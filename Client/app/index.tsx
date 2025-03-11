@@ -8,6 +8,7 @@ import {
   Image,
   TouchableWithoutFeedback,
   Keyboard,
+  Dimensions,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import tw from "twrnc";
@@ -173,6 +174,21 @@ const Index = () => {
   const topLogoRef = useRef<Animatable.View & View>(null);
   const { requestGalleryPermission } = usePhotoContext(); // Usa el contexto de fotos
 
+  // Get screen dimensions
+  const { width, height } = Dimensions.get('window');
+  
+  // Calculate text size based on screen dimensions
+  const getTitleFontSize = () => {
+    // Base size for standard screens (adjust these thresholds as needed)
+    if (width >= 400) {
+      return 'text-8xl'; // Large screens
+    } else if (width >= 350) {
+      return 'text-7xl'; // Medium screens
+    } else {
+      return 'text-6xl'; // Small screens
+    }
+  };
+
   // useEffect para cargar datos iniciales
   useEffect(() => {
     const checkInitialScreen = async () => {
@@ -327,10 +343,10 @@ const Index = () => {
       <View style={tw`flex-1 justify-center items-center `}>
         {/* Logo en la parte superior */}
         <Animatable.View ref={topLogoRef} animation="slideInDown" duration={600} style={tw`absolute top-[10%]`}>
-          <View style={tw` flex-1 items-center justify-center w-70 h-70`}>
+          <View style={tw` flex-1 items-center  max-w-[300px] w-[100%] h-70`}>
             <Text
               style={[
-                tw`text-white text-8xl z-10 text-center pt-5`,
+                tw`text-white ${getTitleFontSize()}  z-10 text-center pt-15`,
                 {
                   fontFamily: "IconFont",
                   textShadowColor: "rgba(0, 0, 0, 0.5)",

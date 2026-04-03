@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState, useRef } from "react";
 import {
   View,
   Text,
@@ -8,12 +8,13 @@ import {
   Alert,
   TextInput,
   Keyboard,
-  KeyboardAvoidingView,
   Platform,
+  Animated,
+  Share,
 } from "react-native";
 import tw from "twrnc";
 import { useGameContext } from "@/app/providers/GameContext";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { RoomOfGameResponse, Player } from "@/app/models/interfaces";
 import { useFocusEffect } from "@react-navigation/native";
 import ImageBlur from "@/app/components/ImageBlur/ImageBlur";
@@ -42,8 +43,8 @@ interface ChatMessageType {
 
 const WaitingRoom = ({}) => {
   const insets = useSafeAreaInsets();
-  console.log("insets", insets);
   const navigation = useRouter();
+  const { code: deepLinkCode } = useLocalSearchParams<{ code?: string }>();
   const {
     startSocket,
     endSocket,
@@ -71,24 +72,47 @@ const WaitingRoom = ({}) => {
   // New state for chat functionality
   const [chatMessage, setChatMessage] = useState<string>("");
   const [chatMessages, setChatMessages] = useState<ChatMessageType[]>([]);
-  const [isKeyboardVisible, setKeyboardVisible] = useState<boolean>(false);
   const [lastSentTime, setLastSentTime] = useState<number>(0);
   const COOLDOWN_TIME = 1000; // 1 second cooldown between messages
 
   const roundOptions = [10, 15, 20];
 
-  // Add keyboard visibility listeners
+  // Keyboard height animation — the professional way
+  const keyboardPadding = useRef(new Animated.Value(0)).current;
+
   useEffect(() => {
-    const keyboardDidShowListener = Keyboard.addListener("keyboardDidShow", () => {
-      setKeyboardVisible(true);
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+
+    const showListener = Keyboard.addListener(showEvent, (e) => {
+
+      if (Platform.OS === "ios") {
+        Animated.timing(keyboardPadding, {
+          toValue: e.endCoordinates.height,
+          duration: 250,
+          useNativeDriver: false,
+        }).start();
+      } else {
+        keyboardPadding.setValue(e.endCoordinates.height);
+      }
     });
-    const keyboardDidHideListener = Keyboard.addListener("keyboardDidHide", () => {
-      setKeyboardVisible(false);
+
+    const hideListener = Keyboard.addListener(hideEvent, () => {
+
+      if (Platform.OS === "ios") {
+        Animated.timing(keyboardPadding, {
+          toValue: 0,
+          duration: 200,
+          useNativeDriver: false,
+        }).start();
+      } else {
+        keyboardPadding.setValue(0);
+      }
     });
 
     return () => {
-      keyboardDidHideListener.remove();
-      keyboardDidShowListener.remove();
+      showListener.remove();
+      hideListener.remove();
     };
   }, []);
 
@@ -181,6 +205,14 @@ const WaitingRoom = ({}) => {
       Alert.alert("Error", "There was an error selecting your image.");
     }
   };
+
+  // If opened via deep link, set the game code
+  useEffect(() => {
+    if (deepLinkCode && !gameCode) {
+      console.log("Deep link code:", deepLinkCode);
+      setGameCode(deepLinkCode);
+    }
+  }, [deepLinkCode]);
 
   useFocusEffect(
     useCallback(() => {
@@ -325,6 +357,17 @@ const WaitingRoom = ({}) => {
     setDialogVisible(true);
   };
 
+  const shareGameCode = async () => {
+    if (!gameCode) return;
+    try {
+      await Share.share({
+        message: `Join my ExposeMe game!\nhttps://exposeme-mobile-app-f72q.onrender.com/join/${gameCode}`,
+      });
+    } catch (e) {
+      // User cancelled share
+    }
+  };
+
   const copyGameCodeToClipboard = async () => {
     if (gameCode) {
       await Clipboard.setStringAsync(gameCode);
@@ -445,9 +488,14 @@ const WaitingRoom = ({}) => {
                 >
                   {gameCode}
                 </Text>
-                <TouchableOpacity onPress={copyGameCodeToClipboard} style={tw`absolute right-[-50px] p-2`}>
-                  <Ionicons name="copy-outline" size={30} color="white" />
-                </TouchableOpacity>
+                <View style={tw`absolute right-[-90px] flex-row`}>
+                  <TouchableOpacity onPress={copyGameCodeToClipboard} style={tw`p-2`}>
+                    <Ionicons name="copy-outline" size={26} color="white" />
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={shareGameCode} style={tw`p-2`}>
+                    <Ionicons name="share-social-outline" size={26} color="white" />
+                  </TouchableOpacity>
+                </View>
               </View>
 
               <Text
@@ -544,17 +592,8 @@ const WaitingRoom = ({}) => {
             </View>
           </View>
           {/* Chat footer */}
-          <KeyboardAvoidingView
-            behavior={"padding"}
-            keyboardVerticalOffset={Platform.OS === "android" ? 0 : 0}
-            style={tw`w-full`}
-          >
-            <View
-              style={[
-                tw`px-2 py-2 flex-row items-center max-w-[500px] w-full self-center`,
-                { paddingBottom: Math.max(insets.bottom, 8) },
-              ]}
-            >
+          <Animated.View style={[tw`w-full mb-5`, { paddingBottom: keyboardPadding }]}>
+            <View style={tw`px-2 py-2 flex-row items-center max-w-[500px] w-full self-center`}>
               <TextInput
                 value={chatMessage}
                 onChangeText={setChatMessage}
@@ -571,7 +610,7 @@ const WaitingRoom = ({}) => {
                 <Ionicons name="send" size={20} color="white" />
               </TouchableOpacity>
             </View>
-          </KeyboardAvoidingView>
+          </Animated.View>
         </View>
       </View>
 

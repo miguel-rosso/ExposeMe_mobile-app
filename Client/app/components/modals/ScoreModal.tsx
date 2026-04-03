@@ -42,7 +42,7 @@ const ScoreModal: React.FC<ScoreModalProps> = ({
             <View style={tw`flex items-center w-[12%] min-w-[40px] justify-center rounded-l-full bg-[#e63a35]`}>
               <Text style={tw`text-lg text-white font-bold`}>{index + 1}</Text>
             </View>
-            <View style={tw`flex-row px-2 items-center flex-1 justify-between`}>
+            <View style={tw`flex-row px-2 pr-4 items-center flex-1 justify-between`}>
               <View>
                 <Text style={tw`text-lg font-bold`}>{player.username}</Text>
                 <View style={tw`flex-row items-center`}>

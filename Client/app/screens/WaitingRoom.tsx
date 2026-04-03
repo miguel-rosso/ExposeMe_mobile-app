@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import {
   View,
   Text,
@@ -16,7 +16,6 @@ import tw from "twrnc";
 import { useGameContext } from "@/app/providers/GameContext";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { RoomOfGameResponse, Player } from "@/app/models/interfaces";
-import { useFocusEffect } from "@react-navigation/native";
 import ImageBlur from "@/app/components/ImageBlur/ImageBlur";
 import { ImageBlurView } from "@/app/components/ImageBlur";
 import { useBackgroundContext } from "@/app/providers/BackgroundContext";
@@ -215,120 +214,81 @@ const WaitingRoom = ({}) => {
     }
   }, [deepLinkCode]);
 
-  // Ref always holds current gameCode (avoids stale closures in socket listeners)
+  // Ref always holds current gameCode (avoids stale closures)
   const gameCodeRef = useRef(gameCode);
   useEffect(() => { gameCodeRef.current = gameCode; }, [gameCode]);
+  const joinedRef = useRef(false);
 
-  const joinRoom = useCallback(() => {
-    if (!socket || !username) return;
-    const code = gameCodeRef.current;
-    console.log("Joining game with code:", code);
-    setIsLoading(true);
-    socket.emit("join-create-game", { gameCode: code, username });
-  }, [socket, username]);
+  // Start socket once on mount
+  useEffect(() => {
+    startSocket();
+  }, []);
 
-  // Start socket on mount
-  useFocusEffect(
-    useCallback(() => {
-      console.log("focus waiting room");
-      startSocket();
-      return () => {
-        console.log("desfocus waiting room");
-      };
-    }, [])
-  );
-
-  // Setup listeners + join when socket is ready
+  // Single effect: setup listeners, join room, handle reconnect
   useEffect(() => {
     if (!socket || !username) return;
 
-    // Clear all listeners first
-    socket.off("room-of-game");
-    socket.off("player-joined");
-    socket.off("player-left");
-    socket.off("new-host");
-    socket.off("chat-message");
-    socket.off("rounds-updated");
-    socket.off("game-started");
-    socket.off("player-removed");
+    const doJoin = () => {
+      const code = gameCodeRef.current;
+      console.log("Joining room:", code);
+      setIsLoading(true);
+      socket.emit("join-create-game", { gameCode: code, username });
+    };
 
-    // Re-join on reconnect (socket got new ID, server lost us)
+    // Remove all previous listeners to avoid duplicates
+    socket.removeAllListeners();
+
     socket.on("connect", () => {
-      console.log("Socket connected/reconnected — rejoining room");
-      joinRoom();
-    });
-
-    socket.on("chat-message", (data: { username: string; message: string }) => {
-      if (data.username !== username) {
-        const messageId = `${Date.now()}-${Math.random()}`;
-        setChatMessages((prev) => [...prev, { id: messageId, username: data.username, message: data.message }]);
-      }
+      console.log("Socket connected");
+      doJoin();
     });
 
     socket.on("room-of-game", (data: RoomOfGameResponse) => {
       console.log("Room data:", data);
       setIsLoading(false);
       if (!data.success) {
-        console.log("Room error:", data.message);
         endSocket();
         navigation.replace({ pathname: "/", params: { message: data.message } });
       } else if (data.room) {
+        joinedRef.current = true;
         setPlayers(data.room.players);
         setGameCode(data.room.gameCode);
         setRoundsOfGame(data.room.rounds);
-        const currentPlayer = data.room.players.find((p) => p.username === username);
-        if (currentPlayer?.hasPlantedPhoto) setHasPlantedPhoto(true);
+        const me = data.room.players.find((p) => p.username === username);
+        if (me?.hasPlantedPhoto) setHasPlantedPhoto(true);
       }
     });
 
-    socket.on("rounds-updated", (rounds: number) => {
-      setRoundsOfGame(rounds);
+    socket.on("chat-message", (data: { username: string; message: string }) => {
+      if (data.username !== username) {
+        setChatMessages((prev) => [...prev, { id: `${Date.now()}-${Math.random()}`, username: data.username, message: data.message }]);
+      }
     });
 
-    socket.on("player-joined", (newPlayer: Player) => {
-      setPlayers((prev) => [...prev, newPlayer]);
-    });
-
-    socket.on("player-left", (leftUsername: string) => {
-      setPlayers((prev) => prev.filter((p) => p.username !== leftUsername));
-    });
-
-    socket.on("new-host", (newHost: Player) => {
-      setPlayers((prev) =>
-        prev.map((p) => ({ ...p, isHost: p.username === newHost.username }))
-      );
-    });
+    socket.on("rounds-updated", (rounds: number) => setRoundsOfGame(rounds));
+    socket.on("player-joined", (p: Player) => setPlayers((prev) => [...prev, p]));
+    socket.on("player-left", (name: string) => setPlayers((prev) => prev.filter((p) => p.username !== name)));
+    socket.on("new-host", (h: Player) => setPlayers((prev) => prev.map((p) => ({ ...p, isHost: p.username === h.username }))));
 
     socket.on("game-started", (players: Player[]) => {
       setPlayersProvider(players);
-      console.log("Game started");
       navigation.replace("/screens/GameScreen");
     });
 
-    socket.on("player-removed", (removedPlayer: Player) => {
-      if (removedPlayer.username === username) {
+    socket.on("player-removed", (removed: Player) => {
+      if (removed.username === username) {
         endSocket();
         navigation.replace("/");
       } else {
-        setPlayers((prev) => prev.filter((p) => p.username !== removedPlayer.username));
+        setPlayers((prev) => prev.filter((p) => p.username !== removed.username));
       }
     });
 
-    // Initial join (if socket is already connected)
-    if (socket.connected) {
-      joinRoom();
-    }
+    // If already connected, join now
+    if (socket.connected) doJoin();
 
     return () => {
-      socket.off("connect");
-      socket.off("room-of-game");
-      socket.off("player-joined");
-      socket.off("player-left");
-      socket.off("new-host");
-      socket.off("chat-message");
-      socket.off("rounds-updated");
-      socket.off("game-started");
-      socket.off("player-removed");
+      socket.removeAllListeners();
     };
   }, [socket, username]);
 

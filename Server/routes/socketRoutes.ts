@@ -60,7 +60,15 @@ io.on("connection", (socket: Socket) => {
 
       chatCooldowns.delete(socket.id);
 
-      // Remove player from room
+      // Only remove if this socket is still the player's current socket.
+      // If the player already reconnected with a new socket (rejoin), their
+      // socketId will have changed — don't remove them.
+      const player = room.players.find((p) => p.username === username);
+      if (!player || player.socketId !== socket.id) {
+        console.log(`[${gameCode}] ${username} old socket disconnected (already reconnected) — ignoring`);
+        return;
+      }
+
       console.log(`[${gameCode}] ${username} disconnected`);
       const result = roomManager.removePlayer(gameCode, username);
       if (!result.removed) return;

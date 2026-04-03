@@ -20,6 +20,8 @@ const io = new Server(server, {
     origin: "*",
     methods: ["GET", "POST"],
   },
+  pingTimeout: 90_000,    // Wait 90s before considering client dead
+  pingInterval: 25_000,   // Ping every 25s
 });
 
 export { server, io };

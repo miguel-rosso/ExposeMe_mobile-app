@@ -215,13 +215,17 @@ const WaitingRoom = ({}) => {
     }
   }, [deepLinkCode]);
 
-  // Join or rejoin room
+  // Ref always holds current gameCode (avoids stale closures in socket listeners)
+  const gameCodeRef = useRef(gameCode);
+  useEffect(() => { gameCodeRef.current = gameCode; }, [gameCode]);
+
   const joinRoom = useCallback(() => {
     if (!socket || !username) return;
-    console.log("Joining game with code:", gameCode);
+    const code = gameCodeRef.current;
+    console.log("Joining game with code:", code);
     setIsLoading(true);
-    socket.emit("join-create-game", { gameCode, username });
-  }, [socket, gameCode, username]);
+    socket.emit("join-create-game", { gameCode: code, username });
+  }, [socket, username]);
 
   // Start socket on mount
   useFocusEffect(

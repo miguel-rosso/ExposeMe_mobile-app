@@ -293,6 +293,7 @@ const WaitingRoom = ({}) => {
   }, [socket, username]);
 
   const handleLeaveGame = () => {
+    if (socket) socket.emit("leave-room");
     endSocket();
     navigation.replace("/");
   };

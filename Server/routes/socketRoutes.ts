@@ -60,21 +60,39 @@ io.on("connection", (socket: Socket) => {
 
       chatCooldowns.delete(socket.id);
 
-      // Only remove if this socket is still the player's current socket.
-      // If the player already reconnected with a new socket (rejoin), their
-      // socketId will have changed — don't remove them.
       const player = room.players.find((p) => p.username === username);
       if (!player || player.socketId !== socket.id) {
-        console.log(`[${gameCode}] ${username} old socket disconnected (already reconnected) — ignoring`);
+        console.log(`[${gameCode}] ${username} old socket disconnected — already reconnected, ignoring`);
         return;
       }
 
-      console.log(`[${gameCode}] ${username} disconnected`);
+      // Keep all players in room on disconnect — they can rejoin.
+      // Room gets cleaned up after 30min inactivity.
+      console.log(`[${gameCode}] ${username} disconnected — keeping in room`);
+    } catch (e) { console.error("disconnect error:", e); }
+  });
+
+  // Explicit leave — player pressed the leave button
+  socket.on("leave-room", () => {
+    try {
+      const { gameCode, username } = socket.data;
+      if (!gameCode || !username) return;
+
+      const room = roomManager.getRoom(gameCode);
+      if (!room) return;
+
+      if (room.held && room.currentPlayer?.socketId === socket.id) gameEngine.forceRelease(room);
+
+      console.log(`[${gameCode}] ${username} left voluntarily`);
       const result = roomManager.removePlayer(gameCode, username);
       if (!result.removed) return;
       if (result.newHost) io.to(gameCode).emit("new-host", result.newHost);
       if (!result.isEmpty) io.to(gameCode).emit("player-left", username);
-    } catch (e) { console.error("disconnect error:", e); }
+
+      socket.leave(gameCode);
+      socket.data.gameCode = null;
+      socket.data.username = null;
+    } catch (e) { console.error("leave-room error:", e); }
   });
 
   socket.on("set-rounds", (data: { gameCode: string; rounds: number }) => {

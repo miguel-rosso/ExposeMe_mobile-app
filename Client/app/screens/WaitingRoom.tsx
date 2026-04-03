@@ -479,23 +479,21 @@ const WaitingRoom = ({}) => {
                 Game Code
               </Text>
 
-              <View style={tw`flex items-center mb-1 relative overflow-visible`}>
+              <View style={tw`flex-row items-center mb-1`}>
+                <TouchableOpacity onPress={copyGameCodeToClipboard} style={tw`p-2`}>
+                  <Ionicons name="copy-outline" size={24} color="rgba(255,255,255,0.7)" />
+                </TouchableOpacity>
                 <Text
                   style={[
-                    tw`text-5xl text-white font-extrabold`,
+                    tw`text-5xl text-white font-extrabold mx-1`,
                     { lineHeight: 60, textShadowColor: "rgba(0, 0, 0, 0.5)", textShadowOffset: { width: 2, height: 2 }, textShadowRadius: 5 },
                   ]}
                 >
                   {gameCode}
                 </Text>
-                <View style={tw`absolute right-[-90px] flex-row`}>
-                  <TouchableOpacity onPress={copyGameCodeToClipboard} style={tw`p-2`}>
-                    <Ionicons name="copy-outline" size={26} color="white" />
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={shareGameCode} style={tw`p-2`}>
-                    <Ionicons name="share-social-outline" size={26} color="white" />
-                  </TouchableOpacity>
-                </View>
+                <TouchableOpacity onPress={shareGameCode} style={tw`p-2`}>
+                  <Ionicons name="share-social-outline" size={24} color="rgba(255,255,255,0.7)" />
+                </TouchableOpacity>
               </View>
 
               <Text

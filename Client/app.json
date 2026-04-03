@@ -26,7 +26,7 @@
         "backgroundColor": "#d00000"
       },
       "package": "com.socketNull.ExposeMe",
-      "versionCode": 3
+      "versionCode": 4
     },
     "assetBundlePatterns": ["**/*"],
     "plugins": [
@@ -51,6 +51,6 @@
         "projectId": "6ab88ec9-1d9d-4f34-86be-b7ab1b3492a1"
       }
     },
-    "owner": "rivotx"
+    "owner": "miguelrosso"
   }
 }

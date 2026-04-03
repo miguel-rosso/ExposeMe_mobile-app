@@ -1,7 +1,7 @@
 {
   "name": "photoroulette",
   "main": "expo-router/entry",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "scripts": {
     "start": "expo start --dev-client",
     "reset-project": "node ./scripts/reset-project.js",
@@ -58,7 +58,9 @@
     "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1",
     "twrnc": "^4.6.1",
-    "expo-linear-gradient": "~14.0.2"
+    "expo-linear-gradient": "~14.0.2",
+    "expo-screen-orientation": "~8.0.4",
+    "expo-device": "~7.0.3"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

@@ -1,13 +1,12 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { View, Text, TouchableOpacity, StatusBar, FlatList, BackHandler } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import tw from "twrnc";
 import { useGameContext } from "../providers/GameContext";
-import { Player, RandomPhotoResponse, ScoreRound } from "../models/interfaces";
+import { Player, ScoreRound } from "../models/interfaces";
 import { usePhotoContext } from "../providers/PhotoContext";
 import getEnvVars from "@/config";
 import PhotoComponent from "@/app/components/PhotoComponent";
-import { View as AnimatableView } from "react-native-animatable";
 import ScoreModal from "@/app/components/modals/ScoreModal";
 import ProgressBar from "@/app/components/ProgressBar";
 import FinalScoreModal from "@/app/components/modals/FinalScoreModal";
@@ -17,342 +16,321 @@ import EmojisButton from "@/app/components/IngameComunication/EmojisButtons";
 
 const { SERVER_URL } = getEnvVars();
 
-// Define an interface for emoji reactions
-interface EmojiReactionData {
-  id: string;
-  username: string;
-  emoji: string;
-}
-
-// Available emojis
+interface EmojiReactionData { id: string; username: string; emoji: string }
+type Phase = "answering" | "reveal" | "scores" | null;
 
 const GameScreen = () => {
   const { username, gameCode, endSocket, socket, playersProvider, roundsOfGame, plantedPhotoUri, uploadPlantedPhoto } =
     useGameContext();
   const safeUsername = username ?? "";
   const safeGameCode = gameCode ?? "";
-  const [PhotoToShow, setPhotoToShow] = useState<string | null>(null);
-  const [usernamePhoto, setUsernamePhoto] = useState<string | null>(null);
-  const [round, setRound] = useState<number>(0);
-  const [isReady, setIsReady] = useState<boolean>(false);
-  const [gameOver, setGameOver] = useState<boolean>(false);
-  const { photoUri, getRandomPhoto, setPhotoUri } = usePhotoContext();
-  const [myturn, setMyTurn] = useState<boolean>(false);
-  const elementRef = useRef<AnimatableView>(null);
-  const [userSelected, setUserSelected] = useState<string>("");
-  const [showCorrectAnswer, setShowCorrectAnswer] = useState<boolean>(false);
-  const [showScore, setShowScore] = useState<boolean>(false);
-  const [score, setScore] = useState<ScoreRound[] | null>(null);
+  const { getRandomPhoto, setPhotoUri } = usePhotoContext();
+
+  // ── Round state (reset each round) ───────────────────
+  const [photo, setPhoto] = useState<string | null>(null);
+  const [photoOwner, setPhotoOwner] = useState("");
+  const [round, setRound] = useState(0);
+  const [phase, setPhase] = useState<Phase>(null);
+  const [phaseDuration, setPhaseDuration] = useState(0);
+  const [phaseKey, setPhaseKey] = useState(0);
+  const [correctAnswer, setCorrectAnswer] = useState("");
+  const [scores, setScores] = useState<ScoreRound[] | null>(null);
+  const [mySelection, _setMySelection] = useState("");
+  const mySelectionRef = useRef("");
+  const setMySelection = (val: string) => { mySelectionRef.current = val; _setMySelection(val); };
+  const [answerSent, setAnswerSent] = useState(false);
+
+  // ── Hold state ───────────────────────────────────────
+  const [gameHeld, setGameHeld] = useState(false);  // server says game paused
+  const [pressing, setPressing] = useState(false);   // my finger is on button
+
+  // ── End game ─────────────────────────────────────────
   const [finalScore, setFinalScore] = useState<ScoreRound[] | null>(null);
-  const timeForAnswer = 6000; // 6 seconds
-  const [progressKey, setProgressKey] = useState<number>(0);
-  const [showFinalScore, setShowFinalScore] = useState<boolean>(false);
-  const [showWinner, setShowWinner] = useState<boolean>(false);
+  const [showFinalScore, setShowFinalScore] = useState(false);
+  const [showWinner, setShowWinner] = useState(false);
   const [winner, setWinner] = useState<ScoreRound | null>(null);
 
-  // New emoji reactions state
+  // ── Other ────────────────────────────────────────────
   const [emojiReactions, setEmojiReactions] = useState<EmojiReactionData[]>([]);
+  const [plantedPhotoUploaded, setPlantedPhotoUploaded] = useState(false);
+  const [isReady, setIsReady] = useState(false);
 
-  // Add a state variable to track if we've uploaded the planted photo
-  const [plantedPhotoUploaded, setPlantedPhotoUploaded] = useState<boolean>(false);
+  // ── Derived ──────────────────────────────────────────
+  const isOwner = username === photoOwner;
+  // Hold button: mounted during scores phase for photo owner (or while pressing to catch onPressOut)
+  const holdButtonMounted = isOwner && (phase === "scores" || pressing);
 
-  // Function to upload an image to the server
-  const uploadImage = async (uri: string) => {
+  // ── Upload helper ────────────────────────────────────
+  const uploadImage = async (uri: string): Promise<string> => {
     const formData = new FormData();
-    formData.append("image", {
-      uri,
-      name: "photo.jpg",
-      type: "image/jpeg",
-    } as any);
+    formData.append("image", { uri, name: "photo.jpg", type: "image/jpeg" } as any);
+    const response = await fetch(`${SERVER_URL}/upload`, { method: "POST", body: formData });
+    if (!response.ok) throw new Error(`Upload failed: ${response.status}`);
+    return (await response.json()).url;
+  };
 
-    const response = await fetch(`${SERVER_URL}/upload`, {
-      method: "POST",
-      body: formData,
-      headers: { "Content-Type": "multipart/form-data" },
+  // ── Block back button ────────────────────────────────
+  useFocusEffect(useCallback(() => {
+    const h = () => true;
+    BackHandler.addEventListener("hardwareBackPress", h);
+    return () => BackHandler.removeEventListener("hardwareBackPress", h);
+  }, []));
+
+  // ── Hold handlers ────────────────────────────────────
+  const onHoldPress = () => {
+    if (!isOwner || !socket || pressing) return;
+    if (phase !== "scores") return;
+    setPressing(true);
+    socket.emit("hold-start");
+  };
+
+  const onHoldRelease = () => {
+    if (!pressing || !socket) return;
+    setPressing(false);
+    socket.emit("hold-end");
+  };
+
+  // ── Socket listeners ─────────────────────────────────
+  useEffect(() => {
+    if (!socket) return;
+
+    // My turn: pick photo → upload → send
+    socket.on("your-turn", async (data: { round: number }) => {
+      setRound(data.round);
+      try {
+        const uri = await getRandomPhoto();
+        if (!uri) { console.error("No photo selected"); return; }
+        for (let i = 1; i <= 3; i++) {
+          try {
+            console.log(`Upload attempt ${i}...`);
+            const url = await uploadImage(uri);
+            console.log("Photo uploaded");
+            socket.emit("photo-sent", { photo: url });
+            setPhotoUri(null);
+            return;
+          } catch (e) {
+            console.error(`Attempt ${i} failed:`, e);
+            if (i < 3) await new Promise((r) => setTimeout(r, 1000 * i));
+          }
+        }
+        console.error("All upload attempts failed");
+      } catch (e) { console.error("your-turn error:", e); }
     });
 
-    const data = await response.json();
-    return data.url;
-  };
+    // Atomic: new round — photo + answer timer
+    socket.on("round-start", (data: { photo: string; owner: string; round: number; duration: number }) => {
+      console.log(`[GAME] round-start: round=${data.round}, owner=${data.owner}`);
+      setPhoto(`${SERVER_URL}${data.photo}`);
+      setPhotoOwner(data.owner);
+      setRound(data.round);
+      setPhase("answering");
+      setPhaseDuration(data.duration);
+      setPhaseKey((k) => k + 1);
+      setCorrectAnswer("");
+      setScores(null);
+      setMySelection("");
+      setAnswerSent(false);
+      setGameHeld(false);
+      setPressing(false);
+    });
 
-  // Function to remove emoji reaction after animation
-  const removeEmojiReaction = (id: string) => {
-    setEmojiReactions((current) => current.filter((reaction) => reaction.id !== id));
-  };
+    // Atomic: answer revealed — submit answer NOW using ref (always current)
+    socket.on("round-reveal", (data: { correctAnswer: string; duration: number }) => {
+      console.log(`[GAME] round-reveal: ${data.correctAnswer}, my guess: ${mySelectionRef.current}`);
+      socket.emit("submit-answer", { guess: mySelectionRef.current || "" });
+      setPhase("reveal");
+      setCorrectAnswer(data.correctAnswer);
+      setPhaseDuration(data.duration);
+      setPhaseKey((k) => k + 1);
+    });
 
-  useFocusEffect(
-    React.useCallback(() => {
-      const onBackPress = () => {
-        return true; // Prevents going back
-      };
+    // Atomic: scores displayed
+    socket.on("round-scores", (data: { scores: ScoreRound[]; round: number; totalRounds: number; duration: number }) => {
+      console.log(`[GAME] round-scores: round ${data.round}/${data.totalRounds}`);
+      setPhase("scores");
+      setScores(data.scores);
+      setRound(data.round);
+      setPhaseDuration(data.duration);
+      setPhaseKey((k) => k + 1);
+    });
 
-      BackHandler.addEventListener("hardwareBackPress", onBackPress);
+    // Hold: everyone pauses
+    socket.on("hold-start", () => {
+      console.log("[GAME] hold-start");
+      setGameHeld(true);
+    });
 
-      return () => {
-        BackHandler.removeEventListener("hardwareBackPress", onBackPress);
-      };
-    }, [])
-  );
+    // Hold ended (from server force-release or another client)
+    socket.on("hold-end", () => {
+      console.log("[GAME] hold-end");
+      setGameHeld(false);
+      setPressing(false);
+    });
 
-  useEffect(() => {
-    console.log("GameScreen mounted, socket", socket);
-    console.log("players: ", playersProvider);
+    // Hold resume: phase continues with remaining time
+    socket.on("hold-resume", (data: { phase: string; duration: number }) => {
+      console.log(`[GAME] hold-resume: ${data.phase} ${data.duration}ms`);
+      setGameHeld(false);
+      setPressing(false);
+      setPhaseDuration(data.duration);
+      setPhaseKey((k) => k + 1);
+    });
 
-    if (socket) {
-      socket.on("your-turn", async (data: { round: number }) => {
-        console.log("My turn");
-        setRound(data.round);
-        setMyTurn(true);
-        await getRandomPhoto();
-      });
+    socket.on("round-skipped", () => { console.log("[GAME] round-skipped"); });
 
-      socket.on("score-round", (data: ScoreRound[]) => {
-        console.log("Score Round");
-        console.log(data);
-        setScore(data);
-        setShowScore(true);
-      });
+    socket.on("game-over", (data: { finalScore: ScoreRound[] }) => {
+      console.log("[GAME] game-over");
+      setFinalScore(data.finalScore);
+      if (data.finalScore?.length > 0) { setWinner(data.finalScore[0]); setShowWinner(true); }
+    });
 
-      // Modify the photo-received socket handler
-      socket.on("photo-received", (data: { photo: string; username: string; round: number; isPlanted?: boolean }) => {
-        setScore(null);
-        setShowCorrectAnswer(false);
-        setUsernamePhoto("");
-        setUserSelected("");
-        console.log("Photo received from: " + data.username);
-        setPhotoToShow(`${SERVER_URL}${data.photo}`);
-        setUsernamePhoto(data.username);
-        setRound(data.round);
-        console.log("ronda: ", data.round, "recibida");
-        setProgressKey((prevKey) => prevKey + 1);
-        setTimeout(() => {
-          setShowCorrectAnswer(true);
-        }, timeForAnswer);
-      });
+    socket.on("emoji-reaction", (data: { username: string; emoji: string }) => {
+      setEmojiReactions((c) => [...c, { id: `${Date.now()}-${Math.random()}`, ...data }]);
+    });
 
-      socket.on("game-over", (data: { finalScore: ScoreRound[] }) => {
-        console.log("Game Over");
-        console.log(data.finalScore);
-        setFinalScore(data.finalScore);
-        setGameOver(true);
-        if (data.finalScore && data.finalScore.length > 0) {
-          setShowScore(false);
-          setWinner(data.finalScore[0]);
-          setShowWinner(true);
-        }
-      });
-
-      // Add the new emoji reaction listener
-      socket.on("emoji-reaction", (data: { username: string; emoji: string }) => {
-        const newReaction: EmojiReactionData = {
-          id: `${Date.now()}-${Math.random()}`,
-          username: data.username,
-          emoji: data.emoji,
-        };
-
-        setEmojiReactions((current) => [...current, newReaction]);
-      });
-
-      setIsReady(true);
-    }
+    setIsReady(true);
 
     return () => {
-      console.log("GameScreen unmounted");
-      if (socket) {
-        socket.off("your-turn");
-        socket.off("photo-received");
-        socket.off("emoji-reaction"); // Remove emoji reaction listener
-        endSocket();
-      }
+      socket.off("your-turn"); socket.off("round-start"); socket.off("round-reveal");
+      socket.off("round-scores"); socket.off("hold-start"); socket.off("hold-end");
+      socket.off("hold-resume"); socket.off("round-skipped"); socket.off("game-over");
+      socket.off("emoji-reaction");
+      endSocket();
     };
   }, [socket]);
 
+  // Upload planted photo first, THEN signal ready
   useEffect(() => {
-    console.log("GAME OVER EN GAMESCREEN ES", gameOver);
-  }, [gameOver]);
+    if (!isReady || !socket) return;
 
-  useEffect(() => {
-    const sendPhoto = async () => {
-      if (photoUri && socket && myturn && round > 0) {
-        setMyTurn(false);
+    const ready = async () => {
+      // Upload planted photo before signaling ready
+      if (plantedPhotoUri && !plantedPhotoUploaded) {
         try {
-          const photoUrl = await uploadImage(photoUri);
-          console.log("Photo uploaded", photoUrl);
-          console.log("ronda: ", round, "enviada");
-          const randomPhotoResponse: RandomPhotoResponse = {
-            photo: photoUrl,
-            gameCode: safeGameCode,
-            username: safeUsername,
-            round: round,
-          };
-
-          socket.emit("photo-sent", randomPhotoResponse);
-          setPhotoUri(null);
-        } catch (error) {
-          sendPhoto();
+          console.log("Uploading planted photo before ready...");
+          const url = await uploadPlantedPhoto();
+          if (url) {
+            socket.emit("plant-photo", { gameCode, username, photoUrl: url });
+            setPlantedPhotoUploaded(true);
+            console.log("Planted photo uploaded");
+          }
+        } catch (e) {
+          console.error("Planted photo upload failed:", e);
         }
       }
-    };
 
-    sendPhoto();
-  }, [photoUri, myturn, round]);
-
-  useEffect(() => {
-    if (isReady && socket) {
-      console.log("GameScreen is ready");
       console.log("Emitting im-ready");
       socket.emit("im-ready", { gameCode: safeGameCode, username: safeUsername });
-    }
-  }, [isReady]);
-
-  useEffect(() => {
-    if (showCorrectAnswer && usernamePhoto !== "" && socket) {
-      console.log("Correct answer is: ", usernamePhoto, "User selected: ", userSelected);
-      if (userSelected === usernamePhoto) {
-        console.log("Correct Answer");
-        socket.emit("correct-answer", {
-          gameCode: safeGameCode,
-          username: safeUsername,
-          guess: userSelected,
-        });
-      } else {
-        console.log("Incorrect Answer");
-        socket.emit("incorrect-answer", {
-          gameCode: safeGameCode,
-          username: safeUsername,
-          guess: userSelected,
-        });
-      }
-    }
-  }, [showCorrectAnswer]);
-
-  // Add a new effect to handle plantedPhoto upload when the game starts
-  useEffect(() => {
-    const uploadPlantedPhotoIfNeeded = async () => {
-      // Only upload if we have a plantedPhotoUri and haven't uploaded it yet
-      if (plantedPhotoUri && !plantedPhotoUploaded && socket && gameCode) {
-        try {
-          const photoUrl = await uploadPlantedPhoto();
-          if (photoUrl) {
-            // Now tell the server about the planted photo
-            socket.emit("plant-photo", {
-              gameCode,
-              username,
-              photoUrl,
-            });
-            setPlantedPhotoUploaded(true);
-          }
-        } catch (error) {
-          console.error("Failed to upload planted photo:", error);
-        }
-      }
     };
 
-    uploadPlantedPhotoIfNeeded();
-  }, [plantedPhotoUri, plantedPhotoUploaded, socket, gameCode, username]);
+    ready();
+  }, [isReady]);
 
-  const handleWinnerAnimationEnd = () => {
-    setShowWinner(false);
-    setShowFinalScore(true);
-  };
+  const handleWinnerEnd = () => { setShowWinner(false); setShowFinalScore(true); };
+  const removeEmoji = (id: string) => setEmojiReactions((c) => c.filter((r) => r.id !== id));
 
-  useEffect(() => {
-    if (showWinner) {
-      console.log("Winner is shown");
-    }
-  }, [showWinner]);
-
-  useEffect(() => {
-    if (userSelected !== "") {
-      console.log("userSelected: ", userSelected);
-    }
-  }, [userSelected]);
+  // ── Render helpers ───────────────────────────────────
+  const isRevealOrScores = phase === "reveal" || phase === "scores";
 
   const renderPlayer = ({ item }: { item: Player }) => {
-    const isPhotoOwner = item.username === usernamePhoto;
-    const isAnswer = item.username === userSelected;
-    const isCurrentUser = item.username === safeUsername;
+    const isAnswer = item.username === photoOwner;
+    const isSelected = item.username === mySelection;
+    const isMe = item.username === safeUsername;
+
+    // Only color YOUR selection: green if correct, red if wrong
+    let bg = "bg-gray-700";
+    if (isRevealOrScores && isSelected) {
+      bg = isAnswer ? "bg-green-500" : "bg-red-500";
+    } else if (!isRevealOrScores && isSelected) {
+      bg = "bg-blue-500";
+    }
 
     return (
       <TouchableOpacity
-        style={tw`p-3 rounded-lg mb-2 mx-1 flex-grow flex-basis-[48%] ${
-          showCorrectAnswer
-            ? isPhotoOwner
-              ? "bg-green-500"
-              : isAnswer
-                ? "bg-red-500"
-                : "bg-gray-700"
-            : isAnswer
-              ? "bg-blue-500"
-              : "bg-gray-700"
-        }`}
-        onPress={() => setUserSelected(item.username)}
-        disabled={showCorrectAnswer}
+        style={tw`p-3 rounded-lg mb-2 mx-1 flex-grow flex-basis-[48%] ${bg}`}
+        onPress={() => !isRevealOrScores && setMySelection(item.username)}
+        disabled={isRevealOrScores}
       >
         <View style={tw`flex-row items-center justify-between`}>
-          <Text
-            style={tw`text-white text-base flex-1 ${isCurrentUser ? "font-bold" : ""}`}
-            numberOfLines={1}
-            ellipsizeMode="tail"
-          >
+          <Text style={tw`text-white text-base flex-1 ${isMe ? "font-bold" : ""}`} numberOfLines={1} ellipsizeMode="tail">
             {item.username}
           </Text>
-          {isCurrentUser && <Text style={tw`text-white text-xs bg-gray-600 px-1 py-0.5 rounded-full ml-1`}>You</Text>}
+          <View style={tw`flex-row items-center`}>
+            {isMe && <Text style={tw`text-white text-xs bg-gray-600 px-1 py-0.5 rounded-full ml-1`}>You</Text>}
+          </View>
         </View>
       </TouchableOpacity>
     );
   };
 
+  // ── Main render ──────────────────────────────────────
   return (
     <View style={{ flex: 1 }}>
       <StatusBar hidden />
-      <WinnerModal visible={showWinner} winner={winner} onAnimationEnd={handleWinnerAnimationEnd} />
+      <WinnerModal visible={showWinner} winner={winner} onAnimationEnd={handleWinnerEnd} />
       <FinalScoreModal visible={showFinalScore} finalScore={finalScore || []} />
-      {/* Main Game Content */}
+
       <View style={tw`flex-1 bg-black`}>
-        {PhotoToShow ? (
+        {photo ? (
           <>
-            <PhotoComponent photoUrl={PhotoToShow} />
+            <PhotoComponent photoUrl={photo} />
+
+            {/* Emoji reactions */}
             <View style={tw`absolute top-4 left-4 z-90`}>
-              {emojiReactions.map((reaction) => (
-                <EmojiReaction
-                  key={reaction.id}
-                  username={reaction.username}
-                  emoji={reaction.emoji}
-                  onAnimationEnd={() => removeEmojiReaction(reaction.id)}
-                />
+              {emojiReactions.map((r) => (
+                <EmojiReaction key={r.id} username={r.username} emoji={r.emoji} onAnimationEnd={() => removeEmoji(r.id)} />
               ))}
             </View>
-            <AnimatableView ref={elementRef} style={tw`z-8 absolute size-full`}>
-              {/* Emoji reactions container */}
 
-              <View style={tw`absolute size-full top-15 left-0 right-0 p-4`}>
-                <ProgressBar key={progressKey} duration={timeForAnswer} />
-              </View>
+            {/* Game overlay — hidden during hold so photo is visible */}
+            {!gameHeld && (
+              <View style={tw`z-8 absolute w-full h-full`}>
+                {/* Progress bar during answering or scores */}
+                {(phase === "answering" || phase === "scores") && phaseDuration > 0 && (
+                  <View style={tw`absolute top-15 left-0 right-0 p-4 items-center`}>
+                    <View style={tw`w-full max-w-[500px]`}>
+                      <ProgressBar key={phaseKey} duration={phaseDuration} />
+                    </View>
+                  </View>
+                )}
 
-              {/* Players list */}
-              <View style={tw`absolute z-40 bottom-22 left-0 right-0 p-2 flex-row justify-center`}>
-                <FlatList
-                  data={playersProvider}
-                  renderItem={renderPlayer}
-                  keyExtractor={(item) => item.socketId}
-                  numColumns={2}
-                  columnWrapperStyle={tw`justify-between`}
-                  style={tw`w-full px-2`}
-                  contentContainerStyle={tw`w-full`}
+                {/* Player selection buttons */}
+                <View style={tw`absolute z-40 bottom-22 left-0 right-0 p-2 flex-row justify-center`}>
+                  <FlatList
+                    data={playersProvider}
+                    renderItem={renderPlayer}
+                    keyExtractor={(item) => item.socketId}
+                    numColumns={2}
+                    columnWrapperStyle={tw`justify-between`}
+                    style={tw`w-full max-w-[500px] px-2`}
+                    contentContainerStyle={tw`w-full`}
+                  />
+                </View>
+
+                {/* Score modal */}
+                <ScoreModal
+                  visible={phase === "scores" && !!scores}
+                  scoreRound={scores || []}
+                  rounds={{ round, roundsOfGame: roundsOfGame }}
+                  correctAnswer={correctAnswer}
                 />
               </View>
+            )}
 
-              <ScoreModal
-                visible={showScore}
-                onClose={() => setShowScore(false)}
-                elementRef={elementRef}
-                scoreRound={score || []}
-                canHold={username == usernamePhoto}
-                rounds={{ round: round, roundsOfGame: roundsOfGame }}
-                photoUrl={PhotoToShow}
-              />
-            </AnimatableView>
+            {/* Hold button — mounted during scores for photo owner, invisible while pressing */}
+            {holdButtonMounted && (
+              <View style={tw`absolute bottom-24 left-0 right-0 z-60 items-center ${pressing ? "opacity-0" : ""}`}>
+                <TouchableOpacity
+                  style={tw`bg-blue-600 p-4 rounded-xl w-[90%] max-w-[500px] border-2 border-blue-400 shadow-lg items-center`}
+                  onPressIn={onHoldPress}
+                  onPressOut={onHoldRelease}
+                  activeOpacity={0.8}
+                >
+                  <Text style={tw`text-white text-lg font-bold`}>Hold photo</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
             <EmojisButton />
           </>
         ) : (

@@ -1,14 +1,15 @@
 import { useFonts } from "expo-font";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
+import * as ScreenOrientation from "expo-screen-orientation";
+import { DeviceType, getDeviceTypeAsync } from "expo-device";
 import { useEffect } from "react";
-import { StatusBar } from "react-native"; // Cambia el import
+import { StatusBar } from "react-native";
 import "react-native-reanimated";
 import { PhotoProvider } from "@/app/providers/PhotoContext";
 import { GameProvider } from "./providers/GameContext";
 import { BackgroundProvider } from "./providers/BackgroundContext";
 
-// Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
@@ -21,6 +22,15 @@ export default function RootLayout() {
       SplashScreen.hideAsync();
     }
   }, [loaded]);
+
+  useEffect(() => {
+    (async () => {
+      const deviceType = await getDeviceTypeAsync();
+      if (deviceType === DeviceType.PHONE) {
+        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+      }
+    })();
+  }, []);
 
   if (!loaded) {
     return null;

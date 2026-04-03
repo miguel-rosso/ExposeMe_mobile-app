@@ -6,8 +6,8 @@ export interface Player {
   isReady: boolean;
   lastAnswerCorrect: boolean;
   lastGuess: string;
-  hasPlantedPhoto?: boolean; // Player has marked they will plant a photo
-  plantedPhoto?: string; // The actual photo URL once uploaded
+  hasPlantedPhoto?: boolean;
+  plantedPhoto?: string;
 }
 
 export interface ScoreRound {
@@ -15,6 +15,7 @@ export interface ScoreRound {
   points: number;
   isHost: boolean;
   lastAnswerCorrect: boolean;
+  lastGuess: string;
 }
 
 export interface PlayerId {
@@ -22,16 +23,29 @@ export interface PlayerId {
   gameCode: string;
 }
 
+export type RoundPhase = "waiting-photo" | "answering" | "reveal" | "scores";
+
 export interface Room {
   gameCode: string;
   players: Player[];
   rounds: number;
   started: boolean;
-  intervalId: NodeJS.Timeout | null;
-  buttonPressed: boolean;
   currentPlayer: Player | null;
   round: number;
-  plantedPhotosShown?: number; // Track how many planted photos have been shown
+  plantedPhotosShown: number;
+  /** Round numbers where planted photos will appear (decided at game start) */
+  plantedSlots: Set<number>;
+  phase: RoundPhase | null;
+
+  // Timer: only ONE active timer at a time
+  _timer: NodeJS.Timeout | null;
+  _timerCallback: (() => void) | null;
+  _timerStartedAt: number;
+  _timerDuration: number;
+
+  // Hold
+  held: boolean;
+  _holdSafetyTimer: NodeJS.Timeout | null;
 }
 
 export interface JoinCreateGameData {
@@ -41,7 +55,7 @@ export interface JoinCreateGameData {
 
 export interface RoomOfGameResponse {
   success: boolean;
-  room?: Room;
+  room?: Omit<Room, "_timer" | "_timerCallback" | "_timerStartedAt" | "_timerDuration" | "_holdSafetyTimer" | "plantedSlots">;
   message?: string;
   rounds?: number;
 }

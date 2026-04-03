@@ -72,7 +72,7 @@ export interface GameProviderProps {
 export interface PhotoContextProps {
   photoUri: string | null;
   requestGalleryPermission: (options: { askAgain: boolean }) => Promise<boolean>;
-  getRandomPhoto: () => Promise<void>;
+  getRandomPhoto: () => Promise<string | null>;
   setPhotoUri: React.Dispatch<React.SetStateAction<string | null>>;
   handleContinue: () => Promise<void>;
 }

@@ -352,7 +352,7 @@ const WaitingRoom = ({}) => {
       >
         {/* Left side - host/user icon */}
         <View style={tw`absolute left-6 flex-row items-center`}>
-          {item.isHost && <Icon name="star" size={20} color="yellow" style={tw`mr-2`} />}
+          {item.isHost && <Text style={tw`mr-2 text-base`}>👑</Text>}
           {item.username === username && <Icon name="user" size={20} color="white" />}
         </View>
 
@@ -425,23 +425,22 @@ const WaitingRoom = ({}) => {
       <View style={tw`flex-1`}>
         <View style={tw`flex-1 flex `}>
           {/* Main content area */}
-          <View style={tw`flex-1 pt-20 px-4 ${isLoading ? "opacity-0" : "opacity-100"}`}>
-            <View style={tw`items-center mb-4`}>
+          <View style={tw`flex-1 pt-14 px-4 max-w-[500px] w-full self-center ${isLoading ? "opacity-0" : "opacity-100"}`}>
+            <View style={tw`items-center mb-2`}>
               <Text
                 style={[
-                  tw`text-2xl text-white font-bold mb-4`,
+                  tw`text-xl text-white font-bold mb-1`,
                   { textShadowColor: "rgba(0, 0, 0, 0.5)", textShadowOffset: { width: 2, height: 2 }, textShadowRadius: 4 },
                 ]}
               >
                 Game Code
               </Text>
 
-              {/* Game code section */}
-              <View style={tw`flex items-center mb-4 relative`}>
+              <View style={tw`flex items-center mb-1 relative overflow-visible`}>
                 <Text
                   style={[
                     tw`text-5xl text-white font-extrabold`,
-                    { textShadowColor: "rgba(0, 0, 0, 0.5)", textShadowOffset: { width: 2, height: 2 }, textShadowRadius: 5 },
+                    { lineHeight: 60, textShadowColor: "rgba(0, 0, 0, 0.5)", textShadowOffset: { width: 2, height: 2 }, textShadowRadius: 5 },
                   ]}
                 >
                   {gameCode}
@@ -453,27 +452,25 @@ const WaitingRoom = ({}) => {
 
               <Text
                 style={[
-                  tw`text-white font-extrabold mb-4`,
+                  tw`text-white font-extrabold mb-2`,
                   { textShadowColor: "rgba(0, 0, 0, 0.5)", textShadowOffset: { width: 2, height: 2 }, textShadowRadius: 5 },
                 ]}
               >
                 {roundsOfGame} Rounds
               </Text>
 
-              {/* Plant Photo Button */}
-              <TouchableOpacity onPress={pickAndPlantImage} style={tw`mb-4 items-center`} disabled={isSelecting}>
+              <TouchableOpacity onPress={pickAndPlantImage} style={tw`mb-2 items-center`} disabled={isSelecting}>
                 <View
-                  style={tw`h-16 w-16 rounded-full ${hasPlantedPhoto ? "bg-green-600" : "bg-black/40"} flex
-                justify-center items-center`}
+                  style={tw`h-14 w-14 rounded-full ${hasPlantedPhoto ? "bg-green-600" : "bg-black/40"} flex justify-center items-center`}
                 >
                   <Icon
                     name={hasPlantedPhoto ? "check" : "camera"}
-                    size={26}
+                    size={22}
                     color="white"
                     style={hasPlantedPhoto ? tw`ml-0.5` : tw``}
                   />
                 </View>
-                <Text style={tw`mt-1 text-white font-medium text-center text-sm`}>
+                <Text style={tw`mt-1 text-white font-medium text-center text-xs`}>
                   {hasPlantedPhoto ? "Photo Planted" : "Plant Photo"}
                 </Text>
               </TouchableOpacity>
@@ -549,13 +546,13 @@ const WaitingRoom = ({}) => {
           {/* Chat footer */}
           <KeyboardAvoidingView
             behavior={"padding"}
-            keyboardVerticalOffset={Platform.OS === "android" ? (insets.bottom > 0 ? -40 : 0) : 0}
+            keyboardVerticalOffset={Platform.OS === "android" ? 0 : 0}
             style={tw`w-full`}
           >
             <View
               style={[
-                tw`px-2 py-3 flex-row items-center`,
-                { paddingBottom: Platform.OS === "android" ? (insets.bottom > 0 ? 50 : 40) : 20 },
+                tw`px-2 py-2 flex-row items-center max-w-[500px] w-full self-center`,
+                { paddingBottom: Math.max(insets.bottom, 8) },
               ]}
             >
               <TextInput

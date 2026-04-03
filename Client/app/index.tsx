@@ -365,7 +365,7 @@ const Index = () => {
           </View>
         </Animatable.View>
 
-        <View style={tw`px-2 flex-1 w-full justify-center pt-[18%] items-center`}>
+        <View style={tw`px-2 flex-1 w-full max-w-[500px] self-center justify-center pt-[18%] items-center`}>
           {/* Mostrar el formulario de ingreso de usuario y botones si no se está uniendo a un juego */}
           {!isJoiningGame && (
             <>

@@ -46,9 +46,10 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
       const response = await fetch(`${SERVER_URL}/upload`, {
         method: "POST",
         body: formData,
-        headers: { "Content-Type": "multipart/form-data" },
       });
-      console.log("Response:", response);
+      if (!response.ok) {
+        throw new Error(`Upload failed: ${response.status}`);
+      }
       const data = await response.json();
       return data.url; // Returns the URL path like /temp/filename.jpg
     } catch (error) {

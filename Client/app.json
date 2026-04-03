@@ -3,7 +3,7 @@
     "name": "Expose Me",
     "slug": "expose-me",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/images/adaptive-icon.png",
     "scheme": "myapp",
     "userInterfaceStyle": "automatic",
@@ -25,7 +25,8 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#d00000"
       },
-      "package": "com.socketNull.ExposeMe"
+      "package": "com.socketNull.ExposeMe",
+      "versionCode": 3
     },
     "assetBundlePatterns": ["**/*"],
     "plugins": [

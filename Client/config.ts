@@ -1,7 +1,7 @@
-// You need to rename this file to config.ts and replace the SERVER_URL with your local IP address (http://(IP):3000/)  
+// Replace SERVER_URL with your server URL or local IP (http://(IP):3000/) for development
 const getEnvVars = () => {
   return {
-    SERVER_URL: "" // secret :3 (please hire Geyson Steven Gualdron, https://www.linkedin.com/in/geysongualdron)
+    SERVER_URL: "https://exposeme-mobile-app.onrender.com"
   };
 };
 

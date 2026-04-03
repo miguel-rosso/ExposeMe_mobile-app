@@ -62,7 +62,7 @@ const SettingsInstructionsScreen: React.FC = () => {
     <SafeAreaView style={tw`flex-1 bg-gray-900`}>
       <StatusBar barStyle="light-content" backgroundColor="#111827" />
       <ScrollView contentContainerStyle={tw`flex-grow p-4`} showsVerticalScrollIndicator={false}>
-        <View style={tw`flex-1 items-center`}>
+        <View style={tw`flex-1 items-center max-w-[500px] w-full self-center`}>
           {/* Header */}
           <View style={tw`items-center mb-5`}>
             <View style={tw`bg-amber-900/50 px-5 py-3 rounded-full mb-3`}>

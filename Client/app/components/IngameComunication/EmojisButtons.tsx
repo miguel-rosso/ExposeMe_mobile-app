@@ -10,7 +10,7 @@ function EmojisButton() {
   const safeUsername = username ?? "";
   const safeGameCode = gameCode ?? "";
   const [lastSentTime, setLastSentTime] = useState(0);
-  const COOLDOWN_TIME = 1000; // 1 second cooldown
+  const COOLDOWN_TIME = 250; // 250ms cooldown
 
   // Function to send emoji reaction
   const sendEmojiReaction = (emoji: string) => {

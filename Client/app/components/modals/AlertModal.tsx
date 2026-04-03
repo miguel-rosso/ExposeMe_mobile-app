@@ -38,7 +38,7 @@ const AlertOverlay: React.FC<AlertOverlayProps> = ({
       duration={300}
       style={tw`absolute top-0 left-0 right-0 bottom-0 z-50 flex justify-center items-center bg-black bg-opacity-50`}
     >
-      <Animatable.View animation="zoomIn" duration={300} style={tw`rounded-lg p-6 bg-gray-800 w-4/5`}>
+      <Animatable.View animation="zoomIn" duration={300} style={tw`rounded-lg p-6 bg-gray-800 w-4/5 max-w-[500px]`}>
         <Text style={tw`text-2xl text-white font-bold text-center mb-4`}>{title}</Text>
         <Text style={tw`text-lg text-white text-center mb-6`}>
           {message}

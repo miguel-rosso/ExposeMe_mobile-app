@@ -49,61 +49,61 @@ export const PhotoProvider: React.FC<PhotoProviderProps> = ({ children }) => {
     }
   }, [router]);
 
-  const getRandomPhoto = useCallback(async () => {
+  const getRandomPhoto = useCallback(async (): Promise<string | null> => {
     console.log("Getting random photo...");
     const hasPermission = await requestGalleryPermission({ askAgain: true });
     if (!hasPermission) {
       console.log("No permission to access gallery.");
-      return;
+      return null;
     }
 
-    const { totalCount } = await MediaLibrary.getAssetsAsync({
-      mediaType: "photo",
-    });
+    const { totalCount } = await MediaLibrary.getAssetsAsync({ mediaType: "photo" });
+    if (totalCount === 0) {
+      console.log("No photos on device.");
+      return null;
+    }
 
-    if (Platform.OS === "ios") {
-      if (totalCount > 0) {
-        const randomIndex = Math.floor(Math.random() * totalCount);
-        console.log(`Selected photo index: ${randomIndex}`);
+    // Retry up to 3 times if the random index lands on an empty slot
+    for (let i = 0; i < 3; i++) {
+      const randomIndex = Math.floor(Math.random() * totalCount);
+      console.log(`Selected photo index: ${randomIndex}`);
+
+      let uri: string | null = null;
+
+      if (Platform.OS === "ios") {
         const { assets } = await MediaLibrary.getAssetsAsync({
           mediaType: "photo",
           first: 1,
           after:
             randomIndex > 0
-              ? (await MediaLibrary.getAssetsAsync({ mediaType: "photo", first: randomIndex })).assets[randomIndex - 1].id
+              ? (await MediaLibrary.getAssetsAsync({ mediaType: "photo", first: randomIndex })).assets[randomIndex - 1]?.id
               : undefined,
         });
-
         if (assets.length > 0) {
           const assetInfo = await MediaLibrary.getAssetInfoAsync(assets[0].id);
-          const selectedUri = assetInfo.localUri || assetInfo.uri;
-          const encodedUri = encodeURI(selectedUri);
-          console.log(`Selected random photo URI: ${encodedUri}`);
-          setPhotoUri(encodedUri);
-        } else {
-          console.log("No photos found.");
+          uri = assetInfo.localUri || assetInfo.uri;
         }
-      }
-    } else {
-      if (totalCount > 0) {
-        const randomIndex = Math.floor(Math.random() * totalCount);
-        console.log(`Selected photo index: ${randomIndex}`);
+      } else {
         const { assets } = await MediaLibrary.getAssetsAsync({
           mediaType: "photo",
           first: 1,
           after: randomIndex.toString(),
         });
-
         if (assets.length > 0) {
-          const selectedUri = assets[0].uri;
-          const encodedUri = encodeURI(selectedUri);
-          console.log(`Selected random photo URI: ${encodedUri}`);
-          setPhotoUri(encodedUri);
-        } else {
-          console.log("No photos found.");
+          uri = assets[0].uri;
         }
       }
+
+      if (uri) {
+        const encodedUri = encodeURI(uri);
+        console.log(`Selected random photo URI: ${encodedUri}`);
+        setPhotoUri(encodedUri);
+        return encodedUri;
+      }
     }
+
+    console.log("Failed to select a photo after retries.");
+    return null;
   }, [requestGalleryPermission]);
 
   const contextValue = useMemo(

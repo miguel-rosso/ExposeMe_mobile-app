@@ -28,7 +28,12 @@ io.on("connection", (socket: Socket) => {
           socket.data.gameCode = gameCode;
           socket.data.username = username;
           socket.emit("room-of-game", { success: true, room: roomManager.safeRoomData(result.room), rounds: result.room.rounds });
-          socket.broadcast.to(gameCode).emit("player-joined", result.room.players[result.room.players.length - 1]);
+          // Only broadcast player-joined for new players, not rejoins
+          if (!result.rejoin) {
+            const newPlayer = result.room.players[result.room.players.length - 1];
+            socket.broadcast.to(gameCode).emit("player-joined", newPlayer);
+          }
+          console.log(`[${gameCode}] ${username} ${result.rejoin ? "rejoined" : "joined"}`);
         } else {
           socket.emit("room-of-game", { success: false, message: result.message });
         }
@@ -48,16 +53,36 @@ io.on("connection", (socket: Socket) => {
       if (!gameCode || !username) return;
 
       const room = roomManager.getRoom(gameCode);
-      if (room) {
-        if (room.held && room.currentPlayer?.socketId === socket.id) gameEngine.forceRelease(room);
-        if (room.phase === "waiting-photo" && room.currentPlayer?.socketId === socket.id) roomManager.clearAllTimers(room);
-      }
+      if (!room) return;
+
+      // Release hold if this player was holding
+      if (room.held && room.currentPlayer?.socketId === socket.id) gameEngine.forceRelease(room);
 
       chatCooldowns.delete(socket.id);
-      const result = roomManager.removePlayer(gameCode, username);
-      if (!result.removed) return;
-      if (result.newHost) socket.broadcast.to(gameCode).emit("new-host", result.newHost);
-      if (!result.isEmpty) socket.broadcast.to(gameCode).emit("player-left", username);
+
+      // In lobby (not started): remove immediately
+      // In game: give 10s grace period for reconnect (app background)
+      if (!room.started) {
+        const result = roomManager.removePlayer(gameCode, username);
+        if (!result.removed) return;
+        if (result.newHost) socket.broadcast.to(gameCode).emit("new-host", result.newHost);
+        if (!result.isEmpty) socket.broadcast.to(gameCode).emit("player-left", username);
+      } else {
+        console.log(`[${gameCode}] ${username} disconnected mid-game — 10s grace period`);
+        const disconnectedSocketId = socket.id;
+        setTimeout(() => {
+          const player = room.players.find((p) => p.username === username);
+          // If player reconnected, their socketId will have changed
+          if (player && player.socketId === disconnectedSocketId) {
+            console.log(`[${gameCode}] ${username} did not reconnect — removing`);
+            const result = roomManager.removePlayer(gameCode, username);
+            if (result.removed) {
+              if (result.newHost) io.to(gameCode).emit("new-host", result.newHost);
+              if (!result.isEmpty) io.to(gameCode).emit("player-left", username);
+            }
+          }
+        }, 10_000);
+      }
     } catch (e) { console.error("disconnect error:", e); }
   });
 

@@ -14,6 +14,7 @@ import FinalScoreModal from "@/app/components/modals/FinalScoreModal";
 import WinnerModal from "@/app/components/modals/WinnerModal";
 import EmojiReaction from "@/app/components/IngameComunication/EmojiReaction";
 import EmojisButton from "@/app/components/IngameComunication/EmojisButtons";
+import { useI18n } from "../i18n";
 
 const { SERVER_URL } = getEnvVars();
 
@@ -21,6 +22,7 @@ interface EmojiReactionData { id: string; username: string; emoji: string }
 type Phase = "answering" | "reveal" | "scores" | null;
 
 const GameScreen = () => {
+  const { t } = useI18n();
   const { username, gameCode, endSocket, socket, playersProvider, roundsOfGame, plantedPhotoUri, uploadPlantedPhoto } =
     useGameContext();
   const safeUsername = username ?? "";
@@ -351,7 +353,7 @@ const GameScreen = () => {
                   onPressOut={onHoldRelease}
                   activeOpacity={0.8}
                 >
-                  <Text style={tw`text-white text-lg font-bold`}>Hold photo</Text>
+                  <Text style={tw`text-white text-lg font-bold`}>{t.holdPhoto}</Text>
                 </TouchableOpacity>
               </View>
             )}
@@ -360,7 +362,7 @@ const GameScreen = () => {
           </>
         ) : (
           <View style={tw`flex-1 justify-center items-center`}>
-            <Text style={tw`text-xl text-white font-bold mb-4`}>ARE YOU READY?</Text>
+            <Text style={tw`text-xl text-white font-bold mb-4`}>{t.areYouReady}</Text>
           </View>
         )}
       </View>

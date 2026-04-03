@@ -3,6 +3,7 @@ import { View, Text, Animated } from "react-native";
 import tw from "twrnc";
 import { ScoreRound } from "../../models/interfaces";
 import Icon from "react-native-vector-icons/FontAwesome";
+import { useI18n } from "../../i18n";
 
 interface ScoreModalProps {
   visible: boolean;
@@ -17,6 +18,8 @@ const ScoreModal: React.FC<ScoreModalProps> = ({
   rounds,
   correctAnswer,
 }) => {
+  const { t } = useI18n();
+
   if (!visible) {
     return null;
   }
@@ -26,13 +29,13 @@ const ScoreModal: React.FC<ScoreModalProps> = ({
       style={tw`absolute inset-0 justify-center items-center bg-black bg-opacity-50 pt-20 pb-16 z-50`}
     >
       <Text style={tw`text-xl text-white absolute top-10 font-bold mb-4`}>
-        Round {rounds.round} of {rounds.roundsOfGame}
+        {t.roundOf.replace("{round}", String(rounds.round)).replace("{total}", String(rounds.roundsOfGame))}
       </Text>
 
       {correctAnswer !== "" && (
         <View style={tw`mb-3 flex-row items-center bg-green-600/80 px-4 py-2 rounded-full`}>
           <Icon name="check-circle" size={16} color="white" style={tw`mr-2`} />
-          <Text style={tw`text-white font-bold`}>It was {correctAnswer}'s photo</Text>
+          <Text style={tw`text-white font-bold`}>{t.itWasPhoto.replace("{name}", correctAnswer)}</Text>
         </View>
       )}
 
@@ -53,7 +56,7 @@ const ScoreModal: React.FC<ScoreModalProps> = ({
                     color={player.lastAnswerCorrect ? "green" : "red"}
                   />
                   <Text style={tw`text-xs ${player.lastAnswerCorrect ? "text-green-500" : "text-red-500"}`}>
-                    {player.lastGuess || "No guess"}
+                    {player.lastGuess || t.noGuess}
                   </Text>
                 </View>
               </View>

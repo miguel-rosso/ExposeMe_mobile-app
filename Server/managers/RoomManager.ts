@@ -29,12 +29,20 @@ export class RoomManager {
     return room;
   }
 
-  joinRoom(gameCode: string, username: string, socketId: string): { success: boolean; room?: Room; message?: string } {
+  joinRoom(gameCode: string, username: string, socketId: string): { success: boolean; room?: Room; message?: string; rejoin?: boolean } {
     const room = this.rooms.get(gameCode);
     if (!room) return { success: false, message: "Game not found" };
-    if (room.started) return { success: false, message: "Game already started" };
-    if (room.players.some((p) => p.username === username)) return { success: false, message: "Username already taken" };
+
     this.cancelRoomDeletion(gameCode);
+
+    // Re-join: same username reconnecting (e.g. after app background)
+    const existing = room.players.find((p) => p.username === username);
+    if (existing) {
+      existing.socketId = socketId; // Update socket ID
+      return { success: true, room, rejoin: true };
+    }
+
+    if (room.started) return { success: false, message: "Game already started" };
     room.players.push(this.createPlayer(username, socketId, room.players.length === 0));
     return { success: true, room };
   }

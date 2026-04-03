@@ -9,6 +9,7 @@ import "react-native-reanimated";
 import { PhotoProvider } from "@/app/providers/PhotoContext";
 import { GameProvider } from "./providers/GameContext";
 import { BackgroundProvider } from "./providers/BackgroundContext";
+import { I18nProvider } from "./i18n";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -37,6 +38,7 @@ export default function RootLayout() {
   }
 
   return (
+    <I18nProvider>
     <PhotoProvider>
       <GameProvider>
         <BackgroundProvider>
@@ -52,5 +54,6 @@ export default function RootLayout() {
         </BackgroundProvider>
       </GameProvider>
     </PhotoProvider>
+    </I18nProvider>
   );
 }

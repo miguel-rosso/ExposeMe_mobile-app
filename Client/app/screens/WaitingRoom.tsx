@@ -33,6 +33,7 @@ import ChatMessage from "@/app/components/IngameComunication/ChatMessage";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import SuccessAlert from "@/app/components/SuccessAlert";
 import { LinearGradient } from "expo-linear-gradient";
+import { useI18n } from "../i18n";
 
 // Define chat message interface
 interface ChatMessageType {
@@ -42,6 +43,7 @@ interface ChatMessageType {
 }
 
 const WaitingRoom = ({}) => {
+  const { t } = useI18n();
   const insets = useSafeAreaInsets();
   const navigation = useRouter();
   const { code: deepLinkCode } = useLocalSearchParams<{ code?: string }>();
@@ -58,7 +60,6 @@ const WaitingRoom = ({}) => {
     setPlantedPhotoUri,
   } = useGameContext();
   const [players, setPlayers] = useState<Player[]>([]);
-  const [isInGame, setIsInGame] = useState<boolean>(false);
   const { backgroundImage } = useBackgroundContext();
   const [dialogVisible, setDialogVisible] = useState<boolean>(false);
   const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
@@ -149,22 +150,22 @@ const WaitingRoom = ({}) => {
         Keyboard.dismiss();
       }
     } else {
-      Alert.alert("Slow down", "Please wait before sending another message");
+      Alert.alert(t.slowDown, t.pleaseWaitBeforeSending);
     }
   };
 
   const pickAndPlantImage = async () => {
     if (!hasPlantedPhoto) {
       // First-time photo selection
-      Alert.alert("Plant a Secret Photo", "Choose a photo that will appear at a random moment in the game.", [
-        { text: "Cancel", style: "cancel" },
-        { text: "Choose Photo", onPress: async () => await selectImageFromGallery() },
+      Alert.alert(t.plantSecretPhoto, t.choosePhotoDescription, [
+        { text: t.cancel, style: "cancel" },
+        { text: t.choosePhoto, onPress: async () => await selectImageFromGallery() },
       ]);
     } else {
       // Allow changing the already planted photo
-      Alert.alert("Photo Already Planted", "Would you like to change your planted photo?", [
-        { text: "Keep Current Photo", style: "cancel" },
-        { text: "Change Photo", onPress: async () => await selectImageFromGallery() },
+      Alert.alert(t.photoAlreadyPlanted, t.changePhotoQuestion, [
+        { text: t.keepCurrentPhoto, style: "cancel" },
+        { text: t.changePhoto, onPress: async () => await selectImageFromGallery() },
       ]);
     }
   };
@@ -173,7 +174,7 @@ const WaitingRoom = ({}) => {
     const hasPermission = await requestGalleryPermission({ askAgain: true });
 
     if (!hasPermission) {
-      Alert.alert("Permission Required", "We need access to your photos to plant an image in the game.");
+      Alert.alert(t.permissionRequired, t.needPhotoAccess);
       return;
     }
 
@@ -202,7 +203,7 @@ const WaitingRoom = ({}) => {
       }
     } catch (error) {
       setIsSelecting(false);
-      Alert.alert("Error", "There was an error selecting your image.");
+      Alert.alert(t.error, t.errorSelectingImage);
     }
   };
 
@@ -214,119 +215,118 @@ const WaitingRoom = ({}) => {
     }
   }, [deepLinkCode]);
 
+  // Join or rejoin room
+  const joinRoom = useCallback(() => {
+    if (!socket || !username) return;
+    console.log("Joining game with code:", gameCode);
+    setIsLoading(true);
+    socket.emit("join-create-game", { gameCode, username });
+  }, [socket, gameCode, username]);
+
+  // Start socket on mount
   useFocusEffect(
     useCallback(() => {
       console.log("focus waiting room");
-
-      if (!isInGame) {
-        startSocket();
-      }
-
+      startSocket();
       return () => {
         console.log("desfocus waiting room");
-        socket?.off("room-of-game");
-        socket?.off("player-joined");
-        socket?.off("player-left");
-        socket?.off("host-left");
-        socket?.off("new-host");
-        socket?.off("photo-planted");
       };
-    }, [isInGame])
+    }, [])
   );
 
+  // Setup listeners + join when socket is ready
   useEffect(() => {
-    if (socket && username && !isInGame) {
-      console.log("Joining game with code:", gameCode);
-      setIsInGame(true);
-      setIsLoading(true); // Start loading when joining
-      // Limpiar listeners antes de agregar nuevos
+    if (!socket || !username) return;
+
+    // Clear all listeners first
+    socket.off("room-of-game");
+    socket.off("player-joined");
+    socket.off("player-left");
+    socket.off("new-host");
+    socket.off("chat-message");
+    socket.off("rounds-updated");
+    socket.off("game-started");
+    socket.off("player-removed");
+
+    // Re-join on reconnect (socket got new ID, server lost us)
+    socket.on("connect", () => {
+      console.log("Socket connected/reconnected — rejoining room");
+      joinRoom();
+    });
+
+    socket.on("chat-message", (data: { username: string; message: string }) => {
+      if (data.username !== username) {
+        const messageId = `${Date.now()}-${Math.random()}`;
+        setChatMessages((prev) => [...prev, { id: messageId, username: data.username, message: data.message }]);
+      }
+    });
+
+    socket.on("room-of-game", (data: RoomOfGameResponse) => {
+      console.log("Room data:", data);
+      setIsLoading(false);
+      if (!data.success) {
+        console.log("Room error:", data.message);
+        endSocket();
+        navigation.replace({ pathname: "/", params: { message: data.message } });
+      } else if (data.room) {
+        setPlayers(data.room.players);
+        setGameCode(data.room.gameCode);
+        setRoundsOfGame(data.room.rounds);
+        const currentPlayer = data.room.players.find((p) => p.username === username);
+        if (currentPlayer?.hasPlantedPhoto) setHasPlantedPhoto(true);
+      }
+    });
+
+    socket.on("rounds-updated", (rounds: number) => {
+      setRoundsOfGame(rounds);
+    });
+
+    socket.on("player-joined", (newPlayer: Player) => {
+      setPlayers((prev) => [...prev, newPlayer]);
+    });
+
+    socket.on("player-left", (leftUsername: string) => {
+      setPlayers((prev) => prev.filter((p) => p.username !== leftUsername));
+    });
+
+    socket.on("new-host", (newHost: Player) => {
+      setPlayers((prev) =>
+        prev.map((p) => ({ ...p, isHost: p.username === newHost.username }))
+      );
+    });
+
+    socket.on("game-started", (players: Player[]) => {
+      setPlayersProvider(players);
+      console.log("Game started");
+      navigation.replace("/screens/GameScreen");
+    });
+
+    socket.on("player-removed", (removedPlayer: Player) => {
+      if (removedPlayer.username === username) {
+        endSocket();
+        navigation.replace("/");
+      } else {
+        setPlayers((prev) => prev.filter((p) => p.username !== removedPlayer.username));
+      }
+    });
+
+    // Initial join (if socket is already connected)
+    if (socket.connected) {
+      joinRoom();
+    }
+
+    return () => {
+      socket.off("connect");
       socket.off("room-of-game");
       socket.off("player-joined");
       socket.off("player-left");
-      socket.off("host-left");
       socket.off("new-host");
-      socket.off("photo-planted");
-      socket.off("chat-message"); // Add this line
-
-      socket.emit("join-create-game", { gameCode, username });
-
-      // Add the new chat message listener
-      socket.on("chat-message", (data: { username: string; message: string }) => {
-        // Only add messages from others, we've already added our own
-        if (data.username !== username) {
-          const messageId = `${Date.now()}-${Math.random()}`;
-          setChatMessages((prev) => [
-            ...prev,
-            {
-              id: messageId,
-              username: data.username,
-              message: data.message,
-            },
-          ]);
-        }
-      });
-
-      socket.on("room-of-game", (data: RoomOfGameResponse) => {
-        console.log("Room data:", data);
-        setIsLoading(false); // Room data received, stop loading
-        if (!data.success) {
-          console.log("Room not found:", data.message);
-          endSocket();
-          navigation.replace({ pathname: "/", params: { message: data.message } });
-        } else {
-          console.log("Room found:", data.room);
-          if (data.room) {
-            setPlayers(data.room.players);
-            setGameCode(data.room.gameCode);
-            setRoundsOfGame(data.room.rounds);
-
-            // Check if current user has already marked a photo to plant
-            const currentPlayer = data.room.players.find((p) => p.username === username);
-            if (currentPlayer && currentPlayer.hasPlantedPhoto) {
-              setHasPlantedPhoto(true);
-            }
-          }
-        }
-      });
-
-      socket.on("rounds-updated", (rounds: number) => {
-        setRoundsOfGame(rounds);
-        console.log("Rounds updated:", rounds);
-      });
-
-      socket.on("player-joined", (newPlayer: Player) => {
-        setPlayers((prevPlayers) => [...prevPlayers, newPlayer]);
-      });
-
-      socket.on("player-left", (username: string) => {
-        setPlayers((prevPlayers) => prevPlayers.filter((player) => player.username !== username));
-      });
-
-      socket.on("new-host", (newHost: Player) => {
-        setPlayers((prevPlayers) => {
-          // Eliminar al host actual
-          const filteredPlayers = prevPlayers.filter((player) => !player.isHost);
-          // Definir el nuevo host
-          return filteredPlayers.map((player) => (player.username === newHost.username ? { ...player, isHost: true } : player));
-        });
-      });
-
-      socket.on("game-started", (players: Player[]) => {
-        setPlayersProvider(players);
-        console.log("Game started");
-        navigation.replace("/screens/GameScreen");
-      });
-
-      socket.on("player-removed", (removedPlayer: Player) => {
-        if (removedPlayer.username === username) {
-          endSocket();
-          navigation.replace("/");
-        } else {
-          setPlayers((prevPlayers) => prevPlayers.filter((player) => player.username !== removedPlayer.username));
-        }
-      });
-    }
-  }, [socket]);
+      socket.off("chat-message");
+      socket.off("rounds-updated");
+      socket.off("game-started");
+      socket.off("player-removed");
+    };
+  }, [socket, username]);
 
   const handleLeaveGame = () => {
     endSocket();
@@ -361,7 +361,7 @@ const WaitingRoom = ({}) => {
     if (!gameCode) return;
     try {
       await Share.share({
-        message: `Join my ExposeMe game!\nhttps://exposeme-mobile-app-f72q.onrender.com/join/${gameCode}`,
+        message: t.shareMessage + `https://exposeme-mobile-app-f72q.onrender.com/join/${gameCode}`,
       });
     } catch (e) {
       // User cancelled share
@@ -378,32 +378,39 @@ const WaitingRoom = ({}) => {
     }
   };
 
-  const renderPlayer = ({ item }: { item: Player }) => (
-    <LinearGradient
-      colors={["#fe5436", "#fe3a18", "#eb2200"]}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 0 }}
-      style={tw`rounded-2xl mb-4 w-full p-4 rounded-full mb-2`}
-    >
+  const renderPlayer = ({ item }: { item: Player }) => {
+    const isMe = item.username === username;
+    return (
       <TouchableOpacity
         onPress={() => {
-          if (players[0].username === username && item.username !== username) {
-            confirmRemovePlayer(item);
-          }
+          if (players[0].username === username && !isMe) confirmRemovePlayer(item);
         }}
-        style={tw`relative   flex-row items-center`}
+        activeOpacity={isMe || !isHost ? 1 : 0.7}
+        style={[
+          tw`flex-row items-center px-4 py-3 mb-2 rounded-2xl`,
+          {
+            backgroundColor: isMe ? "rgba(0,0,0,0.55)" : "rgba(0,0,0,0.45)",
+            borderWidth: 1,
+            borderColor: isMe ? "rgba(255,255,255,0.3)" : "rgba(255,255,255,0.12)",
+          },
+        ]}
       >
-        {/* Left side - host/user icon */}
-        <View style={tw`absolute left-6 flex-row items-center`}>
-          {item.isHost && <Text style={tw`mr-2 text-base`}>👑</Text>}
-          {item.username === username && <Icon name="user" size={20} color="white" />}
+        <View style={tw`h-9 w-9 rounded-full bg-white/10 items-center justify-center mr-3`}>
+          {item.isHost ? (
+            <Text style={tw`text-sm`}>👑</Text>
+          ) : (
+            <Text style={tw`text-white text-sm font-bold opacity-50`}>
+              {item.username.charAt(0).toUpperCase()}
+            </Text>
+          )}
         </View>
-
-        {/* Center - username */}
-        <Text style={tw`text-white text-lg mx-auto font-bold`}>{item.username}</Text>
+        <Text style={tw`text-white text-base flex-1 ${isMe ? "font-bold" : "font-medium"}`}>
+          {item.username}
+        </Text>
+        {isMe && <Text style={tw`text-white/40 text-xs`}>You</Text>}
       </TouchableOpacity>
-    </LinearGradient>
-  );
+    );
+  };
 
   const isHost = players.length > 0 && players[0].username === username;
 
@@ -440,17 +447,17 @@ const WaitingRoom = ({}) => {
             <Animatable.View animation="rotate" iterationCount="infinite" easing="linear" duration={1500}>
               <Icon name="spinner" size={40} color="white" />
             </Animatable.View>
-            <Text style={tw`text-white mt-4 text-lg font-bold`}>Loading game room...</Text>
-            <Text style={tw`text-white mt-2 text-sm opacity-70`}>Please wait a moment</Text>
+            <Text style={tw`text-white mt-4 text-lg font-bold`}>{t.loadingGameRoom}</Text>
+            <Text style={tw`text-white mt-2 text-sm opacity-70`}>{t.pleaseWait}</Text>
           </View>
         </View>
       )}
 
       {/* Copy notification overlay - centered on screen */}
-      {showCopyMessage && <SuccessAlert text="Game code copied" />}
+      {showCopyMessage && <SuccessAlert text={t.gameCodeCopied} />}
 
       {/* Photo Added notification overlay */}
-      {showPhotoAddedMessage && <SuccessAlert text="Photo selected for the game!" />}
+      {showPhotoAddedMessage && <SuccessAlert text={t.photoSelectedForGame} />}
 
       {/* Photo selection */}
       {isSelecting && (
@@ -459,7 +466,7 @@ const WaitingRoom = ({}) => {
             <Animatable.View animation="rotate" iterationCount="infinite" easing="linear" duration={1500}>
               <Icon name="spinner" size={40} color="white" />
             </Animatable.View>
-            <Text style={tw`text-white mt-4 text-lg font-bold`}>Selecting your photo...</Text>
+            <Text style={tw`text-white mt-4 text-lg font-bold`}>{t.selectingPhoto}</Text>
           </View>
         </View>
       )}
@@ -476,7 +483,7 @@ const WaitingRoom = ({}) => {
                   { textShadowColor: "rgba(0, 0, 0, 0.5)", textShadowOffset: { width: 2, height: 2 }, textShadowRadius: 4 },
                 ]}
               >
-                Game Code
+                {t.gameCode}
               </Text>
 
               <View style={tw`flex-row items-center mb-1`}>
@@ -502,7 +509,7 @@ const WaitingRoom = ({}) => {
                   { textShadowColor: "rgba(0, 0, 0, 0.5)", textShadowOffset: { width: 2, height: 2 }, textShadowRadius: 5 },
                 ]}
               >
-                {roundsOfGame} Rounds
+                {roundsOfGame} {t.rounds}
               </Text>
 
               <TouchableOpacity onPress={pickAndPlantImage} style={tw`mb-2 items-center`} disabled={isSelecting}>
@@ -517,7 +524,7 @@ const WaitingRoom = ({}) => {
                   />
                 </View>
                 <Text style={tw`mt-1 text-white font-medium text-center text-xs`}>
-                  {hasPlantedPhoto ? "Photo Planted" : "Plant Photo"}
+                  {hasPlantedPhoto ? t.photoPlanted : t.plantPhoto}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -535,32 +542,42 @@ const WaitingRoom = ({}) => {
             <View style={tw`w-full mt-2 mb-4`}>
               {players.length > 0 && players[0].username == username && players.length >= 2 ? (
                 <>
-                  <View style={tw`flex-row flex-wrap justify-center mb-2`}>
+                  {/* Round selector — pill style */}
+                  <View style={[tw`flex-row justify-center mb-3 rounded-full p-1`, { backgroundColor: "rgba(255,255,255,0.08)" }]}>
                     {roundOptions.map((rounds) => (
                       <TouchableOpacity
                         key={rounds}
-                        style={tw`${roundsOfGame === rounds ? "bg-red-600 border border-[#fe8b77]" : "bg-red-700"} p-3 rounded-lg mx-2 mb-2`}
                         onPress={() => handleSetRounds(rounds)}
+                        style={[
+                          tw`flex-1 py-2 rounded-full items-center`,
+                          roundsOfGame === rounds
+                            ? { backgroundColor: "#e9042e" }
+                            : {},
+                        ]}
                       >
-                        <Text style={tw`text-white`}>{rounds} Rounds</Text>
+                        <Text style={tw`text-white text-sm ${roundsOfGame === rounds ? "font-bold" : "opacity-60"}`}>
+                          {rounds}
+                        </Text>
                       </TouchableOpacity>
                     ))}
                   </View>
-                  <LinearGradient
-                    colors={["#9d0420", "#e9042e", "#9d0420"]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                    style={tw`rounded-2xl mb-4 p-4 rounded-lg w-full p-4  mb-2 rounded-full mb-2`}
+
+                  {/* Start button */}
+                  <TouchableOpacity
+                    onPress={handleStartGame}
+                    activeOpacity={0.8}
+                    style={[
+                      tw`w-full py-4 rounded-2xl items-center`,
+                      { backgroundColor: "#e9042e" },
+                    ]}
                   >
-                    <TouchableOpacity style={tw` w-full flex justify-center items-center`} onPress={handleStartGame}>
-                      <Text style={tw`text-white font-bold text-lg`}>Start Game</Text>
-                    </TouchableOpacity>
-                  </LinearGradient>
+                    <Text style={tw`text-white font-bold text-lg`}>{t.startGame}</Text>
+                  </TouchableOpacity>
                 </>
               ) : (
                 <View style={tw`p-2 w-full flex flex-col justify-center items-center`}>
                   <View style={tw`flex flex-row justify-center opacity-70 items-center mb-4`}>
-                    <Text style={tw`text-white`}>{players.length < 2 ? "Waiting for players" : "Waiting host"}</Text>
+                    <Text style={tw`text-white`}>{players.length < 2 ? t.waitingForPlayers : t.waitingHost}</Text>
                     <View style={tw`flex-row`}>
                       <AnimatedDot delay={0} />
                       <AnimatedDot delay={200} />
@@ -581,7 +598,7 @@ const WaitingRoom = ({}) => {
                           },
                         ]}
                       >
-                        Send the game code to your friends so they can join!
+                        {t.sendCodeToFriends}
                       </Text>
                     </Animatable.View>
                   )}
@@ -595,7 +612,7 @@ const WaitingRoom = ({}) => {
               <TextInput
                 value={chatMessage}
                 onChangeText={setChatMessage}
-                placeholder="Type a message..."
+                placeholder={t.typeMessage}
                 placeholderTextColor="#999"
                 style={tw`flex-1 bg-gray-800/90 text-white px-4 py-3 rounded-full mr-2`}
                 maxLength={100}
@@ -615,11 +632,11 @@ const WaitingRoom = ({}) => {
       {/* Dialog modal - unchanged */}
       <AlertModal
         visible={dialogVisible}
-        title="Confirm Remove Player"
-        message="Are you sure you want to remove"
+        title={t.confirmRemovePlayer}
+        message={t.areYouSureRemove}
         highlightedText={`@${selectedPlayer?.username}`}
-        confirmText="Remove"
-        cancelText="Cancel"
+        confirmText={t.remove}
+        cancelText={t.cancel}
         onConfirm={() => {
           if (selectedPlayer) {
             handleRemovePlayer(selectedPlayer.socketId);

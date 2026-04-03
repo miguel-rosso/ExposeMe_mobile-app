@@ -27,8 +27,10 @@ import { useFocusEffect } from "@react-navigation/native";
 import { useFonts } from "expo-font";
 import * as SplashScreen from "expo-splash-screen";
 import { useBackgroundContext } from "./providers/BackgroundContext";
-import { usePhotoContext } from "@/app/providers/PhotoContext"; // Importa el contexto de fotos
+import { usePhotoContext } from "@/app/providers/PhotoContext";
 import { Ionicons } from "@expo/vector-icons";
+import { useI18n } from "./i18n";
+import LanguageToggle from "./components/LanguageToggle";
 
 SplashScreen.preventAutoHideAsync();
 // Animaciones personalizadas para React Native Animatable
@@ -172,7 +174,8 @@ const Index = () => {
   const buttonRef = useRef<Animatable.View & View>(null);
   const textRef = useRef<Animatable.View & View>(null);
   const topLogoRef = useRef<Animatable.View & View>(null);
-  const { requestGalleryPermission } = usePhotoContext(); // Usa el contexto de fotos
+  const { requestGalleryPermission } = usePhotoContext();
+  const { t } = useI18n(); // Usa el contexto de fotos
 
   // Get screen dimensions
   const { width, height } = Dimensions.get('window');
@@ -341,6 +344,11 @@ const Index = () => {
         />
       </View>
       <View style={tw`flex-1 justify-center items-center `}>
+        {/* Language toggle */}
+        <View style={tw`absolute top-12 left-4 z-20`}>
+          <LanguageToggle />
+        </View>
+
         {/* Logo en la parte superior */}
         <Animatable.View ref={topLogoRef} animation="slideInDown" duration={600} style={tw`absolute top-[10%]`}>
           <View style={tw` flex-1 items-center  max-w-[300px] w-[100%] h-70`}>
@@ -355,7 +363,7 @@ const Index = () => {
                 },
               ]}
             >
-              Expose Me
+              {t.appName}
             </Text>
             <Image
               source={require("@/assets/images/carasonrojada.png")}
@@ -378,7 +386,7 @@ const Index = () => {
               >
                 <TextInput
                   style={tw`h-15 rounded-2xl  w-full bg-white font-bold text-center text-lg`}
-                  placeholder="Enter username"
+                  placeholder={t.enterUsername}
                   placeholderTextColor="#3333"
                   value={username || ""}
                   onChange={(e) => handleUsernameChange(e.nativeEvent.text)}
@@ -413,7 +421,7 @@ const Index = () => {
                   style={tw`p-4 rounded-2xl mb-4 w-full`}
                 >
                   <TouchableOpacity style={tw`w-full`} onPress={handleCreateGame}>
-                    <Text style={tw`text-white text-center text-lg font-bold`}>Create Game</Text>
+                    <Text style={tw`text-white text-center text-lg font-bold`}>{t.createGame}</Text>
                   </TouchableOpacity>
                 </LinearGradient>
               </Animatable.View>
@@ -432,7 +440,7 @@ const Index = () => {
                   style={tw`p-4 rounded-2xl mb-4 w-full`}
                 >
                   <TouchableOpacity onPress={handleJoinGame}>
-                    <Text style={tw`text-white text-center text-lg font-bold`}>Join Game</Text>
+                    <Text style={tw`text-white text-center text-lg font-bold`}>{t.joinGame}</Text>
                   </TouchableOpacity>
                 </LinearGradient>
               </Animatable.View>
@@ -453,7 +461,7 @@ const Index = () => {
                   <TextInput
                     ref={gameCodeInputRef}
                     style={tw`p-4 rounded-xl  w-full bg-white text-center text-lg font-bold`}
-                    placeholder="Enter game code"
+                    placeholder={t.enterGameCode}
                     placeholderTextColor="#3333"
                     value={gameCode || ""}
                     onChange={(e) => setGameCode(e.nativeEvent.text)}
@@ -484,7 +492,7 @@ const Index = () => {
                     style={tw`p-4 rounded-2xl mb-4 w-full`}
                   >
                     <TouchableOpacity style={tw` w-full `} onPress={handleSearchRoom}>
-                      <Text style={tw`text-white text-center text-lg font-bold`}>Search Room</Text>
+                      <Text style={tw`text-white text-center text-lg font-bold`}>{t.searchRoom}</Text>
                     </TouchableOpacity>
                   </LinearGradient>
                 </Animatable.View>
@@ -499,7 +507,7 @@ const Index = () => {
           </TouchableOpacity>
         </Animatable.View>
         <Animatable.View ref={textRef} animation="slideInUp" duration={600} style={tw`absolute bottom-15`}>
-          <Text style={tw`text-white font-bold`}>Photo Explorer</Text>
+          <Text style={tw`text-white font-bold`}>{t.photoExplorer}</Text>
         </Animatable.View>
       </View>
     </>

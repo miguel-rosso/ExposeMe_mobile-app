@@ -11,10 +11,12 @@ import { usePhotoContext } from "@/app/providers/PhotoContext";
 import CustomCarousel from "@/app/components/CustomCarousel/CustomCarousel";
 import LottieView from "lottie-react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useI18n } from "../i18n";
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get("window");
 
 const InitialScreen: React.FC = () => {
+  const { t } = useI18n();
   const router = useRouter();
   const { handleContinue } = usePhotoContext();
 
@@ -27,8 +29,8 @@ const InitialScreen: React.FC = () => {
   };
 
   const androidImages = [
-    { id: 1, source: AudioPermissionIMG, title: "Step 1", description: "Tap on Allow." },
-    { id: 2, source: GalleryPermissionIMG, title: "Step 2", description: "Tap on Allow all." },
+    { id: 1, source: AudioPermissionIMG, title: t.step1, description: t.tapAllow },
+    { id: 2, source: GalleryPermissionIMG, title: t.step2, description: t.tapAllowAll },
   ];
 
   // Calculate responsive dimensions for images
@@ -43,24 +45,24 @@ const InitialScreen: React.FC = () => {
           {/* Header */}
           <View style={tw`items-center mb-5`}>
             <View style={tw`bg-amber-900/50 px-4 py-2 rounded-full mb-2`}>
-              <Text style={tw`text-xl font-bold text-amber-400`}>⚠️ Warning ⚠️</Text>
+              <Text style={tw`text-xl font-bold text-amber-400`}>{t.warning}</Text>
             </View>
             <Text style={tw`text-sm text-gray-300 text-center`}>
-              For the application to work properly, please grant the following permissions:
+              {t.permissionExplanation}
             </Text>
           </View>
 
           {/* Permission highlight box */}
           <View style={tw`bg-indigo-900/30 border border-indigo-700/50 rounded-xl p-4 mb-5`}>
-            <Text style={tw`text-sm font-medium text-center text-indigo-300 mb-1`}>Required Permission Setting:</Text>
-            <Text style={tw`text-lg font-bold text-center text-indigo-200`}>"Allow all"</Text>
+            <Text style={tw`text-sm font-medium text-center text-indigo-300 mb-1`}>{t.requiredPermission}</Text>
+            <Text style={tw`text-lg font-bold text-center text-indigo-200`}>{t.allowAll}</Text>
           </View>
 
           {/* Permission instructions */}
           <View style={tw`bg-gray-800 rounded-xl shadow-lg overflow-hidden mb-5 border border-gray-700`}>
             <View style={tw`bg-gray-700 py-2 px-4 border-b border-gray-600`}>
               <Text style={tw`text-base font-medium text-gray-100`}>
-                {Platform.OS === "android" ? "How to enable on Android:" : "How to enable on iOS:"}
+                {Platform.OS === "android" ? t.howToEnableAndroid : t.howToEnableIOS}
               </Text>
             </View>
 
@@ -93,8 +95,7 @@ const InitialScreen: React.FC = () => {
                   <Image source={PermissionRequestIOS} style={{ width: imageWidth, height: imageHeight }} resizeMode="contain" />
                 </View>
                 <Text style={tw`text-sm text-gray-300 text-center`}>
-                  Tap <Text style={tw`text-red-600`}>"Allow all" </Text>
-                  to give access to your photos
+                  {t.tapAllowAll}{" "}{t.allowAccessPhotos}
                 </Text>
               </View>
             )}
@@ -107,9 +108,9 @@ const InitialScreen: React.FC = () => {
               onPress={handleContinuePress}
               activeOpacity={0.7}
             >
-              <Text style={tw`text-white text-base font-medium mr-2`}>Continue</Text>
+              <Text style={tw`text-white text-base font-medium mr-2`}>{t.continue_}</Text>
             </TouchableOpacity>
-            <Text style={tw`text-gray-400 text-xs mt-2 mb-2`}>Tap to proceed after setting permissions</Text>
+            <Text style={tw`text-gray-400 text-xs mt-2 mb-2`}>{t.tapToProceed}</Text>
             <LottieView source={FingerAnimation} autoPlay loop style={{ width: 48, height: 48 }} />
           </View>
         </View>

@@ -8,11 +8,13 @@ import PhotoComponent from "@/app/components/PhotoComponent";
 import CloseButton from "@/app/components/CloseButton";
 import NextImageAnimation from "@/assets/animations/NextImageAnimation.json";
 import LottieView from "lottie-react-native";
+import { useI18n } from "../i18n";
 
 const OwnPhotos = () => {
   const { photoUri, getRandomPhoto, requestGalleryPermission, setPhotoUri } = usePhotoContext();
-  const lottieRef = useRef<LottieView>(null); // Referencia para LottieView
+  const lottieRef = useRef<LottieView>(null);
   const router = useRouter();
+  const { t } = useI18n();
   const [buttonsVisible, setButtonsVisible] = useState(true);
 
   useEffect(() => {
@@ -92,7 +94,7 @@ const OwnPhotos = () => {
         </Animatable.View>
       )}
       <Animatable.View animation="slideInUp" duration={500} style={tw`absolute bottom-14 left-0 right-0 flex-row justify-center`}>
-        {buttonsVisible && <Text style={tw`text-white text-xl font-bold w-full text-center`}>Next</Text>}
+        {buttonsVisible && <Text style={tw`text-white text-xl font-bold w-full text-center`}>{t.next}</Text>}
       </Animatable.View>
     </View>
   );

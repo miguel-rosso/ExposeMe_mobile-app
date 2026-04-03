@@ -5,6 +5,7 @@ import LottieView from "lottie-react-native";
 import * as Animatable from "react-native-animatable";
 import { ScoreRound } from "@/app/models/interfaces";
 import { useGameContext } from "@/app/providers/GameContext";
+import { useI18n } from "../../i18n";
 
 // Get screen dimensions
 const { width, height } = Dimensions.get("window");
@@ -16,6 +17,7 @@ interface WinnerModalProps {
 }
 
 const WinnerModal: React.FC<WinnerModalProps> = ({ visible, winner, onAnimationEnd }) => {
+  const { t } = useI18n();
   const medalAnimation = useRef<LottieView>(null);
   const { endSocket } = useGameContext();
   const confettiAnimation = useRef<LottieView>(null);
@@ -90,7 +92,7 @@ const WinnerModal: React.FC<WinnerModalProps> = ({ visible, winner, onAnimationE
 
             {/* Winner text with animated entrance */}
             <Animated.View style={[tw`items-center`, { opacity: fadeAnim }]}>
-              <Text style={tw`text-yellow-400 text-xl font-bold mb-2`}>WINNER!</Text>
+              <Text style={tw`text-yellow-400 text-xl font-bold mb-2`}>{t.winner}</Text>
               <Animatable.Text
                 animation={animationComplete ? "pulse" : undefined}
                 iterationCount="infinite"
@@ -100,7 +102,7 @@ const WinnerModal: React.FC<WinnerModalProps> = ({ visible, winner, onAnimationE
               </Animatable.Text>
 
               <Animatable.Text animation="fadeIn" delay={1000} style={tw`text-yellow-400 text-2xl font-bold mt-4`}>
-                {winner.points} points
+                {t.points.replace("{points}", String(winner.points))}
               </Animatable.Text>
             </Animated.View>
 
@@ -110,7 +112,7 @@ const WinnerModal: React.FC<WinnerModalProps> = ({ visible, winner, onAnimationE
                 animation="fadeIn"
                 style={tw`absolute bottom-20 w-full items-center`} // Moved higher to avoid emoji bar
               >
-                <Text style={tw`text-white text-lg opacity-70`}>Tap anywhere to continue</Text>
+                <Text style={tw`text-white text-lg opacity-70`}>{t.tapToContinue}</Text>
               </Animatable.View>
             )}
           </View>

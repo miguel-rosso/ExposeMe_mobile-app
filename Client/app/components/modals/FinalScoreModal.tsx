@@ -8,6 +8,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Animatable from "react-native-animatable";
 import LottieView from "lottie-react-native";
 import { LinearGradient } from "expo-linear-gradient";
+import { useI18n } from "../../i18n";
 
 interface FinalScoreModalProps {
   visible: boolean;
@@ -23,6 +24,7 @@ const SILVER = "#94A3B8";
 const BRONZE = "#D97706";
 
 const FinalScoreModal: React.FC<FinalScoreModalProps> = ({ visible, finalScore }) => {
+  const { t } = useI18n();
   const navigation = useRouter();
   const { setRoundsOfGame, setPlayersProvider, endSocket } = useGameContext();
   const slideAnim = useRef(new Animated.Value(300)).current;
@@ -133,7 +135,7 @@ const FinalScoreModal: React.FC<FinalScoreModalProps> = ({ visible, finalScore }
             >
               {item.points}
             </Text>
-            <Text style={[tw`text-xs`, { color: "#6B7280" }]}>pts</Text>
+            <Text style={[tw`text-xs`, { color: "#6B7280" }]}>{t.pts}</Text>
           </View>
         </View>
       </Animatable.View>
@@ -188,9 +190,9 @@ const FinalScoreModal: React.FC<FinalScoreModalProps> = ({ visible, finalScore }
           </Animatable.View>
 
           <Text style={[tw`text-xs font-semibold tracking-widest mb-1`, { color: ACCENT, letterSpacing: 3 }]}>
-            GAME OVER
+            {t.gameOver}
           </Text>
-          <Text style={[tw`text-2xl font-bold`, { color: "#FAFAFA", letterSpacing: 0.5 }]}>Final Results</Text>
+          <Text style={[tw`text-2xl font-bold`, { color: "#FAFAFA", letterSpacing: 0.5 }]}>{t.finalResults}</Text>
 
           {/* Winner highlight */}
           {sortedScores.length > 0 && (
@@ -237,7 +239,7 @@ const FinalScoreModal: React.FC<FinalScoreModalProps> = ({ visible, finalScore }
             ]}
             activeOpacity={0.7}
           >
-            <Text style={[tw`text-sm font-semibold`, { color: "#9CA3AF" }]}>Exit</Text>
+            <Text style={[tw`text-sm font-semibold`, { color: "#9CA3AF" }]}>{t.exit}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -248,7 +250,7 @@ const FinalScoreModal: React.FC<FinalScoreModalProps> = ({ visible, finalScore }
             ]}
             activeOpacity={0.7}
           >
-            <Text style={[tw`text-sm font-bold`, { color: "#0F0F14" }]}>Play Again</Text>
+            <Text style={[tw`text-sm font-bold`, { color: "#0F0F14" }]}>{t.playAgain}</Text>
           </TouchableOpacity>
         </View>
       </Animated.View>

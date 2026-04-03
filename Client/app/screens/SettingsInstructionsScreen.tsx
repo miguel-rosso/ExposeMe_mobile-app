@@ -23,25 +23,27 @@ import IOSPermInstruction3 from "@/assets/images/IOSPermInstruction3.jpg";
 import IOSPermInstruction4 from "@/assets/images/IOSPermInstruction4.jpg";
 import IOSPermInstruction5 from "@/assets/images/IOSPermInstruction5.jpg";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useI18n } from "../i18n";
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get("window");
 
 const SettingsInstructionsScreen: React.FC = () => {
+  const { t } = useI18n();
   const router = useRouter();
   const carouselRef = useRef<any>(null);
 
   const androidImages = [
-    { id: 1, source: PermInstruction1, title: "Step 1", description: "Enable permissions in settings." },
-    { id: 2, source: PermInstruction2, title: "Step 2", description: "Tap on access to Photos and videos." },
-    { id: 3, source: PermInstruction3, title: "Step 3", description: "Allow access all the time" },
+    { id: 1, source: PermInstruction1, title: t.step1, description: t.enablePermissions },
+    { id: 2, source: PermInstruction2, title: t.step2, description: t.tapPhotosVideos },
+    { id: 3, source: PermInstruction3, title: t.step3, description: t.allowAllTime },
   ];
 
   const iosImages = [
-    { id: 1, source: IOSPermInstruction1, title: "Step 1", description: "Enable permissions in settings." },
-    { id: 2, source: IOSPermInstruction2, title: "Step 2", description: "Tap on access to Photos and videos." },
-    { id: 3, source: IOSPermInstruction3, title: "Step 3", description: "Allow access all the time" },
-    { id: 4, source: IOSPermInstruction4, title: "Step 4", description: "Go to Privacy settings." },
-    { id: 5, source: IOSPermInstruction5, title: "Step 5", description: "Enable all necessary permissions." },
+    { id: 1, source: IOSPermInstruction1, title: t.step1, description: t.enablePermissions },
+    { id: 2, source: IOSPermInstruction2, title: t.step2, description: t.tapPhotosVideos },
+    { id: 3, source: IOSPermInstruction3, title: t.step3, description: t.allowAllTime },
+    { id: 4, source: IOSPermInstruction4, title: t.step4, description: t.goPrivacySettings },
+    { id: 5, source: IOSPermInstruction5, title: t.step5, description: t.enableAllPermissions },
   ];
 
   const images = Platform.OS === "ios" ? iosImages : androidImages;
@@ -66,24 +68,23 @@ const SettingsInstructionsScreen: React.FC = () => {
           {/* Header */}
           <View style={tw`items-center mb-5`}>
             <View style={tw`bg-amber-900/50 px-5 py-3 rounded-full mb-3`}>
-              <Text style={tw`text-2xl font-bold text-amber-400`}>⚠️ Careful ⚠️</Text>
+              <Text style={tw`text-2xl font-bold text-amber-400`}>{t.careful}</Text>
             </View>
             <Text style={tw`text-base text-gray-300 text-center`}>
-              For the app to function properly, you need to grant full access to your photos and media. Please follow these
-              instructions.
+              {t.fullAccessExplanation}
             </Text>
           </View>
 
           {/* Permission highlight box */}
           <View style={tw`bg-indigo-900/30 border border-indigo-700/50 rounded-xl p-4 mb-5 w-full`}>
-            <Text style={tw`text-lg font-semibold text-center text-indigo-200 mb-1`}>Always allow all</Text>
+            <Text style={tw`text-lg font-semibold text-center text-indigo-200 mb-1`}>{t.alwaysAllowAll}</Text>
           </View>
 
           {/* Carousel container */}
           <View style={tw`bg-gray-800 rounded-xl shadow-lg overflow-hidden mb-6 border border-gray-700 w-full`}>
             <View style={tw`bg-gray-700 py-2 px-4 border-b border-gray-600`}>
               <Text style={tw`text-base font-medium text-gray-100`}>
-                {Platform.OS === "android" ? "Android Instructions:" : "iOS Instructions:"}
+                {Platform.OS === "android" ? t.androidInstructions : t.iosInstructions}
               </Text>
             </View>
             <View style={tw`p-4`}>
@@ -119,14 +120,14 @@ const SettingsInstructionsScreen: React.FC = () => {
               onPress={() => router.replace("/")}
               activeOpacity={0.7}
             >
-              <Text style={tw`text-gray-200 text-base font-medium text-center`}>Back</Text>
+              <Text style={tw`text-gray-200 text-base font-medium text-center`}>{t.back}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={tw`bg-blue-600 p-4 flex-1 ml-3 rounded-xl border border-blue-500 shadow-lg`}
               onPress={openSettings}
               activeOpacity={0.7}
             >
-              <Text style={tw`text-white text-base font-medium text-center`}>Open Settings</Text>
+              <Text style={tw`text-white text-base font-medium text-center`}>{t.openSettings}</Text>
             </TouchableOpacity>
           </View>
         </View>

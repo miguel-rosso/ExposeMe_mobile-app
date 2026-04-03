@@ -26,7 +26,7 @@
         "backgroundColor": "#d00000"
       },
       "package": "com.socketNull.ExposeMe",
-      "versionCode": 5,
+      "versionCode": 6,
       "targetSdkVersion": 35
     },
     "assetBundlePatterns": ["**/*"],

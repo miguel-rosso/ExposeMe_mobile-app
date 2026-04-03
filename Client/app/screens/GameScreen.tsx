@@ -1,10 +1,11 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
-import { View, Text, TouchableOpacity, StatusBar, FlatList, BackHandler } from "react-native";
+import { View, Text, TouchableOpacity, StatusBar, FlatList, BackHandler, AppState } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import tw from "twrnc";
 import { useGameContext } from "../providers/GameContext";
 import { Player, ScoreRound } from "../models/interfaces";
 import { usePhotoContext } from "../providers/PhotoContext";
+import { useRouter } from "expo-router";
 import getEnvVars from "@/config";
 import PhotoComponent from "@/app/components/PhotoComponent";
 import ScoreModal from "@/app/components/modals/ScoreModal";
@@ -25,6 +26,7 @@ const GameScreen = () => {
   const safeUsername = username ?? "";
   const safeGameCode = gameCode ?? "";
   const { getRandomPhoto, setPhotoUri } = usePhotoContext();
+  const router = useRouter();
 
   // ── Round state (reset each round) ───────────────────
   const [photo, setPhoto] = useState<string | null>(null);
@@ -38,7 +40,6 @@ const GameScreen = () => {
   const [mySelection, _setMySelection] = useState("");
   const mySelectionRef = useRef("");
   const setMySelection = (val: string) => { mySelectionRef.current = val; _setMySelection(val); };
-  const [answerSent, setAnswerSent] = useState(false);
 
   // ── Hold state ───────────────────────────────────────
   const [gameHeld, setGameHeld] = useState(false);  // server says game paused
@@ -89,6 +90,30 @@ const GameScreen = () => {
     setPressing(false);
     socket.emit("hold-end");
   };
+
+  // ── Disconnect detection: go back to menu ────────────
+  useEffect(() => {
+    if (!socket) return;
+
+    const onDisconnect = () => {
+      console.log("[GAME] Socket disconnected — returning to menu");
+      router.replace("/");
+    };
+
+    socket.on("disconnect", onDisconnect);
+
+    // Also check when app comes back from background
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active" && !socket.connected) {
+        onDisconnect();
+      }
+    });
+
+    return () => {
+      socket.off("disconnect", onDisconnect);
+      sub.remove();
+    };
+  }, [socket]);
 
   // ── Socket listeners ─────────────────────────────────
   useEffect(() => {

@@ -14,7 +14,6 @@
         "family": "IconFont"
       }
     ],
-
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.socketNull.ExposeMe",
@@ -26,10 +25,12 @@
         "backgroundColor": "#d00000"
       },
       "package": "com.socketNull.ExposeMe",
-      "versionCode": 6,
+      "versionCode": 10,
       "targetSdkVersion": 35
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "plugins": [
       "expo-router",
       [
@@ -38,6 +39,15 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "cover"
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "targetSdkVersion": 35,
+            "compileSdkVersion": 35
+          }
         }
       ]
     ],

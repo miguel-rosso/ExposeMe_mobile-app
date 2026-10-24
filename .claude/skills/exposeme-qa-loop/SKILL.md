@@ -16,7 +16,7 @@ Read `CLAUDE.md` once per session. The device lab is documented in `.claude/skil
 - Only the orchestrator edits `qa/backlog.json` and commits. Subagents return JSON; parse it, don't trust prose.
 - Evidence before status: an issue is `fixed` only with a passing test; `verified` only after a device run shows it.
 - One issue in flight at a time (fixes touch shared files like GameScreen.tsx/socketRoutes.ts). Discovery and verification agents can run in parallel.
-- Decide technical and product trade-offs yourself with your recommended option (record them as resolved "Decidido por Claude" cards in the dashboard). Only ask the user — via a `pending` card, then move on — for things that are irreversible, costly, outward-facing (deploys, store submissions, pushing) or that touch their machine/accounts/credentials.
+- **Who decides.** Technical questions (architecture, libraries, upgrades, implementation, tests) and minor low-visibility parameters (e.g. how long an abandoned solo room lives): decide yourself with your recommended option and record a resolved "Decidido por Claude" card. **Functional questions — how the game should behave for players** (rules, scoring, what each player sees, what happens when someone leaves/disconnects mid-game, adding/removing features) — and anything irreversible, costly, outward-facing (deploys, store submissions, pushing) or touching the user's machine/accounts: ask via a `pending` decision card with options and your recommendation, then keep working on other issues until answered.
 
 ## One iteration
 
@@ -55,9 +55,12 @@ Minor findings become new `open` issues (severity low) instead of blocking.
 - **Questions for the user go to the dashboard**, never only to the chat: add a `pending` row (`{id: DEC-NNN|ACC-NNN, kind: "decisión"|"acción", status: "pendiente"|"en curso"|"resuelta", issue, title, context, options[], recommendation, answer}`), then continue with other work. The user answers with a comment on that card sent to Claude; when it arrives, record `answer`, set `status: "resuelta"`, reply in the thread and resolve it.
 - Chat messages stay short (2-4 lines) and point to the dashboard.
 
+### 5c. Game status ("Estado del juego")
+Keep `features` in `qa/backlog.json` up to date — it is how the user follows the product, so write it in plain player-facing Spanish, not technical jargon. One row per user-visible capability: `{id: F-NNN, area: "Partida"|"Salas"|"Seguridad y privacidad"|"Plataformas"|"Rendimiento"|"Calidad", title, detail, status: "verificado"|"hecho"|"en curso"|"planeado"|"bloqueado", issues: "EXP-…", date}`. After each fix: add or update the feature it affects (`hecho`); after a device run that shows it working: `verificado`; when an issue is picked: `en curso`; known upcoming work: `planeado`.
+
 ### 6. Publish to the dashboard (every iteration)
 The dashboard is **https://claude.ai/artifact/Tymg6zZ1y6Mdb1Z29eaTui** (Dashboard type; datasets `issues`, `changes`, `runs` are attached JSON files).
-1. `node qa/scripts/export-dashboard.mjs` → `qa/dashboard/{issues,pending,activity,changes,runs}.json`.
+1. `node qa/scripts/export-dashboard.mjs` → `qa/dashboard/{issues,pending,activity,features,changes,runs}.json`.
 2. For each file: `Artifact` publish with `url` = the dashboard, `asset: true`, `file_path` = the json file (one call per file; JSON can't be batched). Take the returned `url`.
 3. `ArtifactData` `list` collection `datasets` to get each document's `version`, then one `batch` with one `update` per dataset (each pinned with `if_version`): `datasets/<id>` ← `{source: {kind: "file", url: <returned url>, name: "<id>.json", format: "json"}, updated: {at: <ISO now>, by: "Claude QA loop"}}`.
 4. Read `data/users/me` doc `check` as the dashboard type requires; do not otherwise re-verify the page.

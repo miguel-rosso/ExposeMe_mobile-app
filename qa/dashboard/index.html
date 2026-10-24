@@ -46,6 +46,21 @@
 #dash-root .qa-ask .how { font-size: 0.9rem; color: var(--color-fg-muted); border-top: 1px dashed color-mix(in srgb, var(--color-fg) 20%, transparent); padding-top: 0.6rem; }
 #dash-root .qa-ask .answer { font-weight: 600; color: var(--qa-green); }
 
+#dash-root .qa-fsum { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
+#dash-root .qa-fsum .chip { display: inline-flex; align-items: center; gap: 0.4rem; font-weight: 700; font-size: 0.95rem; padding: 0.3rem 0.8rem; border-radius: 999px; color: #fff; }
+#dash-root .qa-areas { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); gap: 1rem; }
+#dash-root .qa-area { background: var(--color-panel); border: 1px solid var(--color-border-line); border-radius: 14px; padding: 1.1rem 1.25rem; min-width: 0; }
+#dash-root .qa-area h3 { font-size: 1.1rem; font-weight: 750; margin: 0 0 0.6rem; }
+#dash-root .qa-feat { display: grid; grid-template-columns: auto 1fr; gap: 0.15rem 0.75rem; padding: 0.6rem 0; border-top: 1px solid var(--color-border-line); }
+#dash-root .qa-feat:first-of-type { border-top: 0; }
+#dash-root .qa-feat .pill { grid-row: span 2; align-self: start; margin-top: 0.1rem; }
+#dash-root .qa-feat .ft { font-weight: 650; }
+#dash-root .qa-feat .fd { color: var(--color-fg-muted); font-size: 0.92rem; }
+#dash-root .fs-verificado { background: #0e7a3e; }
+#dash-root .fs-hecho { background: var(--qa-green); }
+#dash-root .fs-en-curso { background: var(--qa-blue); }
+#dash-root .fs-planeado { background: #6b7280; }
+#dash-root .fs-bloqueado { background: var(--qa-violet); }
 #dash-root .qa-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr)); gap: 1rem; }
 #dash-root .qa-kpi { border-radius: 14px; padding: 1.1rem 1.25rem; border: 1px solid; }
 #dash-root .qa-kpi .lbl { font-size: 0.95rem; font-weight: 600; }
@@ -125,6 +140,15 @@
       <p class="qa-hint">Para responder, deja un comentario en la tarjeta y envíalo a Claude (o menciona @claude).</p>
     </div>
     <div class="qa-pending" id="pending-list" data-source="pending"></div>
+  </section>
+
+  <section id="estado">
+    <div class="qa-sec-head">
+      <h2>Estado del juego</h2>
+      <p class="qa-hint">Qué funciona ya, qué se ha probado en móviles y qué viene después.</p>
+    </div>
+    <div class="qa-fsum" id="features-summary" data-source="features"></div>
+    <div class="qa-areas" id="features-list" data-source="features"></div>
   </section>
 
   <section class="qa-kpis" aria-label="Cifras principales">
@@ -331,6 +355,38 @@ dash.calc("by_type", {
     });
   }
 
+  function drawFeatures() {
+    const sum = document.getElementById("features-summary");
+    const box = document.getElementById("features-list");
+    const r = dash.data("features");
+    if (r.status === "error") { failLine(box); sum.innerHTML = ""; return; }
+    if (r.status !== "ok") return;
+    const order = ["verificado", "hecho", "en curso", "bloqueado", "planeado"];
+    const cls = (s) => `fs-${String(s).replace(/\s+/g, "-")}`;
+    sum.innerHTML = "";
+    order.forEach((st) => {
+      const n = r.data.filter((f) => f.status === st).length;
+      if (n) sum.appendChild(el("span", `chip ${cls(st)}`, `${n} ${st}`));
+    });
+    box.innerHTML = "";
+    const areas = [...new Set(r.data.map((f) => f.area))];
+    areas.forEach((area) => {
+      const card = el("div", "qa-area");
+      card.appendChild(el("h3", null, area));
+      r.data
+        .filter((f) => f.area === area)
+        .sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status))
+        .forEach((f) => {
+          const row = el("div", "qa-feat");
+          row.appendChild(el("span", `pill ${cls(f.status)}`, f.status));
+          row.appendChild(el("div", "ft", f.title));
+          row.appendChild(el("div", "fd", f.detail + (f.issues ? ` (${f.issues})` : "")));
+          card.appendChild(row);
+        });
+      box.appendChild(card);
+    });
+  }
+
   function legend(box, items) {
     box.innerHTML = "";
     items.forEach(([label, color]) => {
@@ -489,7 +545,7 @@ dash.calc("by_type", {
   let linked = false;
   dash.onData(() => {
     // One failing section must not blank the rest of the page
-    [drawKpis, drawNow, drawPending, drawTypes, drawSkew, drawIssues, drawTables].forEach((f) => {
+    [drawKpis, drawNow, drawPending, drawFeatures, drawTypes, drawSkew, drawIssues, drawTables].forEach((f) => {
       try { f(); } catch (e) { console.error(`${f.name} failed`, e); }
     });
     if (!linked && dash.data("pending").status === "ok") {

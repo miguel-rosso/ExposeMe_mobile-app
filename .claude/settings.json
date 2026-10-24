@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(qa/lab/lab.sh:*)",
+      "Bash(node qa/lab/bots.mjs:*)",
+      "Bash(node qa/scripts/export-dashboard.mjs:*)",
+      "Bash(xcrun simctl:*)",
+      "Bash(~/.maestro/bin/maestro:*)",
+      "Bash(npx tsc --noEmit:*)",
+      "Bash(npx vitest:*)",
+      "Bash(npx jest:*)"
+    ],
+    "deny": [
+      "Bash(git push:*)",
+      "Bash(eas submit:*)",
+      "Bash(npx eas-cli submit:*)"
+    ]
+  }
+}

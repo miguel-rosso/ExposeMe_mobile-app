@@ -24,7 +24,7 @@ const issues = backlog.issues
   .map((i) => ({ ...i, severity_rank: sevRank[i.severity] ?? 9, severity_es: es(i.severity), status_es: es(i.status), type_es: es(i.type), area_es: es(i.area) }))
   .sort((a, b) => a.severity_rank - b.severity_rank || a.id.localeCompare(b.id));
 
-for (const [name, rows] of Object.entries({ issues, pending: (backlog.pending || []).map((d) => ({ ...d, options_text: (d.options || []).join("\n") })), activity: backlog.activity || [], changes: backlog.changes, runs: backlog.runs.map((r) => ({ ...r, result_es: es(r.result) })) })) {
+for (const [name, rows] of Object.entries({ issues, pending: (backlog.pending || []).map((d) => ({ ...d, options_text: (d.options || []).join("\n") })), activity: backlog.activity || [], features: backlog.features || [], changes: backlog.changes, runs: backlog.runs.map((r) => ({ ...r, result_es: es(r.result) })) })) {
   fs.writeFileSync(path.join(out, `${name}.json`), JSON.stringify(rows, null, 2));
   console.log(`${name}.json: ${rows.length} rows`);
 }

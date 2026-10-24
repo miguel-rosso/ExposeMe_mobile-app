@@ -41,7 +41,7 @@ AVD_DEVICES=("pixel_7" "pixel_4" "pixel_tablet")
 
 mkdir -p "$STATE"
 # adb reads stdin and would swallow the device list of `devices | while read` loops
-adbs() { adbs "$@" </dev/null; }
+adbs() { "$ADB" -s "$@" </dev/null; }
 log() { printf '\033[1;36m[lab]\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31m[lab] %s\033[0m\n' "$*" >&2; exit 1; }
 run_id() { echo "${RUN_ID:-$(date +%Y%m%d-%H%M%S)}"; }

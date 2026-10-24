@@ -1,0 +1,7 @@
+# Entry point used by `qa/lab/lab.sh play`: open → join → play.
+# env: GAME_CODE, USERNAME, METRO_URL (url-encoded)
+appId: com.socketNull.ExposeMe
+---
+- runFlow: open-app.yaml
+- runFlow: join-room.yaml
+- runFlow: play-rounds.yaml

@@ -1,0 +1,373 @@
+<style>
+#dash-root .qa { display: flex; flex-direction: column; gap: var(--cds-gap-xl); font-family: var(--font-anthropic-sans); font-variant-numeric: tabular-nums; }
+#dash-root .qa-head h1 { font-family: var(--font-anthropic-serif); font-weight: 400; font-size: var(--cds-font-size-title); margin: 0; text-wrap: balance; }
+#dash-root .qa-take { color: var(--color-fg-muted); font-size: var(--cds-font-size-body); margin: var(--cds-gap-xs) 0 0; max-width: 70ch; }
+#dash-root .qa-take b { color: var(--color-fg); font-weight: 600; }
+#dash-root .qa-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr)); gap: var(--cds-gap-md); }
+#dash-root .qa-card { background: var(--color-panel); border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); padding: var(--cds-pad-lg); min-width: 0; }
+#dash-root .qa-kpi .lbl { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+#dash-root .qa-kpi .val { font-family: var(--font-anthropic-serif); font-weight: 400; font-size: var(--cds-font-size-title); line-height: 1.15; margin-top: var(--cds-gap-xs); }
+#dash-root .qa-kpi .sub { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); margin-top: var(--cds-gap-xs); }
+#dash-root .qa-kpi.alert .val { color: var(--color-bad); }
+#dash-root .qa-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); gap: var(--cds-gap-md); }
+#dash-root .qa-card h2 { font-size: var(--cds-font-size-heading); font-weight: var(--cds-font-weight-medium); margin: 0; }
+#dash-root .qa-note { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); margin: var(--cds-gap-xs) 0 var(--cds-gap-md); }
+#dash-root .qa-chart { position: relative; min-height: 220px; }
+#dash-root .qa-tip { position: absolute; pointer-events: none; background: var(--cds-surface-popover); border: 1px solid var(--cds-border); border-radius: var(--cds-radius); box-shadow: var(--cds-shadow-popover); padding: var(--cds-pad-xs) var(--cds-pad-sm); font-size: var(--cds-font-size-caption); white-space: nowrap; z-index: 2; }
+#dash-root .qa-tip .k { color: var(--cds-text-secondary); }
+#dash-root .qa-legend { display: flex; flex-wrap: wrap; gap: var(--cds-gap-md); font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); margin-top: var(--cds-gap-sm); }
+#dash-root .qa-legend i { display: inline-block; width: 0.625rem; height: 0.625rem; border-radius: 2px; margin-right: 0.375rem; vertical-align: -1px; }
+#dash-root .qa-tools { display: flex; flex-wrap: wrap; gap: var(--cds-gap-sm); align-items: center; margin-bottom: var(--cds-gap-md); }
+#dash-root .qa-tools input { flex: 1 1 12rem; min-width: 0; font: inherit; font-size: var(--cds-font-size-caption); padding: var(--cds-pad-xs) var(--cds-pad-sm); border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); background: var(--color-bg); color: var(--color-fg); }
+#dash-root .qa-chip { font: inherit; font-size: var(--cds-font-size-caption); padding: var(--cds-pad-xs) var(--cds-pad-sm); border: 1px solid var(--color-border-line); border-radius: 999px; background: transparent; color: var(--color-fg-muted); cursor: pointer; }
+#dash-root .qa-chip[aria-pressed="true"] { background: var(--color-fg); color: var(--color-bg); border-color: var(--color-fg); }
+#dash-root .qa-tbl { max-height: 32rem; overflow: auto; }
+#dash-root .qa-tbl table { width: 100%; border-collapse: collapse; font-size: var(--cds-font-size-caption); }
+#dash-root .qa-tbl th { position: sticky; top: 0; background: var(--color-panel); text-align: left; font-weight: var(--cds-font-weight-medium); color: var(--color-fg-muted); padding: var(--cds-pad-xs) var(--cds-pad-sm); border-bottom: 1px solid var(--color-border-line); }
+#dash-root .qa-tbl th button { all: unset; cursor: pointer; }
+#dash-root .qa-tbl th button:focus-visible { outline: 2px solid var(--color-fg); outline-offset: 2px; }
+#dash-root .qa-tbl td { padding: var(--cds-pad-sm); border-bottom: 1px solid var(--color-border-line); vertical-align: top; }
+#dash-root .qa-tbl td.wrap { min-width: 16rem; max-width: 34rem; }
+#dash-root .qa-tbl td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
+#dash-root .qa-tbl .summary { color: var(--color-fg-muted); margin-top: 0.25rem; }
+#dash-root .pill { display: inline-block; padding: 0.0625rem 0.5rem; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
+#dash-root .sev-critical, #dash-root .sev-high, #dash-root .res-fail { color: var(--color-bad); }
+#dash-root .sev-medium, #dash-root .st-in-progress, #dash-root .st-blocked { color: var(--color-warn); }
+#dash-root .sev-low, #dash-root .st-open, #dash-root .st-wontfix { color: var(--color-fg-muted); }
+#dash-root .st-fixed, #dash-root .st-verified, #dash-root .res-pass { color: var(--color-ok); }
+#dash-root [data-dash-source-state=empty] { color: transparent; }
+#dash-root [data-dash-source-state=refreshing] { opacity: .5; transition: opacity var(--cds-dur-slow); }
+#dash-root .qa-fail { display: flex; align-items: center; justify-content: center; gap: 0.5rem; min-height: 120px; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+#dash-root .qa-fail::before { content: ""; width: 0.375rem; height: 0.375rem; border-radius: 50%; background: var(--color-bad); }
+@media (max-width: 40rem) { #dash-root .hide-narrow { display: none; } }
+</style>
+
+<div class="qa">
+  <header class="qa-head" id="overview">
+    <h1>ExposeMe QA Lab</h1>
+    <p class="qa-take" id="takeaway">
+      <b data-source="kpis" data-field="open" data-row="0" class="dash-skeleton">—</b> incidencias abiertas, <b data-source="kpis" data-field="open_high" data-row="0" class="dash-skeleton">—</b> de ellas altas o críticas.
+      <b data-source="kpis" data-field="done" data-row="0" class="dash-skeleton">—</b> resueltas hasta ahora en <b data-source="kpis" data-field="changes" data-row="0" class="dash-skeleton">—</b> cambios.
+      Última ejecución del laboratorio (<span data-source="kpis" data-field="last_run" data-row="0" class="dash-skeleton">—</span>): <b data-source="kpis" data-field="last_result" data-row="0" class="dash-skeleton">—</b>, peor desfase entre jugadores <b data-source="kpis" data-field="last_max_skew" data-row="0" class="dash-skeleton">—</b> ms.
+    </p>
+  </header>
+
+  <section class="qa-kpis" aria-label="Cifras principales">
+    <div class="qa-card qa-kpi" id="kpi-open"><div class="lbl">Incidencias abiertas</div><div class="val dash-skeleton" data-source="kpis" data-field="open" data-row="0">—</div><div class="sub">abiertas + en curso + bloqueadas</div></div>
+    <div class="qa-card qa-kpi" id="kpi-high"><div class="lbl">Altas o críticas abiertas</div><div class="val dash-skeleton" data-source="kpis" data-field="open_high" data-row="0">—</div><div class="sub">se arreglan primero</div></div>
+    <div class="qa-card qa-kpi" id="kpi-done"><div class="lbl">Resueltas o verificadas</div><div class="val dash-skeleton" data-source="kpis" data-field="done" data-row="0">—</div><div class="sub"><span data-source="kpis" data-field="verified" data-row="0">—</span> verificadas en dispositivos</div></div>
+    <div class="qa-card qa-kpi" id="kpi-skew"><div class="lbl">Desfase de sincronización</div><div class="val dash-skeleton" data-source="kpis" data-field="last_p95_skew" data-row="0">—</div><div class="sub">p95 en ms entre jugadores al recibir la misma fase (última ejecución)</div></div>
+  </section>
+
+  <section class="qa-grid">
+    <div class="qa-card" id="by-type">
+      <h2>Incidencias abiertas por tipo</h2>
+      <p class="qa-note">Apiladas por severidad. Sincronización y bugs van primero.</p>
+      <div class="qa-chart" id="chart-types" data-source="by_type"></div>
+      <div class="qa-legend" id="legend-types" data-source="by_type"></div>
+    </div>
+    <div class="qa-card" id="skew">
+      <h2>Desfase de sincronización por ejecución</h2>
+      <p class="qa-note">Diferencia p95 y máxima (ms) entre jugadores al recibir el mismo evento de fase. Cuanto menor, mejor.</p>
+      <div class="qa-chart" id="chart-skew" data-source="runs"></div>
+      <div class="qa-legend" id="legend-skew" data-source="runs"></div>
+    </div>
+  </section>
+
+  <section class="qa-card" id="issues">
+    <h2>Incidencias</h2>
+    <p class="qa-note">Detectadas por el auditor, el revisor de seguridad, las partidas en dispositivos y los bots. La evidencia apunta a fichero y línea.</p>
+    <div class="qa-tools">
+      <input id="issue-search" type="search" placeholder="Buscar incidencias" aria-label="Buscar incidencias">
+      <button class="qa-chip" data-filter="active" aria-pressed="true">Abiertas</button>
+      <button class="qa-chip" data-filter="done" aria-pressed="false">Resueltas</button>
+      <button class="qa-chip" data-filter="all" aria-pressed="false">Todas</button>
+    </div>
+    <div class="qa-tbl">
+      <table id="issues-table" data-source="issues" data-row-key="id">
+        <thead><tr>
+          <th data-field="id"><button data-sort="id">ID</button></th>
+          <th data-field="title"><button data-sort="title">Incidencia</button></th>
+          <th data-field="severity_es"><button data-sort="severity_rank">Severidad</button></th>
+          <th data-field="status_es"><button data-sort="status_es">Estado</button></th>
+          <th data-field="type_es" class="hide-narrow"><button data-sort="type_es">Tipo</button></th>
+          <th data-field="area_es" class="hide-narrow"><button data-sort="area_es">Área</button></th>
+          <th data-field="evidence" class="hide-narrow">Evidencia</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="qa-grid">
+    <div class="qa-card" id="changelog">
+      <h2>Historial de cambios</h2>
+      <p class="qa-note">Un commit por incidencia en la rama qa/loop, los más recientes primero.</p>
+      <div class="qa-tbl">
+        <table id="changes-table" data-source="changes" data-row-key="id">
+          <thead><tr>
+            <th data-field="id">ID</th><th data-field="date">Fecha</th><th data-field="issue">Incidencia</th>
+            <th data-field="title">Cambio</th><th data-field="commit" class="hide-narrow">Commit</th><th data-field="tests" class="hide-narrow">Tests</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="qa-card" id="runs">
+      <h2>Ejecuciones del laboratorio</h2>
+      <p class="qa-note">Partidas de bots, partidas en dispositivos y baterías de tests, las más recientes primero.</p>
+      <div class="qa-tbl">
+        <table id="runs-table" data-source="runs" data-row-key="id">
+          <thead><tr>
+            <th data-field="id">ID</th><th data-field="date">Fecha</th><th data-field="devices">Jugadores</th>
+            <th data-field="result_es">Resultado</th><th data-field="rounds_skipped" class="hide-narrow">Saltadas</th><th data-field="notes" class="hide-narrow">Notas</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+const ACTIVE = ["open", "in-progress", "blocked"];
+const DONE = ["fixed", "verified"];
+const SEVS = ["critical", "high", "medium", "low"];
+const ES = { critical: "crítica", high: "alta", medium: "media", low: "baja", open: "abierta", "in-progress": "en curso", blocked: "bloqueada", fixed: "resuelta", verified: "verificada", wontfix: "descartada", pass: "OK", fail: "fallo", none: "ninguno", sync: "sincronización", bug: "bug", security: "seguridad", perf: "rendimiento", ux: "UX", test: "tests", infra: "infra", server: "servidor", client: "cliente", both: "ambos", lab: "laboratorio" };
+const es = (v) => ES[v] ?? v;
+
+dash.calc("kpis", {
+  inputs: ["issues", "changes", "runs"],
+  title: "Cifras principales de QA",
+  description: "Cuenta incidencias por estado y severidad y lee la última ejecución del laboratorio.",
+  fn: (issues, changes, runs) => {
+    const active = issues.filter((i) => ["open", "in-progress", "blocked"].includes(i.status));
+    const last = runs[runs.length - 1] || {};
+    return [{
+      open: active.length,
+      open_high: active.filter((i) => i.severity === "critical" || i.severity === "high").length,
+      done: issues.filter((i) => i.status === "fixed" || i.status === "verified").length,
+      verified: issues.filter((i) => i.status === "verified").length,
+      changes: changes.length,
+      last_run: last.id || "ninguna aún",
+      last_result: last.result_es || "ninguno",
+      last_p95_skew: last.p95_skew_ms ?? null,
+      last_max_skew: last.max_skew_ms ?? null,
+    }];
+  },
+});
+
+dash.calc("by_type", {
+  inputs: ["issues"],
+  title: "Incidencias abiertas por tipo y severidad",
+  description: "Incidencias abiertas, en curso y bloqueadas contadas por tipo y separadas por severidad.",
+  fn: (issues) => {
+    const order = ["sync", "bug", "security", "perf", "ux", "test", "infra"];
+    const active = issues.filter((i) => ["open", "in-progress", "blocked"].includes(i.status));
+    return order
+      .map((type) => {
+        const label = { sync: "sincronización", bug: "bug", security: "seguridad", perf: "rendimiento", ux: "UX", test: "tests", infra: "infra" }[type];
+        const row = { type: label, critical: 0, high: 0, medium: 0, low: 0, total: 0 };
+        active.filter((i) => i.type === type).forEach((i) => { row[i.severity] = (row[i.severity] || 0) + 1; row.total++; });
+        return row;
+      })
+      .filter((r) => r.total > 0);
+  },
+});
+
+(() => {
+  const root = document.getElementById("dash-root");
+  const css = (name) => getComputedStyle(root).getPropertyValue(name).trim();
+  const sevColor = { critical: "var(--cds-chart-status-critical)", high: dash.colors[0], medium: dash.colors[1], low: "var(--cds-chart-muted)" };
+  let issueFilter = "active";
+  let issueSort = { key: "severity_rank", dir: 1 };
+
+  const failLine = (el) => { el.innerHTML = ""; const d = document.createElement("div"); d.className = "qa-fail"; d.textContent = "No se pudo cargar"; el.appendChild(d); };
+  const unskeleton = (sel) => document.querySelectorAll(sel).forEach((e) => e.classList.remove("dash-skeleton"));
+  const td = (tr, text, cls) => { const c = document.createElement("td"); if (cls) c.className = cls; c.textContent = text ?? ""; tr.appendChild(c); return c; };
+  const pill = (tr, text, cls) => { const c = document.createElement("td"); const s = document.createElement("span"); s.className = `pill ${cls}`; s.textContent = text; c.appendChild(s); tr.appendChild(c); return c; };
+
+  function drawKpis() {
+    const k = dash.data("kpis");
+    const els = document.querySelectorAll('[data-source="kpis"]');
+    if (k.status !== "ok") { if (k.status === "error") els.forEach((e) => { e.classList.remove("dash-skeleton"); e.textContent = "—"; }); return; }
+    const row = k.data[0] || {};
+    els.forEach((e) => {
+      const v = row[e.dataset.field];
+      e.textContent = v === null || v === undefined ? "—" : typeof v === "number" ? d3.format(",")(v) : v;
+      e.classList.remove("dash-skeleton");
+    });
+    document.getElementById("kpi-high").classList.toggle("alert", (row.open_high || 0) > 0);
+  }
+
+  function legend(el, items) {
+    el.innerHTML = "";
+    items.forEach(([label, color]) => {
+      const s = document.createElement("span");
+      const i = document.createElement("i"); i.style.background = color;
+      s.appendChild(i); s.appendChild(document.createTextNode(label)); el.appendChild(s);
+    });
+  }
+
+  function drawTypes() {
+    const el = document.getElementById("chart-types");
+    const lg = document.getElementById("legend-types");
+    const r = dash.data("by_type");
+    if (r.status === "error") { failLine(el); lg.innerHTML = ""; return; }
+    if (r.status !== "ok") { el.innerHTML = ""; return; }
+    const rows = r.data;
+    el.innerHTML = "";
+    if (!rows.length) { const p = document.createElement("p"); p.className = "qa-note"; p.textContent = "No hay incidencias abiertas."; el.appendChild(p); legend(lg, []); return; }
+    const W = el.clientWidth || 400, barH = 22, gap = 10;
+    const svg = d3.select(el).append("svg").attr("width", "100%");
+    const probe = svg.append("g").attr("font-size", css("--cds-font-size-caption") || "12px");
+    const labelW = d3.max(rows, (d) => probe.append("text").text(d.type).node().getComputedTextLength()) + 12;
+    probe.remove();
+    const H = rows.length * (barH + gap) + 24;
+    svg.attr("viewBox", `0 0 ${W} ${H}`);
+    const max = d3.max(rows, (d) => d.total);
+    const x = d3.scaleLinear([0, max], [labelW, W - 28]);
+    const y = d3.scaleBand(rows.map((d) => d.type), [0, H - 24]).paddingInner(gap / (barH + gap));
+    const g = svg.append("g").attr("font-size", css("--cds-font-size-caption") || "12px");
+    x.ticks(Math.min(max, 5)).filter(Number.isInteger).forEach((t) => {
+      g.append("line").attr("x1", x(t)).attr("x2", x(t)).attr("y1", 0).attr("y2", H - 24).attr("stroke", "var(--cds-chart-grid)");
+      g.append("text").attr("x", x(t)).attr("y", H - 6).attr("text-anchor", "middle").attr("fill", "var(--color-fg-muted)").text(t);
+    });
+    rows.forEach((d) => {
+      g.append("text").attr("x", 0).attr("y", y(d.type) + y.bandwidth() / 2).attr("dy", "0.35em").attr("fill", "var(--color-fg)").text(d.type);
+      let acc = 0;
+      SEVS.forEach((s) => {
+        if (!d[s]) return;
+        g.append("rect").attr("x", x(acc) + 1).attr("y", y(d.type)).attr("width", Math.max(0, x(acc + d[s]) - x(acc) - 2)).attr("height", y.bandwidth()).attr("rx", 4).attr("fill", sevColor[s]);
+        acc += d[s];
+      });
+      g.append("text").attr("x", x(d.total) + 6).attr("y", y(d.type) + y.bandwidth() / 2).attr("dy", "0.35em").attr("fill", "var(--color-fg-muted)").text(d.total);
+    });
+    legend(lg, SEVS.map((s) => [es(s), sevColor[s]]));
+  }
+
+  function drawSkew() {
+    const el = document.getElementById("chart-skew");
+    const lg = document.getElementById("legend-skew");
+    const r = dash.data("runs");
+    if (r.status === "error") { failLine(el); lg.innerHTML = ""; return; }
+    if (r.status !== "ok") { el.innerHTML = ""; return; }
+    const rows = r.data.filter((d) => d.max_skew_ms !== null && d.max_skew_ms !== undefined && d.max_skew_ms !== "");
+    el.innerHTML = "";
+    if (!rows.length) { const p = document.createElement("p"); p.className = "qa-note"; p.textContent = "Aún no hay ejecuciones con medidas de sincronización."; el.appendChild(p); legend(lg, []); return; }
+    const W = el.clientWidth || 400, H = 220, m = { t: 12, r: 8, b: 26, l: 8 };
+    const svg = d3.select(el).append("svg").attr("width", "100%").attr("viewBox", `0 0 ${W} ${H}`);
+    const g = svg.append("g").attr("font-size", css("--cds-font-size-caption") || "12px");
+    const max = d3.max(rows, (d) => Number(d.max_skew_ms)) || 1;
+    const yScale = d3.scaleLinear([0, max * 1.15], [H - m.b, m.t]).nice();
+    const ticks = yScale.ticks(4);
+    const tl = g.append("text").text(d3.format(",")(ticks[ticks.length - 1]));
+    m.l = tl.node().getComputedTextLength() + 10; tl.remove();
+    const x0 = d3.scaleBand(rows.map((d) => d.id), [m.l, W - m.r]).padding(0.3);
+    const x1 = d3.scaleBand(["p95", "max"], [0, x0.bandwidth()]).padding(0.12);
+    ticks.forEach((t) => {
+      g.append("line").attr("x1", m.l).attr("x2", W - m.r).attr("y1", yScale(t)).attr("y2", yScale(t)).attr("stroke", "var(--cds-chart-grid)");
+      g.append("text").attr("x", m.l - 6).attr("y", yScale(t)).attr("dy", "0.35em").attr("text-anchor", "end").attr("fill", "var(--color-fg-muted)").text(d3.format(",")(t));
+    });
+    const tip = document.createElement("div"); tip.className = "qa-tip"; tip.hidden = true; el.appendChild(tip);
+    rows.forEach((d) => {
+      const gx = x0(d.id);
+      [["p95", Number(d.p95_skew_ms), dash.colors[0]], ["max", Number(d.max_skew_ms), dash.colors[2]]].forEach(([k, v, c]) => {
+        if (!Number.isFinite(v)) return;
+        g.append("rect").attr("x", gx + x1(k)).attr("y", yScale(v)).attr("width", Math.min(32, x1.bandwidth())).attr("height", Math.max(1, yScale(0) - yScale(v))).attr("rx", 4).attr("fill", c);
+      });
+      g.append("text").attr("x", gx + x0.bandwidth() / 2).attr("y", H - 8).attr("text-anchor", "middle").attr("fill", "var(--color-fg-muted)").text(d.id);
+      g.append("rect").attr("x", gx).attr("y", m.t).attr("width", x0.bandwidth()).attr("height", H - m.t - m.b).attr("fill", "transparent")
+        .on("mousemove", (ev) => {
+          tip.hidden = false;
+          tip.innerHTML = "";
+          const head = document.createElement("div"); head.className = "k"; head.textContent = `${d.id} · ${d.date} · ${d.devices}`; tip.appendChild(head);
+          [["p95", d.p95_skew_ms], ["max", d.max_skew_ms]].forEach(([k, v]) => { const l = document.createElement("div"); l.textContent = `${k}: ${v} ms`; tip.appendChild(l); });
+          const [px, py] = d3.pointer(ev, el);
+          const tw = tip.offsetWidth;
+          tip.style.left = `${Math.max(0, Math.min(el.clientWidth - tw, px + 12))}px`;
+          tip.style.top = `${Math.max(0, py - 40)}px`;
+        })
+        .on("mouseleave", () => { tip.hidden = true; });
+    });
+    legend(lg, [["p95", dash.colors[0]], ["max", dash.colors[2]]]);
+  }
+
+  function drawIssues() {
+    const table = document.getElementById("issues-table");
+    const body = table.querySelector("tbody");
+    const r = dash.data("issues");
+    body.innerHTML = "";
+    if (r.status === "error") { const tr = body.insertRow(); const c = tr.insertCell(); c.colSpan = 7; failLine(c); return; }
+    if (r.status !== "ok") return;
+    const q = (document.getElementById("issue-search").value || "").toLowerCase();
+    let rows = r.data.filter((i) => issueFilter === "all" || (issueFilter === "active" ? ACTIVE.includes(i.status) : DONE.includes(i.status)));
+    if (q) rows = rows.filter((i) => [i.id, i.title, i.summary, i.type_es, i.area_es, i.status_es, i.evidence].join(" ").toLowerCase().includes(q));
+    const { key, dir } = issueSort;
+    rows = [...rows].sort((a, b) => (typeof a[key] === "number" ? a[key] - b[key] : String(a[key]).localeCompare(String(b[key]))) * dir);
+    rows.forEach((i) => {
+      const tr = document.createElement("tr");
+      td(tr, i.id, "mono");
+      const t = td(tr, i.title, "wrap");
+      const s = document.createElement("div"); s.className = "summary"; s.textContent = i.summary; t.appendChild(s);
+      pill(tr, i.severity_es, `sev-${i.severity}`);
+      pill(tr, i.status_es, `st-${i.status}`);
+      td(tr, i.type_es, "hide-narrow");
+      td(tr, i.area_es, "hide-narrow");
+      td(tr, i.evidence, "hide-narrow mono");
+      body.appendChild(tr);
+    });
+    if (!rows.length) { const tr = body.insertRow(); const c = tr.insertCell(); c.colSpan = 7; c.className = "qa-note"; c.textContent = "Ninguna incidencia coincide."; }
+    table.querySelectorAll("th button").forEach((b) => {
+      const th = b.closest("th");
+      th.setAttribute("aria-sort", b.dataset.sort === key ? (dir === 1 ? "ascending" : "descending") : "none");
+    });
+  }
+
+  function drawSimple(id, tableId, cols, cellFor) {
+    const body = document.querySelector(`#${tableId} tbody`);
+    const r = dash.data(id);
+    body.innerHTML = "";
+    if (r.status === "error") { const tr = body.insertRow(); const c = tr.insertCell(); c.colSpan = cols; failLine(c); return; }
+    if (r.status !== "ok") return;
+    const rows = [...r.data].reverse();
+    if (!rows.length) { const tr = body.insertRow(); const c = tr.insertCell(); c.colSpan = cols; c.className = "qa-note"; c.textContent = "Nada todavía."; return; }
+    rows.forEach((d) => { const tr = document.createElement("tr"); cellFor(tr, d); body.appendChild(tr); });
+  }
+
+  function drawChanges() {
+    drawSimple("changes", "changes-table", 6, (tr, d) => {
+      td(tr, d.id, "mono"); td(tr, d.date, "mono"); td(tr, d.issue, "mono"); td(tr, d.title, "wrap");
+      td(tr, d.commit || "sin commit", "hide-narrow mono"); td(tr, d.tests, "hide-narrow");
+    });
+  }
+
+  function drawRuns() {
+    drawSimple("runs", "runs-table", 6, (tr, d) => {
+      td(tr, d.id, "mono"); td(tr, d.date, "mono"); td(tr, d.devices);
+      pill(tr, d.result_es, `res-${d.result}`); td(tr, d.rounds_skipped, "hide-narrow"); td(tr, d.notes, "hide-narrow wrap");
+    });
+  }
+
+  document.getElementById("issue-search").addEventListener("input", drawIssues);
+  document.querySelectorAll("#issues .qa-chip").forEach((b) => b.addEventListener("click", () => {
+    issueFilter = b.dataset.filter;
+    document.querySelectorAll("#issues .qa-chip").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    drawIssues();
+  }));
+  document.querySelectorAll("#issues-table th button").forEach((b) => b.addEventListener("click", () => {
+    issueSort = { key: b.dataset.sort, dir: issueSort.key === b.dataset.sort ? -issueSort.dir : 1 };
+    drawIssues();
+  }));
+
+  let linked = false;
+  dash.onData(() => {
+    drawKpis(); drawTypes(); drawSkew(); drawIssues(); drawChanges(); drawRuns();
+    if (!linked && dash.data("issues").status === "ok") {
+      linked = true;
+      const named = document.getElementById(location.hash.slice(1));
+      if (named) { named.scrollIntoView(); dash.setLink(named.id); }
+    }
+  });
+})();
+</script>

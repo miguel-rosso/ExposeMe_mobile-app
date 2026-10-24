@@ -1,0 +1,15 @@
+# Join room ${GAME_CODE} as ${USERNAME} and wait in the lobby.
+appId: com.socketNull.ExposeMe
+---
+- tapOn: "Enter username"
+- inputText: ${USERNAME}
+- hideKeyboard
+- tapOn: "Join Game"
+- tapOn: "Enter game code"
+- inputText: ${GAME_CODE}
+- hideKeyboard
+- tapOn: "Search Room"
+- extendedWaitUntil:
+    visible: "Waiting host|Start Game"
+    timeout: 30000
+- takeScreenshot: lobby-${USERNAME}

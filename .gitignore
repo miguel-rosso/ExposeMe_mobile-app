@@ -1,0 +1,14 @@
+# PUBLIC REPO — never commit secrets, personal photos, logs or vulnerability details.
+.DS_Store
+.env
+.env.*
+!.env.example
+*.pem
+*.p8
+*.p12
+*.jks
+*.keystore
+*.mobileprovision
+google-services.json
+GoogleService-Info.plist
+.claude/settings.local.json

@@ -1,0 +1,13 @@
+{
+  "name": "exposeme-qa",
+  "private": true,
+  "type": "module",
+  "description": "QA lab tooling: socket bots, dashboard export",
+  "scripts": {
+    "bots": "node lab/bots.mjs",
+    "dashboard": "node scripts/export-dashboard.mjs"
+  },
+  "dependencies": {
+    "socket.io-client": "^4.8.1"
+  }
+}

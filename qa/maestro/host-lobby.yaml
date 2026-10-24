@@ -1,0 +1,12 @@
+# Device creates the room (bots then join with --code). Writes nothing; read the code from the screenshot/logs.
+appId: com.socketNull.ExposeMe
+---
+- runFlow: open-app.yaml
+- tapOn: "Enter username"
+- inputText: ${USERNAME}
+- hideKeyboard
+- tapOn: "Create Game"
+- extendedWaitUntil:
+    visible: "Start Game"
+    timeout: 30000
+- takeScreenshot: host-lobby-${USERNAME}

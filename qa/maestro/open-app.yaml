@@ -1,0 +1,31 @@
+# Cold-start the dev client pointed at local Metro and get past first-run screens.
+# Text selectors are a stopgap until the app exposes testIDs (backlog: EXP-008).
+appId: com.socketNull.ExposeMe
+---
+- launchApp:
+    clearState: true
+    permissions:
+      photos: allow
+      medialibrary: allow
+- openLink: "exp+expose-me://expo-development-client/?url=${METRO_URL}"
+# Expo dev-menu onboarding sheet (first launch only)
+- tapOn:
+    text: "Continue"
+    optional: true
+- extendedWaitUntil:
+    visible: "Continue|Join Game|Create Game"
+    timeout: 120000
+# App first-run permissions explainer (InitialScreen)
+- runFlow:
+    when:
+      visible: "Tap to proceed after setting permissions"
+    commands:
+      - scrollUntilVisible:
+          element: "Continue"
+      - tapOn: "Continue"
+- tapOn:
+    text: "Allow Full Access|Allow all|Allow"
+    optional: true
+- extendedWaitUntil:
+    visible: "Join Game"
+    timeout: 30000

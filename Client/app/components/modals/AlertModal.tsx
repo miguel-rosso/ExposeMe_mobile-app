@@ -2,6 +2,7 @@ import React from "react";
 import { Text, TouchableOpacity, View } from "react-native";
 import tw from "twrnc";
 import * as Animatable from "react-native-animatable";
+import { TEST_IDS } from "@/app/utils/testIds";
 
 interface AlertOverlayProps {
   visible: boolean;
@@ -34,6 +35,7 @@ const AlertOverlay: React.FC<AlertOverlayProps> = ({
 
   return (
     <Animatable.View
+      testID={TEST_IDS.alertModal}
       animation="fadeIn"
       duration={300}
       style={tw`absolute top-0 left-0 right-0 bottom-0 z-50 flex justify-center items-center bg-black bg-opacity-50`}
@@ -45,10 +47,10 @@ const AlertOverlay: React.FC<AlertOverlayProps> = ({
           {highlightedText && <Text style={tw`text-red-500`}> {highlightedText}</Text>}
         </Text>
         <View style={tw`flex-row justify-evenly`}>
-          <TouchableOpacity onPress={onCancel} style={tw`${cancelButtonColor} px-4 py-2 rounded-lg`}>
+          <TouchableOpacity testID={TEST_IDS.alertModalCancel} onPress={onCancel} style={tw`${cancelButtonColor} px-4 py-2 rounded-lg`}>
             <Text style={tw`text-white text-lg`}>{cancelText}</Text>
           </TouchableOpacity>
-          <TouchableOpacity onPress={onConfirm} style={tw`${confirmButtonColor} px-4 py-2 rounded-lg`}>
+          <TouchableOpacity testID={TEST_IDS.alertModalConfirm} onPress={onConfirm} style={tw`${confirmButtonColor} px-4 py-2 rounded-lg`}>
             <Text style={tw`text-white text-lg`}>{confirmText}</Text>
           </TouchableOpacity>
         </View>

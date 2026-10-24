@@ -1,25 +1,38 @@
 # Play until GAME OVER: each round tap a guess, screenshot every phase we can catch.
+# Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
 appId: com.socketNull.ExposeMe
 ---
 - extendedWaitUntil:
-    visible: "ARE YOU READY\\?|Round .*"
+    visible:
+      id: "game-waiting-ready|player-option-.*|score-modal"
     timeout: 60000
 - repeat:
     while:
-      notVisible: "GAME OVER|WINNER!"
+      notVisible:
+        id: "winner-modal|final-score-modal"
     commands:
       - tapOn:
-          text: "bot1"
+          id: "player-option-bot1"
           optional: true
       - evalScript: ${output.shot = (output.shot || 0) + 1}
       - takeScreenshot: round-${USERNAME}-${output.shot}
       - waitForAnimationToEnd:
           timeout: 4000
 - takeScreenshot: final-${USERNAME}
-- tapOn:
-    text: "Tap anywhere to continue"
-    optional: true
+# "Tap anywhere to continue" only renders once the winner animation is tappable
+- runFlow:
+    when:
+      visible:
+        id: "winner-modal"
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: "winner-continue"
+          timeout: 15000
+      - tapOn:
+          id: "winner-continue"
 - extendedWaitUntil:
-    visible: "Final Results|Exit"
+    visible:
+      id: "final-score-modal"
     timeout: 20000
 - takeScreenshot: results-${USERNAME}

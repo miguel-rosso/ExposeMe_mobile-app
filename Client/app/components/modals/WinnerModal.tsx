@@ -6,6 +6,7 @@ import * as Animatable from "react-native-animatable";
 import { ScoreRound } from "@/app/models/interfaces";
 import { useGameContext } from "@/app/providers/GameContext";
 import { useI18n } from "../../i18n";
+import { TEST_IDS } from "@/app/utils/testIds";
 
 // Get screen dimensions
 const { width, height } = Dimensions.get("window");
@@ -58,8 +59,8 @@ const WinnerModal: React.FC<WinnerModalProps> = ({ visible, winner, onAnimationE
   if (!winner || !visible) return null;
 
   return (
-    <View style={tw`absolute top-0 left-0 right-0 bottom-0 z-100`}>
-      <TouchableOpacity activeOpacity={1} style={tw`flex-1`} onPress={animationComplete ? onAnimationEnd : undefined}>
+    <View testID={TEST_IDS.winnerModal} style={tw`absolute top-0 left-0 right-0 bottom-0 z-100`}>
+      <TouchableOpacity accessible={false} activeOpacity={1} style={tw`flex-1`} onPress={animationComplete ? onAnimationEnd : undefined}>
         {/* Main container with black semi-transparent background */}
         <View style={tw`flex-1 bg-black bg-opacity-95`}>
           {/* Confetti covering the entire screen */}
@@ -109,6 +110,7 @@ const WinnerModal: React.FC<WinnerModalProps> = ({ visible, winner, onAnimationE
             {/* "Tap anywhere" text positioned absolutely at the bottom of the screen */}
             {animationComplete && (
               <Animatable.View
+                testID={TEST_IDS.winnerContinue}
                 animation="fadeIn"
                 style={tw`absolute bottom-20 w-full items-center`} // Moved higher to avoid emoji bar
               >

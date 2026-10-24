@@ -1,12 +1,20 @@
 # Device creates the room (bots then join with --code). Writes nothing; read the code from the screenshot/logs.
+# Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
 appId: com.socketNull.ExposeMe
 ---
 - runFlow: open-app.yaml
-- tapOn: "Enter username"
+# Clear a previously saved name before typing
+- tapOn:
+    id: "username-clear-button"
+    optional: true
+- tapOn:
+    id: "username-input"
 - inputText: ${USERNAME}
 - hideKeyboard
-- tapOn: "Create Game"
+- tapOn:
+    id: "create-game-button"
 - extendedWaitUntil:
-    visible: "Start Game"
+    visible:
+      id: "start-game-button"
     timeout: 30000
 - takeScreenshot: host-lobby-${USERNAME}

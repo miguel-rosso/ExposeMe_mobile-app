@@ -1,15 +1,26 @@
 # Join room ${GAME_CODE} as ${USERNAME} and wait in the lobby.
+# Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
 appId: com.socketNull.ExposeMe
 ---
-- tapOn: "Enter username"
+# Clear a previously saved name before typing
+- tapOn:
+    id: "username-clear-button"
+    optional: true
+- tapOn:
+    id: "username-input"
 - inputText: ${USERNAME}
 - hideKeyboard
-- tapOn: "Join Game"
-- tapOn: "Enter game code"
+- tapOn:
+    id: "join-game-button"
+- tapOn:
+    id: "game-code-input"
 - inputText: ${GAME_CODE}
 - hideKeyboard
-- tapOn: "Search Room"
+- tapOn:
+    id: "search-room-button"
+# Lobby (guest or host) or already in the game
 - extendedWaitUntil:
-    visible: "Waiting host|Start Game|ARE YOU READY\\?|bot1"
+    visible:
+      id: "lobby-waiting|start-game-button|game-waiting-ready|player-option-.*"
     timeout: 30000
 - takeScreenshot: lobby-${USERNAME}

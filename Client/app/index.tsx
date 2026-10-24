@@ -31,6 +31,7 @@ import { usePhotoContext } from "@/app/providers/PhotoContext";
 import { Ionicons } from "@expo/vector-icons";
 import { useI18n } from "./i18n";
 import LanguageToggle from "./components/LanguageToggle";
+import { TEST_IDS } from "./utils/testIds";
 
 SplashScreen.preventAutoHideAsync();
 // Animaciones personalizadas para React Native Animatable
@@ -385,6 +386,8 @@ const Index = () => {
                 style={tw`w-full flex items-center justify-center mb-4 relative`}
               >
                 <TextInput
+                  testID={TEST_IDS.usernameInput}
+                  accessibilityLabel={t.enterUsername}
                   style={tw`h-15 rounded-2xl  w-full bg-white font-bold text-center text-lg`}
                   placeholder={t.enterUsername}
                   placeholderTextColor="#3333"
@@ -395,6 +398,7 @@ const Index = () => {
                 {username && username.length > 0 && (
                   <View style={tw`absolute flex items-center justify-center h-full absolute right-4`}>
                     <TouchableOpacity
+                      testID={TEST_IDS.usernameClearButton}
                       style={tw` justify-center  bg-gray-200 h-8 w-8 rounded-full flex items-center justify-center`}
                       onPress={() => {
                         handleUsernameChange("");
@@ -420,7 +424,7 @@ const Index = () => {
                   end={{ x: 1, y: 0 }}
                   style={tw`p-4 rounded-2xl mb-4 w-full`}
                 >
-                  <TouchableOpacity style={tw`w-full`} onPress={handleCreateGame}>
+                  <TouchableOpacity testID={TEST_IDS.createGameButton} style={tw`w-full`} onPress={handleCreateGame}>
                     <Text style={tw`text-white text-center text-lg font-bold`}>{t.createGame}</Text>
                   </TouchableOpacity>
                 </LinearGradient>
@@ -439,7 +443,7 @@ const Index = () => {
                   end={{ x: 1, y: 0 }}
                   style={tw`p-4 rounded-2xl mb-4 w-full`}
                 >
-                  <TouchableOpacity onPress={handleJoinGame}>
+                  <TouchableOpacity testID={TEST_IDS.joinGameButton} onPress={handleJoinGame}>
                     <Text style={tw`text-white text-center text-lg font-bold`}>{t.joinGame}</Text>
                   </TouchableOpacity>
                 </LinearGradient>
@@ -449,7 +453,7 @@ const Index = () => {
 
           {/* Mostrar el formulario de ingreso de código de juego si se está uniendo a un juego */}
           {isJoiningGame && (
-            <TouchableWithoutFeedback onPress={handleCancelJoinGame}>
+            <TouchableWithoutFeedback accessible={false} onPress={handleCancelJoinGame}>
               <View style={tw`flex-1 w-full justify-center items-center`}>
                 {/* Input para ingresar el código del juego */}
                 <Animatable.View
@@ -460,6 +464,8 @@ const Index = () => {
                 >
                   <TextInput
                     ref={gameCodeInputRef}
+                    testID={TEST_IDS.gameCodeInput}
+                    accessibilityLabel={t.enterGameCode}
                     style={tw`p-4 rounded-xl  w-full bg-white text-center text-lg font-bold`}
                     placeholder={t.enterGameCode}
                     placeholderTextColor="#3333"
@@ -491,7 +497,7 @@ const Index = () => {
                     end={{ x: 1, y: 0 }}
                     style={tw`p-4 rounded-2xl mb-4 w-full`}
                   >
-                    <TouchableOpacity style={tw` w-full `} onPress={handleSearchRoom}>
+                    <TouchableOpacity testID={TEST_IDS.searchRoomButton} style={tw` w-full `} onPress={handleSearchRoom}>
                       <Text style={tw`text-white text-center text-lg font-bold`}>{t.searchRoom}</Text>
                     </TouchableOpacity>
                   </LinearGradient>
@@ -502,7 +508,7 @@ const Index = () => {
         </View>
         {/* Botón para navegar a la pantalla de fotos propias */}
         <Animatable.View ref={buttonRef} animation="slideInUp" duration={600} style={tw`absolute bottom-22 items-center`}>
-          <TouchableOpacity style={tw`bg-white/50 p-3  rounded-3xl`} onPress={() => NavigateOwnPhotos("/screens/OwnPhotos")}>
+          <TouchableOpacity testID={TEST_IDS.ownPhotosButton} style={tw`bg-white/50 p-3  rounded-3xl`} onPress={() => NavigateOwnPhotos("/screens/OwnPhotos")}>
             <Ionicons name="dice" size={44} color="white" />
           </TouchableOpacity>
         </Animatable.View>

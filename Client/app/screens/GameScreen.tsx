@@ -9,6 +9,7 @@ import { useRouter } from "expo-router";
 import getEnvVars from "@/config";
 import PhotoComponent from "@/app/components/PhotoComponent";
 import ScoreModal from "@/app/components/modals/ScoreModal";
+import { TEST_IDS, playerOptionId } from "@/app/utils/testIds";
 import ProgressBar from "@/app/components/ProgressBar";
 import FinalScoreModal from "@/app/components/modals/FinalScoreModal";
 import WinnerModal from "@/app/components/modals/WinnerModal";
@@ -267,6 +268,7 @@ const GameScreen = () => {
 
     return (
       <TouchableOpacity
+        testID={playerOptionId(item.username)}
         style={tw`p-3 rounded-lg mb-2 mx-1 flex-grow flex-basis-[48%] ${bg}`}
         onPress={() => !isRevealOrScores && setMySelection(item.username)}
         disabled={isRevealOrScores}
@@ -341,6 +343,7 @@ const GameScreen = () => {
             {holdButtonMounted && (
               <View style={tw`absolute bottom-24 left-0 right-0 z-60 items-center ${pressing ? "opacity-0" : ""}`}>
                 <TouchableOpacity
+                  testID={TEST_IDS.holdButton}
                   style={tw`bg-blue-600 p-4 rounded-xl w-[90%] max-w-[500px] border-2 border-blue-400 shadow-lg items-center`}
                   onPressIn={onHoldPress}
                   onPressOut={onHoldRelease}
@@ -354,7 +357,7 @@ const GameScreen = () => {
             <EmojisButton />
           </>
         ) : (
-          <View style={tw`flex-1 justify-center items-center`}>
+          <View testID={TEST_IDS.gameWaitingReady} style={tw`flex-1 justify-center items-center`}>
             <Text style={tw`text-xl text-white font-bold mb-4`}>{t.areYouReady}</Text>
           </View>
         )}

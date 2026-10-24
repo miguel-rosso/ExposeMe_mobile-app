@@ -9,6 +9,7 @@ import * as Animatable from "react-native-animatable";
 import LottieView from "lottie-react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useI18n } from "../../i18n";
+import { TEST_IDS } from "@/app/utils/testIds";
 
 interface FinalScoreModalProps {
   visible: boolean;
@@ -146,7 +147,7 @@ const FinalScoreModal: React.FC<FinalScoreModalProps> = ({ visible, finalScore }
   if (!visible) return null;
 
   return (
-    <View style={tw`absolute inset-0 flex-1 justify-center items-center z-100`}>
+    <View testID={TEST_IDS.finalScoreModal} style={tw`absolute inset-0 flex-1 justify-center items-center z-100`}>
       {/* Confetti */}
       <View style={[tw`absolute inset-0`, { zIndex: 1 }]}>
         <LottieView
@@ -229,6 +230,7 @@ const FinalScoreModal: React.FC<FinalScoreModalProps> = ({ visible, finalScore }
         {/* Buttons */}
         <View style={tw`flex-row px-5 pb-6 pt-2`}>
           <TouchableOpacity
+            testID={TEST_IDS.finalExitButton}
             onPress={onClose}
             style={[
               tw`flex-1 py-3.5 rounded-2xl items-center justify-center mr-2`,
@@ -244,6 +246,7 @@ const FinalScoreModal: React.FC<FinalScoreModalProps> = ({ visible, finalScore }
           </TouchableOpacity>
 
           <TouchableOpacity
+            testID={TEST_IDS.playAgainButton}
             onPress={playAgain}
             style={[
               tw`flex-1 py-3.5 rounded-2xl items-center justify-center ml-2`,

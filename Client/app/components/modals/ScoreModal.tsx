@@ -4,6 +4,7 @@ import tw from "twrnc";
 import { ScoreRound } from "../../models/interfaces";
 import Icon from "react-native-vector-icons/FontAwesome";
 import { useI18n } from "../../i18n";
+import { TEST_IDS } from "@/app/utils/testIds";
 
 interface ScoreModalProps {
   visible: boolean;
@@ -26,6 +27,7 @@ const ScoreModal: React.FC<ScoreModalProps> = ({
 
   return (
     <View
+      testID={TEST_IDS.scoreModal}
       style={tw`absolute inset-0 justify-center items-center bg-black bg-opacity-50 pt-20 pb-16 z-50`}
     >
       <Text style={tw`text-xl text-white absolute top-10 font-bold mb-4`}>

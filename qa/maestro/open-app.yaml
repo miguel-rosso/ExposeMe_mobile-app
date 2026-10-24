@@ -1,5 +1,6 @@
 # Cold-start the dev client pointed at local Metro and get past first-run screens.
-# Text selectors are a stopgap until the app exposes testIDs (backlog: EXP-008).
+# App screens are matched by testID (Client/app/utils/testIds.ts). Only the Expo dev-client UI
+# (always English) and the first wait below, which must OR dev-menu text with app content, use text.
 appId: com.socketNull.ExposeMe
 ---
 - launchApp:
@@ -17,7 +18,7 @@ appId: com.socketNull.ExposeMe
     commands:
       - tapOn: "http://.*:8081"
 - extendedWaitUntil:
-    visible: "This is the developer menu.*|Join Game|Create Game|Tap to proceed after setting permissions"
+    visible: "This is the developer menu.*|Join Game|Unirse a Partida|Tap to proceed after setting permissions|Pulsa para continuar tras configurar los permisos"
     timeout: 120000
 # Expo dev-menu onboarding sheet (first launch after clearState)
 - runFlow:
@@ -42,19 +43,24 @@ appId: com.socketNull.ExposeMe
             - swipe:
                 direction: DOWN
 - extendedWaitUntil:
-    visible: "Join Game|Create Game|Tap to proceed after setting permissions"
+    visible:
+      id: "join-game-button|initial-screen"
     timeout: 60000
 # App first-run permissions explainer (InitialScreen)
 - runFlow:
     when:
-      visible: "Tap to proceed after setting permissions"
+      visible:
+        id: "initial-screen"
     commands:
       - scrollUntilVisible:
-          element: "Continue"
-      - tapOn: "Continue"
+          element:
+            id: "initial-continue-button"
+      - tapOn:
+          id: "initial-continue-button"
 - tapOn:
     text: "Allow Full Access|Allow all|Allow"
     optional: true
 - extendedWaitUntil:
-    visible: "Join Game"
+    visible:
+      id: "join-game-button"
     timeout: 30000

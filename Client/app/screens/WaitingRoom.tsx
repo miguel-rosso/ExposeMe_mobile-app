@@ -33,6 +33,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import SuccessAlert from "@/app/components/SuccessAlert";
 import { LinearGradient } from "expo-linear-gradient";
 import { useI18n } from "../i18n";
+import { TEST_IDS, lobbyPlayerId, roundsOptionId } from "../utils/testIds";
 
 // Define chat message interface
 interface ChatMessageType {
@@ -355,6 +356,7 @@ const WaitingRoom = ({}) => {
     const isMe = item.username === username;
     return (
       <TouchableOpacity
+        testID={lobbyPlayerId(item.username)}
         onPress={() => {
           if (players[0].username === username && !isMe) confirmRemovePlayer(item);
         }}
@@ -460,10 +462,11 @@ const WaitingRoom = ({}) => {
               </Text>
 
               <View style={tw`flex-row items-center mb-1`}>
-                <TouchableOpacity onPress={copyGameCodeToClipboard} style={tw`p-2`}>
+                <TouchableOpacity testID={TEST_IDS.copyCodeButton} onPress={copyGameCodeToClipboard} style={tw`p-2`}>
                   <Ionicons name="copy-outline" size={24} color="rgba(255,255,255,0.7)" />
                 </TouchableOpacity>
                 <Text
+                  testID={TEST_IDS.lobbyGameCode}
                   style={[
                     tw`text-5xl text-white font-extrabold mx-1`,
                     { lineHeight: 60, textShadowColor: "rgba(0, 0, 0, 0.5)", textShadowOffset: { width: 2, height: 2 }, textShadowRadius: 5 },
@@ -471,7 +474,7 @@ const WaitingRoom = ({}) => {
                 >
                   {gameCode}
                 </Text>
-                <TouchableOpacity onPress={shareGameCode} style={tw`p-2`}>
+                <TouchableOpacity testID={TEST_IDS.shareCodeButton} onPress={shareGameCode} style={tw`p-2`}>
                   <Ionicons name="share-social-outline" size={24} color="rgba(255,255,255,0.7)" />
                 </TouchableOpacity>
               </View>
@@ -485,7 +488,7 @@ const WaitingRoom = ({}) => {
                 {roundsOfGame} {t.rounds}
               </Text>
 
-              <TouchableOpacity onPress={pickAndPlantImage} style={tw`mb-2 items-center`} disabled={isSelecting}>
+              <TouchableOpacity testID={TEST_IDS.plantPhotoButton} onPress={pickAndPlantImage} style={tw`mb-2 items-center`} disabled={isSelecting}>
                 <View
                   style={tw`h-14 w-14 rounded-full ${hasPlantedPhoto ? "bg-green-600" : "bg-black/40"} flex justify-center items-center`}
                 >
@@ -520,6 +523,7 @@ const WaitingRoom = ({}) => {
                     {roundOptions.map((rounds) => (
                       <TouchableOpacity
                         key={rounds}
+                        testID={roundsOptionId(rounds)}
                         onPress={() => handleSetRounds(rounds)}
                         style={[
                           tw`flex-1 py-2 rounded-full items-center`,
@@ -537,6 +541,7 @@ const WaitingRoom = ({}) => {
 
                   {/* Start button */}
                   <TouchableOpacity
+                    testID={TEST_IDS.startGameButton}
                     onPress={handleStartGame}
                     activeOpacity={0.8}
                     style={[
@@ -549,7 +554,7 @@ const WaitingRoom = ({}) => {
                 </>
               ) : (
                 <View style={tw`p-2 w-full flex flex-col justify-center items-center`}>
-                  <View style={tw`flex flex-row justify-center opacity-70 items-center mb-4`}>
+                  <View testID={TEST_IDS.lobbyWaiting} style={tw`flex flex-row justify-center opacity-70 items-center mb-4`}>
                     <Text style={tw`text-white`}>{players.length < 2 ? t.waitingForPlayers : t.waitingHost}</Text>
                     <View style={tw`flex-row`}>
                       <AnimatedDot delay={0} />
@@ -583,6 +588,7 @@ const WaitingRoom = ({}) => {
           <Animated.View style={[tw`w-full mb-5`, { paddingBottom: keyboardPadding }]}>
             <View style={tw`px-2 py-2 flex-row items-center max-w-[500px] w-full self-center`}>
               <TextInput
+                testID={TEST_IDS.chatInput}
                 value={chatMessage}
                 onChangeText={setChatMessage}
                 placeholder={t.typeMessage}
@@ -591,6 +597,7 @@ const WaitingRoom = ({}) => {
                 maxLength={100}
               />
               <TouchableOpacity
+                testID={TEST_IDS.chatSendButton}
                 onPress={sendChatMessage}
                 disabled={!chatMessage.trim()}
                 style={tw`rounded-full w-10 h-10 ${!chatMessage.trim() ? "bg-gray-600" : "bg-[#ff8605]"} items-center justify-center`}

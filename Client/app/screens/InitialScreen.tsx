@@ -12,6 +12,7 @@ import CustomCarousel from "@/app/components/CustomCarousel/CustomCarousel";
 import LottieView from "lottie-react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useI18n } from "../i18n";
+import { TEST_IDS } from "../utils/testIds";
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get("window");
 
@@ -38,7 +39,7 @@ const InitialScreen: React.FC = () => {
   const imageHeight = screenHeight * 0.3;
 
   return (
-    <SafeAreaView style={tw`flex-1 bg-gray-900`}>
+    <SafeAreaView testID={TEST_IDS.initialScreen} style={tw`flex-1 bg-gray-900`}>
       <StatusBar barStyle="light-content" backgroundColor="#111827" />
       <ScrollView contentContainerStyle={tw`flex-grow`} showsVerticalScrollIndicator={false}>
         <View style={tw`flex-1 px-4 pt-4 pb-6 max-w-[500px] w-full self-center`}>
@@ -104,6 +105,7 @@ const InitialScreen: React.FC = () => {
           {/* Continue button and animation */}
           <View style={tw`items-center mt-6`}>
             <TouchableOpacity
+              testID={TEST_IDS.initialContinueButton}
               style={tw`bg-blue-600 w-56 py-3 px-5 rounded-full shadow-lg flex-row justify-center items-center border border-blue-500`}
               onPress={handleContinuePress}
               activeOpacity={0.7}

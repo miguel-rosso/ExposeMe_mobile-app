@@ -21,6 +21,7 @@ Read `CLAUDE.md` once per session. The device lab is documented in `.claude/skil
 ## One iteration
 
 ### 0. Preflight (you, fast)
+- Once per session: `ArtifactComments` `watch` on the dashboard URL (below) so the user's comments on cards reach you, then `read` its open threads and act on any comment sent to Claude that has no answer yet.
 - `git status` clean except `qa/runs/` (if dirty with your own unfinished work from a crashed iteration: inspect, then finish or `git restore` it).
 - `qa/lab/lab.sh status`; start `server` and `metro` if stopped (devices are brought up by the device tester when needed).
 - Read `qa/backlog.json`. Iteration number N = number of `changes` rows + 1.

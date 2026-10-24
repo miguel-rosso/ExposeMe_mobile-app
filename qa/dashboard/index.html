@@ -312,7 +312,8 @@ dash.calc("by_type", {
       card.appendChild(el("span", "tag", `${p.kind} · ${p.id}${p.status === "resuelta" ? " · resuelta" : ""}`));
       card.appendChild(el("h3", null, p.title));
       card.appendChild(el("p", null, p.context));
-      const opts = p.options || [];
+      // Nested arrays arrive as JSON text from the file source: use the newline-joined export field
+      const opts = String(p.options_text || "").split("\n").map((o) => o.trim()).filter(Boolean);
       if (opts.length) {
         const ul = el("ul");
         opts.forEach((o) => {
@@ -487,7 +488,10 @@ dash.calc("by_type", {
 
   let linked = false;
   dash.onData(() => {
-    drawKpis(); drawNow(); drawPending(); drawTypes(); drawSkew(); drawIssues(); drawTables();
+    // One failing section must not blank the rest of the page
+    [drawKpis, drawNow, drawPending, drawTypes, drawSkew, drawIssues, drawTables].forEach((f) => {
+      try { f(); } catch (e) { console.error(`${f.name} failed`, e); }
+    });
     if (!linked && dash.data("pending").status === "ok") {
       linked = true;
       const named = document.getElementById(location.hash.slice(1));

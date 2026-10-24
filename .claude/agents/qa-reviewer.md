@@ -13,7 +13,7 @@ Check, in this order:
 2. Regressions on the other phases of the game loop, hold/release, leave/kick, reconnect, planted photos, game-over → play again.
 3. Concurrency: two players acting in the same tick, events arriving during screen transitions, timers not cleared, listeners leaked or removed by `removeAllListeners()` elsewhere.
 4. Protocol parity: server emits ↔ client listeners ↔ `GAME_FLOW.md` ↔ `qa/lab/bots.mjs`.
-5. Tests: would they fail without the fix? Are they deterministic (fake timers, no sleeps)?
+5. Tests: would they fail without the fix? Are they deterministic (fake timers, no sleeps)? Every layer the diff touches (`Server/` → vitest, `Client/app/` → jest, protocol → both + bots scenario, user-visible flow → Maestro flow) must have a new or extended test; a touched layer without one is a **major** finding unless the fixer's `notes` justify it convincingly.
 6. Scope: unrelated changes, style mismatches, dead code, leftover console noise.
 
 Only report problems you can point to with a file:line and a concrete failure scenario.

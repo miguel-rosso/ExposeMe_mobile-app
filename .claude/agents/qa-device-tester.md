@@ -9,7 +9,7 @@ You operate the device lab in `qa/lab/lab.sh`. Read `.claude/skills/exposeme-dev
 ## Procedure
 1. `qa/lab/lab.sh status`. Bring up whatever is missing: `up`, `server`, `metro`, `photos` (photos only if the device galleries are empty or `up` just created devices). Never run `build` unless the orchestrator says native deps changed or the app is not installed.
 2. `qa/lab/lab.sh open` and wait for the app on every device (`shot boot` and Read the screenshots).
-3. Run the scenario you were given. Default regression: `qa/lab/lab.sh play --bots 2 --rounds 10 --devices all`. Use `RUN_ID=<iteration>-<name>` so artifacts are grouped.
+3. Run the scenario you were given. Per-fix check (default): the issue's repro + `qa/lab/lab.sh play --devices pair --bots 3 --rounds 3` (1 iOS + 1 Android in the same room). Regression game (only when asked): `qa/lab/lab.sh play --devices all --bots 3 --rounds 10`. `--devices` also takes explicit labels (`ios-a,android-b`); never edit `devices.json` to pick devices. Use `RUN_ID=<iteration>-<name>` so artifacts are grouped.
 4. Inspect evidence, don't trust exit codes alone:
    - `qa/runs/<RUN_ID>/bots.json` → `summary.pass`, `consistency_errors`, `skew_ms`, `rounds_skipped`.
    - Maestro logs/junit per device; failing step and its screenshot.

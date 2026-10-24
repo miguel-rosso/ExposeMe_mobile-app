@@ -30,7 +30,8 @@ qa/lab/lab.sh photos 12    # 12 labelled photos per device gallery + bot photos
 ```bash
 qa/lab/lab.sh up && qa/lab/lab.sh server && qa/lab/lab.sh metro
 qa/lab/lab.sh open                                   # app on all devices → local Metro
-RUN_ID=it3-EXP-006 qa/lab/lab.sh play --bots 2 --rounds 10 --devices all
+RUN_ID=it3-EXP-006 qa/lab/lab.sh play --devices pair --bots 3 --rounds 3   # per-fix check: 1 iOS + 1 Android
+RUN_ID=it9-regression qa/lab/lab.sh play --devices all --bots 3 --rounds 10 # regression: all 4 devices
 qa/lab/lab.sh shot after-fix                         # screenshot every device
 qa/lab/lab.sh down                                   # when finished
 ```
@@ -61,5 +62,6 @@ Summary fields: `pass`, `skew_ms` (spread between players receiving the same pha
 - App shows "Could not connect to development server": `lab.sh metro --restart`, then `lab.sh open`; on Android re-run `adb reverse` (`lab.sh up` does it).
 - Gallery empty in app: re-run `lab.sh photos`; on Android check `adb shell ls /sdcard/Pictures/ExposeMeQA` and the media scan.
 - Permission screen loops: iOS `simctl privacy … grant photos`, Android `pm grant … READ_MEDIA_IMAGES` (done by `up`/`install`).
-- Maestro can't find a text: the UI language follows the device locale (en by default); prefer testIDs once EXP-008 lands.
+- Maestro can't find an element: flows select by testID (`Client/app/utils/testIds.ts`, `id:` selectors); check the id in `maestro studio`.
+- iOS simulators run headless (no Simulator.app window in Xcode 27 unless the Simulator component is installed); use `lab.sh shot` to see them.
 - Machine is slow: `up --ios 1 --android 1` and use more bots.

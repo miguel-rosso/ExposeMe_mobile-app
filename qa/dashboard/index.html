@@ -45,6 +45,18 @@
 #dash-root .qa-ask code { font-family: var(--qa-mono); font-size: 0.9rem; background: color-mix(in srgb, var(--color-fg) 8%, transparent); padding: 0.1rem 0.35rem; border-radius: 6px; word-break: break-all; }
 #dash-root .qa-ask .how { font-size: 0.9rem; color: var(--color-fg-muted); border-top: 1px dashed color-mix(in srgb, var(--color-fg) 20%, transparent); padding-top: 0.6rem; }
 #dash-root .qa-ask .answer { font-weight: 600; color: var(--qa-green); }
+#dash-root .qa-form { display: flex; flex-direction: column; gap: 0.5rem; border-top: 1px dashed color-mix(in srgb, var(--color-fg) 20%, transparent); padding-top: 0.6rem; }
+#dash-root .qa-form label.opt { display: flex; gap: 0.5rem; align-items: flex-start; cursor: pointer; padding: 0.35rem 0.5rem; border-radius: 8px; }
+#dash-root .qa-form label.opt:hover { background: color-mix(in srgb, var(--color-fg) 6%, transparent); }
+#dash-root .qa-form label.opt input { margin-top: 0.3rem; flex: none; }
+#dash-root .qa-form label.rec { font-weight: 700; }
+#dash-root .qa-form textarea { font: inherit; font-size: 0.95rem; min-height: 2.6rem; resize: vertical; padding: 0.45rem 0.6rem; border-radius: 8px; border: 1px solid var(--color-border-line); background: var(--color-panel); color: var(--color-fg); width: 100%; box-sizing: border-box; }
+#dash-root .qa-form .row { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; }
+#dash-root .qa-form button.send { font: inherit; font-weight: 700; padding: 0.45rem 1.1rem; border-radius: 999px; border: 0; background: var(--qa-blue); color: #fff; cursor: pointer; }
+#dash-root .qa-form button.send:disabled { opacity: 0.5; cursor: default; }
+#dash-root .qa-form button.send:focus-visible { outline: 2px solid var(--qa-blue); outline-offset: 2px; }
+#dash-root .qa-form .status { font-size: 0.9rem; color: var(--color-fg-muted); }
+#dash-root .qa-form .status.sent { color: var(--qa-green); font-weight: 600; }
 
 #dash-root .qa-archive { margin-top: 1rem; }
 #dash-root .qa-archive summary { cursor: pointer; font-weight: 700; color: var(--color-fg-muted); padding: 0.4rem 0; }
@@ -403,6 +415,66 @@ dash.calc("by_type", {
     });
   }
 
+  // ── Answers sent from the cards (db collection "answers", one doc per card id; Claude reads them) ──
+  let answersDb = null;
+  let answers = {};
+  const drafts = {};
+  (async () => {
+    const db = await window.claude?.use?.("db");
+    if (!db) return;
+    answersDb = db;
+    db.collection("answers").onSnapshot(
+      (snap) => { answers = {}; snap.docs.forEach((d) => { answers[d.id] = d.data() || {}; }); safeDrawPending(); },
+      () => { answersDb = null; safeDrawPending(); },
+    );
+  })();
+  const safeDrawPending = () => { try { drawPending(); } catch (e) { console.error("drawPending failed", e); } };
+
+  function answerForm(p, opts) {
+    const form = el("form", "qa-form");
+    const sent = answers[p.id];
+    const draft = drafts[p.id] || (drafts[p.id] = { choice: sent?.choice ?? null, note: sent?.note ?? "" });
+    const isAction = p.kind !== "decisión";
+    const choices = isAction ? ["Hecho"] : opts;
+    choices.forEach((o) => {
+      const lab = el("label", `opt${!isAction && p.recommendation && o.startsWith(p.recommendation + " ") ? " rec" : ""}`);
+      const r = el("input");
+      r.type = "radio"; r.name = `ans-${p.id}`; r.value = o; r.checked = draft.choice === o;
+      r.addEventListener("change", () => { draft.choice = o; btn.disabled = false; });
+      lab.appendChild(r);
+      lab.appendChild(el("span", null, o));
+      form.appendChild(lab);
+    });
+    const note = el("textarea");
+    note.placeholder = isAction ? "Comentario (opcional)" : "Comentario u otra opción (opcional)";
+    note.setAttribute("aria-label", `Comentario para ${p.id}`);
+    note.value = draft.note;
+    note.addEventListener("input", () => { draft.note = note.value; btn.disabled = !draft.choice && !note.value.trim(); });
+    form.appendChild(note);
+    const row = el("div", "row");
+    const btn = el("button", "send", sent ? "Cambiar respuesta" : "Enviar respuesta");
+    btn.type = "submit";
+    btn.disabled = !draft.choice && !draft.note.trim();
+    const status = el("span", `status${sent ? " sent" : ""}`, sent ? `Enviada ${hhmm(sent.at)}: Claude la recoge en su siguiente paso.` : "");
+    status.setAttribute("aria-live", "polite");
+    row.appendChild(btn);
+    row.appendChild(status);
+    form.appendChild(row);
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      btn.disabled = true;
+      status.className = "status";
+      status.textContent = "Enviando…";
+      try {
+        await answersDb.collection("answers").doc(p.id).set({ id: p.id, choice: draft.choice, note: draft.note.trim(), at: new Date().toISOString(), read: false });
+      } catch (err) {
+        status.textContent = err?.code === "not_granted" || err?.code === "permission_denied" ? "No tienes permiso para responder aquí; usa un comentario." : "No se pudo enviar. Prueba otra vez.";
+        btn.disabled = false;
+      }
+    });
+    return form;
+  }
+
   function drawPending() {
     const box = document.getElementById("pending-list");
     const r = dash.data("pending");
@@ -424,7 +496,8 @@ dash.calc("by_type", {
       card.appendChild(el("p", null, p.context));
       // Nested arrays arrive as JSON text from the file source: use the newline-joined export field
       const opts = String(p.options_text || "").split("\n").map((o) => o.trim()).filter(Boolean);
-      if (opts.length) {
+      // Open decisions list their options inside the answer form instead
+      if (opts.length && (p.answer || !answersDb || p.kind === "acción")) {
         const ul = el("ul");
         opts.forEach((o) => {
           const li = el("li", p.recommendation && o.startsWith(p.recommendation + " ") ? "rec" : null);
@@ -436,6 +509,7 @@ dash.calc("by_type", {
         card.appendChild(ul);
       }
       if (p.answer) card.appendChild(el("p", "answer", `Respuesta: ${p.answer}`));
+      else if (answersDb) card.appendChild(answerForm(p, opts));
       else card.appendChild(el("p", "how", p.kind === "decisión" ? "Responde con un comentario en esta tarjeta indicando la opción." : "Cuando esté hecho, avísame con un comentario en esta tarjeta."));
       target.appendChild(card);
     });

@@ -22,6 +22,7 @@ Read `CLAUDE.md` once per session. The device lab is documented in `.claude/skil
 
 ### 0. Preflight (you, fast)
 - Once per session: `ArtifactComments` `watch` on the dashboard URL (below) so the user's comments on cards reach you, then `read` its open threads and act on any comment sent to Claude that has no answer yet.
+- **At the start of every step** (not only once per session): `ArtifactData` `list` collection `answers` on the dashboard and `ArtifactComments` `read`. Comments and answers do NOT wake this session (the watch is not armed for auto-replies), so polling them is the only way to see the user's replies promptly.
 - `git status` clean except `qa/runs/` (if dirty with your own unfinished work from a crashed iteration: inspect, then finish or `git restore` it).
 - `git worktree list`: worktrees left over from a crashed iteration (under `.claude/worktrees/` or elsewhere, branch not merged) — inspect their diff, then either resume that issue from it or remove them (`git worktree remove --force`, `git branch -D`). Never leave more than 3 alive; each one costs disk.
 - `qa/lab/lab.sh status`; start `server` and `metro` if stopped (devices are brought up by the device tester when needed).
@@ -57,7 +58,7 @@ For each approved issue, in priority order:
 2. In the main checkout (`git status` must be clean apart from ignored files): `git merge --squash <branch> && git commit -m "<same message>"` — one commit per issue on `qa/loop`. On a textual conflict: `git merge --abort` (or `git reset --merge`), keep that issue `in-progress`, and re-run it alone in the next iteration on top of the new `qa/loop`.
 3. Re-run on the merged result: `cd Server && npx vitest run && npx tsc --noEmit`, `cd Client && npx tsc --noEmit` (baseline errors only) `&& npx jest --ci`, `qa/lab/lab.sh server --restart` + a bots smoke run. A failure here is a semantic conflict: `git revert --no-edit HEAD`, keep the issue `in-progress` and re-run it alone next iteration.
 4. Remove the worktree and branch: `git worktree remove --force <path> && git branch -D <branch>`.
-After all merges, `qa-device-tester` (serial, shared lab — Metro serves the main checkout, so it tests the integrated code) once for the whole batch if any issue needs a device check: scenario = each issue's repro + the default regression game, `RUN_ID=it<N>`. A failing device run → identify the culprit issue from the evidence, `git revert` its commit and send it back to rework.
+After all merges, `qa-device-tester` (serial, shared lab — Metro serves the main checkout, so it tests the integrated code) once for the whole batch if any issue needs a device check: scenario = each issue's repro + one short game on 2 devices (`qa/lab/lab.sh play --devices pair --bots 3 --rounds 3`: first iOS + first Android), `RUN_ID=it<N>`. Server-only batches (no client change) skip devices: bots only. Full 10-round games are only for the regression game (step 7). A failing device run → identify the culprit issue from the evidence, `git revert` its commit and send it back to rework.
 
 ### 5. Commit and record
 - Commits happen in step 4b (one per issue, on `qa/loop`).
@@ -66,7 +67,7 @@ After all merges, `qa-device-tester` (serial, shared lab — Metro serves the ma
 
 ### 5b. The user follows progress in the dashboard, not the chat
 - **Activity**: every time a subagent starts or finishes, prepend a row to `activity` in `qa/backlog.json` (`{id: ACT-NNN, at: ISO, iteration, agent, task (Spanish), issue, state: "en curso"|"aprobado"|"terminado"|"bloqueado"}`); keep at most one "en curso" per running agent and close it when it finishes. Publish the dashboard at least at the start and end of each step, not only at the end of the iteration.
-- **Questions for the user go to the dashboard**, never only to the chat: add a `pending` row (`{id: DEC-NNN|ACC-NNN, kind: "decisión"|"acción", status: "pendiente"|"en curso"|"resuelta", issue, title, context, options[], recommendation, answer}`), then continue with other work. The user answers with a comment on that card sent to Claude; when it arrives, record `answer`, set `status: "resuelta"`, reply in the thread and resolve it. Resolved cards are never deleted: the page moves every `status: "resuelta"` card to the collapsed "Archivadas" list automatically, so just set the status and the `answer` (for decisions you take yourself, prefix the answer with "Decidido por Claude:"). `options` is an array in `backlog.json`; the export also writes `options_text` (newline-joined), which is what the page reads.
+- **Questions for the user go to the dashboard**, never only to the chat: add a `pending` row (`{id: DEC-NNN|ACC-NNN, kind: "decisión"|"acción", status: "pendiente"|"en curso"|"resuelta", issue, title, context, options[], recommendation, answer}`), then continue with other work. The user answers with the card's form (db doc `answers/<card id>` = `{id, choice, note, at, read}`; `choice` is the option text or "Hecho", `note` free text) or with a comment sent to Claude. For each `answers` doc with `read: false`: record `answer` (choice + note), set `status: "resuelta"`, act on it, then `update` the doc with `read: true` (pinned `if_version`). For a comment: same, then reply in the thread and resolve it. Resolved cards are never deleted: the page moves every `status: "resuelta"` card to the collapsed "Archivadas" list automatically, so just set the status and the `answer` (for decisions you take yourself, prefix the answer with "Decidido por Claude:"). `options` is an array in `backlog.json`; the export also writes `options_text` (newline-joined), which is what the page reads.
 - Chat messages stay short (2-4 lines) and point to the dashboard.
 
 ### 5c. Game status ("Estado del juego")
@@ -86,7 +87,7 @@ Never change the dashboard page unless the user asks or a new field needs showin
 Old JSON assets can be deleted once no dataset points at them (`Artifact` `delete` with `url` + `path` = asset id).
 
 ### 7. Regression game (every 3rd iteration, and before stopping)
-`qa-device-tester` with a full game: all lab devices + 3 bots, 10 rounds, plus one bots-only chaos run. Log both as `runs` rows; anything new becomes an issue.
+`qa-device-tester` with a full game: all lab devices (2 iOS + 2 Android, `--devices all`) + 3 bots, 10 rounds, plus one bots-only chaos run. Log both as `runs` rows; anything new becomes an issue.
 
 ### 8. Report
 End the iteration with 3-5 lines to the user (in Spanish): what was fixed, evidence (tests, run result, skew), what is next, any `blocked` question.

@@ -182,6 +182,13 @@
 #dash-root .qa-g.g-sev-low[aria-pressed="true"] { background: #6b7280; border-color: #6b7280; }
 #dash-root .qa-x[aria-pressed], #dash-root .qa-x { color: var(--color-fg); }
 #dash-root .qa-g:focus-visible { outline: 2px solid var(--qa-blue); outline-offset: 2px; }
+/* Sortable headers show their state: ↕ sortable, ↑/↓ current order */
+#dash-root .qa-tbl th button { display: inline-flex; align-items: center; gap: 0.35rem; }
+#dash-root .qa-tbl th button::after { content: "↕"; font-size: 0.85em; color: var(--color-fg-muted); opacity: 0.6; }
+#dash-root .qa-tbl th[aria-sort="ascending"] button::after { content: "↑"; color: var(--qa-blue); opacity: 1; }
+#dash-root .qa-tbl th[aria-sort="descending"] button::after { content: "↓"; color: var(--qa-blue); opacity: 1; }
+#dash-root .qa-tbl th button:hover { color: var(--qa-blue); }
+#dash-root .qa-tbl th button:focus-visible { outline: 2px solid var(--qa-blue); outline-offset: 2px; border-radius: 4px; }
 </style>
 
 <div class="qa">

@@ -6,6 +6,8 @@ tools: Read, Grep, Glob, Bash
 
 You review a change you did not write. You get the issue it claims to fix; read `git diff` and `git status` yourself and the full files around each hunk. Read `CLAUDE.md` and `Server/GAME_FLOW.md`.
 
+If the orchestrator gives you a worktree path, review and test THAT checkout: `git -C <path> diff`, `git -C <path> status`, and run tests from `<path>/Server` / `<path>/Client`. Do not modify it.
+
 Check, in this order:
 1. Does it actually fix the issue's root cause (not just the symptom)? Re-run the added tests: `cd Server && npx vitest run` / `cd Client && npx jest --ci`.
 2. Regressions on the other phases of the game loop, hold/release, leave/kick, reconnect, planted photos, game-over → play again.

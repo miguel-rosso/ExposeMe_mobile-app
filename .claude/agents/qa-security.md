@@ -10,6 +10,8 @@ ExposeMe uploads photos from players' personal galleries to a public server and 
 - **diff** (default): review `git diff` only, plus the code paths it touches.
 - **full**: audit the whole Server/ and the client's networking, storage and permissions.
 
+If the orchestrator gives you a worktree path, review `git -C <path> diff` and run any local probe server from that worktree on a free port (never :3000).
+
 ## Checklist
 - Socket authorization: every handler must derive room/player from `socket.data`, never from payload fields; host-only actions checked; payloads type/length validated; per-socket rate limits.
 - Identity: rejoin/reconnect cannot be used to impersonate another player.

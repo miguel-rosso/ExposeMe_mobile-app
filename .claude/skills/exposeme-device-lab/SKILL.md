@@ -39,6 +39,9 @@ qa/lab/lab.sh down                                   # when finished
 ## Why the photos are labelled
 `make-photos.swift` stamps `IOS-A · #3`, `ANDROID-B · #7`, `BOT · #2` on each picture. In a screenshot you can see whose gallery the photo came from and check it against the revealed owner — a direct test of the "who's photo" logic and of cross-device sync.
 
+## Parallel fixers (git worktrees)
+Each worktree runs its own server for bots: `qa/lab/worktree-setup.sh <worktree>` once, then from the worktree root `qa/lab/lab.sh server --port 3101` … `--stop --port 3101`. The devices, Metro (:8081) and the main server (:3000) belong to the main checkout and are used only after changes are merged into `qa/loop`.
+
 ## Bots alone (fast, no devices)
 ```bash
 node qa/lab/bots.mjs --bots 4 --host --rounds 10 --photos qa/runs/photos/bots --out qa/runs/x/bots.json

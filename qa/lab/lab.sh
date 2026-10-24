@@ -8,7 +8,7 @@
 #   up [--ios N] [--android N]  Boot devices (default 2+2), grant perms, adb reverse, write devices.json
 #   down                        Shut down all lab devices and background processes
 #   status                      Show devices, server, metro
-#   server [--restart]          Start local Server on :3000 (log: qa/runs/server.log)
+#   server [--restart] [--port N] [--stop]  Local Server on :3000 (log: qa/runs/server.log); --port for a worktree's own server
 #   metro  [--restart]          Start Metro with EXPO_PUBLIC_SERVER_URL=http://localhost:3000
 #   photos [N]                  Generate N labelled photos per device and push to its gallery (default 12)
 #   build [ios|android|all]     Build dev-client binaries (slow, only when native deps change)
@@ -157,10 +157,17 @@ bg_stop() { # name, port
 }
 
 cmd_server() {
-  [ "${1:-}" = --restart ] && bg_stop server $SERVER_PORT
-  bg_start server "$RUNS/server.log" "$ROOT/Server" env PORT=$SERVER_PORT npx ts-node server.ts
-  for _ in $(seq 1 30); do curl -fs "http://localhost:$SERVER_PORT/health" >/dev/null && { log "server healthy"; return 0; }; sleep 1; done
-  die "server did not become healthy — see $RUNS/server.log"
+  # --port N runs a separate server (e.g. from a git worktree, for parallel fixers); --stop stops it
+  local port=$SERVER_PORT restart=0 stop=0
+  while [ $# -gt 0 ]; do case $1 in
+    --restart) restart=1; shift;; --stop) stop=1; shift;; --port) port=$2; shift 2;; *) die "bad arg $1";; esac; done
+  local name=server logf="$RUNS/server.log"
+  [ "$port" != "$SERVER_PORT" ] && { name="server-$port"; logf="$RUNS/server-$port.log"; }
+  if [ $stop = 1 ]; then bg_stop "$name" "$port"; log "$name stopped"; return 0; fi
+  [ $restart = 1 ] && bg_stop "$name" "$port"
+  bg_start "$name" "$logf" "$ROOT/Server" env PORT="$port" npx ts-node server.ts
+  for _ in $(seq 1 30); do curl -fs "http://localhost:$port/health" >/dev/null && { log "$name healthy on :$port"; return 0; }; sleep 1; done
+  die "$name did not become healthy — see $logf"
 }
 
 cmd_metro() {

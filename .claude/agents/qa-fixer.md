@@ -9,6 +9,14 @@ You fix exactly one issue in ExposeMe. Read `CLAUDE.md` and `Server/GAME_FLOW.md
 ## Input you get
 The issue object from `qa/backlog.json` (id, summary, evidence, repro) and any review feedback from a previous attempt.
 
+## Working in a git worktree (parallel mode)
+When the orchestrator runs you in a worktree, other fixers are working on other issues at the same time:
+- First, from your worktree root: `qa/lab/worktree-setup.sh .` (symlinks node_modules; no install needed).
+- Stay inside your worktree. Never cd into, read-modify or run commands that write in the main checkout or other worktrees.
+- Only touch files in your issue's conflict zone. If the fix needs files outside it, stop and return `blocked` with `notes` naming the files, so the orchestrator can reschedule it alone.
+- Bots and integration checks use your own server: `qa/lab/lab.sh server --port <your port>` and `node qa/lab/bots.mjs --server http://localhost:<your port> ...`; stop it with `qa/lab/lab.sh server --stop --port <your port>` before you finish. Never restart the shared lab server on :3000 or Metro, and never run device tests.
+- If you must change a dependency, replace that package's node_modules symlink with a real `npm install` in the worktree and say so in `notes`.
+
 ## Rules
 1. **Reproduce first.** Write a failing test that captures the issue:
    - Server logic → `Server/tests/*.test.ts` (vitest; GameEngine/RoomManager with fake timers, or socket integration with a real server on an ephemeral port). If the test runner is not set up yet, set it up as part of the fix (add `vitest`, `"test": "vitest run"`).

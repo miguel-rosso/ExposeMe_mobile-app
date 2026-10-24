@@ -1,31 +1,32 @@
 # ExposeMe
 
-Multiplayer party game: each round shows a random photo from one player's gallery and everyone else guesses whose it is. Store-ready (Android `com.socketNull.ExposeMe`, iOS same bundle id).
+Juego multijugador de fiesta: en cada ronda se muestra una foto aleatoria de la galería de un jugador y el resto adivina de quién es. Publicado en Google Play (Android `com.socketNull.ExposeMe`, iOS con el mismo bundle id), pero **aún sin usuarios reales**: se puede cambiar cualquier cosa (protocolo, comportamiento) sin mantener compatibilidad con versiones anteriores.
 
-## Layout
-- `Client/` — Expo SDK 52, React Native 0.76 (new arch), expo-router v4, twrnc styling, socket.io-client. Screens in `app/screens/`, global state in `app/providers/` (GameContext = socket + room, PhotoContext = gallery access), i18n en/es in `app/i18n/`. Native folders `ios/` and `android/` are generated locally by prebuild and are NOT tracked (ignored in `Client/.gitignore`).
-- `Server/` — Express + socket.io, run with ts-node. `managers/GameEngine.ts` owns all game timing (server is the single source of truth, see `Server/GAME_FLOW.md`), `managers/RoomManager.ts` rooms/players in memory, `routes/socketRoutes.ts` event handlers, `/upload` stores photos in `Server/temp` for 30 min.
-- `qa/` — QA lab: `lab/lab.sh` (devices, server, Metro, games), `lab/bots.mjs` (headless players + sync metrics), `maestro/` (device flows), `backlog.json` (local-only issue tracker, source of truth for the dashboard), `runs/` (git-ignored artifacts).
+## Estructura
+- `Client/` — Expo SDK 52, React Native 0.76 (nueva arquitectura), expo-router v4, estilos con twrnc, socket.io-client. Pantallas en `app/screens/`, estado global en `app/providers/` (GameContext = socket + sala, PhotoContext = acceso a la galería), i18n en/es en `app/i18n/`. Las carpetas nativas `ios/` y `android/` las genera prebuild en local y NO se versionan (ignoradas en `Client/.gitignore`).
+- `Server/` — Express + socket.io, se ejecuta con ts-node. `managers/GameEngine.ts` controla todos los tiempos de la partida (el servidor es la única fuente de verdad, ver `Server/GAME_FLOW.md`), `managers/RoomManager.ts` gestiona salas y jugadores en memoria, `routes/socketRoutes.ts` los eventos de socket, `/upload` guarda las fotos en `Server/temp` durante 30 min.
+- `qa/` — Laboratorio de QA: `lab/lab.sh` (dispositivos, servidor, Metro, partidas), `lab/bots.mjs` (jugadores sin interfaz + métricas de sincronización), `maestro/` (flujos en dispositivos), `backlog.json` (gestor de incidencias solo local, fuente de datos del dashboard), `runs/` (artefactos ignorados por git).
 
 ## Repositorio público (IMPORTANTE)
-This repo is PUBLIC on GitHub (RivotX/ExposeMe_mobile-app). Before every commit, check `git diff --cached --stat` and never commit:
-- Secrets or credentials: `.env*`, keystores/certs (`*.jks`, `*.p12`, `*.p8`, `*.pem`, `*.keystore`), `google-services.json`, `GoogleService-Info.plist`, EAS/Expo/Render/Apple tokens, API keys. Use env vars; document them in an `.env.example` with placeholder values.
-- Personal data: real photos, gallery content, `Server/temp/`, screenshots, device logs, IPs, UDIDs. All QA artifacts live in `qa/runs/` (ignored).
-- Vulnerability details: `qa/backlog.json`, `qa/dashboard/*.json`, security-agent reports and exploit snippets stay local (ignored) until the fix ships, and even then never commit exploit code. Security fix commit messages describe the hardening neutrally (e.g. "[FIX] Validate socket payloads against session"), not how to exploit the old code.
-- Production config changes (server URL, bundle ids, store/EAS config) without the user's approval.
-If something sensitive is ever committed, stop and tell the user (rotation + history rewrite is their call); never force-push on your own.
+Este repo es PÚBLICO en GitHub (RivotX/ExposeMe_mobile-app). Antes de cada commit revisa `git diff --cached --stat` y nunca subas:
+- Secretos o credenciales: `.env*`, keystores/certificados (`*.jks`, `*.p12`, `*.p8`, `*.pem`, `*.keystore`), `google-services.json`, `GoogleService-Info.plist`, tokens de EAS/Expo/Render/Apple, API keys. Usa variables de entorno y documéntalas en un `.env.example` con valores de ejemplo.
+- Datos personales: fotos reales, contenido de galerías, `Server/temp/`, capturas de pantalla, logs de dispositivos, IPs, UDIDs. Todos los artefactos de QA van en `qa/runs/` (ignorado).
+- Detalles de vulnerabilidades: `qa/backlog.json`, `qa/dashboard/*.json`, los informes del agente de seguridad y cualquier prueba de concepto se quedan en local (ignorados) hasta que el arreglo esté publicado, y aun así nunca se sube código de explotación. Los mensajes de commit de arreglos de seguridad describen el endurecimiento de forma neutra (p. ej. "[FIX] Validate socket payloads against session"), no cómo explotar el código anterior.
+- Cambios de configuración de producción (URL del servidor, bundle ids, configuración de tiendas/EAS) sin aprobación del usuario.
+Si alguna vez se sube algo sensible, para y avisa al usuario (rotar credenciales y reescribir el historial es decisión suya); nunca hagas force-push por tu cuenta.
 
-## Commands
-- Server: `cd Server && npm run dev` (port 3000). Type check: `npx tsc --noEmit`.
-- Client: `cd Client && EXPO_PUBLIC_SERVER_URL=http://localhost:3000 npx expo start --dev-client`. Type check: `npx tsc --noEmit`. Tests: `npx jest --ci`.
-- Lab: `qa/lab/lab.sh` (see `.claude/skills/exposeme-device-lab/SKILL.md`).
-- `Client/config.ts` falls back to the production server (Render) when `EXPO_PUBLIC_SERVER_URL` is unset. Never point QA traffic at production.
+## Comandos
+- Servidor: `cd Server && npm run dev` (puerto 3000). Tipos: `npx tsc --noEmit`. Tests: `npx vitest run`.
+- Cliente: `cd Client && EXPO_PUBLIC_SERVER_URL=http://localhost:3000 npx expo start --dev-client`. Tipos: `npx tsc --noEmit`. Tests: `npx jest --ci`.
+- Laboratorio: `qa/lab/lab.sh` (ver `.claude/skills/exposeme-device-lab/SKILL.md`).
+- `Client/config.ts` usa el servidor de producción (Render) si `EXPO_PUBLIC_SERVER_URL` no está definida. Nunca dirijas tráfico de QA a producción.
 
-## Conventions
-- Commit messages: `[FIX] …`, `[FEAT] …`, `[TEST] …`, `[CHORE] …`. Never add `Co-Authored-By: Claude` or any AI attribution.
-- Code style: functional components + hooks, twrnc `tw\`…\`` classes, comments in English, short section banners (`// ── Name ──`) in long files.
-- Any socket protocol change updates server, client, `Server/GAME_FLOW.md` and `qa/lab/bots.mjs` together.
-- Client must never run its own game timers; it renders server phases with the `duration` it receives.
+## Convenciones
+- Idioma: todo lo que lee el usuario (respuestas, dashboard, textos del backlog) en español. El código, los comentarios del código y los mensajes de commit, en inglés.
+- Mensajes de commit: `[FIX] …`, `[FEAT] …`, `[TEST] …`, `[CHORE] …`. Nunca añadas `Co-Authored-By: Claude` ni ninguna atribución a IA.
+- Estilo de código: componentes funcionales + hooks, clases twrnc `tw\`…\``, separadores de sección cortos (`// ── Nombre ──`) en ficheros largos.
+- Cualquier cambio en el protocolo de sockets actualiza a la vez servidor, cliente, `Server/GAME_FLOW.md` y `qa/lab/bots.mjs`.
+- El cliente nunca lleva sus propios temporizadores de partida: pinta las fases del servidor con la `duration` que recibe.
 
-## QA loop
-The autonomous fix/polish workflow is the `exposeme-qa-loop` skill (`/exposeme-qa-loop`, or `/loop /exposeme-qa-loop`). Subagents: `qa-auditor`, `qa-fixer`, `qa-reviewer`, `qa-security`, `qa-device-tester` in `.claude/agents/`. Work happens on branch `qa/loop`; progress is published to the QA dashboard artifact https://claude.ai/artifact/Tymg6zZ1y6Mdb1Z29eaTui.
+## Bucle de QA
+El flujo autónomo de arreglos y pulido es la skill `exposeme-qa-loop` (`/exposeme-qa-loop`, o `/loop /exposeme-qa-loop`). Subagentes: `qa-auditor`, `qa-fixer`, `qa-reviewer`, `qa-security` y `qa-device-tester`, en `.claude/agents/`. Se trabaja en la rama `qa/loop` y el progreso se publica en el dashboard de QA: https://claude.ai/artifact/Tymg6zZ1y6Mdb1Z29eaTui. Las preguntas al usuario van al dashboard como tarjetas, y él responde con comentarios.

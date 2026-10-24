@@ -66,24 +66,27 @@ function runRoom(roomIdx, fixedCode) {
       const name = `${prefix}bot${i + 1}`;
       const isHost = !!args.host && i === 0;
       const socket = io(SERVER, { transports: ["websocket"], reconnection: true });
-      const bot = { name, socket, isHost, players: [], guess: "", round: 0 };
+      const bot = { name, socket, isHost, players: [], guess: "", round: 0, token: null };
       bots.push(bot);
       const rec = (ev, round, payload) => events.push({ bot: name, ev, round, t: now(), payload });
 
-      const join = () => socket.emit("join-create-game", { gameCode: isHost && !code ? null : code, username: name });
+      // rejoinToken (from our own room-of-game) is required by the server to reconnect with the same username
+      const join = () => socket.emit("join-create-game", { gameCode: isHost && !code ? null : code, username: name, ...(bot.token ? { rejoinToken: bot.token } : {}) });
+      bot.join = join;
       socket.on("connect", () => {
         if (isHost || code) join();
       });
       socket.on("connect_error", (e) => errors.push(`${name} connect_error ${e.message}`));
       socket.on("room-of-game", (d) => {
         if (!d.success) { errors.push(`${name} join failed: ${d.message}`); return; }
+        if (d.rejoinToken) bot.token = d.rejoinToken;
         bot.players = d.room.players.map((p) => p.username);
         if (isHost && !code) {
           code = d.room.gameCode;
           if (args["code-file"]) fs.writeFileSync(args["code-file"], code);
           console.log(`[room ${roomIdx}] code ${code}`);
           if ([10, 15, 20].includes(ROUNDS)) socket.emit("set-rounds", { gameCode: code, rounds: ROUNDS });
-          bots.filter((b) => !b.isHost).forEach((b) => b.socket.connected && b.socket.emit("join-create-game", { gameCode: code, username: b.name }));
+          bots.filter((b) => !b.isHost).forEach((b) => b.socket.connected && b.join());
         }
         maybeStart();
       });

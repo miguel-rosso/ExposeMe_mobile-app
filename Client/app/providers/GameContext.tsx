@@ -1,10 +1,18 @@
 import React, { createContext, useState, useContext, useRef, useEffect } from "react";
 import { AppState } from "react-native";
 import { io, Socket } from "socket.io-client";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { GameContextProps, GameProviderProps, Player } from "@/app/models/interfaces";
 import getEnvVars from "@/config";
 
 const { SERVER_URL } = getEnvVars();
+const REJOIN_TOKEN_KEY = "rejoinToken";
+
+interface StoredRejoinToken {
+  gameCode: string;
+  username: string;
+  token: string;
+}
 
 const GameContext = createContext<GameContextProps | undefined>(undefined);
 
@@ -16,6 +24,34 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   const [roundsOfGame, setRoundsOfGame] = useState<number>(5);
   const [plantedPhotoUri, setPlantedPhotoUri] = useState<string | null>(null);
   const socketRef = useRef<Socket | null>(null);
+  const rejoinTokenRef = useRef<StoredRejoinToken | null>(null);
+
+  // ── Rejoin token (server requires it to reconnect with an existing username) ──
+
+  const saveRejoinToken = (code: string, name: string, token: string) => {
+    const entry = { gameCode: code, username: name, token };
+    rejoinTokenRef.current = entry;
+    AsyncStorage.setItem(REJOIN_TOKEN_KEY, JSON.stringify(entry)).catch(() => {});
+  };
+
+  const getRejoinToken = async (code: string, name: string): Promise<string | null> => {
+    let entry = rejoinTokenRef.current;
+    if (!entry) {
+      try {
+        const raw = await AsyncStorage.getItem(REJOIN_TOKEN_KEY);
+        entry = raw ? (JSON.parse(raw) as StoredRejoinToken) : null;
+        rejoinTokenRef.current = entry;
+      } catch {
+        entry = null;
+      }
+    }
+    return entry && entry.gameCode === code && entry.username === name ? entry.token : null;
+  };
+
+  const clearRejoinToken = () => {
+    rejoinTokenRef.current = null;
+    AsyncStorage.removeItem(REJOIN_TOKEN_KEY).catch(() => {});
+  };
 
   const startSocket = () => {
     // If we already have a connected socket, reuse it
@@ -106,6 +142,9 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
         plantedPhotoUri,
         setPlantedPhotoUri,
         uploadPlantedPhoto,
+        saveRejoinToken,
+        getRejoinToken,
+        clearRejoinToken,
       }}
     >
       {children}

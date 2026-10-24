@@ -10,7 +10,12 @@ export interface Player {
   lastGuess: string;
   hasPlantedPhoto?: boolean;
   plantedPhoto?: string;
+  /** Secret returned only to this player's socket; required to rejoin with this username. Never broadcast. */
+  rejoinToken: string;
 }
+
+/** Player as sent to other clients (no rejoin token, no planted photo URL). */
+export type PublicPlayer = Omit<Player, "rejoinToken" | "plantedPhoto">;
 
 export interface ScoreRound {
   username: string;
@@ -55,11 +60,20 @@ export interface Room {
 export interface JoinCreateGameData {
   gameCode: string | null;
   username: string;
+  /** Token from a previous room-of-game; required to rejoin with an existing username */
+  rejoinToken?: string;
 }
+
+export type SafeRoom = Omit<Room, "_timer" | "_timerCallback" | "_timerStartedAt" | "_timerDuration" | "_holdSafetyTimer" | "plantedSlots" | "_consecutiveSkips" | "players" | "currentPlayer"> & {
+  players: PublicPlayer[];
+  currentPlayer: PublicPlayer | null;
+};
 
 export interface RoomOfGameResponse {
   success: boolean;
-  room?: Omit<Room, "_timer" | "_timerCallback" | "_timerStartedAt" | "_timerDuration" | "_holdSafetyTimer" | "plantedSlots" | "_consecutiveSkips">;
+  room?: SafeRoom;
   message?: string;
   rounds?: number;
+  /** Only in the response to the joining socket itself */
+  rejoinToken?: string;
 }

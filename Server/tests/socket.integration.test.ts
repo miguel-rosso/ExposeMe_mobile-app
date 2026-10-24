@@ -7,7 +7,7 @@ import "../routes/socketRoutes";
 // Real server on an ephemeral port + 3 real socket.io clients.
 // Production timings are kept; this only covers lobby → first round-start (~1s, GAME_START_DELAY).
 
-const PHOTO = "https://example.invalid/photo.jpg";
+const PHOTO = "/temp/1700000000000-photo.jpg"; // shape of a POST /upload result
 
 let url: string;
 const clients: ClientSocket[] = [];

@@ -22,7 +22,7 @@ export class GameEngine {
     room.plantedPhotosShown = 0;
     room._consecutiveSkips = 0;
     console.log(`[${room.gameCode}] Game started`);
-    this.io.to(room.gameCode).emit("game-started", room.players, room.rounds);
+    this.io.to(room.gameCode).emit("game-started", room.players.map((p) => this.roomManager.publicPlayer(p)), room.rounds);
   }
 
   onAllPlayersReady(room: Room): void {
@@ -34,6 +34,8 @@ export class GameEngine {
 
   onPhotoReceived(room: Room, photo: string, username: string): void {
     if (room.phase !== "waiting-photo") return;
+    // Only the player whose turn it is may provide the photo
+    if (room.currentPlayer?.username !== username) return;
 
     room.round++;
     room.phase = "answering";
@@ -198,6 +200,7 @@ export class GameEngine {
     this.roomManager.clearAllTimers(room);
     room.started = false;
     room.phase = null;
+    room.players.forEach((p) => { p.isReady = false; });
     this.io.to(room.gameCode).emit("game-over", { finalScore: this.buildScores(room) });
   }
 

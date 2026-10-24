@@ -57,6 +57,9 @@ const WaitingRoom = ({}) => {
     setRoundsOfGame,
     roundsOfGame,
     setPlantedPhotoUri,
+    saveRejoinToken,
+    getRejoinToken,
+    clearRejoinToken,
   } = useGameContext();
   const [players, setPlayers] = useState<Player[]>([]);
   const { backgroundImage } = useBackgroundContext();
@@ -228,11 +231,12 @@ const WaitingRoom = ({}) => {
   useEffect(() => {
     if (!socket || !username) return;
 
-    const doJoin = () => {
+    const doJoin = async () => {
       const code = gameCodeRef.current;
       console.log("Joining room:", code);
       setIsLoading(true);
-      socket.emit("join-create-game", { gameCode: code, username });
+      const rejoinToken = code ? await getRejoinToken(code, username) : null;
+      socket.emit("join-create-game", { gameCode: code, username, ...(rejoinToken ? { rejoinToken } : {}) });
     };
 
     // Remove all previous listeners to avoid duplicates
@@ -244,13 +248,15 @@ const WaitingRoom = ({}) => {
     });
 
     socket.on("room-of-game", (data: RoomOfGameResponse) => {
-      console.log("Room data:", data);
+      const { rejoinToken: _token, ...loggable } = data;
+      console.log("Room data:", loggable);
       setIsLoading(false);
       if (!data.success) {
         endSocket();
         navigation.replace({ pathname: "/", params: { message: data.message } });
       } else if (data.room) {
         joinedRef.current = true;
+        if (data.rejoinToken) saveRejoinToken(data.room.gameCode, username, data.rejoinToken);
         setPlayers(data.room.players);
         setGameCode(data.room.gameCode);
         setRoundsOfGame(data.room.rounds);
@@ -277,6 +283,7 @@ const WaitingRoom = ({}) => {
 
     socket.on("player-removed", (removed: Player) => {
       if (removed.username === username) {
+        clearRejoinToken();
         endSocket();
         navigation.replace("/");
       } else {
@@ -294,6 +301,7 @@ const WaitingRoom = ({}) => {
 
   const handleLeaveGame = () => {
     if (socket) socket.emit("leave-room");
+    clearRejoinToken();
     endSocket();
     navigation.replace("/");
   };

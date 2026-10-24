@@ -41,12 +41,14 @@ export interface RandomPhotoResponse {
 export interface JoinCreateGameData {
   gameCode: string | null;
   username: string;
+  rejoinToken?: string; // Required by the server to rejoin with an existing username
 }
 
 export interface RoomOfGameResponse {
   success: boolean;
   room?: Room;
   message?: string;
+  rejoinToken?: string; // Only sent to the joining player; keep it to rejoin after a reconnect
 }
 
 export interface GameContextProps {
@@ -64,6 +66,9 @@ export interface GameContextProps {
   plantedPhotoUri: string | null;
   setPlantedPhotoUri: (uri: string | null) => void;
   uploadPlantedPhoto: () => Promise<string | null>;
+  saveRejoinToken: (gameCode: string, username: string, token: string) => void;
+  getRejoinToken: (gameCode: string, username: string) => Promise<string | null>;
+  clearRejoinToken: () => void;
 }
 
 export interface GameProviderProps {

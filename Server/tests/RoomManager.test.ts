@@ -21,7 +21,7 @@ describe("createRoom", () => {
     expect(room.gameCode).toMatch(/^\d{6}$/);
     expect(room).toMatchObject({ rounds: 10, started: false, round: 0, phase: null, held: false, currentPlayer: null });
     expect(room.players).toEqual([
-      { username: "alice", socketId: "sock-alice", isHost: true, isReady: false, connected: true, points: 0, lastAnswerCorrect: false, lastGuess: "" },
+      { username: "alice", socketId: "sock-alice", isHost: true, isReady: false, connected: true, points: 0, lastAnswerCorrect: false, lastGuess: "", rejoinToken: expect.any(String) },
     ]);
     expect(rm.getRoom(room.gameCode)).toBe(room);
   });
@@ -51,14 +51,36 @@ describe("joinRoom", () => {
     expect(rm.joinRoom(room.gameCode, "bob", "sock-bob")).toEqual({ success: false, message: "Game already started" });
   });
 
-  it("lets an existing username rejoin (even mid-game) and updates its socket id", () => {
+  it("lets an existing username rejoin with its token (even mid-game) and updates its socket id", () => {
     const room = rm.createRoom("alice", "sock-alice");
     rm.joinRoom(room.gameCode, "bob", "sock-bob");
+    const token = rm.getPlayer(room.gameCode, "bob")!.rejoinToken;
     room.started = true;
-    const res = rm.joinRoom(room.gameCode, "bob", "sock-bob-2");
+    const res = rm.joinRoom(room.gameCode, "bob", "sock-bob-2", token);
     expect(res).toMatchObject({ success: true, rejoin: true });
     expect(room.players).toHaveLength(2);
     expect(rm.getPlayer(room.gameCode, "bob")!.socketId).toBe("sock-bob-2");
+  });
+
+  it("gives every player a distinct random token", () => {
+    const room = rm.createRoom("alice", "sock-alice");
+    rm.joinRoom(room.gameCode, "bob", "sock-bob");
+    const [a, b] = room.players.map((p) => p.rejoinToken);
+    expect(a).toMatch(/^[A-Za-z0-9_-]{22,}$/);
+    expect(b).toMatch(/^[A-Za-z0-9_-]{22,}$/);
+    expect(a).not.toBe(b);
+  });
+
+  it("rejects an existing username without the matching token and keeps its socket id", () => {
+    const room = rm.createRoom("alice", "sock-alice");
+    rm.joinRoom(room.gameCode, "bob", "sock-bob");
+    const aliceToken = room.players[0].rejoinToken;
+    for (const token of [undefined, "", "wrong", aliceToken]) {
+      expect(rm.joinRoom(room.gameCode, "bob", "sock-x", token)).toEqual({ success: false, message: "Username already taken" });
+    }
+    room.started = true;
+    expect(rm.joinRoom(room.gameCode, "bob", "sock-x")).toEqual({ success: false, message: "Game already started" });
+    expect(rm.getPlayer(room.gameCode, "bob")!.socketId).toBe("sock-bob");
   });
 });
 
@@ -149,8 +171,18 @@ describe("misc", () => {
     expect(room.currentPlayer.plantedPhoto).toBe("https://example.invalid/p.jpg");
   });
 
-  // Possible leak (follow-up): safeRoomData only strips plantedPhoto from currentPlayer, not from room.players.
-  it.todo("safeRoomData strips plantedPhoto from every player");
+  it("safeRoomData strips plantedPhoto and rejoinToken from every player", () => {
+    const room = rm.createRoom("alice", "sock-alice");
+    rm.joinRoom(room.gameCode, "bob", "sock-bob");
+    room.players[1].plantedPhoto = "https://example.invalid/p.jpg";
+    room.currentPlayer = room.players[1];
+    const safe = rm.safeRoomData(room);
+    for (const p of [...safe.players, safe.currentPlayer!]) {
+      expect(p).not.toHaveProperty("plantedPhoto");
+      expect(p).not.toHaveProperty("rejoinToken");
+    }
+    expect(room.players[1].rejoinToken).toBeTruthy();
+  });
 
   it("deleteRoom clears the room timers and removes it", () => {
     const room = rm.createRoom("alice", "sock-alice");
@@ -178,7 +210,7 @@ describe("connection state", () => {
   it("markDisconnected flags the player only when the socket is their current one", () => {
     const room = rm.createRoom("alice", "sock-alice");
     rm.joinRoom(room.gameCode, "bob", "sock-bob");
-    rm.joinRoom(room.gameCode, "bob", "sock-bob-2"); // rejoin with a new socket
+    rm.joinRoom(room.gameCode, "bob", "sock-bob-2", rm.getPlayer(room.gameCode, "bob")!.rejoinToken); // rejoin with a new socket
     // stale socket disconnecting must not mark bob offline
     expect(rm.markDisconnected(room.gameCode, "bob", "sock-bob")).toBeUndefined();
     expect(rm.getPlayer(room.gameCode, "bob")!.connected).toBe(true);
@@ -192,7 +224,7 @@ describe("connection state", () => {
     rm.joinRoom(room.gameCode, "bob", "sock-bob");
     rm.markDisconnected(room.gameCode, "bob", "sock-bob");
     room.started = true;
-    rm.joinRoom(room.gameCode, "bob", "sock-bob-2");
+    rm.joinRoom(room.gameCode, "bob", "sock-bob-2", rm.getPlayer(room.gameCode, "bob")!.rejoinToken);
     expect(rm.getPlayer(room.gameCode, "bob")!.connected).toBe(true);
   });
 

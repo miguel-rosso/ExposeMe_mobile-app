@@ -74,7 +74,12 @@ describe("start", () => {
     room = setupStartedRoom(15);
     const ev = lastEvent("game-started")!;
     expect(ev.target).toBe(room.gameCode);
-    expect(ev.args[0]).toBe(room.players);
+    const sent = ev.args[0] as Record<string, unknown>[];
+    expect(sent.map((p) => p.username)).toEqual(["alice", "bob", "carol"]);
+    for (const p of sent) {
+      expect(p).not.toHaveProperty("rejoinToken");
+      expect(p).not.toHaveProperty("plantedPhoto");
+    }
     expect(ev.args[1]).toBe(15);
     expect(room.started).toBe(true);
     expect(room.round).toBe(0);
@@ -132,6 +137,16 @@ describe("round phases", () => {
     expect(events("your-turn")).toHaveLength(2);
     expect(lastEvent("your-turn")!.args[0]).toEqual({ round: 2 });
     expect(room.phase).toBe("waiting-photo");
+  });
+
+  it("ignores a photo from anyone but the current owner", () => {
+    const owner = room.currentPlayer!.username;
+    const other = room.players.find((p) => p.username !== owner)!.username;
+    engine.onPhotoReceived(room, PHOTO, other);
+    expect(events("round-start")).toHaveLength(0);
+    expect(room.phase).toBe("waiting-photo");
+    engine.onPhotoReceived(room, PHOTO, owner);
+    expect(lastEvent("round-start")!.args[0]).toMatchObject({ owner });
   });
 
   it("ignores photo-sent outside waiting-photo", () => {
@@ -192,6 +207,7 @@ describe("game over", () => {
 
     expect(room.started).toBe(false);
     expect(room.phase).toBeNull();
+    expect(room.players.every((p) => !p.isReady)).toBe(true);
     expect(room.round).toBe(10);
     expect(vi.getTimerCount()).toBe(0);
   });

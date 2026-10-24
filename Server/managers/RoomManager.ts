@@ -1,4 +1,5 @@
-import { Player, Room } from "../models/interfaces";
+import { randomBytes, timingSafeEqual } from "crypto";
+import { Player, PublicPlayer, Room, SafeRoom } from "../models/interfaces";
 
 const ROOM_CLEANUP_DELAY = 30 * 60 * 1000;
 
@@ -30,14 +31,18 @@ export class RoomManager {
     return room;
   }
 
-  joinRoom(gameCode: string, username: string, socketId: string): { success: boolean; room?: Room; message?: string; rejoin?: boolean } {
+  joinRoom(gameCode: string, username: string, socketId: string, rejoinToken?: string): { success: boolean; room?: Room; message?: string; rejoin?: boolean } {
     const room = this.rooms.get(gameCode);
     if (!room) return { success: false, message: "Game not found" };
 
+    // Re-join: same username reconnecting (e.g. after app background) — only with that player's token
+    const existing = room.players.find((p) => p.username === username);
+    if (existing && !this.tokenMatches(existing.rejoinToken, rejoinToken)) {
+      return { success: false, message: room.started ? "Game already started" : "Username already taken" };
+    }
+
     this.cancelRoomDeletion(gameCode);
 
-    // Re-join: same username reconnecting (e.g. after app background)
-    const existing = room.players.find((p) => p.username === username);
     if (existing) {
       existing.socketId = socketId; // Update socket ID
       existing.connected = true;
@@ -99,12 +104,19 @@ export class RoomManager {
     return this.rooms.get(gameCode)?.players.find((p) => p.username === username);
   }
 
-  safeRoomData(room: Room): Omit<Room, "_timer" | "_timerCallback" | "_timerStartedAt" | "_timerDuration" | "_holdSafetyTimer" | "plantedSlots" | "_consecutiveSkips"> {
+  safeRoomData(room: Room): SafeRoom {
     const { _timer, _timerCallback, _timerStartedAt, _timerDuration, _holdSafetyTimer, plantedSlots, _consecutiveSkips, ...safe } = room;
     return {
       ...safe,
-      currentPlayer: safe.currentPlayer ? { ...safe.currentPlayer, plantedPhoto: undefined } : null,
+      players: safe.players.map((p) => this.publicPlayer(p)),
+      currentPlayer: safe.currentPlayer ? this.publicPlayer(safe.currentPlayer) : null,
     };
+  }
+
+  /** Player data that is safe to send to other clients (drops the rejoin token and planted photo URL). */
+  publicPlayer(player: Player): PublicPlayer {
+    const { rejoinToken, plantedPhoto, ...pub } = player;
+    return pub;
   }
 
   clearAllTimers(room: Room): void {
@@ -122,7 +134,14 @@ export class RoomManager {
   }
 
   private createPlayer(username: string, socketId: string, isHost: boolean): Player {
-    return { username, socketId, isHost, isReady: false, connected: true, points: 0, lastAnswerCorrect: false, lastGuess: "" };
+    return { username, socketId, isHost, isReady: false, connected: true, points: 0, lastAnswerCorrect: false, lastGuess: "", rejoinToken: randomBytes(18).toString("base64url") };
+  }
+
+  private tokenMatches(expected: string, given: unknown): boolean {
+    if (typeof given !== "string") return false;
+    const a = Buffer.from(expected);
+    const b = Buffer.from(given);
+    return a.length === b.length && timingSafeEqual(a, b);
   }
 
   private generateRoomCode(): string {

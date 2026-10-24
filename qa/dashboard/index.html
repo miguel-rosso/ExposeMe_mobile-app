@@ -159,6 +159,28 @@
 #dash-root .qa-kpi.c-yellow .val { color: #b88a00; }
 #dash-root .qa-colors { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.9rem; }
 #dash-root .qa-colors .pill { font-size: 0.8rem; }
+/* Filter chips carry their meaning's colour instead of a generic red */
+#dash-root #issues .qa-chip[data-filter="active"] { border-color: var(--qa-yellow); }
+#dash-root #issues .qa-chip[data-filter="done"] { border-color: var(--qa-green); }
+#dash-root #issues .qa-chip[data-filter="all"] { border-color: var(--qa-blue); }
+#dash-root #issues .qa-chip[data-filter="active"][aria-pressed="true"] { background: var(--qa-yellow); color: #2b2100; }
+#dash-root #issues .qa-chip[data-filter="done"][aria-pressed="true"] { background: var(--qa-green); color: #fff; }
+#dash-root #issues .qa-chip[data-filter="all"][aria-pressed="true"] { background: var(--qa-blue); color: #fff; }
+#dash-root #issue-extra { flex-basis: 100%; flex-direction: column; align-items: flex-start; gap: 0.5rem; }
+#dash-root .qa-group { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; }
+#dash-root .qa-group-lbl { font-weight: 700; font-size: 0.85rem; color: var(--color-fg-muted); min-width: 5.5rem; }
+#dash-root .qa-g { font-size: 0.85rem; padding: 0.25rem 0.75rem; }
+#dash-root .qa-g[aria-pressed="true"] { background: var(--qa-blue); border-color: var(--qa-blue); color: #fff; }
+#dash-root .qa-g.g-sev-critical { border-color: #b0102a; }
+#dash-root .qa-g.g-sev-high { border-color: var(--qa-red); }
+#dash-root .qa-g.g-sev-medium { border-color: var(--qa-amber); }
+#dash-root .qa-g.g-sev-low { border-color: #8b929c; }
+#dash-root .qa-g.g-sev-critical[aria-pressed="true"] { background: #b0102a; border-color: #b0102a; }
+#dash-root .qa-g.g-sev-high[aria-pressed="true"] { background: var(--qa-red); border-color: var(--qa-red); }
+#dash-root .qa-g.g-sev-medium[aria-pressed="true"] { background: var(--qa-amber); border-color: var(--qa-amber); color: #2b2100; }
+#dash-root .qa-g.g-sev-low[aria-pressed="true"] { background: #6b7280; border-color: #6b7280; }
+#dash-root .qa-x[aria-pressed], #dash-root .qa-x { color: var(--color-fg); }
+#dash-root .qa-g:focus-visible { outline: 2px solid var(--qa-blue); outline-offset: 2px; }
 </style>
 
 <div class="qa">
@@ -271,6 +293,7 @@
     <div class="qa-card" id="runs">
       <h2>Partidas y pruebas</h2>
       <p class="qa-hint">Bots, móviles y baterías de tests.</p>
+      <div class="qa-tools" id="runs-filter" data-source="runs"></div>
       <div class="qa-tbl">
         <table id="runs-table" data-source="runs" data-row-key="id">
           <thead><tr><th data-field="id">ID</th><th data-field="devices">Jugadores</th><th data-field="result_es">Resultado</th><th data-field="notes" class="hide-narrow">Notas</th></tr></thead>
@@ -329,7 +352,7 @@ dash.calc("by_type", {
 (() => {
   const sevColor = { critical: "#b0102a", high: "var(--qa-red)", medium: "var(--qa-amber)", low: "#9ca3af" };
   let issueFilter = "active";
-  let issueSev = null, issueType = null, featFilter = null;
+  let issueSev = null, issueType = null, issueArea = null, featFilter = null, runKind = null;
   let issueSort = { key: "severity_rank", dir: 1 };
 
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined && text !== null) e.textContent = text; return e; };
@@ -559,19 +582,42 @@ dash.calc("by_type", {
     if (r.status !== "ok") return;
     const q = (document.getElementById("issue-search").value || "").toLowerCase();
     let rows = r.data.filter((i) => issueFilter === "all" || (issueFilter === "active" ? ACTIVE.includes(i.status) : DONE.includes(i.status)));
-    if (issueSev) rows = rows.filter((i) => issueSev.includes(i.severity));
-    if (issueType) rows = rows.filter((i) => i.type_es === issueType);
+    // Chip groups are built from the status-filtered set so their counts stay meaningful
+    const base = rows;
     const extra = document.getElementById("issue-extra");
     extra.innerHTML = "";
-    const removable = (label, clear) => {
-      const b = el("button", "qa-chip qa-x", `${label} ✕`);
-      b.type = "button";
-      b.setAttribute("aria-label", `Quitar filtro ${label}`);
-      b.addEventListener("click", () => { clear(); drawIssues(); });
-      extra.appendChild(b);
+    const group = (label, values, isOn, toggle, clsFor) => {
+      if (!values.length) return;
+      const wrap = el("div", "qa-group");
+      wrap.appendChild(el("span", "qa-group-lbl", label));
+      values.forEach(([key, text, n]) => {
+        const b = el("button", `qa-chip qa-g ${clsFor ? clsFor(key) : ""}`, `${text} · ${n}`);
+        b.type = "button";
+        b.setAttribute("aria-pressed", String(isOn(key)));
+        b.addEventListener("click", () => { toggle(key); drawIssues(); });
+        wrap.appendChild(b);
+      });
+      extra.appendChild(wrap);
     };
-    if (issueSev) removable(issueSev.map((s) => SEV_ES[s]).join(" o "), () => { issueSev = null; });
-    if (issueType) removable(issueType, () => { issueType = null; });
+    const count = (f, v) => base.filter((i) => f(i) === v).length;
+    const uniq = (f) => [...new Set(base.map(f))].sort((a, b) => String(a).localeCompare(String(b)));
+    group("Severidad", SEVS.map((v) => [v, SEV_ES[v], count((i) => i.severity, v)]).filter((v) => v[2]),
+      (v) => !!issueSev && issueSev.includes(v),
+      (v) => { const cur = issueSev || []; const next = cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v]; issueSev = next.length ? next : null; },
+      (v) => `g-sev-${v}`);
+    group("Tipo", uniq((i) => i.type_es).map((v) => [v, v, count((i) => i.type_es, v)]),
+      (v) => issueType === v, (v) => { issueType = issueType === v ? null : v; });
+    group("Área", uniq((i) => i.area_es).map((v) => [v, v, count((i) => i.area_es, v)]),
+      (v) => issueArea === v, (v) => { issueArea = issueArea === v ? null : v; });
+    if (issueSev) rows = rows.filter((i) => issueSev.includes(i.severity));
+    if (issueType) rows = rows.filter((i) => i.type_es === issueType);
+    if (issueArea) rows = rows.filter((i) => i.area_es === issueArea);
+    if (issueSev || issueType || issueArea) {
+      const clear = el("button", "qa-chip qa-x", "Quitar filtros ✕");
+      clear.type = "button";
+      clear.addEventListener("click", () => { issueSev = issueType = issueArea = null; drawIssues(); });
+      extra.appendChild(clear);
+    }
     if (q) rows = rows.filter((i) => [i.id, i.title, i.summary, i.type_es, i.area_es, i.status_es, i.evidence].join(" ").toLowerCase().includes(q));
     const { key, dir } = issueSort;
     rows = [...rows].sort((a, b) => (typeof a[key] === "number" ? a[key] - b[key] : String(a[key]).localeCompare(String(b[key]))) * dir || a.id.localeCompare(b.id));
@@ -591,13 +637,14 @@ dash.calc("by_type", {
     table.querySelectorAll("th button").forEach((b) => b.closest("th").setAttribute("aria-sort", b.dataset.sort === key ? (dir === 1 ? "ascending" : "descending") : "none"));
   }
 
-  function drawRows(id, tableId, cols, newestFirst, cellFor) {
+  function drawRows(id, tableId, cols, newestFirst, cellFor, keep) {
     const body = document.querySelector(`#${tableId} tbody`);
     const r = dash.data(id);
     body.innerHTML = "";
     if (r.status === "error") { const tr = body.insertRow(); const c = tr.insertCell(); c.colSpan = cols; failLine(c); return; }
     if (r.status !== "ok") return;
-    const rows = newestFirst ? [...r.data].reverse() : r.data;
+    let rows = newestFirst ? [...r.data].reverse() : r.data;
+    if (keep) rows = rows.filter(keep);
     if (!rows.length) { const tr = body.insertRow(); const c = tr.insertCell(); c.colSpan = cols; c.className = "qa-empty"; c.textContent = "Nada todavía."; return; }
     rows.forEach((d) => { const tr = el("tr"); cellFor(tr, d); body.appendChild(tr); });
   }
@@ -612,7 +659,21 @@ dash.calc("by_type", {
     });
     drawRows("runs", "runs-table", 4, true, (tr, d) => {
       td(tr, d.id, "mono"); td(tr, d.devices); pill(tr, d.result_es, `res-${d.result}`); td(tr, d.notes, "hide-narrow wrap");
-    });
+    }, (d) => !runKind || d.kind === runKind);
+    const rf = document.getElementById("runs-filter");
+    const runs = dash.data("runs");
+    rf.innerHTML = "";
+    if (runs.status === "ok") {
+      const KIND_ES = { bots: "Bots", devices: "Móviles", unit: "Tests" };
+      [[null, "Todas", runs.data.length], ...[...new Set(runs.data.map((d) => d.kind))].map((k) => [k, KIND_ES[k] || k, runs.data.filter((d) => d.kind === k).length])]
+        .forEach(([k, text, n]) => {
+          const b = el("button", "qa-chip qa-g", `${text} · ${n}`);
+          b.type = "button";
+          b.setAttribute("aria-pressed", String(runKind === k));
+          b.addEventListener("click", () => { runKind = k; drawTables(); });
+          rf.appendChild(b);
+        });
+    }
   }
 
   document.getElementById("issue-search").addEventListener("input", drawIssues);
@@ -625,7 +686,7 @@ dash.calc("by_type", {
 
   // Shortcut used by KPI cards and chart: set filters, redraw and jump to the table
   function focusIssues({ filter = "active", sev = null, type = null }) {
-    issueFilter = filter; issueSev = sev; issueType = type;
+    issueFilter = filter; issueSev = sev; issueType = type; issueArea = null;
     statusChips().forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.filter === filter)));
     drawIssues();
     document.getElementById("issues").scrollIntoView({ behavior: "smooth", block: "start" });

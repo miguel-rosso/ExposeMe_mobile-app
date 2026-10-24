@@ -2,7 +2,7 @@ import { AddressInfo } from "net";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { io as connect, Socket as ClientSocket } from "socket.io-client";
 import { io, server } from "../app";
-import "../routes/socketRoutes";
+import { roomManager } from "../routes/socketRoutes";
 
 // Real server on an ephemeral port + 3 real socket.io clients.
 // Production timings are kept; this only covers lobby → first round-start (~1s, GAME_START_DELAY).
@@ -35,6 +35,7 @@ beforeAll(async () => {
 afterAll(async () => {
   clients.forEach((c) => c.disconnect());
   await new Promise<void>((resolve) => io.close(() => resolve()));
+  roomManager.clear(); // pending room deletions / game timers must not outlive the server
   vi.restoreAllMocks();
 });
 
@@ -78,7 +79,23 @@ describe("socket flow", () => {
     const payloads = await Promise.all(roundStarts);
     for (const p of payloads) expect(p).toEqual({ photo: PHOTO, owner, round: 1, duration: 8_000 });
 
-    // Clean up server-side timers: everybody leaves → room reset
+    // Everybody leaves → room reset (its deletion timer is cleared in afterAll)
     for (const c of [alice, bob, carol]) c.emit("leave-room");
+  });
+
+  it("teardown (roomManager.clear) leaves no rooms and no pending deletion timers", async () => {
+    const c = await newClient();
+    const created = once(c, "room-of-game");
+    c.emit("join-create-game", { gameCode: null, username: "dave" });
+    await created;
+    c.emit("leave-room"); // empty room → deletion scheduled
+    // Events of one socket are handled in order: this answer means leave-room was processed
+    const probe = once<{ success: boolean }>(c, "room-of-game");
+    c.emit("join-create-game", { gameCode: "000000", username: "dave" });
+    expect((await probe).success).toBe(false);
+    expect(roomManager.stats().pendingDeletions).toBeGreaterThan(0);
+
+    roomManager.clear();
+    expect(roomManager.stats()).toEqual({ rooms: 0, pendingDeletions: 0 });
   });
 });

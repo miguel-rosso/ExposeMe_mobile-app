@@ -45,6 +45,8 @@ export interface Room {
   phase: RoundPhase | null;
   /** Rounds skipped in a row (photo timeout); reset when a round is actually played */
   _consecutiveSkips: number;
+  /** A second player joined at some point (abandoned solo rooms are cleaned up sooner) */
+  _hadGuests: boolean;
 
   // Timer: only ONE active timer at a time
   _timer: NodeJS.Timeout | null;
@@ -64,7 +66,7 @@ export interface JoinCreateGameData {
   rejoinToken?: string;
 }
 
-export type SafeRoom = Omit<Room, "_timer" | "_timerCallback" | "_timerStartedAt" | "_timerDuration" | "_holdSafetyTimer" | "plantedSlots" | "_consecutiveSkips" | "players" | "currentPlayer"> & {
+export type SafeRoom = Omit<Room, "_timer" | "_timerCallback" | "_timerStartedAt" | "_timerDuration" | "_holdSafetyTimer" | "plantedSlots" | "_consecutiveSkips" | "_hadGuests" | "players" | "currentPlayer"> & {
   players: PublicPlayer[];
   currentPlayer: PublicPlayer | null;
 };

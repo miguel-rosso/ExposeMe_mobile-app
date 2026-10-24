@@ -2,7 +2,7 @@ import { AddressInfo } from "net";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { io as connect, Socket as ClientSocket } from "socket.io-client";
 import { io, server } from "../app";
-import "../routes/socketRoutes";
+import { roomManager } from "../routes/socketRoutes";
 
 // Session hardening: identity (room + username) comes from the server-side session set on join,
 // rejoining an existing username requires the rejoin token, and the token never leaves its owner.
@@ -78,6 +78,7 @@ beforeAll(async () => {
 afterAll(async () => {
   clients.forEach((c) => c.disconnect());
   await new Promise<void>((resolve) => io.close(() => resolve()));
+  roomManager.clear(); // pending room deletions / game timers must not outlive the server
   vi.restoreAllMocks();
 });
 

@@ -21,6 +21,8 @@ export class GameEngine {
     room.round = 0;
     room.plantedPhotosShown = 0;
     room._consecutiveSkips = 0;
+    // "Play again" reuses the room: drop scores and answers from the previous game
+    room.players.forEach((p) => { p.points = 0; p.lastGuess = ""; p.lastAnswerCorrect = false; });
     console.log(`[${room.gameCode}] Game started`);
     this.io.to(room.gameCode).emit("game-started", room.players.map((p) => this.roomManager.publicPlayer(p)), room.rounds);
   }
@@ -202,6 +204,8 @@ export class GameEngine {
     room.phase = null;
     room.players.forEach((p) => { p.isReady = false; });
     this.io.to(room.gameCode).emit("game-over", { finalScore: this.buildScores(room) });
+    // Unused planted photos belong to this game only (photos planted for the next one arrive after this)
+    room.players.forEach((p) => { p.hasPlantedPhoto = false; p.plantedPhoto = undefined; });
   }
 
   // ── Private: Timer (single timer per room) ───────────

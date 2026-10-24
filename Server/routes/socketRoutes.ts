@@ -6,8 +6,13 @@ import { JoinCreateGameData, Player, Room } from "../models/interfaces";
 
 const roomManager = new RoomManager();
 const gameEngine = new GameEngine(io, roomManager);
+/** Exported for test teardown (roomManager.clear()). */
+export { roomManager };
 
 const CHAT_COOLDOWN = 250;
+// join-create-game rate limit, per socket: at most JOIN_MAX_ATTEMPTS in any JOIN_WINDOW_MS
+const JOIN_MAX_ATTEMPTS = 5;
+const JOIN_WINDOW_MS = 10_000;
 const chatCooldowns = new Map<string, number>();
 const MAX_USERNAME_LENGTH = 20;
 const MAX_CHAT_LENGTH = 100;
@@ -34,13 +39,50 @@ function session(socket: Socket): { room: Room; player: Player } | null {
   return { room, player };
 }
 
+/**
+ * Drop a room binding of this socket, as an explicit leave. If `owned` (the socket still is that player's
+ * current socket) the player is removed, host handed over and the room notified; a socket replaced by a
+ * rejoin only detaches. Always leaves the socket.io room. Does not touch socket.data.
+ */
+function leaveBinding(socket: Socket, gameCode: string, username: string, owned: boolean): void {
+  const room = roomManager.getRoom(gameCode);
+  if (owned && room) {
+    if (room.held && room.currentPlayer?.socketId === socket.id) gameEngine.forceRelease(room);
+
+    console.log(`[${gameCode}] ${username} left voluntarily`);
+    const result = roomManager.removePlayer(gameCode, username);
+    if (result.removed) {
+      if (result.newHost) io.to(gameCode).emit("new-host", roomManager.publicPlayer(result.newHost));
+      if (!result.isEmpty) io.to(gameCode).emit("player-left", username);
+    }
+  }
+  socket.leave(gameCode);
+}
+
+function leaveCurrentRoom(socket: Socket): void {
+  const { gameCode, username } = socket.data;
+  if (!gameCode || !username) return;
+  leaveBinding(socket, gameCode, username, session(socket) !== null);
+  socket.data.gameCode = null;
+  socket.data.username = null;
+}
+
 io.on("connection", (socket: Socket) => {
   console.log(`Connected: ${socket.id}`);
+  const joinAttempts: number[] = []; // timestamps of recent join-create-game events on this socket
 
   // ── Lobby ──────────────────────────────────────────
 
   socket.on("join-create-game", (data: JoinCreateGameData) => {
     try {
+      const now = Date.now();
+      while (joinAttempts.length && now - joinAttempts[0] >= JOIN_WINDOW_MS) joinAttempts.shift();
+      if (joinAttempts.length >= JOIN_MAX_ATTEMPTS) {
+        socket.emit("room-of-game", { success: false, message: "Too many attempts" });
+        return;
+      }
+      joinAttempts.push(now);
+
       const username = data?.username;
       let gameCode = data?.gameCode;
       if (typeof username !== "string" || !username.trim() || username.length > MAX_USERNAME_LENGTH) {
@@ -52,11 +94,34 @@ io.on("connection", (socket: Socket) => {
         return;
       }
 
+      if (gameCode) gameCode = gameCode.toUpperCase();
+
+      // One socket = one player in one room. The same live socket re-sending join for the room and username
+      // it already owns (WaitingRoom effect re-run, duplicate join) is a no-op. Reconnects and "Play again"
+      // arrive on a new socket and go through the normal rejoin (token) path below.
+      const current = session(socket);
+      if (current && gameCode === current.room.gameCode && username === current.player.username) {
+        const { room, player } = current;
+        socket.emit("room-of-game", { success: true, room: roomManager.safeRoomData(room), rounds: room.rounds, rejoinToken: player.rejoinToken });
+        return;
+      }
+
+      // Any other join first tries the new binding; only on success is the previous one left
+      // (player removed, host handed over). A failed join keeps the socket where it was.
+      const prevCode: string | null = socket.data.gameCode ?? null;
+      const prevUsername: string | null = socket.data.username ?? null;
+      const leavePrevious = () => {
+        if (!prevCode || !prevUsername || (prevCode === gameCode && prevUsername === username)) return;
+        leaveBinding(socket, prevCode, prevUsername, current !== null);
+      };
+
       if (gameCode) {
-        gameCode = gameCode.toUpperCase();
-        const result = roomManager.joinRoom(gameCode, username, socket.id, data.rejoinToken);
+        // Same room under another username: the socket's own player frees its slot
+        const replacing = current && current.room.gameCode === gameCode ? current.player.username : undefined;
+        const result = roomManager.joinRoom(gameCode, username, socket.id, data.rejoinToken, replacing);
         if (result.success && result.room) {
           const player = roomManager.getPlayer(gameCode, username)!;
+          leavePrevious();
           socket.join(gameCode);
           socket.data.gameCode = gameCode;
           socket.data.username = username;
@@ -69,7 +134,12 @@ io.on("connection", (socket: Socket) => {
           socket.emit("room-of-game", { success: false, message: result.message });
         }
       } else {
+        if (roomManager.isAtCapacity()) {
+          socket.emit("room-of-game", { success: false, message: "Server is busy" });
+          return;
+        }
         const room = roomManager.createRoom(username, socket.id);
+        leavePrevious();
         socket.join(room.gameCode);
         socket.data.gameCode = room.gameCode;
         socket.data.username = username;
@@ -106,26 +176,8 @@ io.on("connection", (socket: Socket) => {
   // Explicit leave — player pressed the leave button
   socket.on("leave-room", () => {
     try {
-      const { gameCode, username } = socket.data;
-      if (!gameCode || !username) return;
-
       // A socket replaced by a rejoin only detaches itself; the live player stays
-      const s = session(socket);
-      if (s) {
-        const { room } = s;
-        if (room.held && room.currentPlayer?.socketId === socket.id) gameEngine.forceRelease(room);
-
-        console.log(`[${gameCode}] ${username} left voluntarily`);
-        const result = roomManager.removePlayer(gameCode, username);
-        if (result.removed) {
-          if (result.newHost) io.to(gameCode).emit("new-host", roomManager.publicPlayer(result.newHost));
-          if (!result.isEmpty) io.to(gameCode).emit("player-left", username);
-        }
-      }
-
-      socket.leave(gameCode);
-      socket.data.gameCode = null;
-      socket.data.username = null;
+      leaveCurrentRoom(socket);
     } catch (e) { console.error("leave-room error:", e); }
   });
 

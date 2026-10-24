@@ -113,6 +113,8 @@ describe("removePlayer", () => {
 
   it("resets an emptied room and deletes it after 30 minutes", () => {
     const room = rm.createRoom("alice", "sock-alice");
+    rm.joinRoom(room.gameCode, "bob", "sock-bob"); // had a second player → 30 min (solo rooms: see roomLifecycle)
+    rm.removePlayer(room.gameCode, "bob");
     room.started = true;
     room.round = 4;
     room.phase = "scores";
@@ -128,6 +130,8 @@ describe("removePlayer", () => {
 
   it("cancels scheduled deletion when someone joins the emptied room (and they become host)", () => {
     const room = rm.createRoom("alice", "sock-alice");
+    rm.joinRoom(room.gameCode, "carol", "sock-carol");
+    rm.removePlayer(room.gameCode, "carol");
     rm.removePlayer(room.gameCode, "alice");
     vi.advanceTimersByTime(ROOM_CLEANUP_DELAY / 2);
     const res = rm.joinRoom(room.gameCode, "bob", "sock-bob");

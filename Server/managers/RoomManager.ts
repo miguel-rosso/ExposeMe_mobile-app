@@ -2,6 +2,11 @@ import { randomBytes, timingSafeEqual } from "crypto";
 import { Player, PublicPlayer, Room, SafeRoom } from "../models/interfaces";
 
 const ROOM_CLEANUP_DELAY = 30 * 60 * 1000;
+/** Cleanup delay for rooms that never had a second player (created and abandoned). */
+const SOLO_ROOM_CLEANUP_DELAY = 2 * 60 * 1000;
+export const MAX_PLAYERS_PER_ROOM = 12;
+/** Global cap on rooms held in memory; creating beyond it is refused with "Server is busy". */
+export const MAX_ROOMS = 5000;
 
 export class RoomManager {
   private rooms = new Map<string, Room>();
@@ -20,6 +25,7 @@ export class RoomManager {
       plantedSlots: new Set(),
       phase: null,
       _consecutiveSkips: 0,
+      _hadGuests: false,
       _timer: null,
       _timerCallback: null,
       _timerStartedAt: 0,
@@ -31,7 +37,22 @@ export class RoomManager {
     return room;
   }
 
-  joinRoom(gameCode: string, username: string, socketId: string, rejoinToken?: string): { success: boolean; room?: Room; message?: string; rejoin?: boolean } {
+  /** True when no more rooms may be created (MAX_ROOMS). */
+  isAtCapacity(): boolean {
+    return this.rooms.size >= MAX_ROOMS;
+  }
+
+  /** Counts for health checks and test teardown. */
+  stats(): { rooms: number; pendingDeletions: number } {
+    return { rooms: this.rooms.size, pendingDeletions: this.roomTimeouts.size };
+  }
+
+  /**
+   * Join or rejoin. `replacing`: username of a player in this room that the caller is about to remove
+   * (same socket switching username), so its slot does not count against MAX_PLAYERS_PER_ROOM.
+   * Only successful joins cancel a pending room deletion.
+   */
+  joinRoom(gameCode: string, username: string, socketId: string, rejoinToken?: string, replacing?: string): { success: boolean; room?: Room; message?: string; rejoin?: boolean } {
     const room = this.rooms.get(gameCode);
     if (!room) return { success: false, message: "Game not found" };
 
@@ -41,16 +62,19 @@ export class RoomManager {
       return { success: false, message: room.started ? "Game already started" : "Username already taken" };
     }
 
-    this.cancelRoomDeletion(gameCode);
-
     if (existing) {
+      this.cancelRoomDeletion(gameCode);
       existing.socketId = socketId; // Update socket ID
       existing.connected = true;
       return { success: true, room, rejoin: true };
     }
 
     if (room.started) return { success: false, message: "Game already started" };
+    const taken = room.players.filter((p) => p.username !== replacing).length;
+    if (taken >= MAX_PLAYERS_PER_ROOM) return { success: false, message: "Room is full" };
+    this.cancelRoomDeletion(gameCode);
     room.players.push(this.createPlayer(username, socketId, room.players.length === 0));
+    if (room.players.length >= 2) room._hadGuests = true;
     return { success: true, room };
   }
 
@@ -74,6 +98,7 @@ export class RoomManager {
       this.scheduleRoomDeletion(gameCode);
       return { removed: true, player, isEmpty: true };
     }
+    this.scheduleDeletionIfAbandoned(room);
     return { removed: true, player, newHost, isEmpty: false };
   }
 
@@ -82,6 +107,7 @@ export class RoomManager {
     const player = this.getPlayer(gameCode, username);
     if (!player || player.socketId !== socketId) return undefined;
     player.connected = false;
+    this.scheduleDeletionIfAbandoned(this.rooms.get(gameCode)!);
     return player;
   }
 
@@ -105,7 +131,7 @@ export class RoomManager {
   }
 
   safeRoomData(room: Room): SafeRoom {
-    const { _timer, _timerCallback, _timerStartedAt, _timerDuration, _holdSafetyTimer, plantedSlots, _consecutiveSkips, ...safe } = room;
+    const { _timer, _timerCallback, _timerStartedAt, _timerDuration, _holdSafetyTimer, plantedSlots, _consecutiveSkips, _hadGuests, ...safe } = room;
     return {
       ...safe,
       players: safe.players.map((p) => this.publicPlayer(p)),
@@ -131,6 +157,12 @@ export class RoomManager {
     if (room) this.clearAllTimers(room);
     this.rooms.delete(gameCode);
     this.cancelRoomDeletion(gameCode);
+  }
+
+  /** Delete every room and cancel all their timers (server shutdown / test teardown). */
+  clear(): void {
+    for (const gameCode of [...this.rooms.keys()]) this.deleteRoom(gameCode);
+    for (const gameCode of [...this.roomTimeouts.keys()]) this.cancelRoomDeletion(gameCode);
   }
 
   private createPlayer(username: string, socketId: string, isHost: boolean): Player {
@@ -159,8 +191,15 @@ export class RoomManager {
     room.phase = null;
   }
 
+  /** No connected player left (all disconnected without leaving): delete the room unless someone rejoins. */
+  private scheduleDeletionIfAbandoned(room: Room): void {
+    if (!room.players.some((p) => p.connected)) this.scheduleRoomDeletion(room.gameCode);
+  }
+
   private scheduleRoomDeletion(gameCode: string): void {
-    const t = setTimeout(() => { this.rooms.delete(gameCode); this.roomTimeouts.delete(gameCode); }, ROOM_CLEANUP_DELAY);
+    this.cancelRoomDeletion(gameCode);
+    const delay = this.rooms.get(gameCode)?._hadGuests ? ROOM_CLEANUP_DELAY : SOLO_ROOM_CLEANUP_DELAY;
+    const t = setTimeout(() => { this.roomTimeouts.delete(gameCode); this.deleteRoom(gameCode); }, delay);
     this.roomTimeouts.set(gameCode, t);
   }
 

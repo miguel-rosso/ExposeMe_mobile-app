@@ -37,9 +37,25 @@ After last round: game-over
   Events from sockets that never joined, or that were replaced by a rejoin on another socket, are ignored
   (a replaced socket's `leave-room` only detaches that socket; the live player stays). After `leave-room`
   the username is free again, so joining with it needs no token.
+- **One socket = one player in one room.** The same live socket re-sending `join-create-game` for the room
+  and username it is already bound to (e.g. the WaitingRoom effect re-running, a duplicate join) is a no-op:
+  same `room-of-game` answer with the same token, no token needed, no broadcast. Reconnects arrive on a
+  **new** socket and go through the normal rejoin path with the `rejoinToken`.
+- Any other `join-create-game` from a bound socket (another room, a new room, or the same room under another
+  username) is attempted first; **only if it succeeds** is the previous binding left exactly like
+  `leave-room` (player removed, host handed over, `player-left`, socket leaves the socket.io room). A failed
+  join leaves the socket where it was. Switching username inside the same room frees the socket's own slot
+  for the capacity check.
+- A room holds at most **12 players** (`MAX_PLAYERS_PER_ROOM`); new players beyond that get
+  `"Room is full"`. Rejoins of existing players are always accepted.
+- Limits: at most **5 `join-create-game` per socket in any 10 s** (excess answered with
+  `{ success: false, message: "Too many attempts" }`), and at most **5000 rooms** in memory (`MAX_ROOMS`;
+  creating beyond it answers `"Server is busy"`, joining existing rooms still works).
 - Host only: `set-rounds` (lobby only), `start-game` (not while a game is running), `remove-player`.
 - `im-ready` only counts between `game-started` and the first round (`started && phase === null`).
-  `game-over` resets `isReady`, `started` and `phase` for every player.
+  `game-over` resets `isReady`, `started` and `phase` and clears unused planted photos
+  (`plantedPhoto`, `hasPlantedPhoto`) for every player; `start-game` resets `points`, `lastGuess` and
+  `lastAnswerCorrect` ("Play again" in the same room starts from zero).
 - Player objects broadcast to others (`player-joined`, `game-started`, `new-host`, `player-removed`,
   `room-of-game.room.players`) never include `rejoinToken` or `plantedPhoto`.
 
@@ -49,6 +65,10 @@ After last round: game-over
   `rejoinToken`) but marks
   them `connected: false`; rejoining marks them `connected: true` again.
 - Each round's photo owner is picked only among **connected** players.
+- When no connected player is left (everyone disconnected, or the last connected one left), the room is
+  deleted after **30 min** (`ROOM_CLEANUP_DELAY`), or **2 min** if it never had a second player, unless
+  someone successfully rejoins/joins first (rejected joins do not postpone the deletion). A running game in such a
+  room ends at the next round boundary (below), so no game timers outlive it; deleting a room clears its timers.
 - If fewer than 2 players are connected at a round boundary, the server ends the game (`game-over`).
 - Photo-wait timeouts skip the round (`round-skipped`), but after **3 consecutive skips**
   (`MAX_CONSECUTIVE_SKIPS`) the server ends the game (`game-over`) instead of skipping forever.

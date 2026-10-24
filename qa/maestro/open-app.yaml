@@ -8,13 +8,42 @@ appId: com.socketNull.ExposeMe
       photos: allow
       medialibrary: allow
 - openLink: "exp+expose-me://expo-development-client/?url=${METRO_URL}"
-# Expo dev-menu onboarding sheet (first launch only)
-- tapOn:
-    text: "Continue"
-    optional: true
+- waitForAnimationToEnd:
+    timeout: 5000
+# After clearState the dev client may stay on its launcher instead of loading the bundle
+- runFlow:
+    when:
+      visible: "Development servers"
+    commands:
+      - tapOn: "http://.*:8081"
 - extendedWaitUntil:
-    visible: "Continue|Join Game|Create Game"
+    visible: "This is the developer menu.*|Join Game|Create Game|Tap to proceed after setting permissions"
     timeout: 120000
+# Expo dev-menu onboarding sheet (first launch after clearState)
+- runFlow:
+    when:
+      visible: "This is the developer menu.*"
+    commands:
+      - tapOn: "Continue"
+# The full dev menu stays open after onboarding: close it
+- runFlow:
+    when:
+      visible: "Connected to:"
+    commands:
+      - runFlow:
+          when:
+            platform: Android
+          commands:
+            - pressKey: Back
+      - runFlow:
+          when:
+            platform: iOS
+          commands:
+            - swipe:
+                direction: DOWN
+- extendedWaitUntil:
+    visible: "Join Game|Create Game|Tap to proceed after setting permissions"
+    timeout: 60000
 # App first-run permissions explainer (InitialScreen)
 - runFlow:
     when:

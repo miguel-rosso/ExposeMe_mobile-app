@@ -21,7 +21,7 @@ describe("createRoom", () => {
     expect(room.gameCode).toMatch(/^\d{6}$/);
     expect(room).toMatchObject({ rounds: 10, started: false, round: 0, phase: null, held: false, currentPlayer: null });
     expect(room.players).toEqual([
-      { username: "alice", socketId: "sock-alice", isHost: true, isReady: false, points: 0, lastAnswerCorrect: false, lastGuess: "" },
+      { username: "alice", socketId: "sock-alice", isHost: true, isReady: false, connected: true, points: 0, lastAnswerCorrect: false, lastGuess: "" },
     ]);
     expect(rm.getRoom(room.gameCode)).toBe(room);
   });
@@ -163,5 +163,41 @@ describe("misc", () => {
     expect(cb).not.toHaveBeenCalled();
     expect(room.held).toBe(false);
     expect(rm.getRoom(room.gameCode)).toBeUndefined();
+  });
+});
+
+// ── Connection state (EXP-018) ─────────────────────────
+
+describe("connection state", () => {
+  it("new players start connected", () => {
+    const room = rm.createRoom("alice", "sock-alice");
+    rm.joinRoom(room.gameCode, "bob", "sock-bob");
+    expect(room.players.map((p) => p.connected)).toEqual([true, true]);
+  });
+
+  it("markDisconnected flags the player only when the socket is their current one", () => {
+    const room = rm.createRoom("alice", "sock-alice");
+    rm.joinRoom(room.gameCode, "bob", "sock-bob");
+    rm.joinRoom(room.gameCode, "bob", "sock-bob-2"); // rejoin with a new socket
+    // stale socket disconnecting must not mark bob offline
+    expect(rm.markDisconnected(room.gameCode, "bob", "sock-bob")).toBeUndefined();
+    expect(rm.getPlayer(room.gameCode, "bob")!.connected).toBe(true);
+
+    expect(rm.markDisconnected(room.gameCode, "bob", "sock-bob-2")!.username).toBe("bob");
+    expect(rm.getPlayer(room.gameCode, "bob")!.connected).toBe(false);
+  });
+
+  it("rejoin marks the player connected again", () => {
+    const room = rm.createRoom("alice", "sock-alice");
+    rm.joinRoom(room.gameCode, "bob", "sock-bob");
+    rm.markDisconnected(room.gameCode, "bob", "sock-bob");
+    room.started = true;
+    rm.joinRoom(room.gameCode, "bob", "sock-bob-2");
+    expect(rm.getPlayer(room.gameCode, "bob")!.connected).toBe(true);
+  });
+
+  it("safeRoomData does not expose the skip counter", () => {
+    const room = rm.createRoom("alice", "sock-alice");
+    expect(rm.safeRoomData(room)).not.toHaveProperty("_consecutiveSkips");
   });
 });

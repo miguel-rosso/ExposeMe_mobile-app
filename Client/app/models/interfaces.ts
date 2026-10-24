@@ -6,6 +6,7 @@ export interface Player {
   socketId: string;
   isHost: boolean;
   isReady: boolean;
+  connected?: boolean; // Server-side connection state (false while disconnected)
   hasPlantedPhoto?: boolean; // Changed from plantedPhoto to hasPlantedPhoto (boolean flag)
   plantedPhoto?: string; // This will be set on the server side when actually uploading
 }

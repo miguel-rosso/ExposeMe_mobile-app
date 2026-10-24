@@ -60,8 +60,8 @@ io.on("connection", (socket: Socket) => {
 
       chatCooldowns.delete(socket.id);
 
-      const player = room.players.find((p) => p.username === username);
-      if (!player || player.socketId !== socket.id) {
+      const player = roomManager.markDisconnected(gameCode, username, socket.id);
+      if (!player) {
         console.log(`[${gameCode}] ${username} old socket disconnected — already reconnected, ignoring`);
         return;
       }

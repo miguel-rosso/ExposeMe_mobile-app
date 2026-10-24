@@ -20,6 +20,16 @@ Each round:
 After last round: game-over
 ```
 
+## Disconnected players
+
+- A socket disconnect keeps the player in the room (they can rejoin with the same username) but marks
+  them `connected: false`; rejoining marks them `connected: true` again.
+- Each round's photo owner is picked only among **connected** players.
+- If fewer than 2 players are connected at a round boundary, the server ends the game (`game-over`).
+- Photo-wait timeouts skip the round (`round-skipped`), but after **3 consecutive skips**
+  (`MAX_CONSECUTIVE_SKIPS`) the server ends the game (`game-over`) instead of skipping forever.
+  Any round that is actually played (uploaded or planted photo) resets the counter.
+
 ## Hold (pause)
 
 - Available to the photo owner during `reveal` and `scores` phases

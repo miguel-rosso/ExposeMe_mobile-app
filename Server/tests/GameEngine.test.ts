@@ -421,3 +421,81 @@ describe("hold", () => {
     expect(lastEvent("hold-resume")!.args[0]).toEqual({ phase: "scores", duration: 1_500 });
   });
 });
+
+// ── Offline players / skip cap (EXP-018) ───────────────
+
+describe("offline players and skip cap", () => {
+  const MAX_CONSECUTIVE_SKIPS = 3;
+
+  it("never picks a disconnected player for your-turn", () => {
+    // Always pick the last candidate: without the connected filter that is carol (offline) every round.
+    // Restored by vi.restoreAllMocks() in afterEach.
+    vi.spyOn(Math, "random").mockReturnValue(0.99);
+    room = setupStartedRoom(10);
+    roomManager.markDisconnected(room.gameCode, "carol", "sock-carol");
+    vi.advanceTimersByTime(GAME_START_DELAY);
+
+    for (let i = 0; i < 10; i++) playFullRound();
+
+    const targets = events("your-turn").map((e) => e.target);
+    expect(targets).toHaveLength(10);
+    expect(targets).not.toContain("sock-carol");
+    expect(events("round-skipped")).toHaveLength(0);
+    expect(events("game-over")).toHaveLength(1);
+  });
+
+  it("ends the game instead of looping when fewer than 2 players are connected", () => {
+    room = setupStartedRoom(10);
+    roomManager.markDisconnected(room.gameCode, "bob", "sock-bob");
+    roomManager.markDisconnected(room.gameCode, "carol", "sock-carol");
+    vi.advanceTimersByTime(GAME_START_DELAY);
+
+    expect(events("your-turn")).toHaveLength(0);
+    expect(events("round-skipped")).toHaveLength(0);
+    expect(events("game-over")).toHaveLength(1);
+    expect(room.phase).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("ends the game at the next round boundary when players go offline mid-game", () => {
+    room = setupStartedRoom(10);
+    vi.advanceTimersByTime(GAME_START_DELAY);
+    engine.onPhotoReceived(room, PHOTO, room.currentPlayer!.username);
+    roomManager.markDisconnected(room.gameCode, "bob", "sock-bob");
+    roomManager.markDisconnected(room.gameCode, "carol", "sock-carol");
+    vi.advanceTimersByTime(ANSWER_TIME + REVEAL_TIME + SCORE_DISPLAY_TIME);
+    expect(events("game-over")).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it(`ends the game after ${MAX_CONSECUTIVE_SKIPS} consecutive skipped rounds and stops all timers`, () => {
+    room = setupStartedRoom(10);
+    vi.advanceTimersByTime(GAME_START_DELAY);
+
+    vi.advanceTimersByTime(PHOTO_WAIT_TIMEOUT * (MAX_CONSECUTIVE_SKIPS - 1));
+    expect(events("round-skipped")).toHaveLength(MAX_CONSECUTIVE_SKIPS - 1);
+    expect(events("game-over")).toHaveLength(0);
+
+    vi.advanceTimersByTime(PHOTO_WAIT_TIMEOUT);
+    expect(events("round-skipped")).toHaveLength(MAX_CONSECUTIVE_SKIPS);
+    expect(events("game-over")).toHaveLength(1);
+    expect(room.phase).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+
+    vi.advanceTimersByTime(PHOTO_WAIT_TIMEOUT * 10);
+    expect(events("round-skipped")).toHaveLength(MAX_CONSECUTIVE_SKIPS);
+  });
+
+  it("a played round resets the consecutive skip counter", () => {
+    room = setupStartedRoom(10);
+    vi.advanceTimersByTime(GAME_START_DELAY);
+
+    vi.advanceTimersByTime(PHOTO_WAIT_TIMEOUT * (MAX_CONSECUTIVE_SKIPS - 1));
+    playFullRound();
+    vi.advanceTimersByTime(PHOTO_WAIT_TIMEOUT * (MAX_CONSECUTIVE_SKIPS - 1));
+
+    expect(events("round-skipped")).toHaveLength((MAX_CONSECUTIVE_SKIPS - 1) * 2);
+    expect(events("game-over")).toHaveLength(0);
+    expect(room.phase).toBe("waiting-photo");
+  });
+});

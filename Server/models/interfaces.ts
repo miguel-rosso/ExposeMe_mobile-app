@@ -4,6 +4,8 @@ export interface Player {
   socketId: string;
   isHost: boolean;
   isReady: boolean;
+  /** False while the player's socket is disconnected (kept in the room so they can rejoin) */
+  connected: boolean;
   lastAnswerCorrect: boolean;
   lastGuess: string;
   hasPlantedPhoto?: boolean;
@@ -36,6 +38,8 @@ export interface Room {
   /** Round numbers where planted photos will appear (decided at game start) */
   plantedSlots: Set<number>;
   phase: RoundPhase | null;
+  /** Rounds skipped in a row (photo timeout); reset when a round is actually played */
+  _consecutiveSkips: number;
 
   // Timer: only ONE active timer at a time
   _timer: NodeJS.Timeout | null;
@@ -55,7 +59,7 @@ export interface JoinCreateGameData {
 
 export interface RoomOfGameResponse {
   success: boolean;
-  room?: Omit<Room, "_timer" | "_timerCallback" | "_timerStartedAt" | "_timerDuration" | "_holdSafetyTimer" | "plantedSlots">;
+  room?: Omit<Room, "_timer" | "_timerCallback" | "_timerStartedAt" | "_timerDuration" | "_holdSafetyTimer" | "plantedSlots" | "_consecutiveSkips">;
   message?: string;
   rounds?: number;
 }

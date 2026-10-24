@@ -9,6 +9,7 @@ const GAME_START_DELAY = 1_000;
 const PHOTO_WAIT_TIMEOUT = 15_000;
 const HOLD_SAFETY_TIMEOUT = 30_000;
 const HOLD_MIN_REMAINING = 1_500; // Stop allowing hold when less than this remains
+const MAX_CONSECUTIVE_SKIPS = 3; // End the game after this many photo timeouts in a row
 
 export class GameEngine {
   constructor(private io: Server, private roomManager: RoomManager) {}
@@ -19,6 +20,7 @@ export class GameEngine {
     room.started = true;
     room.round = 0;
     room.plantedPhotosShown = 0;
+    room._consecutiveSkips = 0;
     console.log(`[${room.gameCode}] Game started`);
     this.io.to(room.gameCode).emit("game-started", room.players, room.rounds);
   }
@@ -35,6 +37,7 @@ export class GameEngine {
 
     room.round++;
     room.phase = "answering";
+    room._consecutiveSkips = 0;
     console.log(`[${room.gameCode}] Round ${room.round}: photo from ${username}`);
 
     // Atomic event: photo + phase info in one message
@@ -110,7 +113,9 @@ export class GameEngine {
   // ── Private: Phase transitions ───────────────────────
 
   private startRound(room: Room): void {
-    if (room.players.length < 2) { this.endGame(room); return; }
+    // Only connected players can play; disconnected ones stay in the room to rejoin
+    const connected = room.players.filter((p) => p.connected);
+    if (connected.length < 2) { this.endGame(room); return; }
     if (room.round >= room.rounds) { this.endGame(room); return; }
 
     room.held = false;
@@ -123,6 +128,7 @@ export class GameEngine {
       room.plantedPhotosShown++;
       room.round++;
       room.phase = "answering";
+      room._consecutiveSkips = 0;
 
       console.log(`[${room.gameCode}] Round ${room.round}: planted photo from ${planted.username}`);
 
@@ -136,8 +142,8 @@ export class GameEngine {
 
       this.setTimer(room, ANSWER_TIME, () => this.enterReveal(room));
     } else {
-      const idx = Math.floor(Math.random() * room.players.length);
-      room.currentPlayer = room.players[idx];
+      const idx = Math.floor(Math.random() * connected.length);
+      room.currentPlayer = connected[idx];
       room.phase = "waiting-photo";
 
       console.log(`[${room.gameCode}] Waiting photo from ${room.currentPlayer.username}`);
@@ -147,6 +153,12 @@ export class GameEngine {
         if (room.phase === "waiting-photo") {
           console.log(`[${room.gameCode}] Photo timeout — skipping`);
           this.io.to(room.gameCode).emit("round-skipped");
+          room._consecutiveSkips++;
+          if (room._consecutiveSkips >= MAX_CONSECUTIVE_SKIPS) {
+            console.log(`[${room.gameCode}] ${room._consecutiveSkips} rounds skipped in a row — ending game`);
+            this.endGame(room);
+            return;
+          }
           this.startRound(room);
         }
       });

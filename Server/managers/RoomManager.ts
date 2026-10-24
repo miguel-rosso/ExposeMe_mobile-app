@@ -18,6 +18,7 @@ export class RoomManager {
       plantedPhotosShown: 0,
       plantedSlots: new Set(),
       phase: null,
+      _consecutiveSkips: 0,
       _timer: null,
       _timerCallback: null,
       _timerStartedAt: 0,
@@ -39,6 +40,7 @@ export class RoomManager {
     const existing = room.players.find((p) => p.username === username);
     if (existing) {
       existing.socketId = socketId; // Update socket ID
+      existing.connected = true;
       return { success: true, room, rejoin: true };
     }
 
@@ -70,6 +72,14 @@ export class RoomManager {
     return { removed: true, player, newHost, isEmpty: false };
   }
 
+  /** Mark a player offline, only if `socketId` is still their current socket (ignores stale sockets). */
+  markDisconnected(gameCode: string, username: string, socketId: string): Player | undefined {
+    const player = this.getPlayer(gameCode, username);
+    if (!player || player.socketId !== socketId) return undefined;
+    player.connected = false;
+    return player;
+  }
+
   removePlayerBySocketId(gameCode: string, socketId: string): Player | undefined {
     const room = this.rooms.get(gameCode);
     if (!room) return undefined;
@@ -89,8 +99,8 @@ export class RoomManager {
     return this.rooms.get(gameCode)?.players.find((p) => p.username === username);
   }
 
-  safeRoomData(room: Room): Omit<Room, "_timer" | "_timerCallback" | "_timerStartedAt" | "_timerDuration" | "_holdSafetyTimer" | "plantedSlots"> {
-    const { _timer, _timerCallback, _timerStartedAt, _timerDuration, _holdSafetyTimer, plantedSlots, ...safe } = room;
+  safeRoomData(room: Room): Omit<Room, "_timer" | "_timerCallback" | "_timerStartedAt" | "_timerDuration" | "_holdSafetyTimer" | "plantedSlots" | "_consecutiveSkips"> {
+    const { _timer, _timerCallback, _timerStartedAt, _timerDuration, _holdSafetyTimer, plantedSlots, _consecutiveSkips, ...safe } = room;
     return {
       ...safe,
       currentPlayer: safe.currentPlayer ? { ...safe.currentPlayer, plantedPhoto: undefined } : null,
@@ -112,7 +122,7 @@ export class RoomManager {
   }
 
   private createPlayer(username: string, socketId: string, isHost: boolean): Player {
-    return { username, socketId, isHost, isReady: false, points: 0, lastAnswerCorrect: false, lastGuess: "" };
+    return { username, socketId, isHost, isReady: false, connected: true, points: 0, lastAnswerCorrect: false, lastGuess: "" };
   }
 
   private generateRoomCode(): string {

@@ -46,6 +46,10 @@
 #dash-root .qa-ask .how { font-size: 0.9rem; color: var(--color-fg-muted); border-top: 1px dashed color-mix(in srgb, var(--color-fg) 20%, transparent); padding-top: 0.6rem; }
 #dash-root .qa-ask .answer { font-weight: 600; color: var(--qa-green); }
 
+#dash-root .qa-archive { margin-top: 1rem; }
+#dash-root .qa-archive summary { cursor: pointer; font-weight: 700; color: var(--color-fg-muted); padding: 0.4rem 0; }
+#dash-root .qa-archive summary:focus-visible { outline: 2px solid var(--qa-blue); outline-offset: 2px; }
+#dash-root .qa-archive .qa-pending { margin-top: 0.75rem; }
 #dash-root .qa-fsum { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
 #dash-root .qa-fsum .chip { display: inline-flex; align-items: center; gap: 0.4rem; font-weight: 700; font-size: 0.95rem; padding: 0.3rem 0.8rem; border-radius: 999px; color: #fff; }
 #dash-root .qa-areas { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); gap: 1rem; }
@@ -61,6 +65,18 @@
 #dash-root .fs-en-curso { background: var(--qa-blue); }
 #dash-root .fs-planeado { background: #6b7280; }
 #dash-root .fs-bloqueado { background: var(--qa-violet); }
+#dash-root .qa-kpi[data-kpi] { cursor: pointer; transition: transform .15s, box-shadow .15s; }
+#dash-root .qa-kpi[data-kpi]:hover { transform: translateY(-2px); box-shadow: 0 6px 18px color-mix(in srgb, var(--color-fg) 12%, transparent); }
+#dash-root .qa-kpi[data-kpi]:focus-visible { outline: 2px solid var(--qa-blue); outline-offset: 2px; }
+#dash-root .qa-fsum .chip { border: 0; font: inherit; font-weight: 700; font-size: 0.95rem; cursor: pointer; transition: opacity .15s; }
+#dash-root .qa-fsum .chip:focus-visible { outline: 2px solid var(--qa-blue); outline-offset: 2px; }
+#dash-root .qa-fsum.filtering .chip[aria-pressed="false"] { opacity: 0.45; }
+#dash-root .fs-all { background: color-mix(in srgb, var(--color-fg) 14%, transparent); color: var(--color-fg) !important; }
+#dash-root .qa-legend button { all: unset; cursor: pointer; }
+#dash-root .qa-legend button:hover { text-decoration: underline; }
+#dash-root .qa-legend button:focus-visible { outline: 2px solid var(--qa-blue); outline-offset: 2px; }
+#dash-root .qa-x { background: color-mix(in srgb, var(--qa-blue) 15%, transparent); border-color: var(--qa-blue); }
+#dash-root #issue-extra { margin: 0; }
 #dash-root .qa-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr)); gap: 1rem; }
 #dash-root .qa-kpi { border-radius: 14px; padding: 1.1rem 1.25rem; border: 1px solid; }
 #dash-root .qa-kpi .lbl { font-size: 0.95rem; font-weight: 600; }
@@ -118,6 +134,31 @@
 #dash-root .qa-fail::before { content: ""; width: 0.45rem; height: 0.45rem; border-radius: 50%; background: var(--color-bad); }
 #dash-root .qa-empty { color: var(--color-fg-muted); margin: 0; }
 @media (max-width: 40rem) { #dash-root .hide-narrow { display: none; } #dash-root .qa-kpi .val { font-size: 2rem; } }
+/* Colour language (same everywhere): red bloqueado, yellow abierto, orange en curso / depende de ti,
+   green hecho, teal verificado en móvil, blue planeado, grey descartado. Severity = outlined pill. */
+#dash-root .qa { --qa-yellow: #eab308; --qa-orange: #f97316; --qa-teal: #0d9488; }
+#dash-root .st-open, #dash-root .fs-abierto { background: var(--qa-yellow); color: #2b2100; }
+#dash-root .st-in-progress, #dash-root .fs-en-curso, #dash-root .act-live { background: var(--qa-orange); color: #fff; }
+#dash-root .st-blocked, #dash-root .fs-bloqueado, #dash-root .act-blocked { background: var(--qa-red); color: #fff; }
+#dash-root .st-fixed, #dash-root .fs-hecho, #dash-root .act-done, #dash-root .res-pass { background: var(--qa-green); color: #fff; }
+#dash-root .st-verified, #dash-root .fs-verificado { background: var(--qa-teal); color: #fff; }
+#dash-root .fs-planeado { background: var(--qa-blue); color: #fff; }
+#dash-root .st-wontfix { background: #6b7280; color: #fff; }
+#dash-root .pill.sev-high, #dash-root .pill.sev-medium, #dash-root .pill.sev-low { background: transparent; border: 2px solid currentColor; padding: 0.05rem 0.55rem; }
+#dash-root .pill.sev-high { color: var(--qa-red); }
+#dash-root .pill.sev-medium { color: var(--qa-amber); }
+#dash-root .pill.sev-low { color: #8b929c; }
+#dash-root .pill.sev-critical { background: #b0102a; color: #fff; }
+#dash-root .qa-now { background: color-mix(in srgb, var(--qa-orange) var(--qa-tint), var(--color-panel)); border-color: color-mix(in srgb, var(--qa-orange) 40%, transparent); }
+#dash-root .qa-pulse { background: var(--qa-orange); }
+#dash-root .qa-ask.k-decision, #dash-root .qa-ask.k-action { background: color-mix(in srgb, var(--qa-orange) var(--qa-tint), var(--color-panel)); border-color: color-mix(in srgb, var(--qa-orange) 45%, transparent); }
+#dash-root .qa-ask.k-decision .tag, #dash-root .qa-ask.k-action .tag { background: var(--qa-orange); }
+#dash-root .qa-ask.done { background: var(--color-panel); border-color: var(--color-border-line); opacity: 0.75; }
+#dash-root .qa-ask.done .tag { background: var(--qa-green); }
+#dash-root .qa-kpi.c-yellow { background: color-mix(in srgb, var(--qa-yellow) var(--qa-tint), var(--color-panel)); border-color: color-mix(in srgb, var(--qa-yellow) 45%, transparent); }
+#dash-root .qa-kpi.c-yellow .val { color: #b88a00; }
+#dash-root .qa-colors { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.9rem; }
+#dash-root .qa-colors .pill { font-size: 0.8rem; }
 </style>
 
 <div class="qa">
@@ -128,6 +169,9 @@
       <b data-source="kpis" data-field="done" data-row="0" class="dash-skeleton">—</b> resueltas en <b data-source="kpis" data-field="changes" data-row="0" class="dash-skeleton">—</b> cambios.
       Te esperan <b data-source="kpis" data-field="pending" data-row="0" class="dash-skeleton">—</b> respuestas o acciones.
     </p>
+    <div class="qa-colors" aria-label="Leyenda de colores">
+      <span class="pill st-blocked">bloqueado</span><span class="pill st-open">abierto</span><span class="pill st-in-progress">en curso / depende de ti</span><span class="pill st-fixed">hecho</span><span class="pill st-verified">verificado en móvil</span><span class="pill fs-planeado">planeado</span><span class="pill st-wontfix">descartado</span>
+    </div>
   </header>
 
   <section id="now" aria-label="Ahora mismo">
@@ -140,6 +184,10 @@
       <p class="qa-hint">Para responder, deja un comentario en la tarjeta y envíalo a Claude (o menciona @claude).</p>
     </div>
     <div class="qa-pending" id="pending-list" data-source="pending"></div>
+    <details class="qa-archive" id="archivadas">
+      <summary>Archivadas (<span id="archive-count">0</span>)</summary>
+      <div class="qa-pending" id="archive-list" data-source="pending"></div>
+    </details>
   </section>
 
   <section id="estado">
@@ -152,10 +200,10 @@
   </section>
 
   <section class="qa-kpis" aria-label="Cifras principales">
-    <div class="qa-kpi c-blue" id="kpi-open"><div class="lbl">Incidencias abiertas</div><div class="val dash-skeleton" data-source="kpis" data-field="open" data-row="0">—</div><div class="sub">abiertas, en curso o bloqueadas</div></div>
-    <div class="qa-kpi c-red" id="kpi-high"><div class="lbl">Altas o críticas</div><div class="val dash-skeleton" data-source="kpis" data-field="open_high" data-row="0">—</div><div class="sub">se arreglan primero</div></div>
-    <div class="qa-kpi c-green" id="kpi-done"><div class="lbl">Resueltas</div><div class="val dash-skeleton" data-source="kpis" data-field="done" data-row="0">—</div><div class="sub"><span data-source="kpis" data-field="verified" data-row="0">—</span> verificadas en móviles</div></div>
-    <div class="qa-kpi c-amber" id="kpi-skew"><div class="lbl">Desfase entre jugadores</div><div class="val dash-skeleton" data-source="kpis" data-field="last_p95_skew" data-row="0">—</div><div class="sub">ms (p95) en la última partida, <span data-source="kpis" data-field="last_run" data-row="0">—</span></div></div>
+    <div class="qa-kpi c-yellow" id="kpi-open" data-kpi="open" role="button" tabindex="0" title="Ver en la tabla de incidencias"><div class="lbl">Incidencias abiertas</div><div class="val dash-skeleton" data-source="kpis" data-field="open" data-row="0">—</div><div class="sub">abiertas, en curso o bloqueadas</div></div>
+    <div class="qa-kpi c-red" id="kpi-high" data-kpi="high" role="button" tabindex="0" title="Ver en la tabla de incidencias"><div class="lbl">Altas o críticas</div><div class="val dash-skeleton" data-source="kpis" data-field="open_high" data-row="0">—</div><div class="sub">se arreglan primero</div></div>
+    <div class="qa-kpi c-green" id="kpi-done" data-kpi="done" role="button" tabindex="0" title="Ver en la tabla de incidencias"><div class="lbl">Resueltas</div><div class="val dash-skeleton" data-source="kpis" data-field="done" data-row="0">—</div><div class="sub"><span data-source="kpis" data-field="verified" data-row="0">—</span> verificadas en móviles</div></div>
+    <div class="qa-kpi c-blue" id="kpi-skew"><div class="lbl">Desfase entre jugadores</div><div class="val dash-skeleton" data-source="kpis" data-field="last_p95_skew" data-row="0">—</div><div class="sub">ms (p95) en la última partida, <span data-source="kpis" data-field="last_run" data-row="0">—</span></div></div>
   </section>
 
   <section class="qa-grid">
@@ -181,6 +229,7 @@
       <button class="qa-chip" data-filter="active" aria-pressed="true">Abiertas</button>
       <button class="qa-chip" data-filter="done" aria-pressed="false">Resueltas</button>
       <button class="qa-chip" data-filter="all" aria-pressed="false">Todas</button>
+      <span id="issue-extra" class="qa-tools"></span>
     </div>
     <div class="qa-tbl">
       <table id="issues-table" data-source="issues" data-row-key="id">
@@ -280,6 +329,7 @@ dash.calc("by_type", {
 (() => {
   const sevColor = { critical: "#b0102a", high: "var(--qa-red)", medium: "var(--qa-amber)", low: "#9ca3af" };
   let issueFilter = "active";
+  let issueSev = null, issueType = null, featFilter = null;
   let issueSort = { key: "severity_rank", dir: 1 };
 
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined && text !== null) e.textContent = text; return e; };
@@ -327,10 +377,15 @@ dash.calc("by_type", {
     const r = dash.data("pending");
     if (r.status === "error") { failLine(box); return; }
     if (r.status !== "ok") return;
+    const archive = document.getElementById("archive-list");
     box.innerHTML = "";
-    const rows = [...r.data].sort((a, b) => (a.status === "resuelta") - (b.status === "resuelta"));
-    if (!rows.length) { box.appendChild(el("p", "qa-empty", "No hay nada pendiente por tu parte.")); return; }
-    rows.forEach((p) => {
+    archive.innerHTML = "";
+    // Resolved cards move to the collapsed archive, newest first
+    const open = r.data.filter((p) => p.status !== "resuelta");
+    const done = r.data.filter((p) => p.status === "resuelta").reverse();
+    document.getElementById("archive-count").textContent = done.length;
+    if (!open.length) box.appendChild(el("p", "qa-empty", "No hay nada pendiente por tu parte."));
+    [...open.map((p) => [p, box]), ...done.map((p) => [p, archive])].forEach(([p, target]) => {
       const card = el("article", `qa-ask ${p.kind === "decisión" ? "k-decision" : "k-action"}${p.status === "resuelta" ? " done" : ""}`);
       card.id = p.id;
       card.appendChild(el("span", "tag", `${p.kind} · ${p.id}${p.status === "resuelta" ? " · resuelta" : ""}`));
@@ -351,7 +406,7 @@ dash.calc("by_type", {
       }
       if (p.answer) card.appendChild(el("p", "answer", `Respuesta: ${p.answer}`));
       else card.appendChild(el("p", "how", p.kind === "decisión" ? "Responde con un comentario en esta tarjeta indicando la opción." : "Cuando esté hecho, avísame con un comentario en esta tarjeta."));
-      box.appendChild(card);
+      target.appendChild(card);
     });
   }
 
@@ -364,16 +419,27 @@ dash.calc("by_type", {
     const order = ["verificado", "hecho", "en curso", "bloqueado", "planeado"];
     const cls = (s) => `fs-${String(s).replace(/\s+/g, "-")}`;
     sum.innerHTML = "";
+    sum.classList.toggle("filtering", featFilter !== null);
+    const chip = (label, st, c) => {
+      const b = el("button", `chip ${c}`, label);
+      b.type = "button";
+      b.setAttribute("aria-pressed", String(featFilter === st));
+      b.addEventListener("click", () => { featFilter = featFilter === st ? null : st; drawFeatures(); });
+      sum.appendChild(b);
+    };
+    chip(`${r.data.length} todas`, null, "fs-all");
     order.forEach((st) => {
       const n = r.data.filter((f) => f.status === st).length;
-      if (n) sum.appendChild(el("span", `chip ${cls(st)}`, `${n} ${st}`));
+      if (n) chip(`${n} ${st}`, st, cls(st));
     });
     box.innerHTML = "";
-    const areas = [...new Set(r.data.map((f) => f.area))];
+    const list = featFilter ? r.data.filter((f) => f.status === featFilter) : r.data;
+    if (!list.length) { box.appendChild(el("p", "qa-empty", "Ninguna funcionalidad en este estado.")); return; }
+    const areas = [...new Set(list.map((f) => f.area))];
     areas.forEach((area) => {
       const card = el("div", "qa-area");
       card.appendChild(el("h3", null, area));
-      r.data
+      list
         .filter((f) => f.area === area)
         .sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status))
         .forEach((f) => {
@@ -387,10 +453,11 @@ dash.calc("by_type", {
     });
   }
 
-  function legend(box, items) {
+  function legend(box, items, onPick) {
     box.innerHTML = "";
-    items.forEach(([label, color]) => {
-      const s = el("span"); const i = el("i"); i.style.background = color;
+    items.forEach(([label, color, key]) => {
+      const s = el(onPick ? "button" : "span"); const i = el("i"); i.style.background = color;
+      if (onPick) { s.type = "button"; s.title = `Ver incidencias ${label}`; s.addEventListener("click", () => onPick(key)); }
       s.appendChild(i); s.appendChild(document.createTextNode(label)); box.appendChild(s);
     });
   }
@@ -428,8 +495,12 @@ dash.calc("by_type", {
         acc += d[s];
       });
       g.append("text").attr("x", x(d.total) + 8).attr("y", y(d.type) + y.bandwidth() / 2).attr("dy", "0.35em").attr("fill", "var(--color-fg)").attr("font-weight", 700).text(d.total);
+      // Whole row is a hit target that filters the issues table by this type
+      g.append("rect").attr("x", 0).attr("y", y(d.type)).attr("width", W).attr("height", y.bandwidth()).attr("fill", "transparent").attr("cursor", "pointer")
+        .on("click", () => focusIssues({ type: d.type }))
+        .append("title").text(`Ver incidencias de ${d.type}`);
     });
-    legend(lg, SEVS.map((s) => [SEV_ES[s], sevColor[s]]));
+    legend(lg, SEVS.map((s) => [SEV_ES[s], sevColor[s], s]), (s) => focusIssues({ sev: [s] }));
   }
 
   function drawSkew() {
@@ -488,6 +559,19 @@ dash.calc("by_type", {
     if (r.status !== "ok") return;
     const q = (document.getElementById("issue-search").value || "").toLowerCase();
     let rows = r.data.filter((i) => issueFilter === "all" || (issueFilter === "active" ? ACTIVE.includes(i.status) : DONE.includes(i.status)));
+    if (issueSev) rows = rows.filter((i) => issueSev.includes(i.severity));
+    if (issueType) rows = rows.filter((i) => i.type_es === issueType);
+    const extra = document.getElementById("issue-extra");
+    extra.innerHTML = "";
+    const removable = (label, clear) => {
+      const b = el("button", "qa-chip qa-x", `${label} ✕`);
+      b.type = "button";
+      b.setAttribute("aria-label", `Quitar filtro ${label}`);
+      b.addEventListener("click", () => { clear(); drawIssues(); });
+      extra.appendChild(b);
+    };
+    if (issueSev) removable(issueSev.map((s) => SEV_ES[s]).join(" o "), () => { issueSev = null; });
+    if (issueType) removable(issueType, () => { issueType = null; });
     if (q) rows = rows.filter((i) => [i.id, i.title, i.summary, i.type_es, i.area_es, i.status_es, i.evidence].join(" ").toLowerCase().includes(q));
     const { key, dir } = issueSort;
     rows = [...rows].sort((a, b) => (typeof a[key] === "number" ? a[key] - b[key] : String(a[key]).localeCompare(String(b[key]))) * dir || a.id.localeCompare(b.id));
@@ -521,7 +605,7 @@ dash.calc("by_type", {
   function drawTables() {
     drawRows("activity", "activity-table", 4, false, (tr, d) => {
       td(tr, hhmm(d.at), "mono"); td(tr, d.agent); td(tr, d.task, "wrap");
-      pill(tr, d.state, d.state === "en curso" ? "act-live" : "act-done");
+      pill(tr, d.state, d.state === "en curso" ? "act-live" : d.state === "bloqueado" ? "act-blocked" : "act-done");
     });
     drawRows("changes", "changes-table", 4, true, (tr, d) => {
       td(tr, d.issue, "mono"); td(tr, d.title, "wrap"); td(tr, d.commit || "sin commit", "hide-narrow mono"); td(tr, d.tests, "hide-narrow");
@@ -532,11 +616,25 @@ dash.calc("by_type", {
   }
 
   document.getElementById("issue-search").addEventListener("input", drawIssues);
-  document.querySelectorAll("#issues .qa-chip").forEach((b) => b.addEventListener("click", () => {
+  const statusChips = () => document.querySelectorAll("#issues .qa-chip[data-filter]");
+  statusChips().forEach((b) => b.addEventListener("click", () => {
     issueFilter = b.dataset.filter;
-    document.querySelectorAll("#issues .qa-chip").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    statusChips().forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
     drawIssues();
   }));
+
+  // Shortcut used by KPI cards and chart: set filters, redraw and jump to the table
+  function focusIssues({ filter = "active", sev = null, type = null }) {
+    issueFilter = filter; issueSev = sev; issueType = type;
+    statusChips().forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.filter === filter)));
+    drawIssues();
+    document.getElementById("issues").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  document.querySelectorAll(".qa-kpi[data-kpi]").forEach((k) => {
+    const go = () => focusIssues(k.dataset.kpi === "high" ? { sev: ["critical", "high"] } : k.dataset.kpi === "done" ? { filter: "done" } : {});
+    k.addEventListener("click", go);
+    k.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
+  });
   document.querySelectorAll("#issues-table th button").forEach((b) => b.addEventListener("click", () => {
     issueSort = { key: b.dataset.sort, dir: issueSort.key === b.dataset.sort ? -issueSort.dir : 1 };
     drawIssues();

@@ -160,9 +160,10 @@
 #dash-root .qa-colors { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.9rem; }
 #dash-root .qa-colors .pill { font-size: 0.8rem; }
 /* Filter chips carry their meaning's colour instead of a generic red */
-#dash-root #issues .qa-chip[data-filter="active"] { border-color: var(--qa-yellow); }
-#dash-root #issues .qa-chip[data-filter="done"] { border-color: var(--qa-green); }
-#dash-root #issues .qa-chip[data-filter="all"] { border-color: var(--qa-blue); }
+#dash-root #issues .qa-chip[data-filter] { border: 0; padding: calc(0.4rem + 1px) calc(0.9rem + 1px); }
+#dash-root #issues .qa-chip[data-filter="active"] { background: color-mix(in srgb, var(--qa-yellow) 20%, transparent); }
+#dash-root #issues .qa-chip[data-filter="done"] { background: color-mix(in srgb, var(--qa-green) 20%, transparent); }
+#dash-root #issues .qa-chip[data-filter="all"] { background: color-mix(in srgb, var(--qa-blue) 20%, transparent); }
 #dash-root #issues .qa-chip[data-filter="active"][aria-pressed="true"] { background: var(--qa-yellow); color: #2b2100; }
 #dash-root #issues .qa-chip[data-filter="done"][aria-pressed="true"] { background: var(--qa-green); color: #fff; }
 #dash-root #issues .qa-chip[data-filter="all"][aria-pressed="true"] { background: var(--qa-blue); color: #fff; }
@@ -605,8 +606,14 @@ dash.calc("by_type", {
       (v) => !!issueSev && issueSev.includes(v),
       (v) => { const cur = issueSev || []; const next = cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v]; issueSev = next.length ? next : null; },
       (v) => `g-sev-${v}`);
-    group("Tipo", uniq((i) => i.type_es).map((v) => [v, v, count((i) => i.type_es, v)]),
-      (v) => issueType === v, (v) => { issueType = issueType === v ? null : v; });
+    // No type chips: a type filter only comes from clicking the chart, shown as a removable chip
+    if (issueType) {
+      const t = el("button", "qa-chip qa-x", `${issueType} ✕`);
+      t.type = "button";
+      t.setAttribute("aria-label", `Quitar filtro ${issueType}`);
+      t.addEventListener("click", () => { issueType = null; drawIssues(); });
+      extra.appendChild(t);
+    }
     group("Área", uniq((i) => i.area_es).map((v) => [v, v, count((i) => i.area_es, v)]),
       (v) => issueArea === v, (v) => { issueArea = issueArea === v ? null : v; });
     if (issueSev) rows = rows.filter((i) => issueSev.includes(i.severity));

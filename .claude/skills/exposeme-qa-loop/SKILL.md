@@ -49,9 +49,14 @@ Minor findings become new `open` issues (severity low) instead of blocking.
 - Backlog: issue → `fixed` (or `verified` if a device run covered it), `fixed_at`, `commit` (short sha). Append a `changes` row `{id: CHG-NNN, date, issue, title, commit, tests, review}` and, for every lab/bot run, a `runs` row `{id: RUN-NNN, date, kind: unit|bots|devices, devices, players, rounds, result, p95_skew_ms, max_skew_ms, rounds_skipped, notes}`. Add follow-ups from the fixer/reviewer as new issues.
 - The backlog is local only (ignored): update it, don't commit it.
 
+### 5b. The user follows progress in the dashboard, not the chat
+- **Activity**: every time a subagent starts or finishes, prepend a row to `activity` in `qa/backlog.json` (`{id: ACT-NNN, at: ISO, iteration, agent, task (Spanish), issue, state: "en curso"|"aprobado"|"terminado"|"bloqueado"}`); keep at most one "en curso" per running agent and close it when it finishes. Publish the dashboard at least at the start and end of each step, not only at the end of the iteration.
+- **Questions for the user go to the dashboard**, never only to the chat: add a `pending` row (`{id: DEC-NNN|ACC-NNN, kind: "decisión"|"acción", status: "pendiente"|"en curso"|"resuelta", issue, title, context, options[], recommendation, answer}`), then continue with other work. The user answers with a comment on that card sent to Claude; when it arrives, record `answer`, set `status: "resuelta"`, reply in the thread and resolve it.
+- Chat messages stay short (2-4 lines) and point to the dashboard.
+
 ### 6. Publish to the dashboard (every iteration)
 The dashboard is **https://claude.ai/artifact/Tymg6zZ1y6Mdb1Z29eaTui** (Dashboard type; datasets `issues`, `changes`, `runs` are attached JSON files).
-1. `node qa/scripts/export-dashboard.mjs` → `qa/dashboard/{issues,changes,runs}.json`.
+1. `node qa/scripts/export-dashboard.mjs` → `qa/dashboard/{issues,pending,activity,changes,runs}.json`.
 2. For each file: `Artifact` publish with `url` = the dashboard, `asset: true`, `file_path` = the json file (one call per file; JSON can't be batched). Take the returned `url`.
 3. `ArtifactData` `list` collection `datasets` to get each document's `version`, then one `batch` with one `update` per dataset (each pinned with `if_version`): `datasets/<id>` ← `{source: {kind: "file", url: <returned url>, name: "<id>.json", format: "json"}, updated: {at: <ISO now>, by: "Claude QA loop"}}`.
 4. Read `data/users/me` doc `check` as the dashboard type requires; do not otherwise re-verify the page.

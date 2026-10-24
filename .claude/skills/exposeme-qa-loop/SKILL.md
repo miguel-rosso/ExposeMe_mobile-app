@@ -16,7 +16,7 @@ Read `CLAUDE.md` once per session. The device lab is documented in `.claude/skil
 - Only the orchestrator edits `qa/backlog.json` and commits. Subagents return JSON; parse it, don't trust prose.
 - Evidence before status: an issue is `fixed` only with a passing test; `verified` only after a device run shows it.
 - One issue in flight at a time (fixes touch shared files like GameScreen.tsx/socketRoutes.ts). Discovery and verification agents can run in parallel.
-- If something needs the user (credentials, store config, a product decision such as game rules), mark the issue `blocked` with the question in `notes` and move on.
+- Decide technical and product trade-offs yourself with your recommended option (record them as resolved "Decidido por Claude" cards in the dashboard). Only ask the user — via a `pending` card, then move on — for things that are irreversible, costly, outward-facing (deploys, store submissions, pushing) or that touch their machine/accounts/credentials.
 
 ## One iteration
 

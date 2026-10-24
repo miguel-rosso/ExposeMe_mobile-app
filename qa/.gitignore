@@ -1,5 +1,5 @@
 # PUBLIC REPO: everything below stays local. See "Repositorio público" in CLAUDE.md.
-node_modules/
+node_modules
 runs/
 # Backlog and dashboard exports describe unfixed vulnerabilities and exploits
 backlog.json

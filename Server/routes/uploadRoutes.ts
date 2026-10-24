@@ -4,6 +4,26 @@ import { upload } from "../middlewares/upload";
 
 const router = express.Router();
 
+// ── Invite page helpers ──
+const ROOM_CODE_RE = /^\d{6}$/;
+
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+// JSON string literal safe to embed inside an inline <script>
+const toScriptString = (value: string) =>
+  JSON.stringify(value)
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/&/g, "\\u0026")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+
 router.post("/upload", upload.single("image"), (req, res, next) => {
   UploadRouter(req, res).catch(next);
 });
@@ -14,8 +34,12 @@ router.get("/", (_req, res) => {
 
 router.get("/join/:code", (req, res) => {
   const code = req.params.code;
+  if (!ROOM_CODE_RE.test(code)) {
+    res.status(400).type("text/plain").send("Invalid game code");
+    return;
+  }
   const scheme = "myapp";
-  const deepLink = `${scheme}://screens/WaitingRoom?code=${code}`;
+  const deepLink = `${scheme}://screens/WaitingRoom?code=${encodeURIComponent(code)}`;
 
   // Mobile browsers will try the deep link; fallback shows the code
   res.send(`
@@ -37,11 +61,11 @@ router.get("/join/:code", (req, res) => {
       <div class="card">
         <h1>ExposeMe</h1>
         <p>You've been invited to a game!</p>
-        <div class="code">${code}</div>
-        <a class="btn" href="${deepLink}">Open in App</a>
+        <div class="code">${escapeHtml(code)}</div>
+        <a class="btn" href="${escapeHtml(deepLink)}">Open in App</a>
         <p class="sub">If the app doesn't open, enter the code manually.</p>
       </div>
-      <script>window.location.href = "${deepLink}";</script>
+      <script>window.location.href = ${toScriptString(deepLink)};</script>
     </body>
     </html>
   `);

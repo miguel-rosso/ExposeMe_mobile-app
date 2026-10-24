@@ -220,6 +220,31 @@
     </details>
   </section>
 
+  <section class="qa-card" id="issues">
+    <h2>Incidencias</h2>
+    <p class="qa-hint">Encontradas por el auditor, el revisor de seguridad, los bots y las partidas en dispositivos.</p>
+    <div class="qa-tools">
+      <input id="issue-search" type="search" placeholder="Buscar incidencias" aria-label="Buscar incidencias">
+      <button class="qa-chip" data-filter="active" aria-pressed="true">Abiertas</button>
+      <button class="qa-chip" data-filter="done" aria-pressed="false">Resueltas</button>
+      <button class="qa-chip" data-filter="all" aria-pressed="false">Todas</button>
+      <span id="issue-extra" class="qa-tools"></span>
+    </div>
+    <div class="qa-tbl">
+      <table id="issues-table" data-source="issues" data-row-key="id">
+        <thead><tr>
+          <th data-field="id"><button data-sort="id">ID</button></th>
+          <th data-field="title"><button data-sort="title">Incidencia</button></th>
+          <th data-field="severity_es"><button data-sort="severity_rank">Severidad</button></th>
+          <th data-field="status_es"><button data-sort="status_es">Estado</button></th>
+          <th data-field="type_es" class="hide-narrow"><button data-sort="type_es">Tipo</button></th>
+          <th data-field="evidence" class="hide-narrow">Dónde</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
   <section id="estado">
     <div class="qa-sec-head">
       <h2>Estado del juego</h2>
@@ -248,31 +273,6 @@
       <p class="qa-hint">Diferencia en ms entre jugadores al recibir la misma fase. Cuanto más baja, mejor.</p>
       <div class="qa-chart" id="chart-skew" data-source="runs"></div>
       <div class="qa-legend" id="legend-skew" data-source="runs"></div>
-    </div>
-  </section>
-
-  <section class="qa-card" id="issues">
-    <h2>Incidencias</h2>
-    <p class="qa-hint">Encontradas por el auditor, el revisor de seguridad, los bots y las partidas en dispositivos.</p>
-    <div class="qa-tools">
-      <input id="issue-search" type="search" placeholder="Buscar incidencias" aria-label="Buscar incidencias">
-      <button class="qa-chip" data-filter="active" aria-pressed="true">Abiertas</button>
-      <button class="qa-chip" data-filter="done" aria-pressed="false">Resueltas</button>
-      <button class="qa-chip" data-filter="all" aria-pressed="false">Todas</button>
-      <span id="issue-extra" class="qa-tools"></span>
-    </div>
-    <div class="qa-tbl">
-      <table id="issues-table" data-source="issues" data-row-key="id">
-        <thead><tr>
-          <th data-field="id"><button data-sort="id">ID</button></th>
-          <th data-field="title"><button data-sort="title">Incidencia</button></th>
-          <th data-field="severity_es"><button data-sort="severity_rank">Severidad</button></th>
-          <th data-field="status_es"><button data-sort="status_es">Estado</button></th>
-          <th data-field="type_es" class="hide-narrow"><button data-sort="type_es">Tipo</button></th>
-          <th data-field="evidence" class="hide-narrow">Dónde</th>
-        </tr></thead>
-        <tbody></tbody>
-      </table>
     </div>
   </section>
 

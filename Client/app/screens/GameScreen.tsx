@@ -15,6 +15,7 @@ import WinnerModal from "@/app/components/modals/WinnerModal";
 import EmojiReaction from "@/app/components/IngameComunication/EmojiReaction";
 import EmojisButton from "@/app/components/IngameComunication/EmojisButtons";
 import { useI18n } from "../i18n";
+import { applyRoundStart, RoundStartData } from "../utils/roundStart";
 
 const { SERVER_URL } = getEnvVars();
 
@@ -145,20 +146,12 @@ const GameScreen = () => {
     });
 
     // Atomic: new round — photo + answer timer
-    socket.on("round-start", (data: { photo: string; owner: string; round: number; duration: number }) => {
+    socket.on("round-start", (data: RoundStartData) => {
       console.log(`[GAME] round-start: round=${data.round}, owner=${data.owner}`);
-      setPhoto(`${SERVER_URL}${data.photo}`);
-      setPhotoOwner(data.owner);
-      setRound(data.round);
-      setPhase("answering");
-      setPhaseDuration(data.duration);
-      setPhaseKey((k) => k + 1);
-      setCorrectAnswer("");
-      setScores(null);
-      setMySelection("");
-      setAnswerSent(false);
-      setGameHeld(false);
-      setPressing(false);
+      applyRoundStart(data, SERVER_URL, {
+        setPhoto, setPhotoOwner, setRound, setPhase, setPhaseDuration, setPhaseKey,
+        setCorrectAnswer, setScores, setMySelection, setGameHeld, setPressing,
+      });
     });
 
     // Atomic: answer revealed — submit answer NOW using ref (always current)

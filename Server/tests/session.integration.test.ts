@@ -380,16 +380,16 @@ describe("photo-sent", () => {
     const other = ownerName === "alice" ? bob2 : alice;
 
     const quiet = silent(alice, "round-start", 500);
-    other.emit("photo-sent", { photo: "/temp/1700000000000-photo.jpg" });
-    bob.emit("photo-sent", { photo: "/temp/1700000000000-photo.jpg" }); // replaced socket
-    for (const photo of ["https://example.invalid/x.jpg", "/temp/../app.ts", "/temp/1-a/b.jpg", "/temp/", 42, "/temp/1-" + "a".repeat(2050)]) {
+    other.emit("photo-sent", { photo: "/temp/0123456789abcdef0123456789abcdef.jpg" });
+    bob.emit("photo-sent", { photo: "/temp/0123456789abcdef0123456789abcdef.jpg" }); // replaced socket
+    for (const photo of ["https://example.invalid/x.jpg", "/temp/../app.ts", "/temp/1-a/b.jpg", "/temp/1700000000000-photo.jpg", "/temp/0123456789abcdef0123456789abcdef.gif", "/temp/", 42, "/temp/1-" + "a".repeat(2050)]) {
       owner.emit("photo-sent", { photo });
     }
     expect(await quiet).toBe(true);
 
     const start = once<{ owner: string; photo: string }>(alice, "round-start");
-    owner.emit("photo-sent", { photo: "/temp/1700000000000-photo.jpg" });
-    expect(await start).toMatchObject({ owner: ownerName, photo: "/temp/1700000000000-photo.jpg" });
+    owner.emit("photo-sent", { photo: "/temp/0123456789abcdef0123456789abcdef.jpg" });
+    expect(await start).toMatchObject({ owner: ownerName, photo: "/temp/0123456789abcdef0123456789abcdef.jpg" });
 
     // answer from the replaced socket is ignored; alice's counts
     bob.emit("submit-answer", { guess: ownerName });

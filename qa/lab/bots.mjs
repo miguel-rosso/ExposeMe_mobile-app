@@ -42,6 +42,7 @@ async function uploadPhoto(label) {
   const form = new FormData();
   form.append("image", blob, `${label}.jpg`);
   const res = await fetch(`${SERVER}/upload`, { method: "POST", body: form });
+  if (res.status === 429) throw Object.assign(new Error("upload 429 rate-limited (raise UPLOAD_RATE_MAX on the server)"), { rateLimited: true });
   if (!res.ok) throw new Error(`upload ${res.status}`);
   return { url: (await res.json()).url, ms: now() - t0 };
 }
@@ -52,6 +53,7 @@ function runRoom(roomIdx, fixedCode) {
     const events = []; // {bot, ev, round, t, payload}
     const errors = [];
     const uploads = [];
+    let rateLimited = 0; // uploads refused with 429 (server rate limit, not a game bug)
     let code = fixedCode || null;
     let finished = 0;
     let started = false;
@@ -60,7 +62,7 @@ function runRoom(roomIdx, fixedCode) {
     const done = (reason) => {
       clearTimeout(timer);
       bots.forEach((b) => b.socket.disconnect());
-      resolve({ code, events, errors, uploads, reason, players: bots.map((b) => b.name) });
+      resolve({ code, events, errors, uploads, rateLimited, reason, players: bots.map((b) => b.name) });
     };
     const timer = setTimeout(() => { errors.push(`timeout after ${TIMEOUT_S}s`); done("timeout"); }, TIMEOUT_S * 1000);
 
@@ -108,7 +110,10 @@ function runRoom(roomIdx, fixedCode) {
           const up = await uploadPhoto(name);
           uploads.push(up.ms);
           socket.emit("photo-sent", { photo: up.url });
-        } catch (e) { errors.push(`${name} upload: ${e.message}`); }
+        } catch (e) {
+          if (e.rateLimited) rateLimited++;
+          errors.push(`${name} upload: ${e.message}`);
+        }
       });
       socket.on("round-start", (d) => {
         rec("round-start", d.round, { owner: d.owner, photo: d.photo, duration: d.duration });
@@ -187,6 +192,7 @@ function analyse(r) {
     skew_ms: { p50: pct(skews, 50)?.toFixed(1), p95: pct(skews, 95)?.toFixed(1), max: skews.length ? Math.max(...skews).toFixed(1) : null },
     answer_phase_overrun_ms: { p50: pct(phaseGaps, 50)?.toFixed(1), max: phaseGaps.length ? Math.max(...phaseGaps).toFixed(1) : null },
     upload_ms: { p50: pct(r.uploads, 50)?.toFixed(0), max: r.uploads.length ? Math.max(...r.uploads).toFixed(0) : null },
+    uploads_rate_limited: r.rateLimited,
     missed_events: missed, // phase events a player never received (e.g. after a reconnect) — no resync
     consistency_errors: consistency,
     errors: r.errors,
@@ -203,6 +209,7 @@ const summary = {
   duration_s: Math.round((Date.now() - t0) / 1000),
   pass: rooms.every((r) => r.reason === "game-over" && r.consistency_errors.length === 0 && r.errors.length === 0),
   worst_skew_ms: Math.max(...rooms.map((r) => Number(r.skew_ms.max || 0))),
+  uploads_rate_limited: rooms.reduce((n, r) => n + r.uploads_rate_limited, 0), // >0: server limit too low for this load, not a game bug
   rooms_detail: rooms,
 };
 console.log(JSON.stringify(summary, null, 2));

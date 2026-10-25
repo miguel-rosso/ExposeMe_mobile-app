@@ -18,8 +18,8 @@ const MAX_USERNAME_LENGTH = 20;
 const MAX_CHAT_LENGTH = 100;
 const MAX_EMOJI_LENGTH = 16;
 const MAX_PHOTO_URL_LENGTH = 2048;
-// Paths returned by POST /upload: `/temp/${Date.now()}-${originalname}` (see middlewares/upload.ts)
-const UPLOAD_PATH_RE = /^\/temp\/\d+-[A-Za-z0-9._-]+$/;
+// Paths returned by POST /upload: `/temp/<32 random hex>.<jpg|png|webp>` (see controllers/UploadController.ts)
+const UPLOAD_PATH_RE = /^\/temp\/[0-9a-f]{32}\.(?:jpg|png|webp)$/;
 
 function isUploadPath(value: unknown): value is string {
   return typeof value === "string" && value.length <= MAX_PHOTO_URL_LENGTH && UPLOAD_PATH_RE.test(value);

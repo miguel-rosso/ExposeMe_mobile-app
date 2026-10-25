@@ -114,7 +114,7 @@ All game events are **atomic** — each contains everything the client needs.
 | `set-rounds` | `{ rounds }` (10/15/20) | Host only, lobby only |
 | `start-game` | - | Host only |
 | `im-ready` | - | Player ready to start (session player; payload ignored) |
-| `photo-sent` | `{ photo }` | Photo uploaded; only from the current owner, `photo` must be a `/upload` path (`/temp/<digits>-<name>`) |
+| `photo-sent` | `{ photo }` | Photo uploaded; only from the current owner, `photo` must be a `/upload` path (`/temp/<32 hex>.jpg\|png\|webp`) |
 | `submit-answer` | `{ guess }` | Player's answer |
 | `hold-start` | - | Photo owner pressed hold |
 | `hold-end` | - | Photo owner released hold |
@@ -123,3 +123,21 @@ All game events are **atomic** — each contains everything the client needs.
 | `plant-photo` / `mark-player-planted` | `{ photoUrl }` / - | Applies to the session player; `photoUrl` must be a `/upload` path |
 
 Payload `gameCode`/`username` fields are ignored for all of the above; identity comes from the session.
+
+## Photo upload (HTTP)
+
+`POST /upload` (multipart, one file in field `image`, ≤10MB) → `200 { url: "/temp/<32 random hex>.<jpg|png|webp>" }`, served from `/temp` for 30 min.
+- Accepted formats: JPEG, PNG, WebP, detected from the file contents (the file name and declared MIME type are ignored). The app is expected to send JPEG; HEIC and anything else is refused.
+- The stored image is re-encoded: orientation applied, scaled down to fit 2048×2048, all metadata (EXIF incl. GPS, XMP, ICC) removed, same format as the input.
+- Images are processed one at a time with a short bounded queue (`controllers/sanitizeImage.ts`).
+- Errors are JSON `{ error }`:
+
+| Status | When |
+|--------|------|
+| 400 | No file, malformed multipart, more than one file, wrong field, undecodable image |
+| 413 | File over 10MB, or image over 24 megapixels |
+| 415 | Not JPEG/PNG/WebP (e.g. HEIC) |
+| 429 | Per-IP rate limit (`Retry-After`) — default 60 uploads/min, env `UPLOAD_RATE_MAX` / `UPLOAD_RATE_WINDOW_MS`; `qa/lab/lab.sh server` raises it for bot load tests |
+| 503 | Server busy processing other uploads (`Retry-After`) |
+
+Behind a reverse proxy, env `TRUST_PROXY` is the number of proxy hops used to read the client IP (default 1 when `RENDER` is set, otherwise 0). Env `UPLOAD_DIR` overrides the storage directory (default `Server/temp`).

@@ -1,6 +1,7 @@
 import express from "express";
 import { UploadRouter } from "../controllers/UploadController";
-import { upload } from "../middlewares/upload";
+import { singleImage } from "../middlewares/upload";
+import { uploadRateLimit } from "../middlewares/rateLimit";
 
 const router = express.Router();
 
@@ -24,7 +25,7 @@ const toScriptString = (value: string) =>
     .replace(/\u2028/g, "\\u2028")
     .replace(/\u2029/g, "\\u2029");
 
-router.post("/upload", upload.single("image"), (req, res, next) => {
+router.post("/upload", uploadRateLimit, singleImage("image"), (req, res, next) => {
   UploadRouter(req, res).catch(next);
 });
 

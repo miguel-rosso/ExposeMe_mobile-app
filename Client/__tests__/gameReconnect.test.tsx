@@ -74,7 +74,7 @@ const makeSetters = () => {
   const s = {
     setPhoto: jest.fn(), setPhotoOwner: jest.fn(), setRound: jest.fn(), setPhase: jest.fn(),
     setPhaseDuration: jest.fn(), setPhaseKey: jest.fn(), setCorrectAnswer: jest.fn(), setScores: jest.fn(),
-    setMySelection: jest.fn(), setGameHeld: jest.fn(), setPressing: jest.fn(), setPauseDuration: jest.fn(),
+    setMySelection: jest.fn(), setGameHeld: jest.fn(), setPressing: jest.fn(), setPause: jest.fn(),
   };
   return s as typeof s & GameStateSetters;
 };
@@ -88,7 +88,7 @@ describe("applyGameState", () => {
     expect(s.setPhotoOwner).toHaveBeenCalledWith("alice");
     expect(s.setPhase).toHaveBeenCalledWith("answering");
     expect(s.setPhaseDuration).toHaveBeenCalledWith(4200);
-    expect(s.setPauseDuration).toHaveBeenCalledWith(null);
+    expect(s.setPause).toHaveBeenCalledWith(null);
     expect(s.setMySelection).not.toHaveBeenCalled();
   });
 
@@ -109,8 +109,9 @@ describe("applyGameState", () => {
 
   it("shows the server's pause countdown", () => {
     const s = makeSetters();
-    applyGameState(snapshot({ pause: { duration: 299_000, waitingFor: [] } }), "", { round: 3, owner: "alice" }, s);
-    expect(s.setPauseDuration).toHaveBeenCalledWith(299_000);
+    const pause = { duration: 299_000, waitingFor: [], pause: 2, maxPauses: 3 };
+    applyGameState(snapshot({ pause }), "", { round: 3, owner: "alice" }, s);
+    expect(s.setPause).toHaveBeenCalledWith(pause);
   });
 
   it("waiting for a photo: back to the ready screen; ready phase: send im-ready again", () => {
@@ -256,20 +257,24 @@ describe("GameScreen reconnect handling", () => {
     await act(async () => { mockSocket.connected = true; mockSocket.fire("connect"); });
     await flush();
     expect(mockSocket.emitted).toContainEqual(["join-create-game", { gameCode: "123456", username: "bob", rejoinToken: "tok-123" }]);
-    act(() => mockSocket.fire("game-state", snapshot({ pause: { duration: 299_000, waitingFor: [] } })));
+    act(() => mockSocket.fire("game-state", snapshot({ pause: { duration: 299_000, waitingFor: [], pause: 1, maxPauses: 3 } })));
     expect(has(r.root, TEST_IDS.reconnectingBanner)).toBe(false);
     expect(has(r.root, TEST_IDS.pausedModal)).toBe(true);
     const countdown = () => r.root.find((n) => n.props.testID === TEST_IDS.pausedCountdown).props.children;
     expect(countdown()).toBe("4:59");
+    const counter = () => r.root.find((n) => n.props.testID === TEST_IDS.pausedCounter).props.children;
+    expect(counter()).toBe("Pause 1 of 3");
     act(() => { jest.advanceTimersByTime(60_000); });
     expect(countdown()).toBe("3:59");
 
     act(() => mockSocket.fire("game-resumed", { phase: "answering", duration: 4200 }));
     expect(has(r.root, TEST_IDS.pausedModal)).toBe(false);
 
-    // A later pause of the same length restarts the countdown
-    act(() => mockSocket.fire("game-paused", { duration: 300_000, waitingFor: ["carol"] }));
+    // A later pause gets a full countdown again; the last one warns that the game will end
+    act(() => mockSocket.fire("game-paused", { duration: 300_000, waitingFor: ["carol"], pause: 3, maxPauses: 3 }));
     expect(countdown()).toBe("5:00");
+    expect(counter()).toBe("Pause 3 of 3");
+    expect(has(r.root, TEST_IDS.pausedLastWarning)).toBe(true);
     expect(mockReplace).not.toHaveBeenCalled();
     act(() => r.unmount());
   });

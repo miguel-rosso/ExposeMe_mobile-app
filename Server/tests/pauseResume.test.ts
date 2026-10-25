@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GameEngine, PAUSE_MIN_DURATION, PAUSE_TIMEOUT } from "../managers/GameEngine";
+import { GameEngine, MAX_PAUSES, PAUSE_MIN_DURATION, PAUSE_TIMEOUT } from "../managers/GameEngine";
 import { RoomManager } from "../managers/RoomManager";
 import { GameStateSnapshot, Player, Room } from "../models/interfaces";
 import { CapturedEmit, createFakeIo } from "./helpers";
@@ -82,7 +82,7 @@ describe("pause with fewer than 2 connected players", () => {
 
     drop(other);
     expect(room.paused).toBe(true);
-    expect(last("game-paused")).toMatchObject({ target: room.gameCode, args: [{ duration: PAUSE_TIMEOUT, waitingFor: [other] }] });
+    expect(last("game-paused")).toMatchObject({ target: room.gameCode, args: [{ duration: PAUSE_TIMEOUT, waitingFor: [other], pause: 1, maxPauses: MAX_PAUSES }] });
 
     // Nothing advances while paused, however long it takes (within the countdown)
     vi.advanceTimersByTime(PAUSE_TIMEOUT - 1_000);
@@ -269,25 +269,67 @@ describe("rejoin without a pause (3+ players)", () => {
 });
 
 describe("pause abuse and edge cases (EXP-006 security review)", () => {
-  it("the pause budget is per game: a second pause only gets what is left, then game over", () => {
+  it("every pause gets a full 5:00 countdown (no shared budget), up to MAX_PAUSES = 3; a 4th pause ends the game", () => {
+    expect(MAX_PAUSES).toBe(3);
     room = startedRoom(["alice", "bob"]);
     engine.onPhotoReceived(room, PHOTO, room.currentPlayer!.username);
     const other = room.currentPlayer!.username === "alice" ? "bob" : "alice";
-    drop(other);
-    vi.advanceTimersByTime(4 * 60_000);
-    rejoin(other);
-    expect(room.paused).toBe(false);
+    for (let n = 1; n <= MAX_PAUSES; n++) {
+      drop(other);
+      expect(last("game-paused")!.args[0]).toEqual({ duration: PAUSE_TIMEOUT, waitingFor: [other], pause: n, maxPauses: MAX_PAUSES });
+      // Nearly the whole countdown: the next pause still gets the full 5:00
+      vi.advanceTimersByTime(PAUSE_TIMEOUT - 1_000);
+      expect(events("game-over")).toHaveLength(0);
+      rejoin(other);
+      expect(room.paused).toBe(false);
+    }
+    expect(events("game-paused")).toHaveLength(MAX_PAUSES);
 
+    drop(other); // a 4th pause would be needed: game over at once
+    expect(events("game-paused")).toHaveLength(MAX_PAUSES);
+    expect(events("game-over")).toHaveLength(1);
+    expect(room.started).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("the last allowed pause still runs its full countdown, then game over", () => {
+    room = startedRoom(["alice", "bob"]);
+    engine.onPhotoReceived(room, PHOTO, room.currentPlayer!.username);
+    const other = room.currentPlayer!.username === "alice" ? "bob" : "alice";
+    for (let n = 1; n < MAX_PAUSES; n++) {
+      drop(other);
+      vi.advanceTimersByTime(PAUSE_MIN_DURATION);
+      rejoin(other);
+    }
     drop(other);
-    expect(last("game-paused")!.args[0]).toEqual({ duration: 60_000, waitingFor: [other] });
-    vi.advanceTimersByTime(60_000 - 1);
+    expect(last("game-paused")!.args[0]).toMatchObject({ duration: PAUSE_TIMEOUT, pause: MAX_PAUSES, maxPauses: MAX_PAUSES });
+    vi.advanceTimersByTime(PAUSE_TIMEOUT - 1);
     expect(events("game-over")).toHaveLength(0);
     vi.advanceTimersByTime(1);
     expect(events("game-over")).toHaveLength(1);
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("a flapping connection (drop/rejoin every 500 ms) can't freeze the game: pauses last >= 2 s and use up the budget", () => {
+  it("play again resets the pause count", () => {
+    room = startedRoom(["alice", "bob"]);
+    const other = room.currentPlayer!.username === "alice" ? "bob" : "alice";
+    for (let n = 1; n <= MAX_PAUSES; n++) {
+      drop(other);
+      vi.advanceTimersByTime(PAUSE_MIN_DURATION);
+      rejoin(other);
+    }
+    drop(other);
+    expect(room.started).toBe(false);
+    rejoin(other);
+    emits.length = 0;
+    engine.startGame(room);
+    room.players.forEach((p) => engine.markReady(room, p));
+    vi.advanceTimersByTime(GAME_START_DELAY);
+    drop(other);
+    expect(last("game-paused")!.args[0]).toMatchObject({ duration: PAUSE_TIMEOUT, pause: 1 });
+  });
+
+  it("a flapping connection (drop/rejoin every 500 ms) can't freeze the game: pauses last >= 2 s and the pause cap ends it", () => {
     room = startedRoom(["alice", "bob"]);
     engine.onPhotoReceived(room, PHOTO, room.currentPlayer!.username);
     const other = room.currentPlayer!.username === "alice" ? "bob" : "alice";
@@ -297,17 +339,9 @@ describe("pause abuse and edge cases (EXP-006 security review)", () => {
       rejoin(other);
       vi.advanceTimersByTime(500);
     }
-    // 20 s of flapping: never more than one pause per 2 s
-    expect(events("game-paused").length).toBeLessThanOrEqual(10);
-    expect(events("game-resumed").length).toBeLessThanOrEqual(10);
-
-    // Keep flapping: the cumulative pause budget runs out and the game ends instead of freezing forever
-    for (let i = 0; i < 1_000 && room.started; i++) {
-      drop(other);
-      vi.advanceTimersByTime(500);
-      if (room.started) rejoin(other);
-      vi.advanceTimersByTime(500);
-    }
+    // Never more than one pause per 2 s, never more than MAX_PAUSES: the 4th drop ends the game
+    expect(events("game-paused")).toHaveLength(MAX_PAUSES);
+    expect(events("game-resumed")).toHaveLength(MAX_PAUSES);
     expect(room.started).toBe(false);
     expect(events("game-over")).toHaveLength(1);
   });
@@ -321,7 +355,7 @@ describe("pause abuse and edge cases (EXP-006 security review)", () => {
     const p = rejoin(other);
     expect(room.paused).toBe(true);
     expect(events("game-resumed")).toHaveLength(0);
-    expect(snapshotFor(p.socketId).pause).toMatchObject({ waitingFor: [] });
+    expect(snapshotFor(p.socketId).pause).toEqual({ duration: PAUSE_TIMEOUT - 500, waitingFor: [], pause: 1, maxPauses: MAX_PAUSES });
     vi.advanceTimersByTime(PAUSE_MIN_DURATION - 500);
     expect(room.paused).toBe(false);
     expect(events("game-resumed")).toHaveLength(1);
@@ -352,7 +386,8 @@ describe("pause abuse and edge cases (EXP-006 security review)", () => {
     rm.removePlayer(room.gameCode, a);
     engine.onConnectionChange(room);
     expect(events("game-paused")).toHaveLength(2);
-    expect(last("game-paused")!.args[0]).toEqual({ duration: PAUSE_TIMEOUT - 30_000, waitingFor: [b] });
+    // Same pause (not a new one): its countdown keeps running
+    expect(last("game-paused")!.args[0]).toEqual({ duration: PAUSE_TIMEOUT - 30_000, waitingFor: [b], pause: 1, maxPauses: MAX_PAUSES });
 
     rm.removePlayer(room.gameCode, b);
     engine.onConnectionChange(room);

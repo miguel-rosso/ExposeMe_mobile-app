@@ -58,7 +58,11 @@ const GameScreen = () => {
 
   // ── Pause (fewer than 2 players connected) ───────────
   const [pauseEndsAt, setPauseEndsAt] = useState<number | null>(null);
-  const setPauseDuration = (ms: number | null) => setPauseEndsAt(ms === null ? null : Date.now() + ms);
+  const [pauseCount, setPauseCount] = useState({ pause: 0, maxPauses: 0 });
+  const setPause = (p: GamePausedData | null) => {
+    setPauseEndsAt(p === null ? null : Date.now() + p.duration);
+    if (p) setPauseCount({ pause: p.pause, maxPauses: p.maxPauses });
+  };
 
   // ── Hold state ───────────────────────────────────────
   const [gameHeld, setGameHeld] = useState(false);  // server says game paused
@@ -209,8 +213,8 @@ const GameScreen = () => {
 
     // Fewer than 2 players connected: the server froze the game and shows its countdown
     socket.on("game-paused", (data: GamePausedData) => {
-      console.log(`[GAME] game-paused: ${data.duration}ms, waiting for ${data.waitingFor.join(", ")}`);
-      setPauseDuration(data.duration);
+      console.log(`[GAME] game-paused ${data.pause}/${data.maxPauses}: ${data.duration}ms, waiting for ${data.waitingFor.join(", ")}`);
+      setPause(data);
       setPressing(false);
       setGameHeld(false);
     });
@@ -228,7 +232,7 @@ const GameScreen = () => {
       setPlayersProvider(snap.players);
       const result = applyGameState(snap, SERVER_URL, roundRef.current, {
         setPhoto, setPhotoOwner, setRound, setPhase, setPhaseDuration, setPhaseKey,
-        setCorrectAnswer, setScores, setMySelection, setGameHeld, setPressing, setPauseDuration,
+        setCorrectAnswer, setScores, setMySelection, setGameHeld, setPressing, setPause,
       });
       if (result.gameOver) showGameOver(snap.scores);
       if (result.sendReady) socket.emit("im-ready");
@@ -326,7 +330,7 @@ const GameScreen = () => {
       <StatusBar hidden />
       <WinnerModal visible={showWinner} winner={winner} onAnimationEnd={handleWinnerEnd} />
       <FinalScoreModal visible={showFinalScore} finalScore={finalScore || []} />
-      <PausedModal endsAt={finalScore ? null : pauseEndsAt} />
+      <PausedModal endsAt={finalScore ? null : pauseEndsAt} pause={pauseCount.pause} maxPauses={pauseCount.maxPauses} />
 
       {/* Subtle indicator while socket.io reconnects; the game screen stays */}
       {!connected && !finalScore && (

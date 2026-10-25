@@ -48,6 +48,8 @@ export default {
   reconnecting: "Reconnecting…",
   gamePaused: "Game paused",
   waitingPlayersReturn: "Waiting for players to come back…",
+  pauseOf: "Pause {pause} of {max}",
+  lastPauseWarning: "Last pause: if nobody comes back, the game will end.",
 
   // ScoreModal
   roundOf: "Round {round} of {total}",

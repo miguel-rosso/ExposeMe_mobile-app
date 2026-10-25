@@ -11,6 +11,11 @@ appId: com.socketNull.ExposeMe
     timeout: 120000
 - assertVisible:
     id: "paused-countdown"
+# EXP-084 / DEC-012: "Pause 1 of 3" (first pause of the game, no last-pause warning yet)
+- assertVisible:
+    id: "paused-counter"
+- assertNotVisible:
+    id: "paused-last-warning"
 - takeScreenshot: paused-${USERNAME}
 - extendedWaitUntil:
     notVisible:

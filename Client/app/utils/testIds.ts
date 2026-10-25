@@ -28,6 +28,8 @@ export const TEST_IDS = {
   reconnectingBanner: "reconnecting-banner",
   pausedModal: "paused-modal",
   pausedCountdown: "paused-countdown",
+  pausedCounter: "paused-counter",
+  pausedLastWarning: "paused-last-warning",
   // ── Modals ──
   alertModal: "alert-modal",
   alertModalConfirm: "alert-modal-confirm",

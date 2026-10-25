@@ -53,10 +53,15 @@ export interface RoomOfGameResponse {
 
 export type ServerPhase = "waiting-photo" | "answering" | "reveal" | "scores";
 
-/** `game-paused`: fewer than 2 players connected; the game ends when `duration` (ms) runs out */
+/**
+ * `game-paused`: fewer than 2 players connected; the game ends when `duration` (ms) runs out.
+ * `pause` is this pause's number (1..maxPauses); when another pause would be needed the game ends.
+ */
 export interface GamePausedData {
   duration: number;
   waitingFor: string[];
+  pause: number;
+  maxPauses: number;
 }
 
 /** `game-resumed`: the paused phase continues with `duration` ms */

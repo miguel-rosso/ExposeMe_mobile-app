@@ -1,4 +1,4 @@
-import { GameStateSnapshot, ScoreRound } from "../models/interfaces";
+import { GamePausedData, GameStateSnapshot, ScoreRound } from "../models/interfaces";
 
 type Phase = "answering" | "reveal" | "scores" | null;
 
@@ -14,8 +14,8 @@ export interface GameStateSetters {
   setMySelection: (v: string) => void;
   setGameHeld: (v: boolean) => void;
   setPressing: (v: boolean) => void;
-  /** Pause countdown in ms (from the server), or null when the game is not paused */
-  setPauseDuration: (v: number | null) => void;
+  /** The server's pause (countdown in ms, pause N of M), or null when the game is not paused */
+  setPause: (v: GamePausedData | null) => void;
 }
 
 export interface GameStateResult {
@@ -40,11 +40,11 @@ export const applyGameState = (
   const result: GameStateResult = { gameOver: false, sendReady: false, submitGuess: false };
   s.setPressing(false);
   if (!snap.started) {
-    s.setPauseDuration(null);
+    s.setPause(null);
     s.setGameHeld(false);
     return { ...result, gameOver: true };
   }
-  s.setPauseDuration(snap.pause ? snap.pause.duration : null);
+  s.setPause(snap.pause);
   s.setGameHeld(snap.held);
 
   const inRound = snap.phase === "answering" || snap.phase === "reveal" || snap.phase === "scores";

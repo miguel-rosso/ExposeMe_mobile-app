@@ -97,7 +97,7 @@ where it is ignored). The snapshot is taken after the rejoin's effect on a pause
 - **`game-state`** = `{ started, phase, round, totalRounds, owner, photo, correctAnswer, duration, held, pause,
   scores, players }`. `duration` is the remaining time of the current phase (frozen while paused/held). `owner`
   and `photo` are only set in `answering`/`reveal`/`scores` (the owner stays secret while waiting for a photo);
-  `correctAnswer` only in `reveal`/`scores`. `pause` is `{ duration, waitingFor }` while paused, else `null`.
+  `correctAnswer` only in `reveal`/`scores`. `pause` is `{ duration, waitingFor, pause, maxPauses }` (same as `game-paused`) while paused, else `null`.
   `started: false` means the game ended while the player was away (`scores` are the final scores).
   Until `round-scores` (phases `waiting-photo`/`answering`/`reveal`), `scores` and `players` hide this round's
   answers: `lastGuess: ""`, `lastAnswerCorrect: false` and `points` without the point a correct answer earned.
@@ -108,19 +108,22 @@ where it is ignored). The snapshot is taken after the rejoin's effect on a pause
 - **Pause**: mid-game (after the ready phase), when fewer than 2 players are connected (on a disconnect,
   leave or removal, or at a round boundary) and someone who dropped could still return, the server
   **pauses**: the phase timer is frozen (an active hold ends with `hold-end`; no hold while paused), photos
-  sent while paused are ignored, and `game-paused { duration, waitingFor }` goes to the room. Every
-  connected client shows the countdown from that `duration`.
-- **Pause budget**: `PAUSE_TIMEOUT` (5 min) is the **total** pause time per game, not per pause: `duration` is
-  what is left of it (300000 the first time). A pause with no budget left ends the game.
+  sent while paused are ignored, and `game-paused { duration, waitingFor, pause, maxPauses }` goes to the room.
+  Every connected client shows the countdown from that `duration` and "pause N of M" (`pause` of `maxPauses`;
+  on the last one, a warning that the game ends if nobody returns).
+- **Pause limit**: every pause gets a full `PAUSE_TIMEOUT` (5 min) countdown (`duration` 300000), but there are
+  at most `MAX_PAUSES` (**3**) pauses per game (`pause` is 1, 2, 3). When a 4th pause would be needed the game
+  ends at once (`game-over`, no `game-paused`). This cap is also what stops a flapping connection from freezing
+  a game indefinitely. "Play again" starts with no pauses used.
   If the players who are gone left for good (nobody disconnected remains), the game ends right away instead,
   also while already paused. While paused, when the list of awaited players changes (someone awaited leaves
-  or is removed) `game-paused` is sent again with the new `waitingFor` and the remaining `duration`.
+  or is removed) `game-paused` is sent again with the new `waitingFor` and the remaining `duration` (same pause, same `pause` number).
 - **Resume**: as soon as 2 players are connected again (a rejoin), but never before the pause lasted
   **2 s** (`PAUSE_MIN_DURATION`; an earlier rejoin schedules the resume, a new drop cancels it), the server sends
   `game-resumed { phase, duration }` and the frozen phase continues with its remaining time (at least 1.5 s;
   at least 5 s when waiting for a photo, and the owner gets `your-turn` again). A pause at a round boundary
   resumes by starting that round (new owner, same round number). Scores and round numbers are untouched.
-- **Expiry**: when the pause budget runs out, `game-over`.
+- **Expiry**: when a pause's countdown runs out, `game-over`.
 - With 2 or more players connected the game goes on without the missing ones (never picked as photo owner).
 - Disconnect detection depends on the socket.io heartbeat (`pingInterval` + `pingTimeout`), unless the client
   closes the socket itself; a player whose loss the server hasn't noticed yet is still "connected", and a
@@ -149,7 +152,7 @@ All game events are **atomic** — each contains everything the client needs.
 | `hold-start` | - | - | Pause everything visually |
 | `hold-resume` | reveal/scores | `{ phase, duration }` | Resume with remaining time |
 | `round-skipped` | - | - | Upload timed out, next player |
-| `game-paused` | any | `{ duration, waitingFor }` | Fewer than 2 connected: freeze, show countdown (pause budget left) |
+| `game-paused` | any | `{ duration, waitingFor, pause, maxPauses }` | Fewer than 2 connected: freeze, show countdown and "pause N of M" |
 | `game-resumed` | any | `{ phase, duration }` | Paused phase continues with remaining time |
 | `game-state` | any | snapshot (see "Pause and reconnect") | Only to a rejoining socket: render current phase |
 | `game-over` | - | `{ finalScores }` | Show final results |

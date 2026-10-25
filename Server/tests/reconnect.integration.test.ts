@@ -111,9 +111,9 @@ describe("reconnect mid-round", () => {
   it("2 players: the game pauses for the one left, and resumes for both when the other returns", async () => {
     const { gameCode, socks, tokens, owner } = await gameInAnsweringPhase(["dave", "erin"]);
     const away = owner === "dave" ? "erin" : "dave";
-    const pausedP = once<{ duration: number; waitingFor: string[] }>(socks[owner], "game-paused");
+    const pausedP = once<{ duration: number; waitingFor: string[]; pause: number; maxPauses: number }>(socks[owner], "game-paused");
     socks[away].disconnect();
-    expect(await pausedP).toEqual({ duration: 5 * 60_000, waitingFor: [away] });
+    expect(await pausedP).toEqual({ duration: 5 * 60_000, waitingFor: [away], pause: 1, maxPauses: 3 });
 
     // Frozen: no reveal while paused, even past the answer time
     let revealed = false;

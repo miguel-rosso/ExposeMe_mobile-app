@@ -48,6 +48,8 @@ export default {
   reconnecting: "Reconectando…",
   gamePaused: "Partida en pausa",
   waitingPlayersReturn: "Esperando a que vuelvan los jugadores…",
+  pauseOf: "Pausa {pause} de {max}",
+  lastPauseWarning: "Es la última pausa: si no vuelven, la partida terminará.",
 
   // ScoreModal
   roundOf: "Ronda {round} de {total}",

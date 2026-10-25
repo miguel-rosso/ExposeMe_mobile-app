@@ -49,8 +49,8 @@ export interface Room {
   paused: boolean;
   _pauseTimer: NodeJS.Timeout | null;
   _pauseStartedAt: number;
-  /** Pause time already spent in this game (the budget is PAUSE_TIMEOUT per game, not per pause) */
-  _pauseUsed: number;
+  /** Pauses started in this game (each gets PAUSE_TIMEOUT; at most MAX_PAUSES, then game over) */
+  _pauseCount: number;
   /** Resume scheduled for when the pause reaches its minimum length */
   _resumeTimer: NodeJS.Timeout | null;
   /** Usernames the current pause is waiting for (as last announced) */
@@ -78,7 +78,7 @@ export interface JoinCreateGameData {
   rejoinToken?: string;
 }
 
-export type SafeRoom = Omit<Room, "_timer" | "_timerCallback" | "_timerStartedAt" | "_timerDuration" | "_holdSafetyTimer" | "_pauseTimer" | "_pauseStartedAt" | "_pauseUsed" | "_resumeTimer" | "_pauseWaitingFor" | "plantedSlots" | "_consecutiveSkips" | "_hadGuests" | "players" | "currentPlayer"> & {
+export type SafeRoom = Omit<Room, "_timer" | "_timerCallback" | "_timerStartedAt" | "_timerDuration" | "_holdSafetyTimer" | "_pauseTimer" | "_pauseStartedAt" | "_pauseCount" | "_resumeTimer" | "_pauseWaitingFor" | "plantedSlots" | "_consecutiveSkips" | "_hadGuests" | "players" | "currentPlayer"> & {
   players: PublicPlayer[];
   currentPlayer: PublicPlayer | null;
 };
@@ -90,6 +90,14 @@ export interface RoomOfGameResponse {
   rounds?: number;
   /** Only in the response to the joining socket itself */
   rejoinToken?: string;
+}
+
+/** `game-paused` payload: countdown left (ms), who is awaited, and this pause's number (1..maxPauses) */
+export interface PauseInfo {
+  duration: number;
+  waitingFor: string[];
+  pause: number;
+  maxPauses: number;
 }
 
 /**
@@ -109,8 +117,8 @@ export interface GameStateSnapshot {
   correctAnswer: string | null;
   duration: number;
   held: boolean;
-  /** Remaining pause countdown and who the game is waiting for, or null when not paused */
-  pause: { duration: number; waitingFor: string[] } | null;
+  /** The pause in progress (same as the last `game-paused`), or null when not paused */
+  pause: PauseInfo | null;
   scores: ScoreRound[];
   players: PublicPlayer[];
 }

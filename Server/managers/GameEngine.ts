@@ -1,5 +1,5 @@
 import { Server } from "socket.io";
-import { GameStateSnapshot, Player, Room, ScoreRound } from "../models/interfaces";
+import { GameStateSnapshot, PauseInfo, Player, Room, ScoreRound } from "../models/interfaces";
 import { RoomManager } from "./RoomManager";
 
 const ANSWER_TIME = 8_000;
@@ -11,7 +11,8 @@ const PHOTO_WAIT_TIMEOUT = 15_000;
 const HOLD_SAFETY_TIMEOUT = 30_000;
 const HOLD_MIN_REMAINING = 1_500; // Stop allowing hold when less than this remains
 const MAX_CONSECUTIVE_SKIPS = 3; // End the game after this many photo timeouts in a row
-export const PAUSE_TIMEOUT = 5 * 60_000; // Fewer than 2 connected: total pause time per game before game over
+export const PAUSE_TIMEOUT = 5 * 60_000; // Fewer than 2 connected: countdown of each pause before game over
+export const MAX_PAUSES = 3; // Pauses per game; when another one would be needed the game ends
 export const PAUSE_MIN_DURATION = 2_000; // A pause is never shorter than this (flapping connections)
 const RESUME_MIN_REMAINING = 1_500; // A resumed phase gets at least this much time
 const PHOTO_RESUME_MIN_REMAINING = 5_000; // ...and the photo owner at least this much to (re)send the photo
@@ -28,7 +29,7 @@ export class GameEngine {
     room.currentPhoto = null;
     room.plantedPhotosShown = 0;
     room._consecutiveSkips = 0;
-    room._pauseUsed = 0;
+    room._pauseCount = 0;
     // "Play again" reuses the room: drop scores and answers from the previous game
     room.players.forEach((p) => { p.points = 0; p.lastGuess = ""; p.lastAnswerCorrect = false; });
     console.log(`[${room.gameCode}] Game started`);
@@ -172,7 +173,7 @@ export class GameEngine {
     const waitingFor = this.missingPlayers(room);
     if (waitingFor.join("\n") !== room._pauseWaitingFor.join("\n")) {
       room._pauseWaitingFor = waitingFor;
-      this.io.to(room.gameCode).emit("game-paused", { duration: this.pauseRemaining(room), waitingFor });
+      this.io.to(room.gameCode).emit("game-paused", this.pauseInfo(room));
     }
   }
 
@@ -215,7 +216,7 @@ export class GameEngine {
       correctAnswer: shown ? room.currentPlayer?.username ?? null : null,
       duration: room.started ? duration : 0,
       held: room.held,
-      pause: room.paused ? { duration: this.pauseRemaining(room), waitingFor: this.missingPlayers(room) } : null,
+      pause: room.paused ? this.pauseInfo(room) : null,
       scores,
       players,
     };
@@ -227,10 +228,9 @@ export class GameEngine {
 
   private pauseGame(room: Room): void {
     if (!room.started || room.paused) return;
-    // The pause budget is per game: repeated drops can't keep a game frozen beyond PAUSE_TIMEOUT in total
-    const budget = PAUSE_TIMEOUT - room._pauseUsed;
-    if (budget <= 0) {
-      console.log(`[${room.gameCode}] Pause budget used up — ending game`);
+    // Each pause gets the full PAUSE_TIMEOUT, but only MAX_PAUSES per game: repeated drops can't keep a game frozen
+    if (room._pauseCount >= MAX_PAUSES) {
+      console.log(`[${room.gameCode}] ${MAX_PAUSES} pauses used up — ending game`);
       this.endGame(room);
       return;
     }
@@ -243,16 +243,17 @@ export class GameEngine {
       this.pauseTimer(room);
     }
     room.paused = true;
+    room._pauseCount++;
     room._pauseStartedAt = Date.now();
     room._pauseTimer = setTimeout(() => {
       room._pauseTimer = null;
       if (!room.paused) return;
       console.log(`[${room.gameCode}] Nobody came back in time — ending game`);
       this.endGame(room);
-    }, budget);
+    }, PAUSE_TIMEOUT);
     room._pauseWaitingFor = this.missingPlayers(room);
-    console.log(`[${room.gameCode}] PAUSED "${room.phase}" (${room._timerDuration}ms left, ${budget}ms of pause left), waiting for: ${room._pauseWaitingFor.join(", ")}`);
-    this.io.to(room.gameCode).emit("game-paused", { duration: budget, waitingFor: room._pauseWaitingFor });
+    console.log(`[${room.gameCode}] PAUSED "${room.phase}" (${room._timerDuration}ms left, pause ${room._pauseCount}/${MAX_PAUSES}), waiting for: ${room._pauseWaitingFor.join(", ")}`);
+    this.io.to(room.gameCode).emit("game-paused", this.pauseInfo(room));
   }
 
   private resumeGame(room: Room): void {
@@ -264,7 +265,6 @@ export class GameEngine {
       return;
     }
     room.paused = false;
-    room._pauseUsed += Date.now() - room._pauseStartedAt;
     room._pauseWaitingFor = [];
     if (room._pauseTimer) { clearTimeout(room._pauseTimer); room._pauseTimer = null; }
     const min = room.phase === "waiting-photo" && room.currentPlayer ? PHOTO_RESUME_MIN_REMAINING : RESUME_MIN_REMAINING;
@@ -278,10 +278,14 @@ export class GameEngine {
     this.resumeTimer(room);
   }
 
-  /** What is left of this game's pause budget, counting the pause in progress. */
-  private pauseRemaining(room: Room): number {
-    const current = room.paused ? Date.now() - room._pauseStartedAt : 0;
-    return Math.max(0, PAUSE_TIMEOUT - room._pauseUsed - current);
+  /** `game-paused` payload / snapshot `pause`: countdown left of the pause in progress and which pause it is. */
+  private pauseInfo(room: Room): PauseInfo {
+    return {
+      duration: Math.max(0, PAUSE_TIMEOUT - (Date.now() - room._pauseStartedAt)),
+      waitingFor: this.missingPlayers(room),
+      pause: room._pauseCount,
+      maxPauses: MAX_PAUSES,
+    };
   }
 
   private missingPlayers(room: Room): string[] {

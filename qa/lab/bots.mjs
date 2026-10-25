@@ -12,7 +12,8 @@
 //            --drop-round R --drop-secs S [--drop-bot K]
 //                           bot K (1-based, default the last one) drops at round R's round-start and reconnects
 //                           S seconds later (rejoin + game-state snapshot). With --bots 2 the game must pause
-//                           (game-paused) and resume (game-resumed) for the other bot.
+//                           (game-paused) and resume (game-resumed) for the other bot. Each pause carries
+//                           pause N of maxPauses (3 per game, each with a full 5 min countdown; a 4th ends the game).
 //   node qa/lab/bots.mjs --bots 3 --host --drop-round 2 --drop-secs 3     # drop mid-round, game goes on
 //   node qa/lab/bots.mjs --bots 2 --host --drop-round 2 --drop-secs 8     # 2 players: pause → resume
 import { io } from "socket.io-client";
@@ -149,14 +150,17 @@ function runRoom(roomIdx, fixedCode) {
       socket.on("round-skipped", () => rec("round-skipped", bot.round));
       // Rejoin snapshot: catch up like the app does (guess in reveal, im-ready in the ready phase)
       socket.on("game-state", (d) => {
-        rec("game-state", d.round, { phase: d.phase, paused: !!d.pause, started: d.started });
+        rec("game-state", d.round, { phase: d.phase, paused: !!d.pause, pause: d.pause?.pause, maxPauses: d.pause?.maxPauses, started: d.started });
         if (!d.started) return;
         bot.players = d.players.map((p) => p.username);
         if (d.round !== bot.round) { bot.round = d.round; bot.guess = bot.players[Math.floor(Math.random() * bot.players.length)] || ""; }
         if (d.phase === "reveal") socket.emit("submit-answer", { guess: bot.guess });
         if (d.phase === null && i < N_BOTS - NO_READY) socket.emit("im-ready");
       });
-      socket.on("game-paused", (d) => rec("game-paused", bot.round, { waitingFor: d.waitingFor }));
+      socket.on("game-paused", (d) => {
+        rec("game-paused", bot.round, { waitingFor: d.waitingFor, duration: d.duration, pause: d.pause, maxPauses: d.maxPauses });
+        console.error(`[room ${roomIdx}] ${name}: game-paused ${d.pause}/${d.maxPauses} (${Math.round(d.duration / 1000)}s), waiting for ${d.waitingFor.join(", ")}`);
+      });
       socket.on("game-resumed", (d) => rec("game-resumed", bot.round, { phase: d.phase }));
       socket.on("hold-start", () => rec("hold-start", bot.round));
       socket.on("hold-resume", (d) => rec("hold-resume", bot.round, d));
@@ -220,6 +224,14 @@ function analyse(r) {
       if (!r.events.some((e) => e.bot === other && e.ev === "game-resumed" && e.t > d.t)) consistency.push(`2 players: ${other} never got game-resumed`);
     }
   }
+  // Pause N of M: every game-paused says which pause it is, never beyond the cap, never going back
+  const lastPause = {};
+  for (const e of r.events.filter((x) => x.ev === "game-paused")) {
+    const { pause, maxPauses } = e.payload;
+    if (!Number.isInteger(pause) || !Number.isInteger(maxPauses) || pause < 1 || pause > maxPauses) consistency.push(`${e.bot}: bad game-paused pause ${pause}/${maxPauses}`);
+    else if (pause < (lastPause[e.bot] || 0)) consistency.push(`${e.bot}: pause number went back ${lastPause[e.bot]} -> ${pause}`);
+    lastPause[e.bot] = pause;
+  }
   const roundsSeen = [...new Set(starts.map((s) => s.round))].sort((a, b) => a - b);
   roundsSeen.forEach((n, i) => { if (n !== i + 1) consistency.push(`round numbering gap: expected ${i + 1}, got ${n}`); });
   const phaseGaps = [];
@@ -236,6 +248,7 @@ function analyse(r) {
     disconnects: r.events.filter((e) => e.ev === "chaos-disconnect" || e.ev === "planned-disconnect").length,
     resyncs: r.events.filter((e) => e.ev === "game-state").length,
     pauses: perBotMax(r, "game-paused"),
+    max_pause_number: Math.max(0, ...Object.values(lastPause)),
     resumes: perBotMax(r, "game-resumed"),
     skew_ms: { p50: pct(skews, 50)?.toFixed(1), p95: pct(skews, 95)?.toFixed(1), max: skews.length ? Math.max(...skews).toFixed(1) : null },
     answer_phase_overrun_ms: { p50: pct(phaseGaps, 50)?.toFixed(1), max: phaseGaps.length ? Math.max(...phaseGaps).toFixed(1) : null },

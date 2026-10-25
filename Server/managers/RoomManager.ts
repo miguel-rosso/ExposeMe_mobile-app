@@ -28,7 +28,7 @@ export class RoomManager {
       paused: false,
       _pauseTimer: null,
       _pauseStartedAt: 0,
-      _pauseUsed: 0,
+      _pauseCount: 0,
       _resumeTimer: null,
       _pauseWaitingFor: [],
       _consecutiveSkips: 0,
@@ -138,7 +138,7 @@ export class RoomManager {
   }
 
   safeRoomData(room: Room): SafeRoom {
-    const { _timer, _timerCallback, _timerStartedAt, _timerDuration, _holdSafetyTimer, _pauseTimer, _pauseStartedAt, _pauseUsed, _resumeTimer, _pauseWaitingFor, plantedSlots, _consecutiveSkips, _hadGuests, ...safe } = room;
+    const { _timer, _timerCallback, _timerStartedAt, _timerDuration, _holdSafetyTimer, _pauseTimer, _pauseStartedAt, _pauseCount, _resumeTimer, _pauseWaitingFor, plantedSlots, _consecutiveSkips, _hadGuests, ...safe } = room;
     return {
       ...safe,
       players: safe.players.map((p) => this.publicPlayer(p)),

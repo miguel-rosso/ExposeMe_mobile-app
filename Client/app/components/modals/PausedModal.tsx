@@ -8,13 +8,16 @@ import { formatCountdown } from "@/app/utils/gameState";
 interface PausedModalProps {
   /** When the server's pause countdown ends (local clock: receipt time + the server's duration), or null */
   endsAt: number | null;
+  /** Which pause this is (1..maxPauses): on the last one the game ends if nobody comes back */
+  pause: number;
+  maxPauses: number;
 }
 
 /**
  * Shown to every connected player while the server has the game paused (fewer than 2 connected).
- * Only displays the server's countdown: when it runs out the server sends game-over.
+ * Only displays the server's countdown (when it runs out the server sends game-over) and "pause N of M".
  */
-const PausedModal: React.FC<PausedModalProps> = ({ endsAt }) => {
+const PausedModal: React.FC<PausedModalProps> = ({ endsAt, pause, maxPauses }) => {
   const { t } = useI18n();
   const [remaining, setRemaining] = useState(endsAt === null ? 0 : endsAt - Date.now());
 
@@ -39,6 +42,16 @@ const PausedModal: React.FC<PausedModalProps> = ({ endsAt }) => {
         <Text testID={TEST_IDS.pausedCountdown} style={tw`text-4xl text-white font-bold`}>
           {formatCountdown(remaining)}
         </Text>
+        {maxPauses > 0 && (
+          <Text testID={TEST_IDS.pausedCounter} style={tw`text-base text-gray-300 text-center mt-4`}>
+            {t.pauseOf.replace("{pause}", String(pause)).replace("{max}", String(maxPauses))}
+          </Text>
+        )}
+        {maxPauses > 0 && pause >= maxPauses && (
+          <Text testID={TEST_IDS.pausedLastWarning} style={tw`text-base text-yellow-300 font-bold text-center mt-2`}>
+            {t.lastPauseWarning}
+          </Text>
+        )}
       </View>
     </View>
   );

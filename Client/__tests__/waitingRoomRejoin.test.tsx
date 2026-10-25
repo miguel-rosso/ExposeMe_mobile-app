@@ -98,7 +98,7 @@ const snapshot = (over: Partial<GameStateSnapshot> = {}): GameStateSnapshot => (
   phase: "answering",
   round: 3,
   totalRounds: 15,
-  owner: "alice",
+  isOwner: false,
   photo: "/temp/x.jpg",
   correctAnswer: null,
   duration: 5000,
@@ -153,7 +153,7 @@ describe("WaitingRoom: joining a game already in progress (EXP-097)", () => {
   it("stays in the lobby on a lobby snapshot (game not started, or ended while away)", async () => {
     const r = await mount();
     act(() => mockSocket.fire("room-of-game", roomOfGame));
-    act(() => mockSocket.fire("game-state", snapshot({ started: false, phase: null, owner: null, photo: null })));
+    act(() => mockSocket.fire("game-state", snapshot({ started: false, phase: null, photo: null })));
     expect(mockReplace).not.toHaveBeenCalled();
 
     mockSocket.emitted = [];

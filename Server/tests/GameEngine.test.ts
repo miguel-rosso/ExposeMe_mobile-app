@@ -24,6 +24,11 @@ function events(name: string): CapturedEmit[] {
   return emits.filter((e) => e.event === name);
 }
 
+/** Room-wide emits only (round-start also has an owner-only copy, see emitRoundStart) */
+function roomEvents(name: string): CapturedEmit[] {
+  return events(name).filter((e) => e.target === room.gameCode);
+}
+
 function lastEvent(name: string): CapturedEmit | undefined {
   const list = events(name);
   return list[list.length - 1];
@@ -272,9 +277,13 @@ describe("round phases", () => {
 
     expect(room.phase).toBe("answering");
     expect(room.round).toBe(1);
-    const start = lastEvent("round-start")!;
-    expect(start.target).toBe(room.gameCode);
-    expect(start.args[0]).toEqual({ photo: PHOTO, owner, round: 1, duration: ANSWER_TIME });
+    // The room (owner's socket excluded) learns nothing about the owner; only the owner's socket gets isOwner
+    const starts = events("round-start");
+    expect(starts).toHaveLength(2);
+    expect(starts[0]).toMatchObject({ target: room.gameCode, except: socketOf(owner) });
+    expect(starts[0].args[0]).toEqual({ photo: PHOTO, round: 1, duration: ANSWER_TIME, isOwner: false });
+    expect(starts[1].target).toBe(socketOf(owner));
+    expect(starts[1].args[0]).toEqual({ photo: PHOTO, round: 1, duration: ANSWER_TIME, isOwner: true });
 
     vi.advanceTimersByTime(ANSWER_TIME - 1);
     expect(events("round-reveal")).toHaveLength(0);
@@ -305,13 +314,13 @@ describe("round phases", () => {
     expect(events("round-start")).toHaveLength(0);
     expect(room.phase).toBe("waiting-photo");
     engine.onPhotoReceived(room, PHOTO, owner);
-    expect(lastEvent("round-start")!.args[0]).toMatchObject({ owner });
+    expect(lastEvent("round-start")).toMatchObject({ target: socketOf(owner), args: [{ isOwner: true }] });
   });
 
   it("ignores photo-sent outside waiting-photo", () => {
     engine.onPhotoReceived(room, PHOTO, room.currentPlayer!.username);
     engine.onPhotoReceived(room, "https://example.invalid/other.jpg", room.currentPlayer!.username);
-    expect(events("round-start")).toHaveLength(1);
+    expect(roomEvents("round-start")).toHaveLength(1);
     expect(room.round).toBe(1);
   });
 
@@ -343,8 +352,10 @@ describe("game over", () => {
     room = setupStartedRoom(10);
     vi.advanceTimersByTime(GAME_START_DELAY);
 
+    let carolOwned = 0;
     for (let i = 0; i < 10; i++) {
       const owner = room.currentPlayer!.username;
+      if (owner === "carol") carolOwned++;
       engine.onPhotoReceived(room, PHOTO, owner);
       // bob always guesses alice, carol always guesses the real owner
       engine.recordAnswer(room, "bob", "alice");
@@ -352,7 +363,7 @@ describe("game over", () => {
       vi.advanceTimersByTime(ANSWER_TIME + REVEAL_TIME + SCORE_DISPLAY_TIME);
     }
 
-    expect(events("round-start")).toHaveLength(10);
+    expect(roomEvents("round-start")).toHaveLength(10);
     expect(events("round-scores")).toHaveLength(10);
     expect(events("game-over")).toHaveLength(1);
     const over = lastEvent("game-over")!;
@@ -361,8 +372,8 @@ describe("game over", () => {
     expect(finalScore).toHaveLength(3);
     const points = finalScore.map((s) => s.points);
     expect([...points].sort((a, b) => b - a)).toEqual(points);
-    // carol guessed every round she could answer (the owner may also answer; recordAnswer doesn't block it)
-    expect(finalScore.find((s) => s.username === "carol")!.points).toBe(10);
+    // carol guessed every round that wasn't her own photo (the owner's vote never counts)
+    expect(finalScore.find((s) => s.username === "carol")!.points).toBe(10 - carolOwned);
 
     expect(room.started).toBe(false);
     expect(room.phase).toBeNull();
@@ -400,12 +411,15 @@ describe("game over", () => {
       vi.advanceTimersByTime(ANSWER_TIME + REVEAL_TIME + SCORE_DISPLAY_TIME);
     }
 
-    const starts = events("round-start").map((e) => e.args[0] as { photo: string; owner: string; round: number });
+    const starts = roomEvents("round-start").map((e) => e.args[0] as { photo: string; round: number; isOwner: boolean });
     expect(starts).toHaveLength(10);
     expect(starts.map((s) => s.round)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
-    const plantedStarts = starts.filter((s) => s.photo === planted);
+    const plantedStarts = roomEvents("round-start").filter((e) => (e.args[0] as { photo: string }).photo === planted);
     expect(plantedStarts).toHaveLength(1);
-    expect(plantedStarts[0].owner).toBe("bob");
+    // The planter is the owner: only bob's socket is told, the room copy excludes him
+    expect(plantedStarts[0]).toMatchObject({ except: "sock-bob", args: [{ isOwner: false }] });
+    expect(events("round-start").filter((e) => e.target === "sock-bob" && (e.args[0] as { photo: string }).photo === planted))
+      .toMatchObject([{ args: [{ isOwner: true }] }]);
     expect(events("your-turn")).toHaveLength(9);
     expect(room.plantedPhotosShown).toBe(1);
     expect(events("game-over")).toHaveLength(1);
@@ -440,6 +454,17 @@ describe("recordAnswer", () => {
 
     expect(player(guessers[0])).toMatchObject({ points: 1, lastAnswerCorrect: true, lastGuess: owner });
     expect(player(guessers[1])).toMatchObject({ points: 0, lastAnswerCorrect: false, lastGuess: guessers[0] });
+  });
+
+  // EXP-128: the owner knows the answer, so their vote is never recorded nor scored (server-side, whatever the client)
+  it("rejects the photo owner's vote, during answering and reveal", () => {
+    engine.onPhotoReceived(room, PHOTO, owner);
+    engine.recordAnswer(room, owner, owner);
+    expect(player(owner)).toMatchObject({ points: 0, lastAnswerCorrect: false, lastGuess: "" });
+    vi.advanceTimersByTime(ANSWER_TIME);
+    expect(room.phase).toBe("reveal");
+    engine.recordAnswer(room, owner, owner);
+    expect(player(owner)).toMatchObject({ points: 0, lastAnswerCorrect: false, lastGuess: "" });
   });
 
   it("only accepts the first answer per round", () => {

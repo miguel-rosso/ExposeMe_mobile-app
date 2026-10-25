@@ -59,7 +59,7 @@ const snapshot = (over: Partial<GameStateSnapshot> = {}): GameStateSnapshot => (
   phase: "answering",
   round: 3,
   totalRounds: 10,
-  owner: "alice",
+  isOwner: false,
   photo: "/temp/1-a.jpg",
   correctAnswer: null,
   duration: 4200,
@@ -72,7 +72,7 @@ const snapshot = (over: Partial<GameStateSnapshot> = {}): GameStateSnapshot => (
 
 const makeSetters = () => {
   const s = {
-    setPhoto: jest.fn(), setPhotoOwner: jest.fn(), setRound: jest.fn(), setPhase: jest.fn(),
+    setPhoto: jest.fn(), setIsOwner: jest.fn(), setRound: jest.fn(), setPhase: jest.fn(),
     setPhaseDuration: jest.fn(), setPhaseKey: jest.fn(), setCorrectAnswer: jest.fn(), setScores: jest.fn(),
     setMySelection: jest.fn(), setGameHeld: jest.fn(), setPressing: jest.fn(), setPause: jest.fn(),
   };
@@ -82,52 +82,62 @@ const makeSetters = () => {
 describe("applyGameState", () => {
   it("renders the current answering phase with the remaining time and keeps the guess of the same round", () => {
     const s = makeSetters();
-    const r = applyGameState(snapshot(), "http://srv", { round: 3, owner: "alice" }, s);
+    const r = applyGameState(snapshot(), "http://srv", { round: 3, photo: "http://srv/temp/1-a.jpg" }, s);
     expect(r).toEqual({ gameOver: false, sendReady: false, submitGuess: false });
     expect(s.setPhoto).toHaveBeenCalledWith("http://srv/temp/1-a.jpg");
-    expect(s.setPhotoOwner).toHaveBeenCalledWith("alice");
+    expect(s.setIsOwner).toHaveBeenCalledWith(false);
     expect(s.setPhase).toHaveBeenCalledWith("answering");
     expect(s.setPhaseDuration).toHaveBeenCalledWith(4200);
     expect(s.setPause).toHaveBeenCalledWith(null);
     expect(s.setMySelection).not.toHaveBeenCalled();
   });
 
+  // EXP-128: the snapshot never names the owner; only my own snapshot says the photo is mine
+  it("marks the photo as mine only when the snapshot says isOwner", () => {
+    const s = makeSetters();
+    applyGameState(snapshot({ isOwner: true }), "http://srv", { round: 3, photo: "http://srv/temp/1-a.jpg" }, s);
+    expect(s.setIsOwner).toHaveBeenCalledWith(true);
+    const s2 = makeSetters();
+    applyGameState(snapshot({ phase: "waiting-photo", photo: null }), "", { round: 3, photo: null }, s2);
+    expect(s2.setIsOwner).toHaveBeenCalledWith(false);
+  });
+
   it("clears the guess when the round changed while away", () => {
     const s = makeSetters();
-    applyGameState(snapshot(), "http://srv", { round: 2, owner: "bob" }, s);
+    applyGameState(snapshot(), "http://srv", { round: 2, photo: "http://srv/temp/0-b.jpg" }, s);
     expect(s.setMySelection).toHaveBeenCalledWith("");
   });
 
   it("asks to submit the guess in reveal and shows scores in scores", () => {
     const s = makeSetters();
-    expect(applyGameState(snapshot({ phase: "reveal", correctAnswer: "alice" }), "", { round: 3, owner: "alice" }, s).submitGuess).toBe(true);
+    expect(applyGameState(snapshot({ phase: "reveal", correctAnswer: "alice" }), "", { round: 3, photo: "http://srv/temp/1-a.jpg" }, s).submitGuess).toBe(true);
     expect(s.setCorrectAnswer).toHaveBeenCalledWith("alice");
     const s2 = makeSetters();
-    applyGameState(snapshot({ phase: "scores", correctAnswer: "alice" }), "", { round: 3, owner: "alice" }, s2);
+    applyGameState(snapshot({ phase: "scores", correctAnswer: "alice" }), "", { round: 3, photo: "http://srv/temp/1-a.jpg" }, s2);
     expect(s2.setScores).toHaveBeenCalledWith(snapshot().scores);
   });
 
   it("shows the server's pause countdown", () => {
     const s = makeSetters();
     const pause = { duration: 299_000, waitingFor: [], pause: 2, maxPauses: 3 };
-    applyGameState(snapshot({ pause }), "", { round: 3, owner: "alice" }, s);
+    applyGameState(snapshot({ pause }), "", { round: 3, photo: "http://srv/temp/1-a.jpg" }, s);
     expect(s.setPause).toHaveBeenCalledWith(pause);
   });
 
   it("waiting for a photo: the waiting screen for the next round (EXP-039); ready phase: send im-ready again", () => {
     const s = makeSetters();
-    const r = applyGameState(snapshot({ phase: "waiting-photo", owner: null, photo: null, duration: 9_000 }), "", { round: 3, owner: "alice" }, s);
+    const r = applyGameState(snapshot({ phase: "waiting-photo", photo: null, duration: 9_000 }), "", { round: 3, photo: "http://srv/temp/1-a.jpg" }, s);
     expect(r.sendReady).toBe(false);
     expect(s.setPhoto).toHaveBeenCalledWith(null);
     expect(s.setPhase).toHaveBeenCalledWith("waiting-photo");
     expect(s.setRound).toHaveBeenCalledWith(4);
     expect(s.setPhaseDuration).toHaveBeenCalledWith(9_000);
-    expect(applyGameState(snapshot({ phase: null, owner: null, photo: null }), "", { round: 0, owner: "" }, makeSetters()).sendReady).toBe(true);
+    expect(applyGameState(snapshot({ phase: null, photo: null }), "", { round: 0, photo: null }, makeSetters()).sendReady).toBe(true);
   });
 
   it("reports game over when the game ended while away", () => {
     const s = makeSetters();
-    expect(applyGameState(snapshot({ started: false, phase: null }), "", { round: 3, owner: "alice" }, s).gameOver).toBe(true);
+    expect(applyGameState(snapshot({ started: false, phase: null }), "", { round: 3, photo: "http://srv/temp/1-a.jpg" }, s).gameOver).toBe(true);
     expect(s.setPhoto).not.toHaveBeenCalled();
   });
 });

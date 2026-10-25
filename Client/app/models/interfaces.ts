@@ -102,7 +102,8 @@ export interface GameStateSnapshot {
   phase: ServerPhase | null;
   round: number;
   totalRounds: number;
-  owner: string | null;
+  /** The round in play (answering/reveal/scores) is my photo; nobody else is told whose it is before the reveal */
+  isOwner: boolean;
   photo: string | null;
   correctAnswer: string | null;
   duration: number;

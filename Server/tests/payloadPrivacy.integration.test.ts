@@ -122,23 +122,31 @@ describe("player data in socket payloads", () => {
     await Promise.all(started);
     expect(startedPlayers.map((p) => Object.keys(p).sort())).toEqual(players.map(() => ["connected", "hasPlantedPhoto", "isHost", "isReady", "lastAnswerCorrect", "lastGuess", "points", "username"]));
 
-    // First round: an uploaded photo from the picked owner, or bob's planted photo
+    // First round: an uploaded photo from the picked owner, or bob's planted photo (round-start never names the
+    // owner, EXP-128: it is whoever got your-turn, else the planter)
+    let turnOwner: string | null = null;
     for (const n of players) {
       byName[n].once("your-turn", () => {
+        turnOwner = n;
         registerUpload(gameCode, n, PHOTO);
         byName[n].emit("photo-sent", { photo: PHOTO });
       });
     }
-    const roundStart = once<{ owner: string }>(alice, "round-start", 6_000);
+    const roundStart = once<{ isOwner: boolean }>(alice, "round-start", 6_000);
     players.forEach((n) => byName[n].emit("im-ready"));
-    const { owner } = await roundStart;
+    await roundStart;
+    const owner: string = turnOwner ?? "bob";
 
-    // bob (host once alice leaves) answers during answering: right, or wrong when the photo is his own...
+    // bob (host once alice leaves) answers during answering: right, or ignored when the photo is his own...
     const guesser = "bob";
-    const guess = owner === guesser ? "alice" : owner;
-    byName[guesser].emit("submit-answer", { guess });
-    await until(() => roomManager.getPlayer(gameCode, guesser)?.lastGuess === guess);
-    expect(roomManager.getPlayer(gameCode, guesser)!.points).toBe(owner === guesser ? 0 : 1);
+    byName[guesser].emit("submit-answer", { guess: owner });
+    if (owner === guesser) {
+      await new Promise((r) => setTimeout(r, 200));
+      expect(roomManager.getPlayer(gameCode, guesser)).toMatchObject({ lastGuess: "", points: 0 });
+    } else {
+      await until(() => roomManager.getPlayer(gameCode, guesser)?.lastGuess === owner);
+      expect(roomManager.getPlayer(gameCode, guesser)!.points).toBe(1);
+    }
 
     // ...and reconnects on a new socket: room-of-game and game-state hide that answer until round-scores
     const again = await newClient(guesser);

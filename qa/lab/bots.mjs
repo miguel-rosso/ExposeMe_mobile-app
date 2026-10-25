@@ -35,6 +35,11 @@
 //   answering/reveal no player in room-of-game / game-state (players and scores) / new-host / player-removed shows
 //   this round's guess or more points than at the last round-scores; a waiting-photo game-state has no owner/photo:
 //   "payload-leak".
+//   Photo owner secrecy (EXP-128): no payload has an `owner` key; round-start is exactly { photo, round, duration,
+//   isOwner } and an answering game-state has no correctAnswer, so before round-reveal nobody but the owner can tell
+//   whose photo it is ("payload-leak"). Only the owner's own round-start / game-state says `isOwner: true` (the bot
+//   records "owner-signal"); after the reveal it must match `correctAnswer`, and the owner's vote must never count
+//   ("consistency"). Bots guess at random among the other players; the owner bot doesn't vote (empty guess).
 import { io } from "socket.io-client";
 import fs from "node:fs";
 import path from "node:path";
@@ -56,8 +61,13 @@ const PHOTO_UNAVAILABLE = Number(args["photo-unavailable"] || 0);
 const UNAVAILABLE_SKIP_MAX_MS = 2_000; // photo-unavailable → round-skipped must be immediate (the wait is 15 s)
 const NO_READY = Number(args["no-ready"] || 0);
 const NO_ANSWER = !!args["no-answer"];
-// --no-answer: bots submit an empty guess like a player who never taps, so nobody scores (tie at 0)
-const pickGuess = (bot) => (NO_ANSWER ? "" : bot.players[Math.floor(Math.random() * bot.players.length)] || "");
+// --no-answer: bots submit an empty guess like a player who never taps, so nobody scores (tie at 0).
+// Nobody is told whose photo it is: a bot guesses at random among the others; the owner (isOwner) doesn't vote.
+const pickGuess = (bot) => {
+  if (NO_ANSWER || bot.isOwner) return "";
+  const others = bot.players.filter((p) => p !== bot.name);
+  return others[Math.floor(Math.random() * others.length)] || "";
+};
 const TIMEOUT_S = Number(args.timeout || 900);
 const DROP_ROUND = Number(args["drop-round"] || 0);
 const DROP_SECS = Number(args["drop-secs"] || 5);
@@ -114,8 +124,19 @@ function payloadLeaks(me, ev, payload, ids, tokens, ctx = { phase: null, baselin
   // Single-player events while the round is in play (phase as this bot last saw it)
   if ((ev === "new-host" || ev === "player-removed") && inRound(ctx.phase)) checkHidden([payload[0]], ev, ctx.phase);
   // The owner is secret while the photo is awaited
-  if (ev === "game-state" && state?.phase === "waiting-photo" && (state.owner != null || state.photo != null)) {
-    out.push(`game-state: owner/photo set during waiting-photo`);
+  if (ev === "game-state" && state?.phase === "waiting-photo" && state.photo != null) {
+    out.push(`game-state: photo set during waiting-photo`);
+  }
+  // The owner is secret until round-reveal (EXP-128): no `owner` key anywhere, only the per-recipient isOwner flag
+  const hasOwnerKey = (v) => Array.isArray(v) ? v.some(hasOwnerKey) : !!v && typeof v === "object" && ("owner" in v || Object.values(v).some(hasOwnerKey));
+  if (hasOwnerKey(payload)) out.push(`${ev}: payload has an owner key`);
+  if (ev === "round-start") {
+    const keys = Object.keys(payload[0] ?? {}).sort().join(",");
+    if (keys !== "duration,isOwner,photo,round") out.push(`round-start: keys [${keys}] (only photo, round, duration, isOwner)`);
+    if (typeof payload[0]?.isOwner !== "boolean") out.push(`round-start: isOwner is not a boolean`);
+  }
+  if (ev === "game-state" && state?.started && state.phase === "answering" && state.correctAnswer != null) {
+    out.push(`game-state: correctAnswer set during answering`);
   }
   return out;
 }
@@ -172,7 +193,7 @@ function runRoom(roomIdx, fixedCode) {
       const name = `${prefix}bot${i + 1}`;
       const isHost = !!args.host && i === 0;
       const socket = io(SERVER, { transports: ["websocket"], reconnection: true });
-      const bot = { name, socket, isHost, players: [], guess: "", round: 0, token: null };
+      const bot = { name, socket, isHost, players: [], guess: "", round: 0, token: null, isOwner: false };
       bots.push(bot);
       const rec = (ev, round, payload) => events.push({ bot: name, ev, round, t: now(), payload });
 
@@ -249,12 +270,15 @@ function runRoom(roomIdx, fixedCode) {
         }
       });
       socket.on("round-start", (d) => {
-        rec("round-start", d.round, { owner: d.owner, photo: d.photo, duration: d.duration });
+        // Recorded without isOwner (the only per-recipient field), so every bot must get the same payload
+        rec("round-start", d.round, { photo: d.photo, duration: d.duration });
         bot.round = d.round;
+        bot.isOwner = d.isOwner === true;
+        if (bot.isOwner) rec("owner-signal", d.round, { via: "round-start" });
         bot.guess = pickGuess(bot);
-        // Photo access: one non-owner per room loads the photo like the app's <Image> (with credentials), and
-        // checks that it is refused without them
-        if (name === bots.find((b) => b.name !== d.owner)?.name) checkPhotoAccess(name, d.photo, photoAuth(code, bot.token), d.round);
+        // Photo access: a non-owner loads the photo like the app's <Image> (with credentials), and checks that it is
+        // refused without them. Nobody knows who the owner is, so the first two bots check when it isn't theirs
+        if (!bot.isOwner && i < 2) checkPhotoAccess(name, d.photo, photoAuth(code, bot.token), d.round);
         if (DROP_ROUND && i === DROP_BOT && d.round === DROP_ROUND && !bot.dropped) {
           bot.dropped = true;
           rec("planned-disconnect", d.round, { secs: DROP_SECS });
@@ -287,7 +311,11 @@ function runRoom(roomIdx, fixedCode) {
         }
         bot.resyncing = false;
         bot.players = d.players.map((p) => p.username);
+        const inRound = ["answering", "reveal", "scores"].includes(d.phase);
+        bot.isOwner = inRound && d.isOwner === true;
+        if (bot.isOwner) rec("owner-signal", d.round, { via: "game-state" });
         if (d.round !== bot.round) { bot.round = d.round; bot.guess = pickGuess(bot); }
+        else if (bot.isOwner) bot.guess = "";
         if (d.phase === "reveal") socket.emit("submit-answer", { guess: bot.guess });
         if (d.phase === null && i < N_BOTS - NO_READY) socket.emit("im-ready");
       });
@@ -368,9 +396,19 @@ function analyse(r) {
   }
   const starts = r.events.filter((e) => e.ev === "round-start");
   const reveals = r.events.filter((e) => e.ev === "round-reveal");
-  for (const rv of reveals) {
-    const st = starts.find((s) => s.bot === rv.bot && s.round === rv.round);
-    if (st && st.payload.owner !== rv.payload.correctAnswer) consistency.push(`round ${rv.round}: owner ${st.payload.owner} != reveal ${rv.payload.correctAnswer} (${rv.bot})`);
+  // Owner-only signal (EXP-128): whoever was told isOwner for a round is the revealed answer, and the owner's
+  // vote never counts in that round's scores
+  const answerOf = new Map(reveals.map((rv) => [rv.round, rv.payload.correctAnswer]));
+  for (const sig of r.events.filter((e) => e.ev === "owner-signal")) {
+    const answer = answerOf.get(sig.round);
+    if (answer !== undefined && answer !== sig.bot) consistency.push(`round ${sig.round}: ${sig.bot} was told isOwner (${sig.payload.via}) but the answer was ${answer}`);
+  }
+  for (const [round, answer] of answerOf) {
+    if (!r.events.some((e) => e.ev === "owner-signal" && e.round === round && e.bot === answer) && r.players.includes(answer)
+      && starts.some((s) => s.bot === answer && s.round === round)) consistency.push(`round ${round}: owner ${answer} got round-start without isOwner`);
+    const sc = r.events.find((e) => e.ev === "round-scores" && e.round === round);
+    const own = sc?.payload?.scores?.find((x) => x.username === answer);
+    if (own && (own.lastGuess || own.lastAnswerCorrect)) consistency.push(`round ${round}: the owner's vote counted (${own.lastGuess})`);
   }
   // No double rounds: a player never gets two round-starts for the same round number
   const startKeys = starts.map((s) => `${s.bot}#${s.round}`);

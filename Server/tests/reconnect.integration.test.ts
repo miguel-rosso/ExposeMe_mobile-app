@@ -63,7 +63,7 @@ async function gameInAnsweringPhase(names: string[]) {
   await Promise.all(started);
   names.forEach((n) => socks[n].emit("im-ready"));
   const owner = await Promise.race(turns.map((p) => p.then((n) => n ?? new Promise<string>(() => {}))));
-  const starts = names.map((n) => once<{ round: number; owner: string }>(socks[n], "round-start"));
+  const starts = names.map((n) => once<{ round: number; isOwner: boolean }>(socks[n], "round-start"));
   registerUpload(gameCode, owner, PHOTO); // as if the owner had uploaded it (photo-sent takes only own uploads)
   socks[owner].emit("photo-sent", { photo: PHOTO });
   await Promise.all(starts);
@@ -98,7 +98,7 @@ describe("reconnect mid-round", () => {
     const res = await joinAs(back, gameCode, away, tokens[away]);
     expect(res.success).toBe(true);
     const s = await snap;
-    expect(s).toMatchObject({ started: true, phase: "answering", round: 1, owner, photo: PHOTO, pause: null });
+    expect(s).toMatchObject({ started: true, phase: "answering", round: 1, isOwner: false, photo: PHOTO, pause: null });
     expect(s.duration as number).toBeGreaterThan(3_000);
     expect(s.duration as number).toBeLessThanOrEqual(8_000);
 
@@ -129,7 +129,7 @@ describe("reconnect mid-round", () => {
     const resumedOwner = once<{ phase: string; duration: number }>(socks[owner], "game-resumed");
     expect((await joinAs(back, gameCode, away, tokens[away])).success).toBe(true);
     const s = await snap;
-    expect(s).toMatchObject({ phase: "answering", owner, photo: PHOTO });
+    expect(s).toMatchObject({ phase: "answering", isOwner: false, photo: PHOTO });
     expect(s.pause).toBeNull(); // sent after the resume
     const [rb, ro] = await Promise.all([resumedBack, resumedOwner]);
     expect(rb).toEqual(ro);
@@ -150,7 +150,7 @@ describe("reconnect mid-round", () => {
     const snap = once<Record<string, unknown>>(socks[other], "game-state");
     const res = await joinAs(socks[other], gameCode, other, tokens[other]);
     expect(res.success).toBe(true);
-    expect(await snap).toMatchObject({ started: true, phase: "answering", round: 1, owner, photo: PHOTO });
+    expect(await snap).toMatchObject({ started: true, phase: "answering", round: 1, isOwner: false, photo: PHOTO });
     Object.values(socks).forEach((c) => c.emit("leave-room"));
   }, 15_000);
 
@@ -173,7 +173,7 @@ describe("reconnect mid-round", () => {
     const snap = once<Record<string, unknown>>(socks[owner], "game-state");
     const turn = once<{ round: number }>(socks[owner], "your-turn");
     expect((await joinAs(socks[owner], gameCode, owner, tokens[owner])).success).toBe(true);
-    expect(await snap).toMatchObject({ started: true, phase: "waiting-photo", owner: null, photo: null });
+    expect(await snap).toMatchObject({ started: true, phase: "waiting-photo", isOwner: false, photo: null });
     expect(await turn).toEqual({ round: 1, attempt: 1 });
     Object.values(socks).forEach((c) => c.emit("leave-room"));
   }, 15_000);

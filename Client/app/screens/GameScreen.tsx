@@ -50,7 +50,7 @@ const GameScreen = () => {
 
   // ── Round state (reset each round) ───────────────────
   const [photo, setPhoto] = useState<string | null>(null);
-  const [photoOwner, setPhotoOwner] = useState("");
+  const [isOwner, setIsOwner] = useState(false); // this round's photo is mine (only the owner is told, EXP-128)
   const [round, setRound] = useState(0);
   const [phase, setPhase] = useState<Phase>(null);
   const [phaseDuration, setPhaseDuration] = useState(0);
@@ -60,9 +60,9 @@ const GameScreen = () => {
   const [mySelection, _setMySelection] = useState("");
   const mySelectionRef = useRef("");
   const setMySelection = (val: string) => { mySelectionRef.current = val; _setMySelection(val); };
-  // Current round/owner for the game-state handler (socket listeners would see stale state)
-  const roundRef = useRef<{ round: number; owner: string; phase: Phase }>({ round: 0, owner: "", phase: null });
-  roundRef.current = { round, owner: photoOwner, phase };
+  // Current round/photo for the game-state handler (socket listeners would see stale state)
+  const roundRef = useRef<{ round: number; photo: string | null; phase: Phase }>({ round: 0, photo: null, phase: null });
+  roundRef.current = { round, photo, phase };
   // Photo uploaded for my turn: re-sent if the server asks again (after a reconnect or a pause)
   const turnUploadRef = useRef<TurnUpload | null>(null);
 
@@ -99,7 +99,6 @@ const GameScreen = () => {
   const [isReady, setIsReady] = useState(false);
 
   // ── Derived ──────────────────────────────────────────
-  const isOwner = username === photoOwner;
   // Hold button: mounted during scores phase for photo owner (or while pressing to catch onPressOut)
   const holdButtonMounted = isOwner && (phase === "scores" || pressing);
 
@@ -177,7 +176,7 @@ const GameScreen = () => {
       setTurnUploading(false);
       ownUnavailableRef.current = null; // a report of mine was answered by the round-skipped before this
       applyWaitingPhoto(data, {
-        setPhoto, setPhotoOwner, setRound, setPhase, setPhaseDuration, setPhaseKey,
+        setPhoto, setIsOwner, setRound, setPhase, setPhaseDuration, setPhaseKey,
         setCorrectAnswer, setScores, setMySelection, setGameHeld, setPressing,
       });
     });
@@ -219,12 +218,12 @@ const GameScreen = () => {
 
     // Atomic: new round — photo + answer timer
     socket.on("round-start", (data: RoundStartData) => {
-      console.log(`[GAME] round-start: round=${data.round}, owner=${data.owner}`);
+      console.log(`[GAME] round-start: round=${data.round}, mine=${data.isOwner}`);
       currentTurnRef.current = null;
       setTurnUploading(false);
       setSkipNotice(null);
       applyRoundStart(data, SERVER_URL, {
-        setPhoto, setPhotoOwner, setRound, setPhase, setPhaseDuration, setPhaseKey,
+        setPhoto, setIsOwner, setRound, setPhase, setPhaseDuration, setPhaseKey,
         setCorrectAnswer, setScores, setMySelection, setGameHeld, setPressing,
       });
     });
@@ -297,7 +296,7 @@ const GameScreen = () => {
       // Paused between rounds (after scores): the next round's photo is awaited now
       if (data.phase === "waiting-photo" && roundRef.current.phase !== "waiting-photo") {
         setPhoto(null);
-        setPhotoOwner("");
+        setIsOwner(false);
         setScores(null);
         setPhase("waiting-photo");
         setRound(roundRef.current.round + 1);
@@ -315,7 +314,7 @@ const GameScreen = () => {
       setTurnUploading(false);
       if (snap.phase !== "waiting-photo") setSkipNotice(null);
       const result = applyGameState(snap, SERVER_URL, roundRef.current, {
-        setPhoto, setPhotoOwner, setRound, setPhase, setPhaseDuration, setPhaseKey,
+        setPhoto, setIsOwner, setRound, setPhase, setPhaseDuration, setPhaseKey,
         setCorrectAnswer, setScores, setMySelection, setGameHeld, setPressing, setPause,
       });
       if (result.gameOver) showGameOver(snap.scores);
@@ -378,7 +377,8 @@ const GameScreen = () => {
   const isRevealOrScores = phase === "reveal" || phase === "scores";
 
   const renderPlayer = ({ item }: { item: Player }) => {
-    const isAnswer = item.username === photoOwner;
+    // The answer is only known from round-reveal on (correctAnswer); before that nobody is told whose photo it is
+    const isAnswer = item.username === correctAnswer;
     const isSelected = item.username === mySelection;
     const isMe = item.username === safeUsername;
 
@@ -394,8 +394,8 @@ const GameScreen = () => {
       <TouchableOpacity
         testID={playerOptionId(item.username)}
         style={tw`p-3 rounded-lg mb-2 mx-1 flex-grow flex-basis-[48%] ${bg}`}
-        onPress={() => !isRevealOrScores && setMySelection(item.username)}
-        disabled={isRevealOrScores}
+        onPress={() => !isRevealOrScores && !isOwner && setMySelection(item.username)}
+        disabled={isRevealOrScores || isOwner}
       >
         <View style={tw`flex-row items-center justify-between`}>
           <Text style={tw`text-white text-base flex-1 ${isMe ? "font-bold" : ""}`} numberOfLines={1} ellipsizeMode="tail">
@@ -477,17 +477,26 @@ const GameScreen = () => {
                   </View>
                 )}
 
-                {/* Player selection buttons */}
+                {/* Player selection buttons (my own photo: I can't vote, so a hint instead while the others answer) */}
                 <View style={tw`absolute z-40 bottom-22 left-0 right-0 p-2 flex-row justify-center`}>
-                  <FlatList
-                    data={playersProvider}
-                    renderItem={renderPlayer}
-                    keyExtractor={(item) => item.username}
-                    numColumns={2}
-                    columnWrapperStyle={tw`justify-between`}
-                    style={tw`w-full max-w-[500px] px-2`}
-                    contentContainerStyle={tw`w-full`}
-                  />
+                  {isOwner && phase === "answering" ? (
+                    <Text
+                      testID={TEST_IDS.ownPhotoHint}
+                      style={tw`text-white text-lg font-bold text-center bg-gray-800 bg-opacity-80 px-4 py-3 rounded-xl max-w-[500px]`}
+                    >
+                      {t.ownPhotoHint}
+                    </Text>
+                  ) : (
+                    <FlatList
+                      data={playersProvider}
+                      renderItem={renderPlayer}
+                      keyExtractor={(item) => item.username}
+                      numColumns={2}
+                      columnWrapperStyle={tw`justify-between`}
+                      style={tw`w-full max-w-[500px] px-2`}
+                      contentContainerStyle={tw`w-full`}
+                    />
+                  )}
                 </View>
 
                 {/* Score modal */}

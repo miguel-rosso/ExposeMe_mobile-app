@@ -79,7 +79,8 @@ describe("socket flow", () => {
     registerUpload(gameCode, owner, PHOTO); // as if the owner had uploaded it (photo-sent takes only own uploads)
     byName[owner].emit("photo-sent", { photo: PHOTO, gameCode });
     const payloads = await Promise.all(roundStarts);
-    for (const p of payloads) expect(p).toEqual({ photo: PHOTO, owner, round: 1, duration: 8_000 });
+    // Same payload for everyone, without the owner's name; only the owner's copy says isOwner (EXP-128)
+    payloads.forEach((p, i) => expect(p).toEqual({ photo: PHOTO, round: 1, duration: 8_000, isOwner: ["alice", "bob", "carol"][i] === owner }));
 
     // Everybody leaves → room reset (its deletion timer is cleared in afterAll)
     for (const c of [alice, bob, carol]) c.emit("leave-room");

@@ -28,6 +28,7 @@ export const TEST_IDS = {
   waitingPhotoText: "waiting-photo-text",
   roundSkippedNotice: "round-skipped-notice",
   holdButton: "hold-button",
+  ownPhotoHint: "own-photo-hint",
   reconnectingBanner: "reconnecting-banner",
   pausedModal: "paused-modal",
   pausedCountdown: "paused-countdown",

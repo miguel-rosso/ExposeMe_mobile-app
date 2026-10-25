@@ -1,5 +1,7 @@
 import { Server } from "socket.io";
-import { GameStateSnapshot, PauseInfo, Player, Room, RoundSkippedData, ScoreRound, WaitingPhotoData, YourTurnData } from "../models/interfaces";
+import {
+  GameStateSnapshot, PauseInfo, Player, Room, RoundSkippedData, RoundStartData, ScoreRound, WaitingPhotoData, YourTurnData,
+} from "../models/interfaces";
 import { RoomManager } from "./RoomManager";
 import { uploadStore } from "../middlewares/uploadStore";
 
@@ -97,15 +99,21 @@ export class GameEngine {
     room._consecutiveSkips = 0;
     console.log(`[${room.gameCode}] Round ${room.round}: photo from ${username}`);
 
-    // Atomic event: photo + phase info in one message
-    this.io.to(room.gameCode).emit("round-start", {
-      photo,
-      owner: username,
-      round: room.round,
-      duration: ANSWER_TIME,
-    });
+    this.emitRoundStart(room, room.currentPlayer, photo);
 
     this.setTimer(room, ANSWER_TIME, () => this.enterReveal(room));
+  }
+
+  /**
+   * Atomic round-start (photo + phase info). The owner's name is secret until round-reveal: everyone gets the same
+   * payload with `isOwner: false`, except the owner's socket, which gets `isOwner: true` (hold button, no self-vote).
+   */
+  private emitRoundStart(room: Room, owner: Player, photo: string): void {
+    const data: Omit<RoundStartData, "isOwner"> = { photo, round: room.round, duration: ANSWER_TIME };
+    // Relies on a rejoin evicting/disconnecting the owner's replaced socket, so only owner.socketId is the owner's
+
+    this.io.to(room.gameCode).except(owner.socketId).emit("round-start", { ...data, isOwner: false } satisfies RoundStartData);
+    this.io.to(owner.socketId).emit("round-start", { ...data, isOwner: true } satisfies RoundStartData);
   }
 
   /** `your-turn` payload for the current photo request (re-sent unchanged on rejoin/resume). */
@@ -138,6 +146,8 @@ export class GameEngine {
     if (!player) return;
     // Only accept first answer per round (ignore duplicates)
     if (player.lastGuess !== "") return;
+    // The owner knows the answer: their vote is never recorded nor scored
+    if (player === room.currentPlayer) return;
     const correct = room.currentPlayer?.username === guess;
     player.lastGuess = guess || "(no guess)";
     player.lastAnswerCorrect = correct;
@@ -216,7 +226,7 @@ export class GameEngine {
   onPlayerRejoined(room: Room, player: Player): void {
     const wasPaused = room.paused;
     this.onConnectionChange(room);
-    this.io.to(player.socketId).emit("game-state", this.snapshot(room));
+    this.io.to(player.socketId).emit("game-state", this.snapshot(room, player));
     if (!room.started) return;
     // Resuming re-sends your-turn itself; otherwise the returning owner still has to send the photo
     if (!wasPaused && !room.paused && room.phase === "waiting-photo" && room.currentPlayer === player) {
@@ -230,13 +240,14 @@ export class GameEngine {
    */
   resendState(room: Room, player: Player): void {
     if (!room.started) return;
-    this.io.to(player.socketId).emit("game-state", this.snapshot(room));
+    this.io.to(player.socketId).emit("game-state", this.snapshot(room, player));
     if (!room.paused && room.phase === "waiting-photo" && room.currentPlayer === player) {
       this.io.to(player.socketId).emit("your-turn", this.yourTurn(room));
     }
   }
 
-  snapshot(room: Room): GameStateSnapshot {
+  /** `game-state` for `recipient`: only the owner's own snapshot says it is their photo (`isOwner`). */
+  snapshot(room: Room, recipient?: Player): GameStateSnapshot {
     const inRound = room.phase === "answering" || room.phase === "reveal" || room.phase === "scores";
     const shown = room.phase === "reveal" || room.phase === "scores";
     // Running timer: what is left of it; paused/held timer: the frozen remaining time
@@ -254,7 +265,7 @@ export class GameEngine {
       phase: room.phase,
       round: room.round,
       totalRounds: room.rounds,
-      owner: inRound ? room.currentPlayer?.username ?? null : null,
+      isOwner: inRound && !!recipient && room.currentPlayer === recipient,
       photo: inRound ? room.currentPhoto : null,
       correctAnswer: shown ? room.currentPlayer?.username ?? null : null,
       duration: room.started ? duration : 0,
@@ -377,12 +388,7 @@ export class GameEngine {
 
       console.log(`[${room.gameCode}] Round ${room.round}: planted photo from ${planted.username}`);
 
-      this.io.to(room.gameCode).emit("round-start", {
-        photo: planted.plantedPhoto,
-        owner: planted.username,
-        round: room.round,
-        duration: ANSWER_TIME,
-      });
+      this.emitRoundStart(room, planted, planted.plantedPhoto ?? "");
       planted.plantedPhoto = undefined;
 
       this.setTimer(room, ANSWER_TIME, () => this.enterReveal(room));

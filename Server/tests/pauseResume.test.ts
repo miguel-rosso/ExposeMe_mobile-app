@@ -94,7 +94,7 @@ describe("pause with fewer than 2 connected players", () => {
     expect(last("game-resumed")).toMatchObject({ target: room.gameCode, args: [{ phase: "answering", duration: ANSWER_TIME - 3_000 }] });
     // Snapshot to the returning socket, after the resume: same round, photo, frozen time, no stale pause
     const snap = snapshotFor(p.socketId);
-    expect(snap).toMatchObject({ started: true, phase: "answering", round: 1, owner, photo: PHOTO, correctAnswer: null, duration: ANSWER_TIME - 3_000, pause: null });
+    expect(snap).toMatchObject({ started: true, phase: "answering", round: 1, isOwner: false, photo: PHOTO, correctAnswer: null, duration: ANSWER_TIME - 3_000, pause: null });
     expect(JSON.stringify(snap)).not.toContain("rejoinToken");
     const order = emits.map((e) => e.event);
     expect(order.lastIndexOf("game-state")).toBeGreaterThan(order.lastIndexOf("game-resumed"));
@@ -141,7 +141,7 @@ describe("pause with fewer than 2 connected players", () => {
     vi.advanceTimersByTime(60_000);
     expect(events("your-turn")).toHaveLength(1); // only the first round's
     const p = rejoin(other);
-    expect(snapshotFor(p.socketId)).toMatchObject({ phase: "scores", owner, correctAnswer: owner, duration: 3_000 });
+    expect(snapshotFor(p.socketId)).toMatchObject({ phase: "scores", isOwner: false, correctAnswer: owner, duration: 3_000 });
     expect(snapshotFor(p.socketId).scores.find((s) => s.username === other)!.points).toBe(1);
 
     vi.advanceTimersByTime(3_000);
@@ -193,7 +193,7 @@ describe("pause with fewer than 2 connected players", () => {
     expect(turns[1]).toEqual({ target: owner.socketId, event: "your-turn", args: [{ round: 1, attempt: 1 }] });
 
     engine.onPhotoReceived(room, PHOTO, owner.username);
-    expect(last("round-start")!.args[0]).toMatchObject({ round: 1, owner: owner.username });
+    expect(last("round-start")!.args[0]).toMatchObject({ round: 1, isOwner: true });
     expect(events("round-skipped")).toHaveLength(0);
   });
 
@@ -210,7 +210,7 @@ describe("pause with fewer than 2 connected players", () => {
 
     vi.advanceTimersByTime(PAUSE_MIN_DURATION);
     const p = rejoin("bob");
-    expect(snapshotFor(p.socketId)).toMatchObject({ phase: "waiting-photo", owner: null, photo: null, round: 1 });
+    expect(snapshotFor(p.socketId)).toMatchObject({ phase: "waiting-photo", isOwner: false, photo: null, round: 1 });
     expect(events("your-turn")).toHaveLength(1);
     vi.advanceTimersByTime(1_500);
     expect(events("your-turn")).toHaveLength(2);
@@ -248,7 +248,7 @@ describe("rejoin without a pause (3+ players)", () => {
     expect(room.phase).toBe("reveal");
 
     const p = rejoin(away);
-    expect(snapshotFor(p.socketId)).toMatchObject({ phase: "reveal", round: 1, owner, photo: PHOTO, correctAnswer: owner, duration: REVEAL_TIME - 1_000, pause: null, held: false });
+    expect(snapshotFor(p.socketId)).toMatchObject({ phase: "reveal", round: 1, isOwner: false, photo: PHOTO, correctAnswer: owner, duration: REVEAL_TIME - 1_000, pause: null, held: false });
     expect(events("game-paused")).toHaveLength(0);
     expect(events("game-resumed")).toHaveLength(0);
     // A guess sent after the snapshot still counts during reveal
@@ -263,7 +263,7 @@ describe("rejoin without a pause (3+ players)", () => {
     expect(room.paused).toBe(false);
     vi.advanceTimersByTime(2_000);
     rejoin(owner.username);
-    expect(snapshotFor(owner.socketId)).toMatchObject({ phase: "waiting-photo", owner: null, photo: null });
+    expect(snapshotFor(owner.socketId)).toMatchObject({ phase: "waiting-photo", isOwner: false, photo: null });
     expect(last("your-turn")).toEqual({ target: owner.socketId, event: "your-turn", args: [{ round: 1, attempt: 1 }] });
   });
 });

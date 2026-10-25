@@ -87,7 +87,7 @@ const textOf = (root: ReactTestInstance, id: string) => root.find((n) => n.props
 describe("waiting-photo helpers", () => {
   it("applyWaitingPhoto leaves the previous round and paints the server's wait", () => {
     const s = {
-      setPhoto: jest.fn(), setPhotoOwner: jest.fn(), setRound: jest.fn(), setPhase: jest.fn(), setPhaseDuration: jest.fn(),
+      setPhoto: jest.fn(), setIsOwner: jest.fn(), setRound: jest.fn(), setPhase: jest.fn(), setPhaseDuration: jest.fn(),
       setPhaseKey: jest.fn(), setCorrectAnswer: jest.fn(), setScores: jest.fn(), setMySelection: jest.fn(),
       setGameHeld: jest.fn(), setPressing: jest.fn(),
     };
@@ -137,7 +137,7 @@ describe("GameScreen while a photo is awaited", () => {
   });
 
   it("everyone sees 'someone is choosing a photo' with the server's progress bar instead of the old scores", () => {
-    act(() => mockSocket.fire("round-start", { photo: "/temp/x.jpg", owner: "alice", round: 1, duration: 8_000 }));
+    act(() => mockSocket.fire("round-start", { photo: "/temp/x.jpg", round: 1, duration: 8_000, isOwner: false }));
     act(() => mockSocket.fire("round-scores", { scores: [], round: 1, totalRounds: 10, duration: 5_000 }));
     act(() => mockSocket.fire("waiting-photo", { round: 2, duration: 15_000 }));
     expect(has(r.root, TEST_IDS.gameWaitingPhoto)).toBe(true);
@@ -146,7 +146,7 @@ describe("GameScreen while a photo is awaited", () => {
     expect(has(r.root, TEST_IDS.roundSkippedNotice)).toBe(false);
 
     // The photo arrives: the round is shown
-    act(() => mockSocket.fire("round-start", { photo: "/temp/y.jpg", owner: "carol", round: 2, duration: 8_000 }));
+    act(() => mockSocket.fire("round-start", { photo: "/temp/y.jpg", round: 2, duration: 8_000, isOwner: false }));
     expect(has(r.root, TEST_IDS.gameWaitingPhoto)).toBe(false);
   });
 
@@ -157,7 +157,7 @@ describe("GameScreen while a photo is awaited", () => {
     expect(textOf(r.root, TEST_IDS.roundSkippedNotice)).toBe(en.roundSkippedTimeout);
     act(() => mockSocket.fire("round-skipped", { round: 1, reason: "unavailable" }));
     expect(textOf(r.root, TEST_IDS.roundSkippedNotice)).toBe(en.roundSkippedUnavailable);
-    act(() => mockSocket.fire("round-start", { photo: "/temp/y.jpg", owner: "carol", round: 1, duration: 8_000 }));
+    act(() => mockSocket.fire("round-start", { photo: "/temp/y.jpg", round: 1, duration: 8_000, isOwner: false }));
     expect(has(r.root, TEST_IDS.roundSkippedNotice)).toBe(false);
   });
 
@@ -165,7 +165,7 @@ describe("GameScreen while a photo is awaited", () => {
   it("shows the round's photo only with the room credentials as image headers", async () => {
     await flush();
     mockPhotoProps.length = 0;
-    act(() => mockSocket.fire("round-start", { photo: "/temp/y.jpg", owner: "carol", round: 1, duration: 8_000 }));
+    act(() => mockSocket.fire("round-start", { photo: "/temp/y.jpg", round: 1, duration: 8_000, isOwner: false }));
     expect(mockPhotoProps.length).toBeGreaterThan(0);
     for (const p of mockPhotoProps) expect(p.headers).toEqual({ Authorization: "Bearer tok-123", "X-Game-Code": "123456" });
   });
@@ -296,7 +296,7 @@ describe("GameScreen while a photo is awaited", () => {
 
   it("a rejoin snapshot in waiting-photo shows the waiting screen with the remaining wait", () => {
     act(() => mockSocket.fire("game-state", {
-      started: true, phase: "waiting-photo", round: 2, totalRounds: 10, owner: null, photo: null, correctAnswer: null,
+      started: true, phase: "waiting-photo", round: 2, totalRounds: 10, isOwner: false, photo: null, correctAnswer: null,
       duration: 6_000, held: false, pause: null, scores: [], players: [],
     }));
     expect(has(r.root, TEST_IDS.gameWaitingPhoto)).toBe(true);
@@ -304,7 +304,7 @@ describe("GameScreen while a photo is awaited", () => {
   });
 
   it("resuming a pause taken between rounds goes to the waiting screen", () => {
-    act(() => mockSocket.fire("round-start", { photo: "/temp/x.jpg", owner: "alice", round: 1, duration: 8_000 }));
+    act(() => mockSocket.fire("round-start", { photo: "/temp/x.jpg", round: 1, duration: 8_000, isOwner: false }));
     act(() => mockSocket.fire("round-scores", { scores: [], round: 1, totalRounds: 10, duration: 5_000 }));
     act(() => mockSocket.fire("game-paused", { duration: 300_000, waitingFor: ["carol"], pause: 1, maxPauses: 3 }));
     act(() => mockSocket.fire("game-resumed", { phase: "waiting-photo", duration: 1_500 }));

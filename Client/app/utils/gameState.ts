@@ -5,7 +5,7 @@ type Phase = "waiting-photo" | "answering" | "reveal" | "scores" | null;
 
 export interface GameStateSetters {
   setPhoto: (v: string | null) => void;
-  setPhotoOwner: (v: string) => void;
+  setIsOwner: (v: boolean) => void;
   setRound: (v: number) => void;
   setPhase: (v: Phase) => void;
   setPhaseDuration: (v: number) => void;
@@ -29,13 +29,13 @@ export interface GameStateResult {
 }
 
 /**
- * Renders the `game-state` snapshot a rejoining player receives. `currentRound`/`currentOwner` are what the
- * screen showed before the reconnect: the guess is kept only if it is still the same round.
+ * Renders the `game-state` snapshot a rejoining player receives. `current` is the round and photo URL the screen
+ * showed before the reconnect: the guess is kept only if it is still the same round.
  */
 export const applyGameState = (
   snap: GameStateSnapshot,
   serverUrl: string,
-  current: { round: number; owner: string },
+  current: { round: number; photo: string | null },
   s: GameStateSetters
 ): GameStateResult => {
   const result: GameStateResult = { gameOver: false, sendReady: false, submitGuess: false };
@@ -49,11 +49,12 @@ export const applyGameState = (
   s.setGameHeld(snap.held);
 
   const inRound = snap.phase === "answering" || snap.phase === "reveal" || snap.phase === "scores";
-  if (inRound && snap.photo && snap.owner) {
-    const sameRound = snap.round === current.round && snap.owner === current.owner;
+  if (inRound && snap.photo) {
+    const photo = `${serverUrl}${snap.photo}`;
+    const sameRound = snap.round === current.round && photo === current.photo;
     if (!sameRound) s.setMySelection("");
-    s.setPhoto(`${serverUrl}${snap.photo}`);
-    s.setPhotoOwner(snap.owner);
+    s.setPhoto(photo);
+    s.setIsOwner(snap.isOwner === true);
     s.setRound(snap.round);
     s.setPhase(snap.phase as Phase);
     s.setPhaseDuration(snap.duration);
@@ -71,7 +72,7 @@ export const applyGameState = (
 
   // Ready phase: back to the "are you ready" screen until the first round
   s.setPhoto(null);
-  s.setPhotoOwner("");
+  s.setIsOwner(false);
   s.setPhase(null);
   s.setCorrectAnswer("");
   s.setScores(null);

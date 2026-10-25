@@ -3,7 +3,7 @@ import { applyRoundStart, RoundStartSetters } from "../app/utils/roundStart";
 const makeSetters = () => {
   const s = {
     setPhoto: jest.fn(),
-    setPhotoOwner: jest.fn(),
+    setIsOwner: jest.fn(),
     setRound: jest.fn(),
     setPhase: jest.fn(),
     setPhaseDuration: jest.fn(),
@@ -18,7 +18,7 @@ const makeSetters = () => {
 };
 
 describe("applyRoundStart (EXP-001)", () => {
-  const data = { photo: "/temp/a.jpg", owner: "alice", round: 3, duration: 10000 };
+  const data = { photo: "/temp/a.jpg", round: 3, duration: 10000, isOwner: false };
 
   it("does not throw and clears hold state left over from the previous round", () => {
     const s = makeSetters();
@@ -27,11 +27,11 @@ describe("applyRoundStart (EXP-001)", () => {
     expect(s.setPressing).toHaveBeenCalledWith(false);
   });
 
-  it("sets the new round photo/owner/phase and resets per-round answer state", () => {
+  it("sets the new round photo/phase and resets per-round answer state", () => {
     const s = makeSetters();
     applyRoundStart(data, "http://srv", s);
     expect(s.setPhoto).toHaveBeenCalledWith("http://srv/temp/a.jpg");
-    expect(s.setPhotoOwner).toHaveBeenCalledWith("alice");
+    expect(s.setIsOwner).toHaveBeenCalledWith(false);
     expect(s.setRound).toHaveBeenCalledWith(3);
     expect(s.setPhase).toHaveBeenCalledWith("answering");
     expect(s.setPhaseDuration).toHaveBeenCalledWith(10000);
@@ -40,5 +40,12 @@ describe("applyRoundStart (EXP-001)", () => {
     expect(s.setMySelection).toHaveBeenCalledWith("");
     const bump = s.setPhaseKey.mock.calls[0][0] as (k: number) => number;
     expect(bump(4)).toBe(5);
+  });
+
+  // EXP-128: round-start never names the owner; only the owner's own copy says the photo is theirs
+  it("marks the photo as mine only from my own isOwner copy", () => {
+    const mine = makeSetters();
+    applyRoundStart({ ...data, isOwner: true }, "http://srv", mine);
+    expect(mine.setIsOwner).toHaveBeenCalledWith(true);
   });
 });

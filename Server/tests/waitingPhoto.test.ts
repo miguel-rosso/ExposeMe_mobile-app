@@ -91,7 +91,7 @@ describe("waiting-photo broadcast (EXP-039)", () => {
   it("the game-state snapshot carries the waiting-photo phase with the remaining wait and no owner", () => {
     vi.advanceTimersByTime(GAME_START_DELAY + 4_000);
     const snap = engine.snapshot(room);
-    expect(snap).toMatchObject({ phase: "waiting-photo", round: 0, owner: null, photo: null, duration: PHOTO_WAIT_TIMEOUT - 4_000 });
+    expect(snap).toMatchObject({ phase: "waiting-photo", round: 0, isOwner: false, photo: null, duration: PHOTO_WAIT_TIMEOUT - 4_000 });
   });
 });
 

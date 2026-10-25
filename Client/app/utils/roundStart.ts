@@ -1,17 +1,22 @@
 import { ScoreRound } from "../models/interfaces";
 
+/**
+ * `round-start`: the round's photo and answer timer. The owner's name is never sent before `round-reveal`; only the
+ * owner's own copy has `isOwner: true` (hold button, no voting).
+ */
 export interface RoundStartData {
   photo: string;
-  owner: string;
   round: number;
   duration: number;
+  isOwner: boolean;
 }
 
 type Phase = "waiting-photo" | "answering" | "reveal" | "scores" | null;
 
 export interface RoundStartSetters {
   setPhoto: (v: string | null) => void;
-  setPhotoOwner: (v: string) => void;
+  /** This round's photo is mine (uploaded or planted by me) */
+  setIsOwner: (v: boolean) => void;
   setRound: (v: number) => void;
   setPhase: (v: Phase) => void;
   setPhaseDuration: (v: number) => void;
@@ -27,7 +32,7 @@ export interface RoundStartSetters {
 // previous round answer/scores/selection and any leftover hold state.
 export const applyRoundStart = (data: RoundStartData, serverUrl: string, s: RoundStartSetters) => {
   s.setPhoto(`${serverUrl}${data.photo}`);
-  s.setPhotoOwner(data.owner);
+  s.setIsOwner(data.isOwner === true);
   s.setRound(data.round);
   s.setPhase("answering");
   s.setPhaseDuration(data.duration);

@@ -23,7 +23,7 @@ type SkipTextKey = (typeof SKIP_TEXT_KEYS)[SkipNotice];
  */
 export const applyWaitingPhoto = (data: WaitingPhotoData, s: RoundStartSetters) => {
   s.setPhoto(null);
-  s.setPhotoOwner("");
+  s.setIsOwner(false);
   s.setRound(data.round);
   s.setPhase("waiting-photo");
   s.setPhaseDuration(data.duration);

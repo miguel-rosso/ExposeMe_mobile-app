@@ -45,6 +45,7 @@ export default {
   // GameScreen
   areYouReady: "ARE YOU READY?",
   holdPhoto: "Hold photo",
+  ownPhotoHint: "It's your photo — wait for the others to vote",
   reconnecting: "Reconnecting…",
   gamePaused: "Game paused",
   waitingPlayersReturn: "Waiting for players to come back…",

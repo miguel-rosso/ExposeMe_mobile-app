@@ -43,6 +43,17 @@ After last round: game-over
   the next attempt when another connected player can be.
 - Planted rounds go straight to `round-start` (no `waiting-photo`).
 
+## Whose photo it is (secret until the reveal)
+
+- The photo owner (the uploader, or the planter for a planted photo) is never named to the others before
+  `round-reveal`. **`round-start { photo, round, duration, isOwner }`** is sent per recipient: the room minus the
+  owner's socket gets `isOwner: false`, the owner's socket the same payload with `isOwner: true`. The same rule
+  applies to the `game-state` snapshot (`isOwner` is per recipient, see "Pause and reconnect").
+- The owner's client uses `isOwner` for the hold button and to disable voting. The server also **ignores the
+  owner's `submit-answer`** (never recorded nor scored: their `lastGuess` stays `""`), whatever the client sends.
+- From `round-reveal { correctAnswer }` on, the answer is public as before (`round-scores`, snapshot
+  `correctAnswer` in `reveal`/`scores`).
+
 ## Join, rejoin and session
 
 - `join-create-game { gameCode, username, rejoinToken? }`: `gameCode: null` creates a room (sender is host).
@@ -102,7 +113,7 @@ After last round: game-over
   during `answering`/`reveal` (abandoned, pauses used up) drops that unrevealed round's answers and points:
   `game-over.finalScore` and the later snapshots never show them.
 - `room-of-game.room` is also an allowlist: `{ gameCode, rounds, started, round, phase, held, paused, players }`
-  (no current photo owner: it is secret while a photo is awaited, and `round-start`/`game-state` carry it).
+  (no current photo owner: it is secret until `round-reveal`, see "Whose photo it is").
 
 ## Disconnected players
 
@@ -135,9 +146,10 @@ and, once the game screen listens, re-sends `join-create-game` on the **same** s
 fresh snapshot (and `your-turn` for an awaited photo), which the game screen renders like any reconnect. Events
 that reached the lobby screen in between are covered by that snapshot.
 
-- **`game-state`** = `{ started, phase, round, totalRounds, owner, photo, correctAnswer, duration, held, pause,
-  scores, players }`. `duration` is the remaining time of the current phase (frozen while paused/held). `owner`
-  and `photo` are only set in `answering`/`reveal`/`scores` (the owner stays secret while waiting for a photo);
+- **`game-state`** = `{ started, phase, round, totalRounds, isOwner, photo, correctAnswer, duration, held, pause,
+  scores, players }`. `duration` is the remaining time of the current phase (frozen while paused/held). `photo` is
+  only set in `answering`/`reveal`/`scores`; `isOwner` is true only in the snapshot sent to the photo owner, in
+  those phases (the owner's name is never in it before the reveal: `correctAnswer` carries it from `reveal` on);
   in `waiting-photo`, `round` is the last played round (the awaited one is `round + 1`, as in `waiting-photo`) and
   `duration` what is left of the photo wait, so the client renders the same waiting screen as for `waiting-photo`;
   `correctAnswer` only in `reveal`/`scores`. `pause` is `{ duration, waitingFor, pause, maxPauses }` (same as `game-paused`) while paused, else `null`.
@@ -195,7 +207,7 @@ All game events are **atomic** — each contains everything the client needs.
 | `game-started` | - | `players, rounds` | Navigate to game screen (public player data only, see "Public player data") |
 | `waiting-photo` | waiting-photo | `{ round, duration }` | Whole room: a photo is awaited (owner not revealed), show wait bar |
 | `your-turn` | waiting-photo | `{ round, attempt }` | Only the picked player: pick and upload a photo (or send `photo-unavailable`) |
-| `round-start` | answering | `{ photo, owner, round, duration }` | Show photo, start answer timer |
+| `round-start` | answering | `{ photo, round, duration, isOwner }` | Show photo, start answer timer. Per recipient: `isOwner` true only to the photo owner (never names the owner) |
 | `round-reveal` | reveal | `{ correctAnswer, duration }` | Show correct answer |
 | `round-scores` | scores | `{ scores, duration }` | Show scoreboard |
 | `hold-start` | - | - | Pause everything visually |
@@ -217,7 +229,7 @@ All game events are **atomic** — each contains everything the client needs.
 | `im-ready` | - | Player ready to start (session player; payload ignored) |
 | `photo-sent` | `{ photo }` | Photo uploaded; only from the current owner, `photo` must be a path the owner got from `/upload` in this room (`/temp/<32 hex>.jpg\|png\|webp`) |
 | `photo-unavailable` | `{ round, attempt }` (from its `your-turn`) | The awaited owner has no photo to send (no access, no photos, upload failed): skip the round now |
-| `submit-answer` | `{ guess }` | Player's answer |
+| `submit-answer` | `{ guess }` | Player's answer (ignored from the photo owner) |
 | `hold-start` | - | Photo owner pressed hold |
 | `hold-end` | - | Photo owner released hold |
 | `chat-message` | `{ message }` (≤100 chars) | Broadcast as `{ username, message }` with the session username |

@@ -63,5 +63,5 @@ Summary fields: `pass`, `skew_ms` (spread between players receiving the same pha
 - Gallery empty in app: re-run `lab.sh photos`; on Android check `adb shell ls /sdcard/Pictures/ExposeMeQA` and the media scan.
 - Permission screen loops: iOS `simctl privacy … grant photos`, Android `pm grant … READ_MEDIA_IMAGES` (done by `up`/`install`).
 - Maestro can't find an element: flows select by testID (`Client/app/utils/testIds.ts`, `id:` selectors); check the id in `maestro studio`.
-- iOS simulators run headless (no Simulator.app window in Xcode 27 unless the Simulator component is installed); use `lab.sh shot` to see them.
+- iOS simulators are shown in DeviceHub (Xcode 27 replaced Simulator.app; `lab.sh up` opens it). `lab.sh shot` takes screenshots.
 - Machine is slow: `up --ios 1 --android 1` and use more bots.

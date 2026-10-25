@@ -108,7 +108,8 @@ cmd_up() {
     xcrun simctl privacy "$udid" grant photos "$APP_ID" 2>/dev/null || true
     list="$(jq -c --arg id "$udid" --arg l "ios-${letters[$i]}" --arg n "$name" '. + [{label:$l, platform:"ios", id:$id, model:$n}]' <<<"$list")"
   done
-  open -a Simulator 2>/dev/null || open -b com.apple.iphonesimulator 2>/dev/null || true
+  # Show the simulators: Xcode 27 replaced Simulator.app with DeviceHub
+  [ "$n_ios" -gt 0 ] && { open -g -b com.apple.dt.Devices 2>/dev/null || open -g -a Simulator 2>/dev/null || true; }
   for ((i=0; i<n_android; i++)); do
     local avd="${AVD_NAMES[$i]}" serial
     serial="$(emu_serial_for_avd "$avd")"

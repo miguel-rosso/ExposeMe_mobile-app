@@ -1,4 +1,5 @@
 import fs from "fs";
+import os from "os";
 import path from "path";
 import { Request, Response } from "express";
 
@@ -11,8 +12,38 @@ import { Request, Response } from "express";
 export const UPLOAD_TTL_MS = 30 * 60 * 1000; // 30 minutes — games can last 15+ min
 export const SWEEP_INTERVAL_MS = 5 * 60 * 1000;
 
-/** Names produced by UploadController; nothing else in the upload dir (e.g. .gitkeep) is ever touched. */
+/** Names produced by UploadController; /temp serves nothing else. */
 export const UPLOAD_FILE_RE = /^[0-9a-f]{32}\.(?:jpg|png|webp)$/;
+
+/** Upload names written by older server versions ("<epoch ms>-<name>.<ext>"): never served, but still expired. */
+export const LEGACY_UPLOAD_FILE_RE = /^\d{13}-[\w.-]+\.(?:jpe?g|png|webp)$/i;
+
+/**
+ * Files the sweeper may expire: current and legacy upload names only, nothing else in the dir (e.g. .gitkeep)
+ * is ever touched. Only regular files directly in the dir are deleted (lstat: symlinks and subdirectories are
+ * skipped, never followed).
+ */
+const isSweepable = (name: string) => UPLOAD_FILE_RE.test(name) || LEGACY_UPLOAD_FILE_RE.test(name);
+
+const realOrResolved = (p: string) => {
+  const resolved = path.resolve(p);
+  try {
+    return [resolved, fs.realpathSync(resolved)];
+  } catch {
+    return [resolved];
+  }
+};
+
+/**
+ * UPLOAD_DIR must be a dedicated directory: refuse to sweep shared ones (the OS temp dir, the filesystem root,
+ * the home directory), where other programs' files could match the upload names.
+ */
+export function isUnsafeSweepDir(dir: string): boolean {
+  const forbidden = new Set([os.tmpdir(), os.homedir(), path.parse(path.resolve(dir)).root].flatMap(realOrResolved));
+  return realOrResolved(dir).some((p) => forbidden.has(p));
+}
+
+const warnedUnsafeDirs = new Set<string>();
 
 const remainingMs = (mtimeMs: number, ttlMs: number, now: number) => mtimeMs + ttlMs - now;
 
@@ -33,8 +64,9 @@ async function deleteIfExpired(dir: string, name: string, ttlMs: number): Promis
 }
 
 /**
- * Deletes upload files in `dir` whose mtime is at least `ttlMs` old. Returns the deleted file names.
- * `onFresh` is called for every upload file kept, with the epoch ms at which it expires.
+ * Deletes upload files (current or legacy names, regular files only) in `dir` whose mtime is at least `ttlMs`
+ * old. Returns the deleted file names. `onFresh` is called for every upload file kept, with the epoch ms at
+ * which it expires. Does nothing (warns once) if `dir` is a shared directory (see isUnsafeSweepDir).
  */
 export async function sweepUploads(
   dir: string,
@@ -42,6 +74,15 @@ export async function sweepUploads(
   now = Date.now(),
   onFresh?: (name: string, expiresAt: number) => void,
 ): Promise<string[]> {
+  if (isUnsafeSweepDir(dir)) {
+    const paths = realOrResolved(dir);
+    const key = paths[paths.length - 1];
+    if (!warnedUnsafeDirs.has(key)) {
+      warnedUnsafeDirs.add(key);
+      console.warn(`[uploads] not sweeping ${key}: UPLOAD_DIR must be a dedicated directory`);
+    }
+    return [];
+  }
   let names: string[];
   try {
     names = await fs.promises.readdir(dir);
@@ -51,7 +92,7 @@ export async function sweepUploads(
   }
   const deleted: string[] = [];
   for (const name of names) {
-    if (!UPLOAD_FILE_RE.test(name)) continue;
+    if (!isSweepable(name)) continue;
     const file = path.join(dir, name);
     try {
       const st = await fs.promises.lstat(file);

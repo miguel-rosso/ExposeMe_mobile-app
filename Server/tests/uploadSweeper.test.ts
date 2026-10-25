@@ -4,7 +4,7 @@ import path from "path";
 import http from "http";
 import { AddressInfo } from "net";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { startUploadSweeper, sweepUploads, SWEEP_INTERVAL_MS, UPLOAD_TTL_MS } from "../middlewares/uploadSweeper";
+import { isUnsafeSweepDir, startUploadSweeper, sweepUploads, SWEEP_INTERVAL_MS, UPLOAD_TTL_MS } from "../middlewares/uploadSweeper";
 import type { Player, Room } from "../models/interfaces";
 
 // Uploads expire by mtime on disk, so photos left behind by a server restart are still deleted, and /temp
@@ -13,7 +13,22 @@ import type { Player, Room } from "../models/interfaces";
 const STALE = "a".repeat(32) + ".jpg";
 const FRESH = "b".repeat(32) + ".png";
 const STALE_WEBP = "c".repeat(32) + ".webp";
-const NOT_UPLOADS = [".gitkeep", "notes.txt", "a".repeat(31) + ".jpg", "d".repeat(32) + ".gif", "E".repeat(32) + ".jpg"];
+// Only upload names are swept: current ones (UPLOAD_FILE_RE) and legacy "<13-digit epoch>-<name>.<img>" names from
+// older server versions (never served, but they must not stay on disk forever). Anything else is never touched.
+const LEGACY = ["1775230128541-planted-photo.jpg", "1792869683257-bot2.jpg", "1775230141678-photo.jpg", "1775230141679-a.b.JPEG", "1775230141680-x.png", "1775230141681-y.webp"];
+const UNRELATED = [
+  ".gitkeep",
+  ".hidden.jpg",
+  "notes.txt",
+  "important.jpg",
+  "a".repeat(31) + ".jpg",
+  "d".repeat(32) + ".gif",
+  "E".repeat(32) + ".jpg",
+  "177523012854-short-epoch.jpg",
+  "1775230128541-photo.gif",
+  "1775230128541-.jpg",
+  "1775230128541photo.jpg",
+];
 const MIN = 60_000;
 
 let dir: string;
@@ -37,12 +52,12 @@ afterEach(() => {
 
 // ── sweepUploads ──
 describe("sweepUploads", () => {
-  it("deletes upload files older than the TTL and keeps fresh and non-upload files", async () => {
+  it("deletes upload files older than the TTL and keeps fresh uploads and every unrelated file", async () => {
     const now = Date.now();
     write(STALE, UPLOAD_TTL_MS + MIN);
     write(STALE_WEBP, 24 * 60 * MIN);
     write(FRESH, UPLOAD_TTL_MS - MIN);
-    for (const n of NOT_UPLOADS) write(n, 24 * 60 * MIN);
+    for (const n of UNRELATED) write(n, 24 * 60 * MIN);
     fs.mkdirSync(path.join(dir, "f".repeat(32) + ".jpg")); // a directory with an upload-like name is left alone
     const fresh: Array<[string, number]> = [];
 
@@ -52,7 +67,7 @@ describe("sweepUploads", () => {
     expect(exists(STALE)).toBe(false);
     expect(exists(STALE_WEBP)).toBe(false);
     expect(exists(FRESH)).toBe(true);
-    for (const n of NOT_UPLOADS) expect(exists(n)).toBe(true);
+    for (const n of UNRELATED) expect(exists(n)).toBe(true);
     expect(exists("f".repeat(32) + ".jpg")).toBe(true);
     expect(fresh).toHaveLength(1);
     expect(fresh[0][0]).toBe(FRESH);
@@ -65,6 +80,95 @@ describe("sweepUploads", () => {
     write(FRESH, 0);
     expect(await sweepUploads(dir, UPLOAD_TTL_MS, now + UPLOAD_TTL_MS - 1_000)).toEqual([]);
     expect(await sweepUploads(dir, UPLOAD_TTL_MS, now + UPLOAD_TTL_MS + 1_000)).toEqual([FRESH]);
+  });
+
+  it("expires legacy-named files by mtime too: stale ones deleted, fresh ones kept until their TTL", async () => {
+    const now = Date.now();
+    for (const n of LEGACY) write(n, 24 * 60 * MIN);
+    for (const n of UNRELATED) write(n, 24 * 60 * MIN);
+    write("1800000000000-fresh.jpg", UPLOAD_TTL_MS - MIN);
+    const fresh: string[] = [];
+
+    const deleted = await sweepUploads(dir, UPLOAD_TTL_MS, now, (n) => fresh.push(n));
+
+    expect(deleted.sort()).toEqual([...LEGACY].sort());
+    for (const n of LEGACY) expect(exists(n)).toBe(false);
+    for (const n of UNRELATED) expect(exists(n)).toBe(true);
+    expect(exists("1800000000000-fresh.jpg")).toBe(true);
+    expect(fresh).toEqual(["1800000000000-fresh.jpg"]);
+    expect(await sweepUploads(dir, UPLOAD_TTL_MS, now + UPLOAD_TTL_MS)).toEqual(["1800000000000-fresh.jpg"]);
+  });
+
+  it("never follows symlinks or leaves the directory", async () => {
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "exposeme-sweep-outside-"));
+    try {
+      write("victim.jpg", 24 * 60 * MIN, outside);
+      fs.mkdirSync(path.join(outside, "sub"));
+      write("nested.jpg", 24 * 60 * MIN, path.join(outside, "sub"));
+      // Entries with upload-like names that are not regular files: symlinks (to a file, to a dir) and a subdirectory
+      fs.symlinkSync(path.join(outside, "victim.jpg"), path.join(dir, "1775230128541-link.jpg"));
+      fs.symlinkSync(path.join(outside, "victim.jpg"), path.join(dir, "9".repeat(32) + ".jpg"));
+      fs.symlinkSync(path.join(outside, "sub"), path.join(dir, "1775230128542-linkdir.jpg"));
+      fs.mkdirSync(path.join(dir, "1775230128543-subdir.jpg"));
+      write("inner.jpg", 24 * 60 * MIN, path.join(dir, "1775230128543-subdir.jpg"));
+      const t = new Date(Date.now() - 24 * 60 * MIN);
+      fs.lutimesSync(path.join(dir, "1775230128541-link.jpg"), t, t);
+
+      expect(await sweepUploads(dir, UPLOAD_TTL_MS)).toEqual([]);
+
+      expect(fs.existsSync(path.join(outside, "victim.jpg"))).toBe(true);
+      expect(fs.existsSync(path.join(outside, "sub", "nested.jpg"))).toBe(true);
+      expect(fs.lstatSync(path.join(dir, "1775230128541-link.jpg")).isSymbolicLink()).toBe(true);
+      expect(fs.lstatSync(path.join(dir, "9".repeat(32) + ".jpg")).isSymbolicLink()).toBe(true);
+      expect(exists(path.join("1775230128543-subdir.jpg", "inner.jpg"))).toBe(true);
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ["os.tmpdir()", () => os.tmpdir()],
+    ["os.tmpdir() with trailing slash", () => os.tmpdir() + path.sep],
+    ["the filesystem root", () => path.parse(process.cwd()).root],
+    ["the home directory", () => os.homedir()],
+  ])("refuses to sweep %s (never even lists it) and warns once", async (_label, getDir) => {
+    const target = getDir();
+    expect(isUnsafeSweepDir(target)).toBe(true);
+    // Guard against a broken implementation touching a real shared directory
+    const readdir = vi.spyOn(fs.promises, "readdir").mockResolvedValue([]);
+    const unlink = vi.spyOn(fs.promises, "unlink").mockResolvedValue();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(await sweepUploads(target)).toEqual([]);
+      expect(await sweepUploads(target)).toEqual([]);
+      expect(readdir).not.toHaveBeenCalled();
+      expect(unlink).not.toHaveBeenCalled();
+      expect(warn.mock.calls.length).toBeLessThanOrEqual(1);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("warns exactly once per unsafe directory", async () => {
+    const readdir = vi.spyOn(fs.promises, "readdir").mockResolvedValue([]);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      vi.resetModules(); // fresh module: no directory warned about yet
+      const fresh = await import("../middlewares/uploadSweeper");
+      await fresh.sweepUploads(os.homedir());
+      await fresh.sweepUploads(path.join(os.homedir(), "x", ".."));
+      expect(warn).toHaveBeenCalledTimes(1);
+      await fresh.sweepUploads(os.tmpdir());
+      expect(warn).toHaveBeenCalledTimes(2);
+      expect(readdir).not.toHaveBeenCalled();
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("a dedicated subdirectory of the temp dir or home is not considered unsafe", () => {
+    expect(isUnsafeSweepDir(dir)).toBe(false);
+    expect(isUnsafeSweepDir(path.join(os.homedir(), "exposeme-uploads"))).toBe(false);
   });
 
   it("returns [] for a missing directory", async () => {
@@ -84,11 +188,13 @@ describe("startUploadSweeper", () => {
     const later = "e".repeat(32) + ".jpg";
     write(later, 7 * MIN); // expires at +23 min, between the sweeps at +20 and +25
     write(".gitkeep", 24 * 60 * MIN);
+    write("1775230128541-planted-photo.jpg", 24 * 60 * MIN); // legacy name from an older server version
 
     const sweeper = startUploadSweeper(dir);
     try {
       await sweeper.idle();
       expect(exists(STALE)).toBe(false);
+      expect(exists("1775230128541-planted-photo.jpg")).toBe(false);
       expect(exists(FRESH)).toBe(true);
 
       await vi.advanceTimersByTimeAsync(2 * MIN - 1_000);

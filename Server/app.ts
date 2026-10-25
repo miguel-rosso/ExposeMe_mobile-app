@@ -7,15 +7,18 @@ import { uploadPath } from "./middlewares/upload";
 import { parseTrustProxy } from "./middlewares/rateLimit";
 import { serveUpload, startUploadSweeper } from "./middlewares/uploadSweeper";
 import { errorHandler } from "./middlewares/errorHandler";
+import { notFound, securityHeaders } from "./middlewares/securityHeaders";
 import { requireRoomMember, requireRoomUpload } from "./middlewares/uploadAccess";
 
 const app = express();
+app.disable("x-powered-by");
 
 // Behind a reverse proxy (Render) req.ip must come from X-Forwarded-For, or every client would share the
 // proxy's IP for the /upload rate limit (see parseTrustProxy).
 const trustProxyHops = parseTrustProxy(process.env.TRUST_PROXY, Boolean(process.env.RENDER));
 if (trustProxyHops > 0) app.set("trust proxy", trustProxyHops);
 
+app.use(securityHeaders);
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -27,6 +30,8 @@ app.use("/temp", (_req, res) => {
   res.status(404).json({ error: "Not found" });
 });
 app.use("/", uploadRoutes);
+// Unknown routes: JSON 404 that never echoes the path
+app.use(notFound);
 // Last: JSON errors without stack traces or server paths (bad URL encoding, body parse errors, disk failures)
 app.use(errorHandler);
 

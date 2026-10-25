@@ -8,7 +8,7 @@ import { NextFunction, Request, Response } from "express";
  */
 export function errorHandler(err: unknown, req: Request, res: Response, next: NextFunction) {
   const raw = (err as { status?: unknown; statusCode?: unknown } | null)?.status ?? (err as { statusCode?: unknown } | null)?.statusCode;
-  const status = typeof raw === "number" && raw >= 400 && raw < 500 ? raw : 500;
+  const status = typeof raw === "number" && Number.isInteger(raw) && raw >= 400 && raw < 500 ? raw : 500;
 
   if (status === 500) console.error(`[http] ${req.method} ${req.path} failed:`, err);
   if (res.headersSent) return next(err); // let Express close the connection

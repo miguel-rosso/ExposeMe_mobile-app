@@ -1,8 +1,10 @@
+import crypto from "crypto";
 import express from "express";
 import { UploadRouter } from "../controllers/UploadController";
 import { singleImage } from "../middlewares/upload";
 import { uploadRateLimit } from "../middlewares/rateLimit";
 import { requireRoomMember, requireUploadAllowed } from "../middlewares/uploadAccess";
+import { joinPageCsp } from "../middlewares/securityHeaders";
 
 const router = express.Router();
 
@@ -44,6 +46,10 @@ router.get("/join/:code", (req, res) => {
   const scheme = "myapp";
   const deepLink = `${scheme}://screens/WaitingRoom?code=${encodeURIComponent(code)}`;
 
+  // The global deny-all CSP would block the page's inline style/script: allow them, the script by nonce only
+  const nonce = crypto.randomBytes(16).toString("base64");
+  res.setHeader("Content-Security-Policy", joinPageCsp(nonce));
+
   // Mobile browsers will try the deep link; fallback shows the code
   res.send(`
     <!DOCTYPE html>
@@ -68,7 +74,7 @@ router.get("/join/:code", (req, res) => {
         <a class="btn" href="${escapeHtml(deepLink)}">Open in App</a>
         <p class="sub">If the app doesn't open, enter the code manually.</p>
       </div>
-      <script>window.location.href = ${toScriptString(deepLink)};</script>
+      <script nonce="${nonce}">window.location.href = ${toScriptString(deepLink)};</script>
     </body>
     </html>
   `);

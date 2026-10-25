@@ -238,7 +238,9 @@ unknown room or a token that is not a current member of it → **403**.
   and when the room is deleted. A player's own photos are deleted when they leave or are removed, except the photo
   on screen this round (deleted with the rest at `game-over`). The 30-min TTL stays as a backstop (`UPLOAD_TTL_MS`, by file mtime: a sweep at
   startup and every 5 min deletes expired uploads and schedules exact deletion for those expiring before the next
-  sweep, so restarts don't leave photos behind).
+  sweep, so restarts don't leave photos behind). The sweep only deletes regular files directly in the upload dir
+  named like an upload (`<32 hex>.jpg|png|webp`) or a legacy upload (`<13-digit epoch ms>-<name>.jpg|jpeg|png|webp`);
+  symlinks, subdirectories, dotfiles (`.gitkeep`) and any other name are never touched.
 - `photo-sent` / `plant-photo` take the returned `/temp/...` path, and only a photo that **the sender uploaded in
   this room** (and that still exists); anything else (another player's or another room's photo, a path never
   uploaded) is ignored.
@@ -258,4 +260,12 @@ unknown room or a token that is not a current member of it → **403**.
 | 429 | Room already holds 100 photos, or per-IP rate limit (`Retry-After`) — default 60 uploads/min, env `UPLOAD_RATE_MAX` / `UPLOAD_RATE_WINDOW_MS`; `qa/lab/lab.sh server` raises it for bot load tests |
 | 503 | Server busy processing other uploads (`Retry-After`) |
 
-Behind a reverse proxy, env `TRUST_PROXY` is the number of proxy hops used to read the client IP (default 1 when `RENDER` is set, otherwise 0). Env `UPLOAD_DIR` overrides the storage directory (default `Server/temp`).
+Behind a reverse proxy, env `TRUST_PROXY` is the number of proxy hops used to read the client IP (default 1 when `RENDER` is set, otherwise 0). Env `UPLOAD_DIR` overrides the storage directory (default `Server/temp`); it must be a dedicated directory: if it is the OS temp dir, the filesystem root or the home directory the sweep refuses to run (one warning in the log).
+
+Any other HTTP route answers **404** JSON `{ "error": "Not found" }` (the path is never echoed), and other errors
+are handled by the final JSON error handler (`{ error }`, a 4xx only for integer 400–499 statuses, otherwise 500).
+Every response carries security headers: `Content-Security-Policy: default-src 'none'; frame-ancestors 'none';
+base-uri 'none'; form-action 'none'`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+`Referrer-Policy: no-referrer`, `Cross-Origin-Resource-Policy: same-site` (browsers only; React Native image loads
+are unaffected), `Strict-Transport-Security: max-age=15552000`, and no `X-Powered-By`. The `/join/<code>` invite page
+overrides the CSP to allow its inline style and only its inline script, by a per-response nonce.

@@ -24,6 +24,15 @@ appId: com.socketNull.ExposeMe
       visible: "Development servers"
     commands:
       - tapOn: "http://.*:8081"
+# The launcher can also show up only after the check above (seen on Android): wait for it too, then pick the server
+- extendedWaitUntil:
+    visible: "This is the developer menu.*|Join Game|Unirse a Partida|Tap to proceed after setting permissions|Pulsa para continuar tras configurar los permisos|Development servers|DEVELOPMENT SERVERS"
+    timeout: 120000
+- runFlow:
+    when:
+      visible: "Development servers|DEVELOPMENT SERVERS"
+    commands:
+      - tapOn: "http://.*:8081"
 - extendedWaitUntil:
     visible: "This is the developer menu.*|Join Game|Unirse a Partida|Tap to proceed after setting permissions|Pulsa para continuar tras configurar los permisos"
     timeout: 120000
@@ -62,6 +71,15 @@ appId: com.socketNull.ExposeMe
       visible:
         id: "initial-screen"
     commands:
+      # The dev client's floating dev-menu button sits on top of the language toggle (top right) and a tap
+      # there opens the dev menu instead: drag the button away first (it snaps to the screen edge lower down)
+      - swipe:
+          from:
+            id: "language-toggle"
+          direction: DOWN
+          duration: 800
+      - waitForAnimationToEnd:
+          timeout: 2000
       # EXP-122: the onboarding offers the language toggle. Tap it twice (net no change, so later
       # flows keep the device language) and check the warning header switches language each time.
       - runFlow:

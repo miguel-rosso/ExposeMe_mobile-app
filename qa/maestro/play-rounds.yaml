@@ -4,7 +4,7 @@ appId: com.socketNull.ExposeMe
 ---
 - extendedWaitUntil:
     visible:
-      id: "game-waiting-ready|game-waiting-photo|player-option-.*|score-modal"
+      id: "game-waiting-ready|game-waiting-photo|player-option-.*|own-photo-hint|score-modal"
     timeout: 60000
 - repeat:
     while:

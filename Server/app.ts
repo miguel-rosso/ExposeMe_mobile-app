@@ -5,6 +5,7 @@ import { createServer } from "http";
 import uploadRoutes from "./routes/uploadRoutes";
 import { uploadPath } from "./middlewares/upload";
 import { parseTrustProxy } from "./middlewares/rateLimit";
+import { serveUpload, startUploadSweeper } from "./middlewares/uploadSweeper";
 
 const app = express();
 
@@ -17,7 +18,11 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-app.use("/temp", express.static(uploadPath));
+// Uploads: exact /temp/<32 hex>.<ext> route only (no static directory listing of other files)
+app.get("/temp/:name", serveUpload(uploadPath));
+app.use("/temp", (_req, res) => {
+  res.status(404).end();
+});
 app.use("/", uploadRoutes);
 
 // ── Socket heartbeat ──
@@ -49,5 +54,9 @@ const io = new Server(server, {
   pingInterval: PING_INTERVAL,
   pingTimeout: PING_TIMEOUT,
 });
+
+// Deletes uploads past their TTL at startup (leftovers from a previous process) and periodically after that
+const uploadSweeper = startUploadSweeper(uploadPath);
+server.on("close", uploadSweeper.stop);
 
 export { server, io };

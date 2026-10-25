@@ -4,8 +4,7 @@ import path from "path";
 import { Request, Response } from "express";
 import { uploadPath } from "../middlewares/upload";
 import { ImageRejected, sanitizeImage } from "./sanitizeImage";
-
-const FILE_TTL = 30 * 60 * 1000; // 30 minutes — games can last 15+ min
+import { UPLOAD_TTL_MS } from "../middlewares/uploadSweeper";
 
 export const UploadRouter = async (req: Request, res: Response) => {
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
@@ -26,14 +25,14 @@ export const UploadRouter = async (req: Request, res: Response) => {
   const filePath = path.join(uploadPath, filename);
   await fs.promises.writeFile(filePath, image.data, { flag: "wx" });
 
-  // Schedule file deletion
+  // Exact-time deletion; the periodic sweep (middlewares/uploadSweeper) covers restarts
   setTimeout(() => {
     fs.unlink(filePath, (err) => {
       if (err && err.code !== "ENOENT") {
         console.error("Error deleting file:", err);
       }
     });
-  }, FILE_TTL).unref();
+  }, UPLOAD_TTL_MS).unref();
 
   res.json({ url: `/temp/${filename}` });
 };

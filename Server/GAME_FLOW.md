@@ -177,7 +177,7 @@ Payload `gameCode`/`username` fields are ignored for all of the above; identity 
 
 ## Photo upload (HTTP)
 
-`POST /upload` (multipart, one file in field `image`, ≤10MB) → `200 { url: "/temp/<32 random hex>.<jpg|png|webp>" }`, served from `/temp` for 30 min.
+`POST /upload` (multipart, one file in field `image`, ≤10MB) → `200 { url: "/temp/<32 random hex>.<jpg|png|webp>" }`, served from `/temp` for 30 min (`UPLOAD_TTL_MS`, by file mtime: a sweep at startup and every 5 min deletes expired uploads and schedules exact deletion for those expiring before the next sweep, so restarts don't leave photos behind). Only `GET/HEAD /temp/<32 hex>.<jpg|png|webp>` is served (`Cache-Control: no-store, private`); expired or any other path under `/temp` → 404.
 - Accepted formats: JPEG, PNG, WebP, detected from the file contents (the file name and declared MIME type are ignored). The app is expected to send JPEG; HEIC and anything else is refused.
 - The stored image is re-encoded: orientation applied, scaled down to fit 2048×2048, all metadata (EXIF incl. GPS, XMP, ICC) removed, same format as the input.
 - Images are processed one at a time with a short bounded queue (`controllers/sanitizeImage.ts`).

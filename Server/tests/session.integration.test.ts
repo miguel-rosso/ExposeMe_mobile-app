@@ -275,10 +275,7 @@ describe("im-ready", () => {
       const turn = Promise.race([once(alice, "your-turn", 3_000), once(bob, "your-turn", 3_000)]);
       if (how === "disconnects") carol.disconnect();
       else if (how === "leaves") carol.emit("leave-room");
-      else {
-        const carolSocketId = carolJoin.room!.players.find((p) => p.username === "carol")!.socketId as string;
-        alice.emit("remove-player", { socketId: carolSocketId });
-      }
+      else alice.emit("remove-player", { username: "carol" });
       expect(await turn).toEqual({ round: 1, attempt: 1 });
       for (const c of [alice, bob]) c.emit("leave-room");
     });
@@ -355,7 +352,7 @@ describe("stale sockets and membership changes", () => {
   it("ignores remove-player from a non-host", async () => {
     const { gameCode, alice, bob } = await lobby();
     const quiet = silent(alice, "player-removed");
-    bob.emit("remove-player", { gameCode, socketId: alice.id });
+    bob.emit("remove-player", { gameCode, username: "alice" });
     expect(await quiet).toBe(true);
     expect(alice.connected).toBe(true);
   });

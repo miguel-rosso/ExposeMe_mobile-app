@@ -45,7 +45,7 @@ export class GameEngine {
     // "Play again" reuses the room: drop scores and answers from the previous game
     room.players.forEach((p) => { p.points = 0; p.lastGuess = ""; p.lastAnswerCorrect = false; });
     console.log(`[${room.gameCode}] Game started`);
-    this.io.to(room.gameCode).emit("game-started", room.players.map((p) => this.roomManager.publicPlayer(p)), room.rounds);
+    this.io.to(room.gameCode).emit("game-started", this.roomManager.publicPlayers(room), room.rounds);
     // Don't wait forever for a player who backgrounds the app or drops before GameScreen mounts
     this.setTimer(room, READY_TIMEOUT, () => {
       if (!room.started || room.phase !== null) return;
@@ -241,16 +241,12 @@ export class GameEngine {
     const shown = room.phase === "reveal" || room.phase === "scores";
     // Running timer: what is left of it; paused/held timer: the frozen remaining time
     const duration = room._timer ? Math.max(0, room._timerDuration - (Date.now() - room._timerStartedAt)) : room._timerDuration;
-    // Guesses of the round in play are secret until round-scores (points already count a correct one).
-    // In waiting-photo they are already reset by startRound.
-    const hideGuesses = room.started && (room.phase === "answering" || room.phase === "reveal");
-    const players = room.players.map((p) => {
-      const pub = this.roomManager.publicPlayer(p);
-      return hideGuesses ? { ...pub, ...this.hiddenGuess(p) } : pub;
-    });
+    // Guesses of the round in play are secret until round-scores (points already count a correct one)
+    const hideGuesses = this.roomManager.guessesHidden(room);
+    const players = this.roomManager.publicPlayers(room);
     const scores = this.buildScores(room).map((sc) => {
       const p = room.players.find((x) => x.username === sc.username)!;
-      return hideGuesses ? { ...sc, ...this.hiddenGuess(p) } : sc;
+      return hideGuesses ? { ...sc, ...this.roomManager.hiddenGuess(p) } : sc;
     });
     if (hideGuesses) scores.sort((a, b) => b.points - a.points);
     return {
@@ -267,10 +263,6 @@ export class GameEngine {
       scores,
       players,
     };
-  }
-
-  private hiddenGuess(p: Player): { points: number; lastGuess: string; lastAnswerCorrect: boolean } {
-    return { points: p.points - (p.lastAnswerCorrect ? 1 : 0), lastGuess: "", lastAnswerCorrect: false };
   }
 
   private pauseGame(room: Room): void {
@@ -461,6 +453,10 @@ export class GameEngine {
 
   private endGame(room: Room): void {
     console.log(`[${room.gameCode}] Game over`);
+    // Ended before round-scores (abandoned, pauses used up): the unrevealed round's answers and points don't count
+    if (this.roomManager.guessesHidden(room)) {
+      room.players.forEach((p) => Object.assign(p, this.roomManager.hiddenGuess(p)));
+    }
     this.roomManager.clearAllTimers(room);
     room.started = false;
     room.phase = null;

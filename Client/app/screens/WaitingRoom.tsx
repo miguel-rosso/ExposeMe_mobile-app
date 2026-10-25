@@ -350,9 +350,9 @@ const WaitingRoom = ({}) => {
     }
   };
 
-  const handleRemovePlayer = (socketId: string) => {
+  const handleRemovePlayer = (target: string) => {
     if (socket) {
-      socket.emit("remove-player", { gameCode, socketId });
+      socket.emit("remove-player", { gameCode, username: target });
     }
   };
 
@@ -539,7 +539,7 @@ const WaitingRoom = ({}) => {
             <FlatList
               data={players}
               renderItem={renderPlayer}
-              keyExtractor={(item) => item.socketId}
+              keyExtractor={(item) => item.username}
               style={tw`w-full flex-1`}
               contentContainerStyle={tw`pb-2`}
             />
@@ -649,7 +649,7 @@ const WaitingRoom = ({}) => {
         cancelText={t.cancel}
         onConfirm={() => {
           if (selectedPlayer) {
-            handleRemovePlayer(selectedPlayer.socketId);
+            handleRemovePlayer(selectedPlayer.username);
           }
           setDialogVisible(false);
         }}

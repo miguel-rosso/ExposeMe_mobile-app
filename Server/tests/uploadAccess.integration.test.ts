@@ -245,8 +245,7 @@ describe("uploads are deleted with the game / room", () => {
     expect(onDisk(p2) && onDisk(p3)).toBe(true); // the others' photos stay
 
     // Host (kim, after jon left) kicks lou
-    const lou = roomManager.getPlayer(b.gameCode, "lou")!;
-    b.socket.emit("remove-player", { socketId: lou.socketId });
+    b.socket.emit("remove-player", { username: "lou" });
     await until(() => !onDisk(p3));
     expect(onDisk(p2)).toBe(true);
     b.socket.emit("leave-room");

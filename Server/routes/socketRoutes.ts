@@ -63,7 +63,7 @@ function leaveBinding(socket: Socket, gameCode: string, username: string, owned:
     console.log(`[${gameCode}] ${username} left voluntarily`);
     const result = roomManager.removePlayer(gameCode, username);
     if (result.removed) {
-      if (result.newHost) io.to(gameCode).emit("new-host", roomManager.publicPlayer(result.newHost));
+      if (result.newHost) io.to(gameCode).emit("new-host", roomManager.publicPlayer(result.newHost, room));
       if (!result.isEmpty) io.to(gameCode).emit("player-left", username);
       gameEngine.checkReady(room); // ready phase: the others may all be ready now
       gameEngine.onConnectionChange(room); // mid-game: pause (or end) if fewer than 2 remain connected
@@ -359,16 +359,17 @@ io.on("connection", (socket: Socket) => {
     } catch (e) { console.error("chat error:", e); }
   });
 
-  socket.on("remove-player", (data: { socketId: string }) => {
+  // Host kicks a player by username (socket ids are never sent to clients); the host can't kick itself
+  socket.on("remove-player", (data: { username: string }) => {
     try {
       const s = session(socket);
-      if (!s || !s.player.isHost || typeof data?.socketId !== "string") return;
+      if (!s || !s.player.isHost || typeof data?.username !== "string" || data.username === s.player.username) return;
       const { room } = s;
-      const removed = roomManager.removePlayerBySocketId(room.gameCode, data.socketId);
+      const removed = roomManager.removePlayerByUsername(room.gameCode, data.username);
       if (removed) {
-        io.to(room.gameCode).emit("player-removed", roomManager.publicPlayer(removed));
+        io.to(room.gameCode).emit("player-removed", roomManager.publicPlayer(removed, room));
         // The kicked player's current socket and any other socket still bound to them in this room
-        const target = io.sockets.sockets.get(data.socketId);
+        const target = io.sockets.sockets.get(removed.socketId);
         if (target) evictSocket(target, room.gameCode);
         socketsOf(room.gameCode, removed.username).forEach((old) => evictSocket(old, room.gameCode));
         gameEngine.checkReady(room);

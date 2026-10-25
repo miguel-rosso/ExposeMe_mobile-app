@@ -482,7 +482,7 @@ const GameScreen = () => {
                   <FlatList
                     data={playersProvider}
                     renderItem={renderPlayer}
-                    keyExtractor={(item) => item.socketId}
+                    keyExtractor={(item) => item.username}
                     numColumns={2}
                     columnWrapperStyle={tw`justify-between`}
                     style={tw`w-full max-w-[500px] px-2`}

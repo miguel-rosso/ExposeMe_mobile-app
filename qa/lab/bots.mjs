@@ -30,6 +30,11 @@
 //   Every bot records waiting-photo { round, duration } (room-wide, owner secret): same payload for all, skew measured.
 //   Photos: uploads send the room code + the bot's rejoin token (X-Game-Code / Authorization: Bearer), like the app;
 //   on each round-start one non-owner bot GETs the photo with them (must be 200) and without (must be 401): "photo-access".
+//   Payload privacy (EXP-017/EXP-027): every event a bot receives is scanned; no socketId / rejoinToken / plantedPhoto
+//   key (except the bot's own token in room-of-game), no socket id or other bot's token as a value; during
+//   answering/reveal no player in room-of-game / game-state (players and scores) / new-host / player-removed shows
+//   this round's guess or more points than at the last round-scores; a waiting-photo game-state has no owner/photo:
+//   "payload-leak".
 import { io } from "socket.io-client";
 import fs from "node:fs";
 import path from "node:path";
@@ -70,6 +75,51 @@ const pct = (xs, p) => (xs.length ? [...xs].sort((a, b) => a - b)[Math.min(xs.le
 // /upload and /temp only answer members of the photo's room: room code + the bot's rejoin token (never logged)
 const photoAuth = (code, token) => ({ Authorization: `Bearer ${token}`, "X-Game-Code": code });
 
+const PRIVATE_KEYS = new Set(["socketId", "rejoinToken", "plantedPhoto"]);
+
+/**
+ * Privacy problems in one received event (EXP-017/EXP-027). `ids`: every socket id the room's bots have had;
+ * `tokens`: name -> rejoin token. Messages never include the secret values themselves.
+ */
+function payloadLeaks(me, ev, payload, ids, tokens, ctx = { phase: null, baseline: null }) {
+  const out = [];
+  const walk = (v, p) => {
+    if (typeof v === "string") {
+      if (ids.has(v)) out.push(`${ev} ${p}: a socket id`);
+      for (const [name, tok] of tokens) if (tok && v === tok && !(ev === "room-of-game" && p === "0.rejoinToken" && name === me)) out.push(`${ev} ${p}: ${name}'s rejoin token`);
+    } else if (Array.isArray(v)) v.forEach((x, i) => walk(x, `${p}.${i}`));
+    else if (v && typeof v === "object") {
+      for (const [k, x] of Object.entries(v)) {
+        if (PRIVATE_KEYS.has(k) && !(ev === "room-of-game" && p === "0" && k === "rejoinToken")) out.push(`${ev} ${p}.${k}: private key`);
+        walk(x, `${p}.${k}`);
+      }
+    }
+  };
+  payload.forEach((x, i) => walk(x, String(i)));
+  // The round's answers (guess, correctness, the point it earned) stay hidden until round-scores
+  const inRound = (phase) => phase === "answering" || phase === "reveal";
+  const checkHidden = (entries, where, phase) => {
+    for (const pl of entries) {
+      if (!pl || typeof pl !== "object") continue;
+      if (pl.lastGuess || pl.lastAnswerCorrect) out.push(`${where}: ${pl.username}'s guess visible during ${phase}`);
+      const before = ctx.baseline?.get(pl.username);
+      if (before !== undefined && pl.points > before) out.push(`${where}: ${pl.username}'s points ${before} -> ${pl.points} during ${phase} (before round-scores)`);
+    }
+  };
+  const state = ev === "room-of-game" ? payload[0]?.room : ev === "game-state" ? payload[0] : null;
+  if (state?.started && inRound(state.phase)) {
+    checkHidden(state.players ?? [], `${ev}.players`, state.phase);
+    if (ev === "game-state") checkHidden(state.scores ?? [], "game-state.scores", state.phase);
+  }
+  // Single-player events while the round is in play (phase as this bot last saw it)
+  if ((ev === "new-host" || ev === "player-removed") && inRound(ctx.phase)) checkHidden([payload[0]], ev, ctx.phase);
+  // The owner is secret while the photo is awaited
+  if (ev === "game-state" && state?.phase === "waiting-photo" && (state.owner != null || state.photo != null)) {
+    out.push(`game-state: owner/photo set during waiting-photo`);
+  }
+  return out;
+}
+
 async function uploadPhoto(label, auth) {
   const t0 = now();
   let blob;
@@ -94,6 +144,7 @@ function runRoom(roomIdx, fixedCode) {
     let finished = 0;
     let started = false;
     const bots = [];
+    const socketIds = new Set(); // every socket id of this room's bots (they change on reconnect)
 
     const done = (reason) => {
       clearTimeout(timer);
@@ -129,7 +180,28 @@ function runRoom(roomIdx, fixedCode) {
       const join = () => socket.emit("join-create-game", { gameCode: isHost && !code ? null : code, username: name, ...(bot.token ? { rejoinToken: bot.token } : {}) });
       bot.join = join;
       socket.on("connect", () => {
+        socketIds.add(socket.id);
         if (isHost || code) join();
+      });
+      // Privacy check of every received event. Runs before the event's own handler, so `phase` is the phase this
+      // bot was in when it arrived; `baseline` = points per player at the last round-scores (null when unknown)
+      const priv = { phase: null, baseline: null };
+      socket.on("disconnect", () => { priv.baseline = null; }); // round-scores may be missed while away
+      socket.onAny((ev, ...payload) => {
+        const tokens = new Map(bots.map((b) => [b.name, b.token]));
+        for (const leak of payloadLeaks(name, ev, payload, socketIds, tokens, priv)) rec("payload-leak", bot.round, { leak });
+        const d = payload[0];
+        if (ev === "game-started") { priv.phase = null; priv.baseline = new Map((d ?? []).map((p) => [p.username, 0])); }
+        else if (ev === "waiting-photo") priv.phase = "waiting-photo";
+        else if (ev === "round-start") priv.phase = "answering";
+        else if (ev === "round-reveal") priv.phase = "reveal";
+        else if (ev === "round-scores") { priv.phase = "scores"; priv.baseline = new Map((d?.scores ?? []).map((s) => [s.username, s.points])); }
+        else if (ev === "game-resumed" || ev === "hold-resume") priv.phase = d?.phase ?? priv.phase;
+        else if (ev === "game-over") priv.phase = null;
+        else if (ev === "game-state") {
+          priv.phase = d?.started ? d.phase : null;
+          if (d?.started) priv.baseline = new Map((d.scores ?? []).map((s) => [s.username, s.points]));
+        }
       });
       socket.on("connect_error", (e) => errors.push(`${name} connect_error ${e.message}`));
       socket.on("room-of-game", (d) => {
@@ -304,6 +376,8 @@ function analyse(r) {
   const startKeys = starts.map((s) => `${s.bot}#${s.round}`);
   const dupes = [...new Set(startKeys.filter((k, i) => startKeys.indexOf(k) !== i))];
   if (dupes.length) consistency.push(`duplicate round-start: ${dupes.join(", ")}`);
+  // Payload privacy: no socket ids, other players' tokens or planted photo URLs; guesses hidden until round-scores
+  for (const e of r.events.filter((x) => x.ev === "payload-leak")) consistency.push(`${e.bot}: ${e.payload.leak}`);
   // Planned drop: the bot must come back with a snapshot; with 2 players the game must pause and resume
   const drops = r.events.filter((e) => e.ev === "planned-disconnect");
   for (const d of drops) {

@@ -142,14 +142,14 @@ describe("removePlayer", () => {
   });
 });
 
-describe("removePlayerBySocketId", () => {
+describe("removePlayerByUsername", () => {
   it("removes the matching player and returns it", () => {
     const room = rm.createRoom("alice", "sock-alice");
     rm.joinRoom(room.gameCode, "bob", "sock-bob");
-    expect(rm.removePlayerBySocketId(room.gameCode, "sock-bob")!.username).toBe("bob");
+    expect(rm.removePlayerByUsername(room.gameCode, "bob")!.username).toBe("bob");
     expect(room.players.map((p) => p.username)).toEqual(["alice"]);
-    expect(rm.removePlayerBySocketId(room.gameCode, "sock-bob")).toBeUndefined();
-    expect(rm.removePlayerBySocketId("000000", "sock-alice")).toBeUndefined();
+    expect(rm.removePlayerByUsername(room.gameCode, "bob")).toBeUndefined();
+    expect(rm.removePlayerByUsername("000000", "alice")).toBeUndefined();
   });
 });
 
@@ -161,29 +161,29 @@ describe("misc", () => {
     expect(rm.setRounds("000000", 20)).toBe(false);
   });
 
-  it("safeRoomData strips timers, planted slots and the current player's planted photo", () => {
+  it("safeRoomData strips timers, planted slots and the current player", () => {
     const room = rm.createRoom("alice", "sock-alice");
     room.players[0].plantedPhoto = "https://example.invalid/p.jpg";
     room.currentPlayer = room.players[0];
     room.plantedSlots = new Set([3]);
-    const safe = rm.safeRoomData(room) as Record<string, unknown>;
-    for (const key of ["_timer", "_timerCallback", "_timerStartedAt", "_timerDuration", "_holdSafetyTimer", "plantedSlots"]) {
+    const safe = rm.safeRoomData(room) as unknown as Record<string, unknown>;
+    for (const key of ["_timer", "_timerCallback", "_timerStartedAt", "_timerDuration", "_holdSafetyTimer", "plantedSlots", "currentPlayer"]) {
       expect(safe).not.toHaveProperty(key);
     }
-    expect((safe.currentPlayer as { plantedPhoto?: string }).plantedPhoto).toBeUndefined();
     // original room untouched
     expect(room.currentPlayer.plantedPhoto).toBe("https://example.invalid/p.jpg");
   });
 
-  it("safeRoomData strips plantedPhoto and rejoinToken from every player", () => {
+  it("safeRoomData strips plantedPhoto, rejoinToken and socketId from every player", () => {
     const room = rm.createRoom("alice", "sock-alice");
     rm.joinRoom(room.gameCode, "bob", "sock-bob");
     room.players[1].plantedPhoto = "https://example.invalid/p.jpg";
     room.currentPlayer = room.players[1];
     const safe = rm.safeRoomData(room);
-    for (const p of [...safe.players, safe.currentPlayer!]) {
+    for (const p of safe.players) {
       expect(p).not.toHaveProperty("plantedPhoto");
       expect(p).not.toHaveProperty("rejoinToken");
+      expect(p).not.toHaveProperty("socketId");
     }
     expect(room.players[1].rejoinToken).toBeTruthy();
   });

@@ -207,11 +207,10 @@ describe("reconnect mid-round", () => {
     // carol too, then the host kicks carol: both of her sockets are out
     const carol2 = await newClient();
     const carolOldClosed = once(sock.carol, "disconnect");
-    const res = await joinAs(carol2, gameCode, "carol", tokens.carol);
+    await joinAs(carol2, gameCode, "carol", tokens.carol);
     await carolOldClosed;
-    const carolId = (res.room as unknown as { players: { username: string; socketId: string }[] }).players.find((p) => p.username === "carol")!.socketId;
     const carol2Closed = once(carol2, "disconnect");
-    sock.host.emit("remove-player", { socketId: carolId });
+    sock.host.emit("remove-player", { username: "carol" });
     await carol2Closed;
 
     const cutOff = [sock.bob, sock.carol, carol2].map((c) => silent(c, "round-start", 6_000));

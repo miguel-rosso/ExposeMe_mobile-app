@@ -1,15 +1,16 @@
 import { Socket } from "socket.io-client";
 import type { GalleryAccess } from "@/app/utils/galleryAccess";
 
+/** Player as the server sends it (public fields only: no socket id, rejoin token or planted photo URL). */
 export interface Player {
   username: string;
   points: number;
-  socketId: string;
   isHost: boolean;
   isReady: boolean;
   connected?: boolean; // Server-side connection state (false while disconnected)
-  hasPlantedPhoto?: boolean; // Changed from plantedPhoto to hasPlantedPhoto (boolean flag)
-  plantedPhoto?: string; // This will be set on the server side when actually uploading
+  hasPlantedPhoto?: boolean;
+  lastAnswerCorrect?: boolean;
+  lastGuess?: string;
 }
 
 export interface PhotoComponentProps {

@@ -79,8 +79,9 @@ After last round: game-over
 - Limits: at most **5 `join-create-game` per socket in any 10 s** (excess answered with
   `{ success: false, message: "Too many attempts" }`), and at most **5000 rooms** in memory (`MAX_ROOMS`;
   creating beyond it answers `"Server is busy"`, joining existing rooms still works).
-- Host only: `set-rounds` (lobby only), `start-game` (not while a game is running), `remove-player`
-  (evicts every socket bound to the removed player in that room, like a rejoin evicts the replaced one).
+- Host only: `set-rounds` (lobby only), `start-game` (not while a game is running), `remove-player { username }`
+  (by username, socket ids are never sent to clients; the host can't remove itself; evicts every socket bound to
+  the removed player in that room, like a rejoin evicts the replaced one).
 - `im-ready` only counts between `game-started` and the first round (`started && phase === null`).
   The first round is scheduled (after `GAME_START_DELAY`, 1 s) as soon as **at least 2 players are connected
   and all connected players are ready** (checked on `im-ready` and when a player disconnects, leaves or is
@@ -92,8 +93,16 @@ After last round: game-over
   `game-over` resets `isReady`, `started` and `phase` and clears unused planted photos
   (`plantedPhoto`, `hasPlantedPhoto`) for every player; `start-game` resets `points`, `lastGuess` and
   `lastAnswerCorrect` ("Play again" in the same room starts from zero).
-- Player objects broadcast to others (`player-joined`, `game-started`, `new-host`, `player-removed`,
-  `room-of-game.room.players`) never include `rejoinToken` or `plantedPhoto`.
+- **Public player data.** Every player object sent to clients (`player-joined`, `game-started`, `new-host`,
+  `player-removed`, `room-of-game.room.players`, `game-state.players`) is built by one allowlist
+  (`RoomManager.publicPlayer`): `{ username, points, isHost, isReady, connected, hasPlantedPhoto, lastGuess,
+  lastAnswerCorrect }`. Never `socketId`, `rejoinToken` or `plantedPhoto` (of anyone). While the round in play
+  is in `answering`/`reveal`, `lastGuess: ""`, `lastAnswerCorrect: false` and `points` without the point a correct
+  answer earned (shown from `round-scores` on), the same rule as the `game-state` snapshot. A game that ends
+  during `answering`/`reveal` (abandoned, pauses used up) drops that unrevealed round's answers and points:
+  `game-over.finalScore` and the later snapshots never show them.
+- `room-of-game.room` is also an allowlist: `{ gameCode, rounds, started, round, phase, held, paused, players }`
+  (no current photo owner: it is secret while a photo is awaited, and `round-start`/`game-state` carry it).
 
 ## Disconnected players
 
@@ -183,7 +192,7 @@ All game events are **atomic** — each contains everything the client needs.
 | Event | Phase | Data | Description |
 |-------|-------|------|-------------|
 | `room-of-game` | - | `{ success, room?, rounds?, message?, rejoinToken? }` | Join result (token only to the joiner) |
-| `game-started` | - | `players, rounds` | Navigate to game screen (players without `rejoinToken`/`plantedPhoto`) |
+| `game-started` | - | `players, rounds` | Navigate to game screen (public player data only, see "Public player data") |
 | `waiting-photo` | waiting-photo | `{ round, duration }` | Whole room: a photo is awaited (owner not revealed), show wait bar |
 | `your-turn` | waiting-photo | `{ round, attempt }` | Only the picked player: pick and upload a photo (or send `photo-unavailable`) |
 | `round-start` | answering | `{ photo, owner, round, duration }` | Show photo, start answer timer |
@@ -204,6 +213,7 @@ All game events are **atomic** — each contains everything the client needs.
 | `join-create-game` | `{ gameCode \| null, username, rejoinToken? }` | Create/join; rejoin needs `rejoinToken` (also after every reconnect in game) |
 | `set-rounds` | `{ rounds }` (10/15/20) | Host only, lobby only |
 | `start-game` | - | Host only |
+| `remove-player` | `{ username }` | Host only: removes that player (not the host) and evicts their sockets |
 | `im-ready` | - | Player ready to start (session player; payload ignored) |
 | `photo-sent` | `{ photo }` | Photo uploaded; only from the current owner, `photo` must be a path the owner got from `/upload` in this room (`/temp/<32 hex>.jpg\|png\|webp`) |
 | `photo-unavailable` | `{ round, attempt }` (from its `your-turn`) | The awaited owner has no photo to send (no access, no photos, upload failed): skip the round now |

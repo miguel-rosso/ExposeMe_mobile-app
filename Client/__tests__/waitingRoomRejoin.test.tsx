@@ -87,8 +87,8 @@ afterAll(() => { jest.restoreAllMocks(); });
 const flush = () => act(async () => { await Promise.resolve(); });
 
 const players = [
-  { username: "alice", socketId: "s1", isHost: true, connected: true },
-  { username: "bob", socketId: "s2", isHost: false, connected: true },
+  { username: "alice", isHost: true, connected: true },
+  { username: "bob", isHost: false, connected: true },
 ] as any[];
 
 const roomOfGame = { success: true, room: { gameCode: "ABC123", players, rounds: 15 }, rejoinToken: "tok-123" };

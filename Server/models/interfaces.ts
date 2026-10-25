@@ -14,8 +14,20 @@ export interface Player {
   rejoinToken: string;
 }
 
-/** Player as sent to other clients (no rejoin token, no planted photo URL). */
-export type PublicPlayer = Omit<Player, "rejoinToken" | "plantedPhoto">;
+/**
+ * Player as sent to clients: an explicit allowlist (RoomManager.publicPlayer). Never the socket id, rejoin token
+ * or planted photo URL; `points`/`lastGuess`/`lastAnswerCorrect` exclude the round in play until round-scores.
+ */
+export interface PublicPlayer {
+  username: string;
+  points: number;
+  isHost: boolean;
+  isReady: boolean;
+  connected: boolean;
+  hasPlantedPhoto: boolean;
+  lastAnswerCorrect: boolean;
+  lastGuess: string;
+}
 
 export interface ScoreRound {
   username: string;
@@ -102,10 +114,17 @@ export interface JoinCreateGameData {
   rejoinToken?: string;
 }
 
-export type SafeRoom = Omit<Room, "_timer" | "_timerCallback" | "_timerStartedAt" | "_timerDuration" | "_holdSafetyTimer" | "_pauseTimer" | "_pauseStartedAt" | "_pauseCount" | "_resumeTimer" | "_pauseWaitingFor" | "plantedSlots" | "_consecutiveSkips" | "_hadGuests" | "players" | "currentPlayer"> & {
+/** Room as sent in room-of-game: an explicit allowlist (RoomManager.safeRoomData); never names the photo owner. */
+export interface SafeRoom {
+  gameCode: string;
+  rounds: number;
+  started: boolean;
+  round: number;
+  phase: RoundPhase | null;
+  held: boolean;
+  paused: boolean;
   players: PublicPlayer[];
-  currentPlayer: PublicPlayer | null;
-};
+}
 
 export interface RoomOfGameResponse {
   success: boolean;

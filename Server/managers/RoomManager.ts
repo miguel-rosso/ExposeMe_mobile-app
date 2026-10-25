@@ -120,10 +120,11 @@ export class RoomManager {
     return player;
   }
 
-  removePlayerBySocketId(gameCode: string, socketId: string): Player | undefined {
+  /** Host kick (remove-player): drops the player without host handover (the host is the one kicking). */
+  removePlayerByUsername(gameCode: string, username: string): Player | undefined {
     const room = this.rooms.get(gameCode);
     if (!room) return undefined;
-    const idx = room.players.findIndex((p) => p.socketId === socketId);
+    const idx = room.players.findIndex((p) => p.username === username);
     if (idx === -1) return undefined;
     const player = room.players.splice(idx, 1)[0];
     this.releasePlayerUploads(room, player);
@@ -154,19 +155,45 @@ export class RoomManager {
     return this.rooms.get(gameCode)?.players.find((p) => p.username === username);
   }
 
+  // ── Client-facing data (allowlists) ──
+
+  /** room-of-game `room`: only these fields; players through publicPlayers (no owner while a photo is awaited). */
   safeRoomData(room: Room): SafeRoom {
-    const { _timer, _timerCallback, _timerStartedAt, _timerDuration, _holdSafetyTimer, _pauseTimer, _pauseStartedAt, _pauseCount, _resumeTimer, _pauseWaitingFor, plantedSlots, _consecutiveSkips, _hadGuests, ...safe } = room;
-    return {
-      ...safe,
-      players: safe.players.map((p) => this.publicPlayer(p)),
-      currentPlayer: safe.currentPlayer ? this.publicPlayer(safe.currentPlayer) : null,
-    };
+    const { gameCode, rounds, started, round, phase, held, paused } = room;
+    return { gameCode, rounds, started, round, phase, held, paused, players: this.publicPlayers(room) };
   }
 
-  /** Player data that is safe to send to other clients (drops the rejoin token and planted photo URL). */
-  publicPlayer(player: Player): PublicPlayer {
-    const { rejoinToken, plantedPhoto, ...pub } = player;
-    return pub;
+  /** Every player of `room` as sent to clients, answers of the round in play hidden. */
+  publicPlayers(room: Room): PublicPlayer[] {
+    return room.players.map((p) => this.publicPlayer(p, room));
+  }
+
+  /**
+   * The only shape in which a player is sent to clients (explicit allowlist: never socketId, rejoinToken or
+   * plantedPhoto). With `room`, the answer of the round in play is hidden while guessesHidden(room).
+   */
+  publicPlayer(player: Player, room?: Room): PublicPlayer {
+    const pub: PublicPlayer = {
+      username: player.username,
+      points: player.points,
+      isHost: player.isHost,
+      isReady: player.isReady,
+      connected: player.connected,
+      hasPlantedPhoto: !!player.hasPlantedPhoto,
+      lastAnswerCorrect: player.lastAnswerCorrect,
+      lastGuess: player.lastGuess,
+    };
+    return room && this.guessesHidden(room) ? { ...pub, ...this.hiddenGuess(player) } : pub;
+  }
+
+  /** Guesses of the round in play are secret until round-scores (in waiting-photo startRound already reset them). */
+  guessesHidden(room: Room): boolean {
+    return room.started && (room.phase === "answering" || room.phase === "reveal");
+  }
+
+  /** A player's answer fields as they were before this round (points without the point a correct answer earned). */
+  hiddenGuess(p: Player): { points: number; lastGuess: string; lastAnswerCorrect: boolean } {
+    return { points: p.points - (p.lastAnswerCorrect ? 1 : 0), lastGuess: "", lastAnswerCorrect: false };
   }
 
   clearAllTimers(room: Room): void {

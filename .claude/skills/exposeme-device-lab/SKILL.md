@@ -64,4 +64,7 @@ Summary fields: `pass`, `skew_ms` (spread between players receiving the same pha
 - Permission screen loops: iOS `simctl privacy … grant photos`, Android `pm grant … READ_MEDIA_IMAGES` (done by `up`/`install`).
 - Maestro can't find an element: flows select by testID (`Client/app/utils/testIds.ts`, `id:` selectors); check the id in `maestro studio`.
 - iOS simulators are shown in DeviceHub (Xcode 27 replaced Simulator.app; `lab.sh up` opens it). `lab.sh shot` takes screenshots.
+- `metro`/`build`/`doctor` fail with "Client needs Node N": install the major pinned in `Client/.nvmrc` (`nvm install N`); the lab picks it from nvm or Homebrew `node@N` when the default node differs.
+- iOS "Cannot find native module …": `lab.sh build ios` re-runs `pod install` whenever `Client/ios/Podfile.lock` differs from `Pods/Manifest.lock` or `Client/package*.json`/`Podfile` changed after the last install. Config-plugin/`app.json` changes still need a manual `npx expo prebuild` in `Client/` first.
+- Lab helper tests (no devices): `qa/lab/tests/lab-functions.test.sh`.
 - Machine is slow: `up --ios 1 --android 1` and use more bots.

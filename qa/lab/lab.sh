@@ -45,16 +45,49 @@ adbs() { "$ADB" -s "$@" </dev/null; }
 log() { printf '\033[1;36m[lab]\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31m[lab] %s\033[0m\n' "$*" >&2; exit 1; }
 run_id() { echo "${RUN_ID:-$(date +%Y%m%d-%H%M%S)}"; }
-# Expo SDK 58 tooling needs an LTS Node (22.13+/24.3+, no odd releases): Client commands
-# (Metro, native builds) use the newest nvm v24/v22 when the default node is unsupported.
-client_path() {
-  local major; major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
-  if [ $((major % 2)) -eq 1 ] || [ "$major" -lt 22 ]; then
-    local bin; bin="$(ls -d "$HOME"/.nvm/versions/node/v2[24].*/bin 2>/dev/null | sort -V | tail -1)"
-    [ -n "$bin" ] && { echo "$bin:$PATH"; return; }
-  fi
-  echo "$PATH"
+# ── Toolchain checks (sourceable: qa/lab/tests/lab-functions.test.sh) ──
+# Client commands (Metro, native builds) must run on the Node major pinned in Client/.nvmrc.
+# Uses the default node when it matches, else the newest matching nvm/Homebrew install;
+# fails loudly (non-zero + message on stderr) when none is found.
+client_node_major() { # prints the major version pinned in Client/.nvmrc ("24", "v24.3.0" → 24)
+  local f="$ROOT/Client/.nvmrc" v
+  [ -f "$f" ] || { echo "[lab] missing $f" >&2; return 1; }
+  v="$(tr -d ' \r\n' <"$f")"; v="${v#v}"; v="${v%%.*}"
+  [[ "$v" =~ ^[0-9]+$ ]] || { echo "[lab] cannot parse a Node major from $f ('$(cat "$f")')" >&2; return 1; }
+  echo "$v"
 }
+client_path() {
+  local want cur bin
+  want="$(client_node_major)" || return 1
+  cur="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
+  [ "$cur" = "$want" ] && { echo "$PATH"; return 0; }
+  bin="$(ls -d "${NVM_DIR:-$HOME/.nvm}"/versions/node/v"$want".*/bin 2>/dev/null | sort -V | tail -1)"
+  # LAB_BREW_PREFIXES: space-separated Homebrew prefixes to search (overridable for tests)
+  [ -n "$bin" ] || for p in ${LAB_BREW_PREFIXES:-${HOMEBREW_PREFIX:-/opt/homebrew} /usr/local}; do
+    [ -x "$p/opt/node@$want/bin/node" ] && { bin="$p/opt/node@$want/bin"; break; }
+  done
+  if [ -z "$bin" ] || [ ! -x "$bin/node" ]; then
+    printf '\033[1;31m[lab] Client needs Node %s (Client/.nvmrc) but found node %s and no v%s install in nvm or Homebrew. Run: nvm install %s\033[0m\n' \
+      "$want" "$cur" "$want" "$want" >&2
+    return 1
+  fi
+  echo "$bin:$PATH"
+}
+# Pods need `pod install` when missing, when Podfile.lock and Pods/Manifest.lock differ, or when the
+# Podfile or the npm deps changed after the last install (autolinking only picks up new native
+# modules such as expo-image-manipulator during pod install, so Podfile.lock alone lags behind)
+pods_stale() { # ios dir (its parent is the Client dir); exit 0 = pod install needed
+  local d=$1 m="$1/Pods/Manifest.lock" f
+  [ -f "$d/Podfile.lock" ] && [ -f "$m" ] || return 0
+  cmp -s "$d/Podfile.lock" "$m" || return 0
+  for f in "$d/Podfile" "$d/Podfile.properties.json" "$d/../package.json" "$d/../package-lock.json"; do
+    [ "$f" -nt "$m" ] && return 0
+  done
+  return 1
+}
+# pod install leaves Manifest.lock untouched when its content is unchanged: bump its mtime so
+# inputs that changed without affecting pods (JS-only deps, rewritten Podfile) stop triggering it
+pods_mark_installed() { touch "$1/Pods/Manifest.lock"; }
 
 ios_udid() { xcrun simctl list devices available -j | jq -r --arg n "$1" '[.devices[][] | select(.name==$n)][0].udid // empty'; }
 emu_serial_for_avd() {
@@ -68,6 +101,7 @@ devices() { if [ -f "$DEVICES_JSON" ]; then jq -c '.[]' "$DEVICES_JSON"; fi; }
 cmd_doctor() {
   local ok=1
   for t in xcrun jq node npm; do command -v $t >/dev/null || { echo "MISSING $t"; ok=0; }; done
+  client_path >/dev/null || ok=0
   [ -x "$ADB" ] || { echo "MISSING adb ($ADB)"; ok=0; }
   [ -x "$EMULATOR" ] || { echo "MISSING emulator ($EMULATOR)"; ok=0; }
   [ -x "$MAESTRO" ] || { echo "MISSING maestro (run: qa/lab/lab.sh setup)"; ok=0; }
@@ -184,7 +218,8 @@ cmd_server() {
 
 cmd_metro() {
   [ "${1:-}" = --restart ] && bg_stop metro $METRO_PORT
-  bg_start metro "$RUNS/metro.log" "$ROOT/Client" env PATH="$(client_path)" EXPO_PUBLIC_SERVER_URL="http://localhost:$SERVER_PORT" npx expo start --dev-client --port $METRO_PORT
+  local cpath; cpath="$(client_path)" || exit 1
+  bg_start metro "$RUNS/metro.log" "$ROOT/Client" env PATH="$cpath" EXPO_PUBLIC_SERVER_URL="http://localhost:$SERVER_PORT" npx expo start --dev-client --port $METRO_PORT
   for _ in $(seq 1 60); do [[ "$(curl -fs "http://localhost:$METRO_PORT/status" 2>/dev/null)" == *running* ]] && { log "metro ready"; return 0; }; sleep 1; done
   die "metro not ready — see $RUNS/metro.log"
 }
@@ -209,12 +244,14 @@ cmd_photos() {
 }
 
 cmd_build() {
-  local what=${1:-all} rc=0
+  local what=${1:-all} rc=0 cpath
+  cpath="$(client_path)" || exit 1
   if [ "$what" = ios ] || [ "$what" = all ]; then
     log "Building iOS dev client with xcodebuild (slow, log: $RUNS/build-ios.log)"
+    pods_stale "$ROOT/Client/ios" && log "Pods missing or out of sync with Podfile.lock: running pod install"
     # expo run:ios needs Simulator.app to resolve devices; xcodebuild + simctl install does not
     # Every target (incl. pods declaring older minimums) builds at the app's prebuild deployment target
-    (cd "$ROOT/Client/ios" && export PATH="$(client_path)" && { [ -d Pods ] || pod install; } \
+    (cd "$ROOT/Client/ios" && export PATH="$cpath" && { ! pods_stale . || { pod install && pods_mark_installed .; }; } \
       && dt="$(grep -m1 -o 'IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*' ExposeMe.xcodeproj/project.pbxproj | awk '{print $3}')" \
       && xcodebuild -workspace ExposeMe.xcworkspace -scheme ExposeMe \
       -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
@@ -224,7 +261,7 @@ cmd_build() {
   fi
   if [ "$what" = android ] || [ "$what" = all ]; then
     log "Building Android dev client (slow, log: $RUNS/build-android.log)"
-    (cd "$ROOT/Client/android" && PATH="$(client_path)" ./gradlew :app:assembleDebug) >"$RUNS/build-android.log" 2>&1 \
+    (cd "$ROOT/Client/android" && PATH="$cpath" ./gradlew :app:assembleDebug) >"$RUNS/build-android.log" 2>&1 \
       && echo "$ROOT/Client/android/app/build/outputs/apk/debug/app-debug.apk" >"$STATE/android-apk-path" \
       && log "Android build OK" || { log "Android build FAILED — tail $RUNS/build-android.log"; rc=1; }
   fi
@@ -312,6 +349,8 @@ cmd_status() {
   done
 }
 
+# Sourced (tests): define functions only
+[ "${BASH_SOURCE[0]}" = "$0" ] || return 0
 c=${1:-help}; shift || true
 case $c in
   doctor|setup|up|down|status|server|metro|photos|build|install|open|shot|play) "cmd_$c" "$@";;

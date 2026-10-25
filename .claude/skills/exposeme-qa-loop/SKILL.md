@@ -80,9 +80,10 @@ The dashboard is **https://claude.ai/artifact/Tymg6zZ1y6Mdb1Z29eaTui** (Dashboar
 - activity `state`: `en curso` (orange, shown in "Ahora mismo") · `bloqueado` (red) · anything else (green).
 - pending `status`: `pendiente`/`en curso` (orange, shown) · `resuelta` (archived).
 1. `node qa/scripts/export-dashboard.mjs` → `qa/dashboard/{issues,pending,activity,features,changes,runs}.json`.
-2. For each file: `Artifact` publish with `url` = the dashboard, `asset: true`, `file_path` = the json file (one call per file; JSON can't be batched). Take the returned `url`.
+2. `node qa/scripts/export-dashboard.mjs --status` lists the datasets that changed since the last publish. Upload only those: `Artifact` publish with `url` = the dashboard, `asset: true`, `file_path` = the json file (one call per file). Take the returned `url`.
 3. `ArtifactData` `list` collection `datasets` to get each document's `version`, then one `batch` with one `update` per dataset (each pinned with `if_version`): `datasets/<id>` ← `{source: {kind: "file", url: <returned url>, name: "<id>.json", format: "json"}, updated: {at: <ISO now>, by: "Claude QA loop"}}`.
 4. Read `data/users/me` doc `check` as the dashboard type requires; do not otherwise re-verify the page.
+5. `node qa/scripts/export-dashboard.mjs --mark-published`. A project hook (`qa/scripts/dashboard-hook.sh`, Stop + PostToolUse on Agent) blocks ending a turn while the backlog has unpublished changes; publish whenever it fires — after every activity/status change, not just at the end of the iteration.
 Never change the dashboard page unless the user asks or a new field needs showing. Its source is `qa/dashboard/index.html`; to publish it, wrap it as `{"text": <file>}` in `qa/dashboard/page.json` and `update` document `files/index.html` with `file_path`.
 Old JSON assets can be deleted once no dataset points at them (`Artifact` `delete` with `url` + `path` = asset id).
 

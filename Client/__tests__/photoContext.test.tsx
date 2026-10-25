@@ -35,6 +35,7 @@ jest.mock("expo-media-library", () => {
   return {
     ...jest.requireActual(require("path").join(__dirname, "../node_modules/expo-media-library/build/legacyWarnings")),
     requestPermissionsAsync: jest.fn(async () => ({ status: "granted", canAskAgain: true, accessPrivileges: "all" })),
+    getPermissionsAsync: jest.fn(async () => ({ status: "granted", canAskAgain: true, accessPrivileges: "all" })),
     Query,
     Asset,
     AssetField: { MEDIA_TYPE: "mediaType" },

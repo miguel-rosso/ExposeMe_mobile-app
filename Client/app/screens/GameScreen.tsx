@@ -27,6 +27,8 @@ import { applyGameState, turnUploadAction, TurnUpload } from "../utils/gameState
 import { applyWaitingPhoto, SkipNotice, skipNoticeFor, skipNoticeText } from "../utils/waitingPhoto";
 import { useGameConnection } from "../hooks/useGameConnection";
 import PausedModal from "@/app/components/modals/PausedModal";
+import GalleryAccessModal from "@/app/components/modals/GalleryAccessModal";
+import { useGalleryAccessGuard } from "@/app/hooks/useGalleryAccessGuard";
 
 const { SERVER_URL } = getEnvVars();
 
@@ -43,6 +45,8 @@ const GameScreen = () => {
   const safeGameCode = gameCode ?? "";
   const { pickGamePhoto, setPhotoUri } = usePhotoContext();
   const router = useRouter();
+  // Photo access revoked / no photos left (re-checked on foreground): blocking overlay, the game screen stays
+  const galleryGuard = useGalleryAccessGuard({ watch: true });
 
   // ── Round state (reset each round) ───────────────────
   const [photo, setPhoto] = useState<string | null>(null);
@@ -412,6 +416,13 @@ const GameScreen = () => {
       <WinnerModal visible={showWinner} winners={winners} onAnimationEnd={handleWinnerEnd} />
       <FinalScoreModal visible={showFinalScore} finalScore={finalScore || []} />
       <PausedModal endsAt={finalScore ? null : pauseEndsAt} pause={pauseCount.pause} maxPauses={pauseCount.maxPauses} />
+      <GalleryAccessModal
+        access={finalScore || showWinner ? null : galleryGuard.blocked}
+        onAllow={() => galleryGuard.check({ ask: true })}
+        onSelectPhotos={galleryGuard.selectMore}
+        onRetry={() => galleryGuard.check({ ask: false })}
+        blocking
+      />
 
       {/* Subtle indicator while socket.io reconnects; the game screen stays */}
       {!connected && !finalScore && (

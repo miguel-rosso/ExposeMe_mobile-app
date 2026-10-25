@@ -96,7 +96,7 @@ const InitialScreen: React.FC = () => {
                   <Image source={PermissionRequestIOS} style={{ width: imageWidth, height: imageHeight }} resizeMode="contain" />
                 </View>
                 <Text style={tw`text-sm text-gray-300 text-center`}>
-                  {t.tapAllowAll}{" "}{t.allowAccessPhotos}
+                  {t.tapAllowAll}
                 </Text>
               </View>
             )}

@@ -9,6 +9,8 @@ import CloseButton from "@/app/components/CloseButton";
 import NextImageAnimation from "@/assets/animations/NextImageAnimation.json";
 import LottieView from "lottie-react-native";
 import { useI18n } from "../i18n";
+import GalleryAccessModal from "@/app/components/modals/GalleryAccessModal";
+import { useGalleryAccessGuard } from "@/app/hooks/useGalleryAccessGuard";
 
 const OwnPhotos = () => {
   const { photoUri, getRandomPhoto, requestGalleryPermission, setPhotoUri } = usePhotoContext();
@@ -16,6 +18,16 @@ const OwnPhotos = () => {
   const router = useRouter();
   const { t } = useI18n();
   const [buttonsVisible, setButtonsVisible] = useState(true);
+  // No photo access / no photos: explain instead of a black screen; load a photo once access is back
+  const galleryGuard = useGalleryAccessGuard({ watch: true });
+  const wasBlockedRef = useRef(false);
+  useEffect(() => {
+    if (galleryGuard.blocked) wasBlockedRef.current = true;
+    else if (wasBlockedRef.current) {
+      wasBlockedRef.current = false;
+      getRandomPhoto().catch((e) => console.error("Error getting random photo:", e));
+    }
+  }, [galleryGuard.blocked]);
 
   useEffect(() => {
     const checkPermissions = async () => {
@@ -96,6 +108,13 @@ const OwnPhotos = () => {
       <Animatable.View animation="slideInUp" duration={500} style={tw`absolute bottom-14 left-0 right-0 flex-row justify-center`}>
         {buttonsVisible && <Text style={tw`text-white text-xl font-bold w-full text-center`}>{t.next}</Text>}
       </Animatable.View>
+      <GalleryAccessModal
+        access={galleryGuard.blocked}
+        onAllow={() => galleryGuard.check({ ask: true })}
+        onSelectPhotos={galleryGuard.selectMore}
+        onRetry={() => galleryGuard.check({ ask: false })}
+        onBack={handleClose}
+      />
     </View>
   );
 };

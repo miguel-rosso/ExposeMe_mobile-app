@@ -1,6 +1,7 @@
 import React from "react";
 import TestRenderer, { act } from "react-test-renderer";
 import { GameStateSnapshot } from "../app/models/interfaces";
+import { TEST_IDS } from "../app/utils/testIds";
 // Loaded with the file (jest.mock calls below are hoisted above it), not inside a test
 import WaitingRoom from "../app/screens/WaitingRoom";
 
@@ -56,7 +57,14 @@ jest.mock("../app/providers/GameContext", () => ({
   }),
 }));
 jest.mock("../app/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: null }) }));
-jest.mock("../app/providers/PhotoContext", () => ({ usePhotoContext: () => ({ requestGalleryPermission: jest.fn() }) }));
+const mockCheckGalleryAccess = jest.fn(async (_: { ask: boolean }) => ({ status: "ok", limited: false, canAskAgain: true }));
+jest.mock("../app/providers/PhotoContext", () => ({
+  usePhotoContext: () => ({
+    requestGalleryPermission: jest.fn(),
+    checkGalleryAccess: (o: { ask: boolean }) => mockCheckGalleryAccess(o),
+    selectMorePhotos: jest.fn(async () => {}),
+  }),
+}));
 jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/en").default }) }));
 jest.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 jest.mock("react-native-vector-icons/FontAwesome", () => "Icon");
@@ -162,5 +170,32 @@ describe("WaitingRoom: joining a game already in progress (EXP-097)", () => {
     mockSocket.emitted = [];
     act(() => r.unmount());
     expect(mockSocket.emitted).toEqual([]);
+  });
+});
+
+// EXP-118: no photo access / no photos → blocking overlay in the lobby (checked on mount and on every foreground);
+// the only way out is leaving the room.
+describe("WaitingRoom: gallery access guard (EXP-118)", () => {
+  const has = (r: TestRenderer.ReactTestRenderer, id: string) => r.root.findAll((n) => n.props.testID === id).length > 0;
+  afterEach(() => mockCheckGalleryAccess.mockImplementation(async () => ({ status: "ok", limited: false, canAskAgain: true })));
+
+  it("blocks the lobby without access and lets the player leave the room", async () => {
+    mockCheckGalleryAccess.mockImplementation(async () => ({ status: "denied", limited: false, canAskAgain: false }));
+    const r = await mount();
+    await flush();
+    expect(mockCheckGalleryAccess).toHaveBeenCalledWith({ ask: false });
+    expect(has(r, TEST_IDS.galleryAccessModal)).toBe(true);
+
+    act(() => r.root.find((n) => n.props.testID === TEST_IDS.galleryBackButton && typeof n.props.onPress === "function").props.onPress());
+    expect(mockSocket.emitted.map(([ev]) => ev)).toContain("leave-room");
+    expect(mockReplace).toHaveBeenCalledWith("/");
+    act(() => r.unmount());
+  });
+
+  it("no overlay with access and photos", async () => {
+    const r = await mount();
+    await flush();
+    expect(has(r, TEST_IDS.galleryAccessModal)).toBe(false);
+    act(() => r.unmount());
   });
 });

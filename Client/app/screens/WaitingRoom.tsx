@@ -27,6 +27,8 @@ import * as Animatable from "react-native-animatable";
 import * as Clipboard from "expo-clipboard";
 import * as ImagePicker from "expo-image-picker";
 import AlertModal from "@/app/components/modals/AlertModal";
+import GalleryAccessModal from "@/app/components/modals/GalleryAccessModal";
+import { useGalleryAccessGuard } from "@/app/hooks/useGalleryAccessGuard";
 import { Ionicons } from "@expo/vector-icons";
 import ChatMessage from "@/app/components/IngameComunication/ChatMessage";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -69,6 +71,7 @@ const WaitingRoom = ({}) => {
   const [showCopyMessage, setShowCopyMessage] = useState<boolean>(false);
   const [hasPlantedPhoto, setHasPlantedPhoto] = useState<boolean>(false);
   const { requestGalleryPermission } = usePhotoContext();
+  const galleryGuard = useGalleryAccessGuard({ watch: true });
   const [showPhotoAddedMessage, setShowPhotoAddedMessage] = useState<boolean>(false);
   const [isSelecting, setIsSelecting] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true); // New loading state
@@ -653,6 +656,16 @@ const WaitingRoom = ({}) => {
         onCancel={() => setDialogVisible(false)}
         confirmButtonColor="bg-red-600"
         cancelButtonColor="bg-blue-500"
+      />
+
+      {/* No photo access / no photos (re-checked on foreground): can't stay in the lobby without them */}
+      <GalleryAccessModal
+        access={galleryGuard.blocked}
+        onAllow={() => galleryGuard.check({ ask: true })}
+        onSelectPhotos={galleryGuard.selectMore}
+        onRetry={() => galleryGuard.check({ ask: false })}
+        onBack={handleLeaveGame}
+        blocking
       />
     </View>
   );

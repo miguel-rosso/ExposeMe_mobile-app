@@ -59,6 +59,18 @@ export default {
   ownPhotoFailed: "We couldn't open a photo from your gallery, so your round was skipped.",
   ownPhotoUploadFailed: "Your photo couldn't be uploaded, so your round was skipped. Check your connection.",
 
+  // GalleryAccessModal
+  galleryAccessTitle: "Photo access needed",
+  galleryAccessDenied: "ExposeMe plays with the photos in your gallery, so you can't play without access to them. On your turns a random photo from your gallery (or from the ones you selected) is uploaded and shown to the other players in your room, and deleted when the game ends. Allow access to all your photos or to a selection.",
+  galleryNoPhotosTitle: "No photos",
+  galleryNoPhotos: "You need at least one photo in your gallery to play.",
+  galleryNoPhotosLimited: "You need at least one photo in your gallery to play. You only shared some photos and none can be used: select more photos or allow access to all of them.",
+  galleryBlockedNote: "This disappears as soon as you allow access again.",
+  allowAccess: "Allow access",
+  selectPhotos: "Select photos",
+  tryAgain: "Try again",
+  howToEnable: "How do I enable it?",
+
   // ScoreModal
   roundOf: "Round {round} of {total}",
   itWasPhoto: "It was {name}'s photo",
@@ -80,9 +92,9 @@ export default {
 
   // InitialScreen
   warning: "⚠️ Warning ⚠️",
-  permissionExplanation: "For the application to work properly, please grant the following permissions:",
+  permissionExplanation: "ExposeMe needs access to your photos: on your turns a random photo from your gallery (or from the ones you selected) is uploaded and shown to the other players in your room, and deleted when the game ends.",
   requiredPermission: "Required Permission Setting:",
-  allowAll: '"Allow all"',
+  allowAll: '"Allow all" (or select some photos)',
   howToEnableAndroid: "How to enable on Android:",
   howToEnableIOS: "How to enable on iOS:",
   step1: "Step 1",
@@ -91,22 +103,21 @@ export default {
   step4: "Step 4",
   step5: "Step 5",
   tapAllow: "Tap on Allow.",
-  tapAllowAll: "Tap on Allow all.",
-  allowAccessPhotos: "to give access to your photos",
+  tapAllowAll: "Allow access to all your photos or only to the ones you select.",
   continue_: "Continue",
   tapToProceed: "Tap to proceed after setting permissions",
 
   // SettingsInstructionsScreen
   careful: "⚠️ Careful ⚠️",
-  fullAccessExplanation: "For the app to function properly, you need to grant full access to your photos and media.",
-  alwaysAllowAll: "Always allow all",
+  fullAccessExplanation: "To play, ExposeMe needs access to your photos: to all of them or to a selection with at least one photo.",
+  alwaysAllowAll: "Allow access to your photos",
   androidInstructions: "Android Instructions:",
   iosInstructions: "iOS Instructions:",
   enablePermissions: "Enable permissions in settings.",
   tapPhotosVideos: "Tap on access to Photos and videos.",
-  allowAllTime: "Allow access all the time",
+  allowAllTime: 'Choose "Allow all" or "Select photos".',
   goPrivacySettings: "Go to Privacy settings.",
-  enableAllPermissions: "Enable all necessary permissions.",
+  enableAllPermissions: 'Choose "Full Access" or "Limited Access".',
   back: "Back",
   openSettings: "Open Settings",
 

@@ -1,4 +1,5 @@
 import { Socket } from "socket.io-client";
+import type { GalleryAccess } from "@/app/utils/galleryAccess";
 
 export interface Player {
   username: string;
@@ -146,6 +147,12 @@ export interface PhotoContextProps {
   getRandomPhoto: () => Promise<string | null>;
   /** Photo for your-turn: never navigates away from the game, uses limited access if that is all there is */
   pickGamePhoto: () => Promise<GamePhotoResult>;
+  /** Gate to play: permission (full or limited) and at least one visible photo; `ask` shows the system prompt if it can */
+  checkGalleryAccess: (options: { ask: boolean }) => Promise<GalleryAccess>;
+  /** Limited access: system picker to share more photos (iOS 14+, Android 14+) */
+  selectMorePhotos: () => Promise<void>;
+  /** Subscribes to gallery / limited selection changes; returns the unsubscribe function */
+  onGalleryChange: (listener: () => void) => () => void;
   setPhotoUri: React.Dispatch<React.SetStateAction<string | null>>;
   handleContinue: () => Promise<void>;
 }

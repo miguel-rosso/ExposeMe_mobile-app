@@ -1,52 +1,76 @@
 import React, { createContext, useContext, useState, useCallback, useMemo } from "react";
 import * as MediaLibrary from "expo-media-library";
-import { useRouter } from "expo-router";
 import { GamePhotoResult, PhotoContextProps, PhotoProviderProps } from "@/app/models/interfaces";
+import { checkGalleryAccess as checkAccess, GalleryAccess } from "@/app/utils/galleryAccess";
 
 const PhotoContext = createContext<PhotoContextProps | undefined>(undefined);
 
 export const PhotoProvider: React.FC<PhotoProviderProps> = ({ children }) => {
   const [photoUri, setPhotoUri] = useState<string | null>(null);
-  const router = useRouter();
 
-  const requestGalleryPermission = useCallback(
-    async ({ askAgain }: { askAgain: boolean }): Promise<boolean> => {
-      console.log("Requesting gallery permission...");
-      const { status, canAskAgain, accessPrivileges } = await MediaLibrary.requestPermissionsAsync();
-      console.log(`Permission status: ${status}, canAskAgain: ${canAskAgain}, accessPrivileges: ${accessPrivileges}`);
-      if (status !== "granted" || accessPrivileges !== "all") {
-        if (status === "denied" && canAskAgain && askAgain && accessPrivileges === "limited") {
-          console.log("Permission denied but can ask again.");
-          return false;
-        } else {
-          console.log("Navigating to SettingsInstructionsScreen due to insufficient permissions.");
-          router.replace("/screens/SettingsInstructionsScreen");
-        }
-        return false;
-      }
-      console.log("Permission granted.");
-      return true;
-    },
-    [router]
+  /** Photo permission granted, full or limited access. Never navigates: callers explain what is missing. */
+  const requestGalleryPermission = useCallback(async ({ askAgain }: { askAgain: boolean }): Promise<boolean> => {
+    let { status, canAskAgain } = await MediaLibrary.getPermissionsAsync();
+    if (status !== "granted" && canAskAgain && askAgain) ({ status } = await MediaLibrary.requestPermissionsAsync());
+    console.log(`Gallery permission: ${status}`);
+    return status === "granted";
+  }, []);
+
+  /** Whether at least one image is visible to the app (the limited selection counts) */
+  const hasVisiblePhotos = useCallback(async (): Promise<boolean> => {
+    const photos = await new MediaLibrary.Query()
+      .eq(MediaLibrary.AssetField.MEDIA_TYPE, MediaLibrary.MediaType.IMAGE)
+      .limit(1)
+      .exeForMetadata();
+    return photos.length > 0;
+  }, []);
+
+  /** Gate to play: permission (full or limited) and at least one visible photo. `ask` shows the system prompt if it can. */
+  const checkGalleryAccess = useCallback(
+    ({ ask }: { ask: boolean }): Promise<GalleryAccess> =>
+      checkAccess(
+        {
+          getPermissions: () => MediaLibrary.getPermissionsAsync(),
+          requestPermissions: () => MediaLibrary.requestPermissionsAsync(),
+          hasPhotos: hasVisiblePhotos,
+        },
+        { ask }
+      ),
+    [hasVisiblePhotos]
   );
 
-  const handleContinue = useCallback(async () => {
-    console.log("Handling continue...");
-    const { status, canAskAgain, accessPrivileges } = await MediaLibrary.requestPermissionsAsync();
-    console.log(`Permission status: ${status}, canAskAgain: ${canAskAgain}, accessPrivileges: ${accessPrivileges}`);
-    if (status !== "granted" || accessPrivileges !== "all") {
-      if (accessPrivileges === "limited" || !canAskAgain) {
-        console.log("Navigating to screens/SettingsInstructionsScreen due to limited access or cannot ask again.");
-        router.replace("/screens/SettingsInstructionsScreen");
-      } else {
-        console.log("Navigating to InitialScreen.");
-        router.replace("/screens/InitialScreen");
-      }
-    } else {
-      console.log("Navigating to InitialScreen.");
-      router.replace("/screens/InitialScreen");
+  /** Limited access: lets the user share more photos (iOS 14+, Android 14+); does nothing elsewhere. */
+  const selectMorePhotos = useCallback(async () => {
+    try {
+      await MediaLibrary.presentPermissionsPicker(["photo"]);
+    } catch (e) {
+      console.log("Photo selection picker unavailable:", e);
     }
-  }, [router]);
+  }, []);
+
+  /**
+   * Gallery or limited selection changed (iOS reports picks made in the limited picker this way: the picker call
+   * itself resolves as soon as it opens). Returns the unsubscribe function.
+   */
+  const onGalleryChange = useCallback((listener: () => void): (() => void) => {
+    try {
+      const sub = MediaLibrary.addListener(() => listener());
+      return () => sub.remove();
+    } catch (e) {
+      console.log("Gallery change listener unavailable:", e);
+      return () => {};
+    }
+  }, []);
+
+  /** Onboarding: show the system prompt. Home's Create/Join gate explains anything still missing. */
+  const handleContinue = useCallback(async () => {
+    try {
+      const { status, accessPrivileges } = await MediaLibrary.requestPermissionsAsync();
+      console.log(`Onboarding permission: ${status} (${accessPrivileges})`);
+    } catch (e) {
+      console.log("Could not request gallery permission:", e);
+    }
+  }, []);
 
   /** Random photo among the ones the app can see (all of them, or the limited selection). */
   const pickFromGallery = useCallback(async (): Promise<GamePhotoResult> => {
@@ -73,7 +97,7 @@ export const PhotoProvider: React.FC<PhotoProviderProps> = ({ children }) => {
 
       if (uri) {
         const encodedUri = encodeURI(uri);
-        console.log(`Selected random photo URI: ${encodedUri}`);
+        console.log("Random photo selected.");
         setPhotoUri(encodedUri);
         return { uri: encodedUri };
       }
@@ -120,10 +144,13 @@ export const PhotoProvider: React.FC<PhotoProviderProps> = ({ children }) => {
       requestGalleryPermission,
       getRandomPhoto,
       pickGamePhoto,
+      checkGalleryAccess,
+      selectMorePhotos,
+      onGalleryChange,
       setPhotoUri,
       handleContinue,
     }),
-    [photoUri, requestGalleryPermission, getRandomPhoto, pickGamePhoto, handleContinue]
+    [photoUri, requestGalleryPermission, getRandomPhoto, pickGamePhoto, checkGalleryAccess, selectMorePhotos, onGalleryChange, handleContinue]
   );
 
   return <PhotoContext.Provider value={contextValue}>{children}</PhotoContext.Provider>;

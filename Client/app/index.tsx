@@ -27,7 +27,8 @@ import { useFocusEffect } from "expo-router";
 import { useFonts } from "expo-font";
 import * as SplashScreen from "expo-splash-screen";
 import { useBackgroundContext } from "./providers/BackgroundContext";
-import { usePhotoContext } from "@/app/providers/PhotoContext";
+import { useGalleryAccessGuard } from "@/app/hooks/useGalleryAccessGuard";
+import GalleryAccessModal from "@/app/components/modals/GalleryAccessModal";
 import { Ionicons } from "@expo/vector-icons";
 import { useI18n } from "./i18n";
 import LanguageToggle from "./components/LanguageToggle";
@@ -176,8 +177,10 @@ const Index = () => {
   const buttonRef = useRef<Animatable.View & View>(null);
   const textRef = useRef<Animatable.View & View>(null);
   const topLogoRef = useRef<Animatable.View & View>(null);
-  const { requestGalleryPermission } = usePhotoContext();
-  const { t } = useI18n(); // Usa el contexto de fotos
+  const { t } = useI18n();
+  // Playing needs photo access (full or limited) and at least one photo: checked on Create / Search room
+  const galleryGuard = useGalleryAccessGuard({ watch: false });
+  const ensureGalleryAccess = async () => (await galleryGuard.check({ ask: true }))?.status === "ok";
 
   // Get screen dimensions
   const { width, height } = Dimensions.get('window');
@@ -268,10 +271,7 @@ const Index = () => {
       return;
     }
 
-    const hasPermission = await requestGalleryPermission({ askAgain: true });
-    if (!hasPermission) {
-      return;
-    }
+    if (!(await ensureGalleryAccess())) return;
 
     setGameCode(null); // Limpiar el gameCode antes de navegar
     console.log("Navigating to WaitingRoom");
@@ -285,10 +285,7 @@ const Index = () => {
       return;
     }
 
-    const hasPermission = await requestGalleryPermission({ askAgain: true });
-    if (!hasPermission) {
-      return;
-    }
+    if (!(await ensureGalleryAccess())) return;
 
     router.push("/screens/WaitingRoom");
   };
@@ -513,6 +510,17 @@ const Index = () => {
           <Text style={tw`text-white font-bold`}>{t.photoExplorer}</Text>
         </Animatable.View>
       </View>
+      <GalleryAccessModal
+        access={galleryGuard.blocked}
+        onAllow={() => galleryGuard.check({ ask: true })}
+        onSelectPhotos={galleryGuard.selectMore}
+        onRetry={() => galleryGuard.check({ ask: false })}
+        onBack={galleryGuard.dismiss}
+        onShowHelp={() => {
+          galleryGuard.dismiss();
+          router.push("/screens/SettingsInstructionsScreen");
+        }}
+      />
     </>
   );
 };

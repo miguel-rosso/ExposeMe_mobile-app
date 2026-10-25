@@ -33,6 +33,15 @@ export const TEST_IDS = {
   pausedCountdown: "paused-countdown",
   pausedCounter: "paused-counter",
   pausedLastWarning: "paused-last-warning",
+  // ── Gallery access (home, lobby, game) ──
+  galleryAccessModal: "gallery-access-modal",
+  galleryAccessMessage: "gallery-access-message",
+  galleryAllowButton: "gallery-allow-button",
+  gallerySelectPhotosButton: "gallery-select-photos-button",
+  gallerySettingsButton: "gallery-settings-button",
+  galleryRetryButton: "gallery-retry-button",
+  galleryHelpButton: "gallery-help-button",
+  galleryBackButton: "gallery-back-button",
   // ── Modals ──
   alertModal: "alert-modal",
   alertModalConfirm: "alert-modal-confirm",

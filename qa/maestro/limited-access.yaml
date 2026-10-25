@@ -1,8 +1,9 @@
 # EXP-041: play without clearState or permission grants, so a limited/partial photo access set by the tester
 # survives (open-app.yaml would reset it). The app must already be on the home screen.
-# The Create/Join gate (index.tsx requestGalleryPermission) still demands full access, so with limited access the
-# join ends on SettingsInstructionsScreen. To test the in-game path, join with full access and switch to limited once
-# the game has started. iOS simulator: TCC.db kTCCServicePhotos auth_value=3 for the app +
+# EXP-118: the Create/Join gate accepts limited access as long as at least one photo is selected, so the device joins
+# straight into the lobby (no gallery-access-modal, never SettingsInstructionsScreen). With nothing selected it stays
+# on the home screen with the gallery-access-modal ("Select photos"). Revoking access mid-game shows the blocking
+# gallery-access-modal on return to the foreground, without leaving the game. iOS simulator: TCC.db kTCCServicePhotos auth_value=3 for the app +
 # `xcrun simctl spawn <udid> launchctl kickstart -k user/foreground/com.apple.tccd` (the app keeps running; the
 # limited selection made earlier in the system picker is kept). Android revokes kill the app, so only the join can be
 # checked there.
@@ -39,6 +40,8 @@ appId: com.socketNull.ExposeMe
       id: "join-game-button"
     timeout: 60000
 - runFlow: join-room.yaml
+- assertNotVisible:
+    id: "gallery-access-modal"
 - runFlow: play-rounds.yaml
 - assertNotVisible:
     id: "initial-screen"

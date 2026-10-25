@@ -256,7 +256,7 @@ describe("im-ready", () => {
     const turn = Promise.race([once(alice, "your-turn"), once(bob, "your-turn")]);
     alice.emit("im-ready", { gameCode, username: "alice" });
     bob.emit("im-ready", { gameCode, username: "bob" });
-    expect(await turn).toEqual({ round: 1 });
+    expect(await turn).toEqual({ round: 1, attempt: 1 });
     for (const c of [alice, bob]) c.emit("leave-room");
   });
 
@@ -278,7 +278,7 @@ describe("im-ready", () => {
         const carolSocketId = carolJoin.room!.players.find((p) => p.username === "carol")!.socketId as string;
         alice.emit("remove-player", { socketId: carolSocketId });
       }
-      expect(await turn).toEqual({ round: 1 });
+      expect(await turn).toEqual({ round: 1, attempt: 1 });
       for (const c of [alice, bob]) c.emit("leave-room");
     });
   }
@@ -298,7 +298,7 @@ describe("im-ready", () => {
     expect((await joinAs(bob2, gameCode, "bob", tokens.bob)).success).toBe(true);
     const turn = Promise.race([once(alice, "your-turn", 3_000), once(bob2, "your-turn", 3_000)]);
     bob2.emit("im-ready");
-    expect(await turn).toEqual({ round: 1 });
+    expect(await turn).toEqual({ round: 1, attempt: 1 });
     for (const c of [alice, bob2]) c.emit("leave-room");
   });
 

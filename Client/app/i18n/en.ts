@@ -50,6 +50,14 @@ export default {
   waitingPlayersReturn: "Waiting for players to come back…",
   pauseOf: "Pause {pause} of {max}",
   lastPauseWarning: "Last pause: if nobody comes back, the game will end.",
+  someoneChoosingPhoto: "Someone is choosing a photo…",
+  uploadingYourPhoto: "Uploading your photo…",
+  roundSkippedTimeout: "The photo didn't arrive in time. Round skipped.",
+  roundSkippedUnavailable: "The chosen player had no photo to show. Round skipped.",
+  ownPhotoNoPermission: "We can't access your photos, so your round was skipped. Allow photo access in Settings to play your turn.",
+  ownPhotoNoPhotos: "There are no photos we can use in your gallery, so your round was skipped.",
+  ownPhotoFailed: "We couldn't open a photo from your gallery, so your round was skipped.",
+  ownPhotoUploadFailed: "Your photo couldn't be uploaded, so your round was skipped. Check your connection.",
 
   // ScoreModal
   roundOf: "Round {round} of {total}",

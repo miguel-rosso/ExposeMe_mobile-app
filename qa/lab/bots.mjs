@@ -22,6 +22,12 @@
 //            --app-resync   after a rejoin snapshot of a started game, ignore it (and your-turn) and re-send the join
 //                           on the same socket, like the app going from its lobby to the game screen (EXP-097)
 //   node qa/lab/bots.mjs --bots 2 --host --drop-round 2 --drop-secs 8 --app-resync
+//            --photo-unavailable P   on its turn a bot reports photo-unavailable { round, attempt } with probability P (like a phone with no
+//                           gallery access / no photos / failed uploads): the round must be skipped at once for everyone
+//                           (round-skipped reason "unavailable"), not after the 15 s wait. --upload-fail P instead stays
+//                           silent, so the server skips by timeout (reason "timeout").
+//   node qa/lab/bots.mjs --bots 3 --host --photo-unavailable 0.3
+//   Every bot records waiting-photo { round, duration } (room-wide, owner secret): same payload for all, skew measured.
 import { io } from "socket.io-client";
 import fs from "node:fs";
 import path from "node:path";
@@ -39,6 +45,8 @@ const ROUNDS = Number(args.rounds || 10);
 const WAIT_PLAYERS = Number(args["wait-players"] || N_BOTS);
 const CHAOS = Number(args.chaos || 0);
 const UPLOAD_FAIL = Number(args["upload-fail"] || 0);
+const PHOTO_UNAVAILABLE = Number(args["photo-unavailable"] || 0);
+const UNAVAILABLE_SKIP_MAX_MS = 2_000; // photo-unavailable → round-skipped must be immediate (the wait is 15 s)
 const NO_READY = Number(args["no-ready"] || 0);
 const NO_ANSWER = !!args["no-answer"];
 // --no-answer: bots submit an empty guess like a player who never taps, so nobody scores (tie at 0)
@@ -127,7 +135,16 @@ function runRoom(roomIdx, fixedCode) {
       });
       socket.on("your-turn", async (d) => {
         if (bot.resyncing) { rec("your-turn-missed-on-purpose", d.round); return; }
-        rec("your-turn", d.round);
+        rec("your-turn", d.round, { attempt: d.attempt });
+        if (!Number.isInteger(d.attempt)) errors.push(`${name}: your-turn without an integer attempt`);
+        // One report per photo request (a re-sent your-turn of the same attempt doesn't report again)
+        if (bot.reportedAttempt !== d.attempt && Math.random() < PHOTO_UNAVAILABLE) {
+          bot.reportedAttempt = d.attempt;
+          await sleep(100 + Math.random() * 300); // permission check / empty gallery on a phone
+          rec("photo-unavailable-sent", d.round, { attempt: d.attempt });
+          socket.emit("photo-unavailable", { round: d.round, attempt: d.attempt });
+          return;
+        }
         if (Math.random() < UPLOAD_FAIL) { rec("upload-skipped-on-purpose", d.round); return; }
         try {
           await sleep(200 + Math.random() * 800); // gallery pick on a phone
@@ -161,7 +178,8 @@ function runRoom(roomIdx, fixedCode) {
         socket.emit("submit-answer", { guess: bot.guess });
       });
       socket.on("round-scores", (d) => rec("round-scores", d.round, { scores: d.scores }));
-      socket.on("round-skipped", () => rec("round-skipped", bot.round));
+      socket.on("waiting-photo", (d) => rec("waiting-photo", d.round, d));
+      socket.on("round-skipped", (d) => rec("round-skipped", d?.round ?? bot.round, d));
       // Rejoin snapshot: catch up like the app does (guess in reveal, im-ready in the ready phase)
       socket.on("game-state", (d) => {
         rec("game-state", d.round, { phase: d.phase, paused: !!d.pause, pause: d.pause?.pause, maxPauses: d.pause?.maxPauses, started: d.started });
@@ -218,9 +236,37 @@ function analyse(r) {
     if (!byKey.has(k)) byKey.set(k, []);
     byKey.get(k).push(e);
   }
+  // waiting-photo repeats with the same round number after a skip: key each bot's n-th one (same n = same wait)
+  // (bots that went offline may have missed one, so they are left out of the alignment)
+  const waitSeen = {};
+  const wentOffline = new Set(r.events.filter((e) => e.ev === "chaos-disconnect" || e.ev === "planned-disconnect").map((e) => e.bot));
+  for (const e of r.events.filter((x) => x.ev === "waiting-photo")) {
+    const keys = Object.keys(e.payload || {}).sort().join(",");
+    if (keys !== "duration,round") consistency.push(`${e.bot}: waiting-photo payload has keys [${keys}] (owner must stay secret)`);
+    if (wentOffline.has(e.bot)) continue;
+    const n = (waitSeen[e.bot] = (waitSeen[e.bot] || 0) + 1);
+    const k = `waiting-photo#${n}`;
+    if (!byKey.has(k)) byKey.set(k, []);
+    byKey.get(k).push(e);
+  }
+  const waitSkews = [...byKey].filter(([k, es]) => k.startsWith("waiting-photo#") && es.length > 1)
+    .map(([, es]) => Math.max(...es.map((e) => e.t)) - Math.min(...es.map((e) => e.t)));
+  // photo-unavailable: the reporter gets round-skipped (reason "unavailable") right away, not after the 15 s wait
+  const unavailableSkipMs = [];
+  for (const rep of r.events.filter((e) => e.ev === "photo-unavailable-sent")) {
+    const sk = r.events.find((e) => e.bot === rep.bot && e.ev === "round-skipped" && e.t >= rep.t);
+    if (!sk) { consistency.push(`${rep.bot}: photo-unavailable (round ${rep.round}) never skipped`); continue; }
+    unavailableSkipMs.push(sk.t - rep.t);
+    if (sk.payload?.reason !== "unavailable") consistency.push(`${rep.bot}: photo-unavailable skipped with reason ${sk.payload?.reason}`);
+    if (sk.t - rep.t > UNAVAILABLE_SKIP_MAX_MS) consistency.push(`${rep.bot}: photo-unavailable took ${Math.round(sk.t - rep.t)}ms to skip`);
+  }
   const missed = {};
   for (const [k, es] of byKey) {
-    for (const name of r.players) if (!es.some((e) => e.bot === name)) (missed[name] ||= []).push(k);
+    for (const name of r.players) {
+      // Bots that went offline are left out of the waiting-photo alignment, so those keys are not "missed" by them
+      if (k.startsWith("waiting-photo#") && wentOffline.has(name)) continue;
+      if (!es.some((e) => e.bot === name)) (missed[name] ||= []).push(k);
+    }
     if (es.length > 1) skews.push(Math.max(...es.map((e) => e.t)) - Math.min(...es.map((e) => e.t)));
     const sig = (e) => JSON.stringify(e.payload ?? null);
     if (new Set(es.map(sig)).size > 1) consistency.push(`${k}: players received different payloads`);
@@ -281,7 +327,11 @@ function analyse(r) {
     reason: r.reason,
     players: r.players.length,
     rounds_played: roundsSeen.length,
-    rounds_skipped: new Set(r.events.filter((e) => e.ev === "round-skipped").map((e) => e.round)).size,
+    rounds_skipped: perBotMax(r, "round-skipped"),
+    skipped_unavailable: r.events.filter((e) => e.ev === "photo-unavailable-sent").length,
+    unavailable_skip_ms: { p50: pct(unavailableSkipMs, 50)?.toFixed(1), max: unavailableSkipMs.length ? Math.max(...unavailableSkipMs).toFixed(1) : null },
+    waiting_photo: perBotMax(r, "waiting-photo"),
+    waiting_photo_skew_ms: { p50: pct(waitSkews, 50)?.toFixed(1), max: waitSkews.length ? Math.max(...waitSkews).toFixed(1) : null },
     disconnects: r.events.filter((e) => e.ev === "chaos-disconnect" || e.ev === "planned-disconnect").length,
     resyncs: r.events.filter((e) => e.ev === "game-state").length,
     pauses: perBotMax(r, "game-paused"),

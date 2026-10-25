@@ -114,12 +114,14 @@ describe("applyGameState", () => {
     expect(s.setPause).toHaveBeenCalledWith(pause);
   });
 
-  it("waiting for a photo: back to the ready screen; ready phase: send im-ready again", () => {
+  it("waiting for a photo: the waiting screen for the next round (EXP-039); ready phase: send im-ready again", () => {
     const s = makeSetters();
-    const r = applyGameState(snapshot({ phase: "waiting-photo", owner: null, photo: null }), "", { round: 3, owner: "alice" }, s);
+    const r = applyGameState(snapshot({ phase: "waiting-photo", owner: null, photo: null, duration: 9_000 }), "", { round: 3, owner: "alice" }, s);
     expect(r.sendReady).toBe(false);
     expect(s.setPhoto).toHaveBeenCalledWith(null);
-    expect(s.setPhase).toHaveBeenCalledWith(null);
+    expect(s.setPhase).toHaveBeenCalledWith("waiting-photo");
+    expect(s.setRound).toHaveBeenCalledWith(4);
+    expect(s.setPhaseDuration).toHaveBeenCalledWith(9_000);
     expect(applyGameState(snapshot({ phase: null, owner: null, photo: null }), "", { round: 0, owner: "" }, makeSetters()).sendReady).toBe(true);
   });
 
@@ -133,9 +135,9 @@ describe("applyGameState", () => {
 describe("turnUploadAction / formatCountdown", () => {
   it("uploads once per round, re-sends the uploaded photo, waits for one in flight", () => {
     expect(turnUploadAction(null, 2)).toBe("upload");
-    expect(turnUploadAction({ round: 2 }, 2)).toBe("wait");
-    expect(turnUploadAction({ round: 2, url: "/temp/1-a.jpg" }, 2)).toBe("resend");
-    expect(turnUploadAction({ round: 2, url: "/temp/1-a.jpg" }, 3)).toBe("upload");
+    expect(turnUploadAction({ attempt: 2 }, 2)).toBe("wait");
+    expect(turnUploadAction({ attempt: 2, url: "/temp/1-a.jpg" }, 2)).toBe("resend");
+    expect(turnUploadAction({ attempt: 2, url: "/temp/1-a.jpg" }, 3)).toBe("upload");
   });
 
   it("formats the pause countdown as m:ss", () => {

@@ -50,6 +50,14 @@ export default {
   waitingPlayersReturn: "Esperando a que vuelvan los jugadores…",
   pauseOf: "Pausa {pause} de {max}",
   lastPauseWarning: "Es la última pausa: si no vuelven, la partida terminará.",
+  someoneChoosingPhoto: "Alguien está eligiendo una foto…",
+  uploadingYourPhoto: "Subiendo tu foto…",
+  roundSkippedTimeout: "La foto no llegó a tiempo. Ronda saltada.",
+  roundSkippedUnavailable: "El jugador elegido no tenía ninguna foto. Ronda saltada.",
+  ownPhotoNoPermission: "No podemos acceder a tus fotos, así que se ha saltado tu ronda. Permite el acceso a las fotos en Ajustes para jugar tu turno.",
+  ownPhotoNoPhotos: "No hay fotos que podamos usar en tu galería, así que se ha saltado tu ronda.",
+  ownPhotoFailed: "No hemos podido abrir una foto de tu galería, así que se ha saltado tu ronda.",
+  ownPhotoUploadFailed: "No se ha podido subir tu foto, así que se ha saltado tu ronda. Revisa tu conexión.",
 
   // ScoreModal
   roundOf: "Ronda {round} de {total}",

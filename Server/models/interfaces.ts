@@ -32,6 +32,30 @@ export interface PlayerId {
 
 export type RoundPhase = "waiting-photo" | "answering" | "reveal" | "scores";
 
+/** `waiting-photo` (room-wide): round `round`'s photo is awaited for up to `duration` ms; never names the owner */
+export interface WaitingPhotoData {
+  round: number;
+  duration: number;
+}
+
+/**
+ * `your-turn` (owner only): send the photo for `round`. `attempt` identifies this photo request (a new one per owner
+ * pick, also when the round number repeats after a skip); `photo-unavailable` must echo both.
+ */
+export interface YourTurnData {
+  round: number;
+  attempt: number;
+}
+
+/** `photo-unavailable` (client → server): the owner of request `attempt` for `round` has no photo to send */
+export type PhotoUnavailableData = YourTurnData;
+
+/** `round-skipped`: no photo for `round` — the wait ran out, or the owner sent photo-unavailable */
+export interface RoundSkippedData {
+  round: number;
+  reason: "timeout" | "unavailable";
+}
+
 export interface Room {
   gameCode: string;
   players: Player[];

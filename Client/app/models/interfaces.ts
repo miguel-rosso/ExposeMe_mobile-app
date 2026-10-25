@@ -71,6 +71,27 @@ export interface GameResumedData {
   duration: number;
 }
 
+/** `waiting-photo`: the whole room waits up to `duration` ms for round `round`'s photo (owner not revealed) */
+export interface WaitingPhotoData {
+  round: number;
+  duration: number;
+}
+
+/**
+ * `your-turn` (only to me): send the photo for `round`. `attempt` identifies this photo request (new per owner pick,
+ * also when the round number repeats after a skip); `photo-unavailable` echoes both.
+ */
+export interface YourTurnData {
+  round: number;
+  attempt: number;
+}
+
+/** `round-skipped`: no photo for `round` (it is awaited again from another player) */
+export interface RoundSkippedData {
+  round: number;
+  reason: "timeout" | "unavailable";
+}
+
 /** `game-state`: snapshot sent to a player who rejoins (see Server/GAME_FLOW.md) */
 export interface GameStateSnapshot {
   started: boolean;
@@ -111,10 +132,18 @@ export interface GameProviderProps {
   children: React.ReactNode;
 }
 
+/** Why the player can't send a photo for their turn ("upload": picked but every upload attempt failed) */
+export type PhotoUnavailableReason = "permission" | "no-photos" | "failed" | "upload";
+
+/** In-game photo pick: a local URI, or why there is none */
+export type GamePhotoResult = { uri: string } | { error: Exclude<PhotoUnavailableReason, "upload"> };
+
 export interface PhotoContextProps {
   photoUri: string | null;
   requestGalleryPermission: (options: { askAgain: boolean }) => Promise<boolean>;
   getRandomPhoto: () => Promise<string | null>;
+  /** Photo for your-turn: never navigates away from the game, uses limited access if that is all there is */
+  pickGamePhoto: () => Promise<GamePhotoResult>;
   setPhotoUri: React.Dispatch<React.SetStateAction<string | null>>;
   handleContinue: () => Promise<void>;
 }

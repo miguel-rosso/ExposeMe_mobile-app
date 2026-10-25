@@ -71,7 +71,7 @@ describe("socket flow", () => {
     });
     for (const [name, sock] of Object.entries(byName)) sock.emit("im-ready", { gameCode, username: name });
     const { name: owner, data: turnData } = await turn;
-    expect(turnData).toEqual({ round: 1 });
+    expect(turnData).toEqual({ round: 1, attempt: 1 });
 
     // Photo → round-start broadcast to everyone
     const roundStarts = [alice, bob, carol].map((c) => once<Record<string, unknown>>(c, "round-start"));

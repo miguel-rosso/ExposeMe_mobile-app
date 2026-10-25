@@ -23,6 +23,6 @@ appId: com.socketNull.ExposeMe
     timeout: 60000
 - extendedWaitUntil:
     visible:
-      id: "player-option-.*|score-modal|game-waiting-ready"
+      id: "player-option-.*|score-modal|game-waiting-ready|game-waiting-photo"
     timeout: 30000
 - takeScreenshot: resumed-${USERNAME}

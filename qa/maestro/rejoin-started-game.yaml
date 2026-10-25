@@ -19,7 +19,7 @@ appId: com.socketNull.ExposeMe
 # Game screen (any phase, possibly paused until the resume), never the lobby
 - extendedWaitUntil:
     visible:
-      id: "player-option-.*|score-modal|game-waiting-ready|paused-modal"
+      id: "player-option-.*|score-modal|game-waiting-ready|game-waiting-photo|paused-modal"
     timeout: 30000
 - assertNotVisible:
     id: "lobby-waiting"

@@ -1,6 +1,7 @@
 import { GamePausedData, GameStateSnapshot, ScoreRound } from "../models/interfaces";
+import { applyWaitingPhoto } from "./waitingPhoto";
 
-type Phase = "answering" | "reveal" | "scores" | null;
+type Phase = "waiting-photo" | "answering" | "reveal" | "scores" | null;
 
 export interface GameStateSetters {
   setPhoto: (v: string | null) => void;
@@ -62,7 +63,13 @@ export const applyGameState = (
     return { ...result, submitGuess: snap.phase === "reveal" };
   }
 
-  // Ready phase or waiting for the next photo: back to the "are you ready" screen until round-start
+  // Waiting for the next photo: same screen as `waiting-photo` (snapshot round is the last played one)
+  if (snap.phase === "waiting-photo") {
+    applyWaitingPhoto({ round: snap.round + 1, duration: snap.duration }, s);
+    return result;
+  }
+
+  // Ready phase: back to the "are you ready" screen until the first round
   s.setPhoto(null);
   s.setPhotoOwner("");
   s.setPhase(null);
@@ -72,18 +79,19 @@ export const applyGameState = (
   return { ...result, sendReady: snap.phase === null };
 };
 
-/** Photo upload for `your-turn`, which the server re-sends after a reconnect or a pause. */
+/** Photo upload for `your-turn` request `attempt`, which the server re-sends after a reconnect or a pause. */
 export interface TurnUpload {
-  round: number;
+  attempt: number;
   url?: string;
 }
 
 /**
- * What to do on `your-turn` for `round`: "upload" a new photo, "resend" the already uploaded `url`
+ * What to do on `your-turn` for request `attempt`: "upload" a new photo, "resend" the already uploaded `url`
  * (a photo-sent emitted while offline or paused was dropped), or "wait" for the upload in flight.
+ * A new request (new attempt, even with the same round number after a skip) always uploads again.
  */
-export const turnUploadAction = (prev: TurnUpload | null, round: number): "upload" | "resend" | "wait" => {
-  if (!prev || prev.round !== round) return "upload";
+export const turnUploadAction = (prev: TurnUpload | null, attempt: number): "upload" | "resend" | "wait" => {
+  if (!prev || prev.attempt !== attempt) return "upload";
   return prev.url ? "resend" : "wait";
 };
 

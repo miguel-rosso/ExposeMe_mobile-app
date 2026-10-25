@@ -172,7 +172,7 @@ describe("reconnect mid-round", () => {
     const turn = once<{ round: number }>(socks[owner], "your-turn");
     expect((await joinAs(socks[owner], gameCode, owner, tokens[owner])).success).toBe(true);
     expect(await snap).toMatchObject({ started: true, phase: "waiting-photo", owner: null, photo: null });
-    expect(await turn).toEqual({ round: 1 });
+    expect(await turn).toEqual({ round: 1, attempt: 1 });
     Object.values(socks).forEach((c) => c.emit("leave-room"));
   }, 15_000);
 

@@ -1,5 +1,5 @@
 import { Server } from "socket.io";
-import { GameStateSnapshot, PauseInfo, Player, Room, ScoreRound } from "../models/interfaces";
+import { GameStateSnapshot, PauseInfo, Player, Room, RoundSkippedData, ScoreRound, WaitingPhotoData, YourTurnData } from "../models/interfaces";
 import { RoomManager } from "./RoomManager";
 
 const ANSWER_TIME = 8_000;
@@ -22,6 +22,11 @@ const PHOTO_RESUME_MIN_REMAINING = 5_000; // ...and the photo owner at least thi
 export class GameEngine {
   /** Pauses started in each room's current game, refunded or not (capped by MAX_TOTAL_PAUSES) */
   private totalPauses = new WeakMap<Room, number>();
+  /**
+   * Id of each room's current photo request (your-turn `attempt`): one per owner pick, never reused, so a
+   * photo-unavailable for an earlier pick (same round number after a skip) can't skip the current one
+   */
+  private turnAttempts = new WeakMap<Room, number>();
 
   constructor(private io: Server, private roomManager: RoomManager) {}
 
@@ -100,6 +105,29 @@ export class GameEngine {
     });
 
     this.setTimer(room, ANSWER_TIME, () => this.enterReveal(room));
+  }
+
+  /** `your-turn` payload for the current photo request (re-sent unchanged on rejoin/resume). */
+  private yourTurn(room: Room): YourTurnData {
+    return { round: room.round + 1, attempt: this.turnAttempts.get(room) ?? 0 };
+  }
+
+  /**
+   * photo-unavailable: the awaited owner can't provide a photo (no gallery access, no photos, upload failed).
+   * Skips the round at once. Only from the current owner while waiting for their photo and not paused, and only
+   * for the current request (`round` and `attempt` of its your-turn), so a late or duplicate report for an earlier
+   * request is ignored. (The next attempt also goes to someone else when possible, see startRound's `exclude`.)
+   */
+  onPhotoUnavailable(room: Room, username: string, round: number, attempt: number): void {
+    if (room.phase !== "waiting-photo" || room.paused) return;
+    if (!room.currentPlayer || room.currentPlayer.username !== username) return;
+    const current = this.yourTurn(room);
+    if (round !== current.round || attempt !== current.attempt) return;
+    if (room._timer) clearTimeout(room._timer);
+    room._timer = null;
+    room._timerCallback = null;
+    console.log(`[${room.gameCode}] ${username} has no photo to send — skipping`);
+    this.skipRound(room, "unavailable");
   }
 
   recordAnswer(room: Room, username: string, guess: string): void {
@@ -191,7 +219,7 @@ export class GameEngine {
     if (!room.started) return;
     // Resuming re-sends your-turn itself; otherwise the returning owner still has to send the photo
     if (!wasPaused && !room.paused && room.phase === "waiting-photo" && room.currentPlayer === player) {
-      this.io.to(player.socketId).emit("your-turn", { round: room.round + 1 });
+      this.io.to(player.socketId).emit("your-turn", this.yourTurn(room));
     }
   }
 
@@ -203,7 +231,7 @@ export class GameEngine {
     if (!room.started) return;
     this.io.to(player.socketId).emit("game-state", this.snapshot(room));
     if (!room.paused && room.phase === "waiting-photo" && room.currentPlayer === player) {
-      this.io.to(player.socketId).emit("your-turn", { round: room.round + 1 });
+      this.io.to(player.socketId).emit("your-turn", this.yourTurn(room));
     }
   }
 
@@ -297,7 +325,7 @@ export class GameEngine {
     this.io.to(room.gameCode).emit("game-resumed", { phase: room.phase, duration: room._timerDuration });
     // A photo sent while paused was ignored: ask the owner again
     if (room.phase === "waiting-photo" && room.currentPlayer?.connected) {
-      this.io.to(room.currentPlayer.socketId).emit("your-turn", { round: room.round + 1 });
+      this.io.to(room.currentPlayer.socketId).emit("your-turn", this.yourTurn(room));
     }
     this.resumeTimer(room);
   }
@@ -321,7 +349,12 @@ export class GameEngine {
 
   // ── Private: Phase transitions ───────────────────────
 
-  private startRound(room: Room): void {
+  /**
+   * Next round: a planted photo, or a connected player picked to send one (`waiting-photo` to the room, then
+   * `your-turn` to that player). `exclude` (the owner who just reported photo-unavailable) is not picked again
+   * for this round when someone else can be.
+   */
+  private startRound(room: Room, exclude?: Player): void {
     if (room.round >= room.rounds) { this.endGame(room); return; }
     // Reset answers for the new round (also before a boundary pause: the last ones were shown by round-scores)
     room.players.forEach((p) => { p.lastGuess = ""; p.lastAnswerCorrect = false; });
@@ -361,28 +394,40 @@ export class GameEngine {
 
       this.setTimer(room, ANSWER_TIME, () => this.enterReveal(room));
     } else {
-      const idx = Math.floor(Math.random() * connected.length);
-      room.currentPlayer = connected[idx];
+      const others = connected.filter((p) => p !== exclude);
+      const candidates = others.length > 0 ? others : connected;
+      room.currentPlayer = candidates[Math.floor(Math.random() * candidates.length)];
       room.phase = "waiting-photo";
       room.currentPhoto = null;
+      this.turnAttempts.set(room, (this.turnAttempts.get(room) ?? 0) + 1); // new photo request
 
       console.log(`[${room.gameCode}] Waiting photo from ${room.currentPlayer.username}`);
-      this.io.to(room.currentPlayer.socketId).emit("your-turn", { round: room.round + 1 });
+      // Room-wide (owner included, same payload): everyone shows the wait, nobody learns whose turn it is
+      const waiting: WaitingPhotoData = { round: room.round + 1, duration: PHOTO_WAIT_TIMEOUT };
+      this.io.to(room.gameCode).emit("waiting-photo", waiting);
+      this.io.to(room.currentPlayer.socketId).emit("your-turn", this.yourTurn(room));
 
       this.setTimer(room, PHOTO_WAIT_TIMEOUT, () => {
         if (room.phase === "waiting-photo") {
           console.log(`[${room.gameCode}] Photo timeout — skipping`);
-          this.io.to(room.gameCode).emit("round-skipped");
-          room._consecutiveSkips++;
-          if (room._consecutiveSkips >= MAX_CONSECUTIVE_SKIPS) {
-            console.log(`[${room.gameCode}] ${room._consecutiveSkips} rounds skipped in a row — ending game`);
-            this.endGame(room);
-            return;
-          }
-          this.startRound(room);
+          this.skipRound(room, "timeout");
         }
       });
     }
+  }
+
+  /** The awaited photo won't be played: announce it, then the next round (same number) or game over. */
+  private skipRound(room: Room, reason: RoundSkippedData["reason"]): void {
+    const owner = room.currentPlayer ?? undefined;
+    const skipped: RoundSkippedData = { round: room.round + 1, reason };
+    this.io.to(room.gameCode).emit("round-skipped", skipped);
+    room._consecutiveSkips++;
+    if (room._consecutiveSkips >= MAX_CONSECUTIVE_SKIPS) {
+      console.log(`[${room.gameCode}] ${room._consecutiveSkips} rounds skipped in a row — ending game`);
+      this.endGame(room);
+      return;
+    }
+    this.startRound(room, reason === "unavailable" ? owner : undefined);
   }
 
   private enterReveal(room: Room): void {

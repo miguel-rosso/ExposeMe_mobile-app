@@ -2,7 +2,7 @@ import { Socket } from "socket.io";
 import { io } from "../app";
 import { RoomManager } from "../managers/RoomManager";
 import { GameEngine } from "../managers/GameEngine";
-import { JoinCreateGameData, Player, Room } from "../models/interfaces";
+import { JoinCreateGameData, PhotoUnavailableData, Player, Room } from "../models/interfaces";
 
 const roomManager = new RoomManager();
 const gameEngine = new GameEngine(io, roomManager);
@@ -245,6 +245,17 @@ io.on("connection", (socket: Socket) => {
       if (!s || !isUploadPath(data?.photo)) return;
       gameEngine.onPhotoReceived(s.room, data.photo, s.player.username);
     } catch (e) { console.error("photo-sent error:", e); }
+  });
+
+  // The current photo owner has no photo to send (no gallery access, no photos, upload failed): skip now.
+  // `{ round, attempt }` of the your-turn being answered; the engine accepts it only from the awaited owner, for the
+  // current photo request
+  socket.on("photo-unavailable", (data: PhotoUnavailableData) => {
+    try {
+      const s = session(socket);
+      if (!s || !Number.isInteger(data?.round) || !Number.isInteger(data?.attempt)) return;
+      gameEngine.onPhotoUnavailable(s.room, s.player.username, data.round, data.attempt);
+    } catch (e) { console.error("photo-unavailable error:", e); }
   });
 
   const onAnswer = (data: { guess: string }) => {

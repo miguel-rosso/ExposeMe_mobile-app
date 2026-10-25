@@ -11,7 +11,7 @@ appId: com.socketNull.ExposeMe
 - runFlow: join-room.yaml
 - extendedWaitUntil:
     visible:
-      id: "game-waiting-ready|player-option-.*|score-modal"
+      id: "game-waiting-ready|game-waiting-photo|player-option-.*|score-modal"
     timeout: 60000
 # Play without ever tapping a player option (empty guess every round)
 - repeat:

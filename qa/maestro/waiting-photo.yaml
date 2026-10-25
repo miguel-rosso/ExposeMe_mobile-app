@@ -1,0 +1,28 @@
+# EXP-039 / EXP-040: between rounds every player sees the waiting screen ("Someone is choosing a photo…" with the
+# server's progress bar) instead of a frozen scoreboard, and a skipped round leaves a notice on it.
+# Run after join-room.yaml with bots that report photo-unavailable on their turns, e.g.:
+#   node qa/lab/bots.mjs --bots 1 --code $GAME_CODE --photo-unavailable 1
+# (every bot turn is skipped at once with reason "unavailable" and the next attempt goes to the device, whose own
+# turns upload normally; with one bot the game never hits 3 skips in a row).
+# Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
+appId: com.socketNull.ExposeMe
+---
+- extendedWaitUntil:
+    visible:
+      id: "game-waiting-photo"
+    timeout: 60000
+- assertVisible:
+    id: "waiting-photo-text"
+- takeScreenshot: waiting-photo-${USERNAME}
+# A bot's turn is skipped right away: the notice shows on the waiting screen (no 15 s freeze)
+- extendedWaitUntil:
+    visible:
+      id: "round-skipped-notice"
+    timeout: 30000
+- takeScreenshot: round-skipped-${USERNAME}
+# The game goes on: a round eventually starts (the device's own photo)
+- extendedWaitUntil:
+    visible:
+      id: "player-option-.*"
+    timeout: 60000
+- takeScreenshot: round-after-skip-${USERNAME}

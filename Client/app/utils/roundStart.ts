@@ -7,7 +7,7 @@ export interface RoundStartData {
   duration: number;
 }
 
-type Phase = "answering" | "reveal" | "scores" | null;
+type Phase = "waiting-photo" | "answering" | "reveal" | "scores" | null;
 
 export interface RoundStartSetters {
   setPhoto: (v: string | null) => void;

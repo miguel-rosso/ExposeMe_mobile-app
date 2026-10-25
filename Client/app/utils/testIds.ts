@@ -24,6 +24,9 @@ export const TEST_IDS = {
   chatSendButton: "chat-send-button",
   // ── Game ──
   gameWaitingReady: "game-waiting-ready",
+  gameWaitingPhoto: "game-waiting-photo",
+  waitingPhotoText: "waiting-photo-text",
+  roundSkippedNotice: "round-skipped-notice",
   holdButton: "hold-button",
   reconnectingBanner: "reconnecting-banner",
   pausedModal: "paused-modal",

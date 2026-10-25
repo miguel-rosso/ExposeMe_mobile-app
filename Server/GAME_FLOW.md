@@ -12,13 +12,36 @@ LOBBY → start-game → im-ready (every connected player, ≥2 connected, or 10
 
 Each round:
   ┌─ waiting-photo ──→ (player uploads) ──→ answering ──→ reveal ──→ scores ──→ next round
-  │                                          (8s)         (3s)       (5s)
-  │  If upload fails after 15s:
+  │     (≤15s)                               (8s)         (3s)       (5s)
+  │  No photo after 15s, or the owner sends photo-unavailable:
   │  └─ round-skipped ──→ next round (same round number, no penalty)
   └──────────────────────────────────────────────────────────────────────────────
 
 After last round: game-over
 ```
+
+## Waiting for the photo
+
+- When a player is picked to send the photo, the server emits **`waiting-photo { round, duration }`** to the
+  **whole room** (owner included, identical payload, so it never tells who was picked), and then
+  **`your-turn { round, attempt }`** to the picked player only. `round` is the round about to be played
+  (`room.round + 1`), `duration` the wait (`PHOTO_WAIT_TIMEOUT`, 15 s). `attempt` identifies this photo request: a
+  new integer for every owner pick in the room (it changes even when the round number repeats after a skip, also if
+  the same player is picked again); re-sends of the same request (rejoin, resume) carry the same `attempt`.
+  Clients show "someone is choosing a photo" with a progress bar of that `duration`; the owner shows "uploading your
+  photo" once `your-turn` arrives.
+- If the owner can't provide a photo (no gallery access, no photos, upload failed after retries) the client sends
+  **`photo-unavailable { round, attempt }`**, echoing the `your-turn` it answers. It is accepted only from the
+  session player who is the awaited owner, in `waiting-photo`, not while paused, and only when both are integers
+  equal to the request in force; anything else (late report for an earlier request, duplicate, malformed) is
+  ignored. The round is skipped at once. The app also drops the result of a your-turn flow whose request ended
+  (next `waiting-photo`, `round-start`, `round-skipped`, `game-paused`, `game-state`, `game-over`): it neither sends
+  that photo nor reports it unavailable (a photo uploaded meanwhile is re-sent if the same request is asked again).
+- Every skip is announced with **`round-skipped { round, reason }`**, `reason` = `"timeout"` (no photo in 15 s) or
+  `"unavailable"` (owner reported photo-unavailable); it never names the owner. The next round (same number)
+  follows right away with a new `waiting-photo`. After an `"unavailable"` skip the same player is not picked for
+  the next attempt when another connected player can be.
+- Planted rounds go straight to `round-start` (no `waiting-photo`).
 
 ## Join, rejoin and session
 
@@ -86,7 +109,7 @@ After last round: game-over
   someone successfully rejoins/joins first (rejected joins do not postpone the deletion). A running game in such a
   room pauses and ends when the pause expires (5 min, below), so no game timers outlive it; deleting a room
   clears its timers.
-- Photo-wait timeouts skip the round (`round-skipped`), but after **3 consecutive skips**
+- Photo-wait timeouts and `photo-unavailable` skip the round (`round-skipped`), but after **3 consecutive skips**
   (`MAX_CONSECUTIVE_SKIPS`) the server ends the game (`game-over`) instead of skipping forever.
   Any round that is actually played (uploaded or planted photo) resets the counter.
 
@@ -106,14 +129,16 @@ that reached the lobby screen in between are covered by that snapshot.
 - **`game-state`** = `{ started, phase, round, totalRounds, owner, photo, correctAnswer, duration, held, pause,
   scores, players }`. `duration` is the remaining time of the current phase (frozen while paused/held). `owner`
   and `photo` are only set in `answering`/`reveal`/`scores` (the owner stays secret while waiting for a photo);
+  in `waiting-photo`, `round` is the last played round (the awaited one is `round + 1`, as in `waiting-photo`) and
+  `duration` what is left of the photo wait, so the client renders the same waiting screen as for `waiting-photo`;
   `correctAnswer` only in `reveal`/`scores`. `pause` is `{ duration, waitingFor, pause, maxPauses }` (same as `game-paused`) while paused, else `null`.
   `started: false` means the game ended while the player was away (`scores` are the final scores).
   Until `round-scores` (phases `waiting-photo`/`answering`/`reveal`), `scores` and `players` hide this round's
   answers: `lastGuess: ""`, `lastAnswerCorrect: false` and `points` without the point a correct answer earned.
   The client renders that phase; in `reveal` it submits its guess (the missed `round-reveal` triggers that
   normally); with `phase: null` (ready phase) it sends `im-ready` again.
-- The photo owner who rejoins while their photo is awaited gets `your-turn` again (same round number); the
-  client re-sends the photo it already uploaded for that round instead of uploading a new one.
+- The photo owner who rejoins while their photo is awaited gets `your-turn` again (same `round` and `attempt`);
+  the client re-sends the photo it already uploaded for that request instead of uploading a new one.
 - **Pause**: mid-game (after the ready phase), when fewer than 2 players are connected (on a disconnect,
   leave or removal, or at a round boundary) and someone who dropped could still return, the server
   **pauses**: the phase timer is frozen (an active hold ends with `hold-end`; no hold while paused), photos
@@ -159,13 +184,14 @@ All game events are **atomic** — each contains everything the client needs.
 |-------|-------|------|-------------|
 | `room-of-game` | - | `{ success, room?, rounds?, message?, rejoinToken? }` | Join result (token only to the joiner) |
 | `game-started` | - | `players, rounds` | Navigate to game screen (players without `rejoinToken`/`plantedPhoto`) |
-| `your-turn` | waiting-photo | `{ round }` | You must pick and upload a photo |
+| `waiting-photo` | waiting-photo | `{ round, duration }` | Whole room: a photo is awaited (owner not revealed), show wait bar |
+| `your-turn` | waiting-photo | `{ round, attempt }` | Only the picked player: pick and upload a photo (or send `photo-unavailable`) |
 | `round-start` | answering | `{ photo, owner, round, duration }` | Show photo, start answer timer |
 | `round-reveal` | reveal | `{ correctAnswer, duration }` | Show correct answer |
 | `round-scores` | scores | `{ scores, duration }` | Show scoreboard |
 | `hold-start` | - | - | Pause everything visually |
 | `hold-resume` | reveal/scores | `{ phase, duration }` | Resume with remaining time |
-| `round-skipped` | - | - | Upload timed out, next player |
+| `round-skipped` | - | `{ round, reason: "timeout" \| "unavailable" }` | No photo for this round; the next `waiting-photo` follows |
 | `game-paused` | any | `{ duration, waitingFor, pause, maxPauses }` | Fewer than 2 connected: freeze, show countdown and "pause N of M" |
 | `game-resumed` | any | `{ phase, duration }` | Paused phase continues with remaining time |
 | `game-state` | any | snapshot (see "Pause and reconnect") | Only to a rejoining socket (or one re-sending its join in a started game): render current phase |
@@ -180,6 +206,7 @@ All game events are **atomic** — each contains everything the client needs.
 | `start-game` | - | Host only |
 | `im-ready` | - | Player ready to start (session player; payload ignored) |
 | `photo-sent` | `{ photo }` | Photo uploaded; only from the current owner, `photo` must be a `/upload` path (`/temp/<32 hex>.jpg\|png\|webp`) |
+| `photo-unavailable` | `{ round, attempt }` (from its `your-turn`) | The awaited owner has no photo to send (no access, no photos, upload failed): skip the round now |
 | `submit-answer` | `{ guess }` | Player's answer |
 | `hold-start` | - | Photo owner pressed hold |
 | `hold-end` | - | Photo owner released hold |

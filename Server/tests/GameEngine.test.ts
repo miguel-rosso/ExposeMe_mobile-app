@@ -95,7 +95,7 @@ describe("start", () => {
     vi.advanceTimersByTime(1);
     const ev = lastEvent("your-turn")!;
     expect(ev.target).toBe(room.currentPlayer!.socketId);
-    expect(ev.args[0]).toEqual({ round: 1 });
+    expect(ev.args[0]).toEqual({ round: 1, attempt: 1 });
     expect(room.phase).toBe("waiting-photo");
     expect(room.round).toBe(0);
   });
@@ -141,7 +141,7 @@ describe("im-ready and ready timeout", () => {
     expect(room.phase).toBe("waiting-photo");
     vi.advanceTimersByTime(GAME_START_DELAY);
     expect(events("your-turn")).toHaveLength(1);
-    expect(lastEvent("your-turn")!.args[0]).toEqual({ round: 1 });
+    expect(lastEvent("your-turn")!.args[0]).toEqual({ round: 1, attempt: 1 });
 
     // a late im-ready does not restart anything
     engine.markReady(room, player("carol"));
@@ -294,7 +294,7 @@ describe("round phases", () => {
     expect(events("your-turn")).toHaveLength(1);
     vi.advanceTimersByTime(1);
     expect(events("your-turn")).toHaveLength(2);
-    expect(lastEvent("your-turn")!.args[0]).toEqual({ round: 2 });
+    expect(lastEvent("your-turn")!.args[0]).toEqual({ round: 2, attempt: 2 });
     expect(room.phase).toBe("waiting-photo");
   });
 
@@ -325,7 +325,7 @@ describe("round phases", () => {
     expect(room.round).toBe(0);
     expect(room.phase).toBe("waiting-photo");
     expect(events("your-turn")).toHaveLength(2);
-    expect(lastEvent("your-turn")!.args[0]).toEqual({ round: 1 });
+    expect(lastEvent("your-turn")!.args[0]).toEqual({ round: 1, attempt: 2 });
   });
 
   it("does not skip once the photo arrived before the timeout", () => {

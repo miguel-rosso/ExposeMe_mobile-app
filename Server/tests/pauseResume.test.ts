@@ -190,7 +190,7 @@ describe("pause with fewer than 2 connected players", () => {
     expect(last("game-resumed")!.args[0]).toEqual({ phase: "waiting-photo", duration: 5_000 });
     const turns = events("your-turn");
     expect(turns).toHaveLength(2);
-    expect(turns[1]).toEqual({ target: owner.socketId, event: "your-turn", args: [{ round: 1 }] });
+    expect(turns[1]).toEqual({ target: owner.socketId, event: "your-turn", args: [{ round: 1, attempt: 1 }] });
 
     engine.onPhotoReceived(room, PHOTO, owner.username);
     expect(last("round-start")!.args[0]).toMatchObject({ round: 1, owner: owner.username });
@@ -264,7 +264,7 @@ describe("rejoin without a pause (3+ players)", () => {
     vi.advanceTimersByTime(2_000);
     rejoin(owner.username);
     expect(snapshotFor(owner.socketId)).toMatchObject({ phase: "waiting-photo", owner: null, photo: null });
-    expect(last("your-turn")).toEqual({ target: owner.socketId, event: "your-turn", args: [{ round: 1 }] });
+    expect(last("your-turn")).toEqual({ target: owner.socketId, event: "your-turn", args: [{ round: 1, attempt: 1 }] });
   });
 });
 

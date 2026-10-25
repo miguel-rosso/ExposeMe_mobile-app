@@ -39,6 +39,6 @@ appId: com.socketNull.ExposeMe
 # Lobby (guest or host) or already in the game
 - extendedWaitUntil:
     visible:
-      id: "lobby-waiting|start-game-button|game-waiting-ready|player-option-.*"
+      id: "lobby-waiting|start-game-button|game-waiting-ready|game-waiting-photo|player-option-.*"
     timeout: 30000
 - takeScreenshot: lobby-${USERNAME}

@@ -1,9 +1,9 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
-import { View, Text, TouchableOpacity, StatusBar, FlatList, BackHandler, AppState } from "react-native";
+import { View, Text, TouchableOpacity, StatusBar, FlatList, BackHandler } from "react-native";
 import { useFocusEffect } from "expo-router";
 import tw from "twrnc";
 import { useGameContext } from "../providers/GameContext";
-import { Player, ScoreRound } from "../models/interfaces";
+import { GamePausedData, GameResumedData, GameStateSnapshot, Player, ScoreRound } from "../models/interfaces";
 import { usePhotoContext } from "../providers/PhotoContext";
 import { useRouter } from "expo-router";
 import getEnvVars from "@/config";
@@ -18,6 +18,9 @@ import EmojisButton from "@/app/components/IngameComunication/EmojisButtons";
 import { useI18n } from "../i18n";
 import { applyRoundStart, RoundStartData } from "../utils/roundStart";
 import { uploadPhoto } from "@/app/utils/uploadPhoto";
+import { applyGameState, turnUploadAction, TurnUpload } from "../utils/gameState";
+import { useGameConnection } from "../hooks/useGameConnection";
+import PausedModal from "@/app/components/modals/PausedModal";
 
 const { SERVER_URL } = getEnvVars();
 
@@ -26,8 +29,10 @@ type Phase = "answering" | "reveal" | "scores" | null;
 
 const GameScreen = () => {
   const { t } = useI18n();
-  const { username, gameCode, endSocket, socket, playersProvider, roundsOfGame, plantedPhotoUri, uploadPlantedPhoto } =
-    useGameContext();
+  const {
+    username, gameCode, endSocket, socket, playersProvider, setPlayersProvider, roundsOfGame, plantedPhotoUri,
+    uploadPlantedPhoto, getRejoinToken, saveRejoinToken,
+  } = useGameContext();
   const safeUsername = username ?? "";
   const safeGameCode = gameCode ?? "";
   const { getRandomPhoto, setPhotoUri } = usePhotoContext();
@@ -45,6 +50,15 @@ const GameScreen = () => {
   const [mySelection, _setMySelection] = useState("");
   const mySelectionRef = useRef("");
   const setMySelection = (val: string) => { mySelectionRef.current = val; _setMySelection(val); };
+  // Current round/owner for the game-state handler (socket listeners would see stale state)
+  const roundRef = useRef({ round: 0, owner: "" });
+  roundRef.current = { round, owner: photoOwner };
+  // Photo uploaded for my turn: re-sent if the server asks again (after a reconnect or a pause)
+  const turnUploadRef = useRef<TurnUpload | null>(null);
+
+  // ── Pause (fewer than 2 players connected) ───────────
+  const [pauseEndsAt, setPauseEndsAt] = useState<number | null>(null);
+  const setPauseDuration = (ms: number | null) => setPauseEndsAt(ms === null ? null : Date.now() + ms);
 
   // ── Hold state ───────────────────────────────────────
   const [gameHeld, setGameHeld] = useState(false);  // server says game paused
@@ -55,6 +69,7 @@ const GameScreen = () => {
   const [showFinalScore, setShowFinalScore] = useState(false);
   const [showWinner, setShowWinner] = useState(false);
   const [winner, setWinner] = useState<ScoreRound | null>(null);
+  const gameOverRef = useRef(false);
 
   // ── Other ────────────────────────────────────────────
   const [emojiReactions, setEmojiReactions] = useState<EmojiReactionData[]>([]);
@@ -89,29 +104,22 @@ const GameScreen = () => {
     socket.emit("hold-end");
   };
 
-  // ── Disconnect detection: go back to menu ────────────
-  useEffect(() => {
-    if (!socket) return;
+  // ── Connection: stay in the game, rejoin on reconnect ─
+  const { connected } = useGameConnection({
+    socket, gameCode, username, getRejoinToken, saveRejoinToken,
+    onLeave: (message) => {
+      console.log("[GAME] Can't rejoin the game — returning to menu");
+      router.replace(message ? { pathname: "/", params: { message } } : "/");
+    },
+  });
 
-    const onDisconnect = () => {
-      console.log("[GAME] Socket disconnected — returning to menu");
-      router.replace("/");
-    };
-
-    socket.on("disconnect", onDisconnect);
-
-    // Also check when app comes back from background
-    const sub = AppState.addEventListener("change", (state) => {
-      if (state === "active" && !socket.connected) {
-        onDisconnect();
-      }
-    });
-
-    return () => {
-      socket.off("disconnect", onDisconnect);
-      sub.remove();
-    };
-  }, [socket]);
+  const showGameOver = (finalScore: ScoreRound[]) => {
+    if (gameOverRef.current) return;
+    gameOverRef.current = true;
+    setPauseEndsAt(null);
+    setFinalScore(finalScore);
+    if (finalScore?.length > 0) { setWinner(finalScore[0]); setShowWinner(true); }
+  };
 
   // ── Socket listeners ─────────────────────────────────
   useEffect(() => {
@@ -120,14 +128,19 @@ const GameScreen = () => {
     // My turn: pick photo → upload → send
     socket.on("your-turn", async (data: { round: number }) => {
       setRound(data.round);
+      const action = turnUploadAction(turnUploadRef.current, data.round);
+      if (action === "resend") { socket.emit("photo-sent", { photo: turnUploadRef.current!.url }); return; }
+      if (action === "wait") return; // the upload in flight sends it
+      turnUploadRef.current = { round: data.round };
       try {
         const uri = await getRandomPhoto();
-        if (!uri) { console.error("No photo selected"); return; }
+        if (!uri) { console.error("No photo selected"); turnUploadRef.current = null; return; }
         for (let i = 1; i <= 3; i++) {
           try {
             console.log(`Upload attempt ${i}...`);
             const url = await uploadImage(uri);
             console.log("Photo uploaded");
+            turnUploadRef.current = { round: data.round, url };
             socket.emit("photo-sent", { photo: url });
             setPhotoUri(null);
             return;
@@ -138,6 +151,7 @@ const GameScreen = () => {
         }
         console.error("All upload attempts failed");
       } catch (e) { console.error("your-turn error:", e); }
+      turnUploadRef.current = null;
     });
 
     // Atomic: new round — photo + answer timer
@@ -193,10 +207,37 @@ const GameScreen = () => {
 
     socket.on("round-skipped", () => { console.log("[GAME] round-skipped"); });
 
+    // Fewer than 2 players connected: the server froze the game and shows its countdown
+    socket.on("game-paused", (data: GamePausedData) => {
+      console.log(`[GAME] game-paused: ${data.duration}ms, waiting for ${data.waitingFor.join(", ")}`);
+      setPauseDuration(data.duration);
+      setPressing(false);
+      setGameHeld(false);
+    });
+
+    socket.on("game-resumed", (data: GameResumedData) => {
+      console.log(`[GAME] game-resumed: ${data.phase} ${data.duration}ms`);
+      setPauseEndsAt(null);
+      setPhaseDuration(data.duration);
+      setPhaseKey((k) => k + 1);
+    });
+
+    // Snapshot after a rejoin: render whatever phase the server is in
+    socket.on("game-state", (snap: GameStateSnapshot) => {
+      console.log(`[GAME] game-state: ${snap.phase} round ${snap.round}, paused=${!!snap.pause}`);
+      setPlayersProvider(snap.players);
+      const result = applyGameState(snap, SERVER_URL, roundRef.current, {
+        setPhoto, setPhotoOwner, setRound, setPhase, setPhaseDuration, setPhaseKey,
+        setCorrectAnswer, setScores, setMySelection, setGameHeld, setPressing, setPauseDuration,
+      });
+      if (result.gameOver) showGameOver(snap.scores);
+      if (result.sendReady) socket.emit("im-ready");
+      if (result.submitGuess) socket.emit("submit-answer", { guess: mySelectionRef.current || "" });
+    });
+
     socket.on("game-over", (data: { finalScore: ScoreRound[] }) => {
       console.log("[GAME] game-over");
-      setFinalScore(data.finalScore);
-      if (data.finalScore?.length > 0) { setWinner(data.finalScore[0]); setShowWinner(true); }
+      showGameOver(data.finalScore);
     });
 
     socket.on("emoji-reaction", (data: { username: string; emoji: string }) => {
@@ -209,7 +250,7 @@ const GameScreen = () => {
       socket.off("your-turn"); socket.off("round-start"); socket.off("round-reveal");
       socket.off("round-scores"); socket.off("hold-start"); socket.off("hold-end");
       socket.off("hold-resume"); socket.off("round-skipped"); socket.off("game-over");
-      socket.off("emoji-reaction");
+      socket.off("emoji-reaction"); socket.off("game-paused"); socket.off("game-resumed"); socket.off("game-state");
       endSocket();
     };
   }, [socket]);
@@ -285,6 +326,14 @@ const GameScreen = () => {
       <StatusBar hidden />
       <WinnerModal visible={showWinner} winner={winner} onAnimationEnd={handleWinnerEnd} />
       <FinalScoreModal visible={showFinalScore} finalScore={finalScore || []} />
+      <PausedModal endsAt={finalScore ? null : pauseEndsAt} />
+
+      {/* Subtle indicator while socket.io reconnects; the game screen stays */}
+      {!connected && !finalScore && (
+        <View testID={TEST_IDS.reconnectingBanner} style={tw`absolute top-2 left-0 right-0 z-100 items-center`} pointerEvents="none">
+          <Text style={tw`text-white text-sm bg-gray-800 bg-opacity-80 px-3 py-1 rounded-full`}>{t.reconnecting}</Text>
+        </View>
+      )}
 
       <View style={tw`flex-1 bg-black`}>
         {photo ? (
@@ -302,7 +351,7 @@ const GameScreen = () => {
             {!gameHeld && (
               <View style={tw`z-8 absolute w-full h-full`}>
                 {/* Progress bar during answering or scores */}
-                {(phase === "answering" || phase === "scores") && phaseDuration > 0 && (
+                {(phase === "answering" || phase === "scores") && phaseDuration > 0 && pauseEndsAt === null && (
                   <View style={tw`absolute top-15 left-0 right-0 p-4 items-center`}>
                     <View style={tw`w-full max-w-[500px]`}>
                       <ProgressBar key={phaseKey} duration={phaseDuration} />

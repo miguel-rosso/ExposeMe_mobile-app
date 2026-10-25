@@ -25,6 +25,9 @@ export const TEST_IDS = {
   // ── Game ──
   gameWaitingReady: "game-waiting-ready",
   holdButton: "hold-button",
+  reconnectingBanner: "reconnecting-banner",
+  pausedModal: "paused-modal",
+  pausedCountdown: "paused-countdown",
   // ── Modals ──
   alertModal: "alert-modal",
   alertModalConfirm: "alert-modal-confirm",

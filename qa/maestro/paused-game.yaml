@@ -1,0 +1,23 @@
+# EXP-006 / DEC-009: a 2-player game pauses while the other player is away and resumes when they return.
+# Run after join-room.yaml with exactly one bot in the room that drops mid-round, e.g.:
+#   node qa/lab/bots.mjs --bots 1 --code $GAME_CODE --drop-round 2 --drop-secs 20
+# The device must show the paused countdown (not leave the game), then continue playing.
+# Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
+appId: com.socketNull.ExposeMe
+---
+- extendedWaitUntil:
+    visible:
+      id: "paused-modal"
+    timeout: 120000
+- assertVisible:
+    id: "paused-countdown"
+- takeScreenshot: paused-${USERNAME}
+- extendedWaitUntil:
+    notVisible:
+      id: "paused-modal"
+    timeout: 60000
+- extendedWaitUntil:
+    visible:
+      id: "player-option-.*|score-modal|game-waiting-ready"
+    timeout: 30000
+- takeScreenshot: resumed-${USERNAME}

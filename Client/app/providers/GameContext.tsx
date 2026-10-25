@@ -71,8 +71,10 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     const newSocket = io(SERVER_URL, {
       autoConnect: true,
       reconnection: true,
-      reconnectionAttempts: 5,
+      // Keep trying: the server keeps the player (and pauses a 2-player game for 5 min) until they rejoin
+      reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
     });
 
     socketRef.current = newSocket;

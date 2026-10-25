@@ -1,5 +1,5 @@
 import { Server } from "socket.io";
-import { Player, Room, ScoreRound } from "../models/interfaces";
+import { GameStateSnapshot, Player, Room, ScoreRound } from "../models/interfaces";
 import { RoomManager } from "./RoomManager";
 
 const ANSWER_TIME = 8_000;
@@ -11,6 +11,10 @@ const PHOTO_WAIT_TIMEOUT = 15_000;
 const HOLD_SAFETY_TIMEOUT = 30_000;
 const HOLD_MIN_REMAINING = 1_500; // Stop allowing hold when less than this remains
 const MAX_CONSECUTIVE_SKIPS = 3; // End the game after this many photo timeouts in a row
+export const PAUSE_TIMEOUT = 5 * 60_000; // Fewer than 2 connected: total pause time per game before game over
+export const PAUSE_MIN_DURATION = 2_000; // A pause is never shorter than this (flapping connections)
+const RESUME_MIN_REMAINING = 1_500; // A resumed phase gets at least this much time
+const PHOTO_RESUME_MIN_REMAINING = 5_000; // ...and the photo owner at least this much to (re)send the photo
 
 export class GameEngine {
   constructor(private io: Server, private roomManager: RoomManager) {}
@@ -20,8 +24,11 @@ export class GameEngine {
   startGame(room: Room): void {
     room.started = true;
     room.round = 0;
+    room.currentPlayer = null;
+    room.currentPhoto = null;
     room.plantedPhotosShown = 0;
     room._consecutiveSkips = 0;
+    room._pauseUsed = 0;
     // "Play again" reuses the room: drop scores and answers from the previous game
     room.players.forEach((p) => { p.points = 0; p.lastGuess = ""; p.lastAnswerCorrect = false; });
     console.log(`[${room.gameCode}] Game started`);
@@ -58,6 +65,7 @@ export class GameEngine {
   onAllPlayersReady(room: Room): void {
     room.phase = "waiting-photo"; // Out of the ready phase: later im-ready / ready timeout are no-ops
     room.round = 0;
+    room.currentPlayer = null; // Picked by startRound; a stale owner from a previous game can't send a photo
     this.assignPlantedSlots(room);
     console.log(`[${room.gameCode}] All ready, planted slots: [${[...room.plantedSlots].join(",")}]`);
     this.setTimer(room, GAME_START_DELAY, () => this.startRound(room));
@@ -65,11 +73,14 @@ export class GameEngine {
 
   onPhotoReceived(room: Room, photo: string, username: string): void {
     if (room.phase !== "waiting-photo") return;
+    // Paused: the owner gets your-turn again on resume and re-sends it
+    if (room.paused) return;
     // Only the player whose turn it is may provide the photo
     if (room.currentPlayer?.username !== username) return;
 
     room.round++;
     room.phase = "answering";
+    room.currentPhoto = photo;
     room._consecutiveSkips = 0;
     console.log(`[${room.gameCode}] Round ${room.round}: photo from ${username}`);
 
@@ -101,7 +112,7 @@ export class GameEngine {
 
   handleHold(room: Room, socketId: string): boolean {
     if (room.currentPlayer?.socketId !== socketId) return false;
-    if (room.held) return false;
+    if (room.held || room.paused) return false;
     if (room.phase !== "scores") return false;
 
     // Don't allow hold if not enough time remaining
@@ -143,17 +154,160 @@ export class GameEngine {
     this.io.to(room.gameCode).emit("hold-end");
   }
 
+  // ── Connection changes: pause / resume / resync ──────
+
+  /**
+   * Call after a player disconnects, rejoins, leaves or is removed. Mid-game (after the ready phase):
+   * fewer than 2 connected → pause, or game over if nobody who is gone can come back (they all left);
+   * 2 or more connected while paused → resume (not before PAUSE_MIN_DURATION). Ready phase: checkReady.
+   */
+  onConnectionChange(room: Room): void {
+    if (!room.started || room.phase === null) return;
+    const connected = room.players.filter((p) => p.connected).length;
+    if (connected >= 2) { this.resumeGame(room); return; }
+    if (room.players.length === connected) { this.endGame(room); return; } // nobody can come back
+    if (!room.paused) { this.pauseGame(room); return; }
+    // Still paused: a resume scheduled by a rejoin is off, and the others learn who is still missing
+    if (room._resumeTimer) { clearTimeout(room._resumeTimer); room._resumeTimer = null; }
+    const waitingFor = this.missingPlayers(room);
+    if (waitingFor.join("\n") !== room._pauseWaitingFor.join("\n")) {
+      room._pauseWaitingFor = waitingFor;
+      this.io.to(room.gameCode).emit("game-paused", { duration: this.pauseRemaining(room), waitingFor });
+    }
+  }
+
+  /** A player rejoined on a new socket: resume if they were awaited, then send them a state snapshot. */
+  onPlayerRejoined(room: Room, player: Player): void {
+    const wasPaused = room.paused;
+    this.onConnectionChange(room);
+    this.io.to(player.socketId).emit("game-state", this.snapshot(room));
+    if (!room.started) return;
+    // Resuming re-sends your-turn itself; otherwise the returning owner still has to send the photo
+    if (!wasPaused && !room.paused && room.phase === "waiting-photo" && room.currentPlayer === player) {
+      this.io.to(player.socketId).emit("your-turn", { round: room.round + 1 });
+    }
+  }
+
+  snapshot(room: Room): GameStateSnapshot {
+    const inRound = room.phase === "answering" || room.phase === "reveal" || room.phase === "scores";
+    const shown = room.phase === "reveal" || room.phase === "scores";
+    // Running timer: what is left of it; paused/held timer: the frozen remaining time
+    const duration = room._timer ? Math.max(0, room._timerDuration - (Date.now() - room._timerStartedAt)) : room._timerDuration;
+    // Guesses of the round in play are secret until round-scores (points already count a correct one).
+    // In waiting-photo they are already reset by startRound.
+    const hideGuesses = room.started && (room.phase === "answering" || room.phase === "reveal");
+    const players = room.players.map((p) => {
+      const pub = this.roomManager.publicPlayer(p);
+      return hideGuesses ? { ...pub, ...this.hiddenGuess(p) } : pub;
+    });
+    const scores = this.buildScores(room).map((sc) => {
+      const p = room.players.find((x) => x.username === sc.username)!;
+      return hideGuesses ? { ...sc, ...this.hiddenGuess(p) } : sc;
+    });
+    if (hideGuesses) scores.sort((a, b) => b.points - a.points);
+    return {
+      started: room.started,
+      phase: room.phase,
+      round: room.round,
+      totalRounds: room.rounds,
+      owner: inRound ? room.currentPlayer?.username ?? null : null,
+      photo: inRound ? room.currentPhoto : null,
+      correctAnswer: shown ? room.currentPlayer?.username ?? null : null,
+      duration: room.started ? duration : 0,
+      held: room.held,
+      pause: room.paused ? { duration: this.pauseRemaining(room), waitingFor: this.missingPlayers(room) } : null,
+      scores,
+      players,
+    };
+  }
+
+  private hiddenGuess(p: Player): { points: number; lastGuess: string; lastAnswerCorrect: boolean } {
+    return { points: p.points - (p.lastAnswerCorrect ? 1 : 0), lastGuess: "", lastAnswerCorrect: false };
+  }
+
+  private pauseGame(room: Room): void {
+    if (!room.started || room.paused) return;
+    // The pause budget is per game: repeated drops can't keep a game frozen beyond PAUSE_TIMEOUT in total
+    const budget = PAUSE_TIMEOUT - room._pauseUsed;
+    if (budget <= 0) {
+      console.log(`[${room.gameCode}] Pause budget used up — ending game`);
+      this.endGame(room);
+      return;
+    }
+    if (room.held) {
+      // The hold already froze the phase timer; the pause replaces it
+      room.held = false;
+      if (room._holdSafetyTimer) { clearTimeout(room._holdSafetyTimer); room._holdSafetyTimer = null; }
+      this.io.to(room.gameCode).emit("hold-end");
+    } else if (room._timer) {
+      this.pauseTimer(room);
+    }
+    room.paused = true;
+    room._pauseStartedAt = Date.now();
+    room._pauseTimer = setTimeout(() => {
+      room._pauseTimer = null;
+      if (!room.paused) return;
+      console.log(`[${room.gameCode}] Nobody came back in time — ending game`);
+      this.endGame(room);
+    }, budget);
+    room._pauseWaitingFor = this.missingPlayers(room);
+    console.log(`[${room.gameCode}] PAUSED "${room.phase}" (${room._timerDuration}ms left, ${budget}ms of pause left), waiting for: ${room._pauseWaitingFor.join(", ")}`);
+    this.io.to(room.gameCode).emit("game-paused", { duration: budget, waitingFor: room._pauseWaitingFor });
+  }
+
+  private resumeGame(room: Room): void {
+    if (!room.paused || room._resumeTimer) return;
+    // A pause lasts at least PAUSE_MIN_DURATION, so a flapping connection can't spam pause/resume
+    const early = PAUSE_MIN_DURATION - (Date.now() - room._pauseStartedAt);
+    if (early > 0) {
+      room._resumeTimer = setTimeout(() => { room._resumeTimer = null; this.onConnectionChange(room); }, early);
+      return;
+    }
+    room.paused = false;
+    room._pauseUsed += Date.now() - room._pauseStartedAt;
+    room._pauseWaitingFor = [];
+    if (room._pauseTimer) { clearTimeout(room._pauseTimer); room._pauseTimer = null; }
+    const min = room.phase === "waiting-photo" && room.currentPlayer ? PHOTO_RESUME_MIN_REMAINING : RESUME_MIN_REMAINING;
+    room._timerDuration = Math.max(min, room._timerDuration);
+    console.log(`[${room.gameCode}] RESUMED "${room.phase}" with ${room._timerDuration}ms`);
+    this.io.to(room.gameCode).emit("game-resumed", { phase: room.phase, duration: room._timerDuration });
+    // A photo sent while paused was ignored: ask the owner again
+    if (room.phase === "waiting-photo" && room.currentPlayer?.connected) {
+      this.io.to(room.currentPlayer.socketId).emit("your-turn", { round: room.round + 1 });
+    }
+    this.resumeTimer(room);
+  }
+
+  /** What is left of this game's pause budget, counting the pause in progress. */
+  private pauseRemaining(room: Room): number {
+    const current = room.paused ? Date.now() - room._pauseStartedAt : 0;
+    return Math.max(0, PAUSE_TIMEOUT - room._pauseUsed - current);
+  }
+
+  private missingPlayers(room: Room): string[] {
+    return room.players.filter((p) => !p.connected).map((p) => p.username);
+  }
+
   // ── Private: Phase transitions ───────────────────────
 
   private startRound(room: Room): void {
+    if (room.round >= room.rounds) { this.endGame(room); return; }
+    // Reset answers for the new round (also before a boundary pause: the last ones were shown by round-scores)
+    room.players.forEach((p) => { p.lastGuess = ""; p.lastAnswerCorrect = false; });
     // Only connected players can play; disconnected ones stay in the room to rejoin
     const connected = room.players.filter((p) => p.connected);
-    if (connected.length < 2) { this.endGame(room); return; }
-    if (room.round >= room.rounds) { this.endGame(room); return; }
+    if (connected.length < 2) {
+      if (room.players.length === connected.length) { this.endGame(room); return; } // nobody can come back
+      // Between rounds, no owner picked yet: wait for someone to return, then start this round
+      room.phase = "waiting-photo";
+      room.currentPlayer = null;
+      room.currentPhoto = null;
+      this.setTimer(room, GAME_START_DELAY, () => this.startRound(room));
+      this.pauseGame(room);
+      return;
+    }
 
     room.held = false;
-    // Reset answers for new round
-    room.players.forEach((p) => { p.lastGuess = ""; p.lastAnswerCorrect = false; });
 
     const planted = this.pickPlantedPhoto(room);
     if (planted) {
@@ -161,6 +315,7 @@ export class GameEngine {
       room.plantedPhotosShown++;
       room.round++;
       room.phase = "answering";
+      room.currentPhoto = planted.plantedPhoto ?? null;
       room._consecutiveSkips = 0;
 
       console.log(`[${room.gameCode}] Round ${room.round}: planted photo from ${planted.username}`);
@@ -178,6 +333,7 @@ export class GameEngine {
       const idx = Math.floor(Math.random() * connected.length);
       room.currentPlayer = connected[idx];
       room.phase = "waiting-photo";
+      room.currentPhoto = null;
 
       console.log(`[${room.gameCode}] Waiting photo from ${room.currentPlayer.username}`);
       this.io.to(room.currentPlayer.socketId).emit("your-turn", { round: room.round + 1 });
@@ -266,8 +422,9 @@ export class GameEngine {
     const callback = room._timerCallback;
     if (!callback) {
       console.error(`[${room.gameCode}] Resume but no callback! Recovering...`);
-      if (room.phase === "reveal") this.enterScores(room);
-      else if (room.phase === "scores") this.startRound(room);
+      if (room.phase === "answering") this.enterReveal(room);
+      else if (room.phase === "reveal") this.enterScores(room);
+      else this.startRound(room);
       return;
     }
 

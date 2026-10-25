@@ -13,6 +13,7 @@ const REVEAL_TIME = 3_000;
 const SCORE_DISPLAY_TIME = 5_000;
 const GAME_START_DELAY = 1_000;
 const PHOTO_WAIT_TIMEOUT = 15_000;
+const PAUSE_TIMEOUT = 5 * 60_000;
 const PHOTO = "/temp/1700000000000-photo.jpg";
 
 let emits: CapturedEmit[];
@@ -132,13 +133,15 @@ describe("abandoned rooms", () => {
     expect(vi.getTimerCount()).toBe(1);
   });
 
-  it("a running game with nobody connected ends at the next boundary and leaves only the deletion timer (waiting-photo)", () => {
+  it("a running game with nobody connected pauses at the next boundary, ends after the pause and leaves only the deletion timer (waiting-photo)", () => {
     const room = startedRoom();
     expect(room.phase).toBe("waiting-photo");
     rm.markDisconnected(room.gameCode, "alice", "sock-alice");
     rm.markDisconnected(room.gameCode, "bob", "sock-bob");
 
     vi.advanceTimersByTime(PHOTO_WAIT_TIMEOUT);
+    expect(room.paused).toBe(true);
+    vi.advanceTimersByTime(PAUSE_TIMEOUT);
     expect(emits.some((e) => e.event === "game-over")).toBe(true);
     expect(room._timer).toBeNull();
     expect(vi.getTimerCount()).toBe(1); // the room deletion
@@ -148,14 +151,14 @@ describe("abandoned rooms", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("a running game with nobody connected ends at the next boundary and leaves only the deletion timer (answering)", () => {
+  it("a running game with nobody connected pauses at the next boundary, ends after the pause and leaves only the deletion timer (answering)", () => {
     const room = startedRoom();
     engine.onPhotoReceived(room, PHOTO, room.currentPlayer!.username);
     expect(room.phase).toBe("answering");
     rm.markDisconnected(room.gameCode, "alice", "sock-alice");
     rm.markDisconnected(room.gameCode, "bob", "sock-bob");
 
-    vi.advanceTimersByTime(ANSWER_TIME + REVEAL_TIME + SCORE_DISPLAY_TIME);
+    vi.advanceTimersByTime(ANSWER_TIME + REVEAL_TIME + SCORE_DISPLAY_TIME + PAUSE_TIMEOUT);
     expect(emits.some((e) => e.event === "game-over")).toBe(true);
     expect(vi.getTimerCount()).toBe(1);
   });

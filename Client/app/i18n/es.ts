@@ -45,6 +45,9 @@ export default {
   // GameScreen
   areYouReady: "¿ESTÁS LISTO?",
   holdPhoto: "Mantener Foto",
+  reconnecting: "Reconectando…",
+  gamePaused: "Partida en pausa",
+  waitingPlayersReturn: "Esperando a que vuelvan los jugadores…",
 
   // ScoreModal
   roundOf: "Ronda {round} de {total}",

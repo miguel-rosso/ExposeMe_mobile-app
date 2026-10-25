@@ -24,6 +24,13 @@ export class RoomManager {
       plantedPhotosShown: 0,
       plantedSlots: new Set(),
       phase: null,
+      currentPhoto: null,
+      paused: false,
+      _pauseTimer: null,
+      _pauseStartedAt: 0,
+      _pauseUsed: 0,
+      _resumeTimer: null,
+      _pauseWaitingFor: [],
       _consecutiveSkips: 0,
       _hadGuests: false,
       _timer: null,
@@ -131,7 +138,7 @@ export class RoomManager {
   }
 
   safeRoomData(room: Room): SafeRoom {
-    const { _timer, _timerCallback, _timerStartedAt, _timerDuration, _holdSafetyTimer, plantedSlots, _consecutiveSkips, _hadGuests, ...safe } = room;
+    const { _timer, _timerCallback, _timerStartedAt, _timerDuration, _holdSafetyTimer, _pauseTimer, _pauseStartedAt, _pauseUsed, _resumeTimer, _pauseWaitingFor, plantedSlots, _consecutiveSkips, _hadGuests, ...safe } = room;
     return {
       ...safe,
       players: safe.players.map((p) => this.publicPlayer(p)),
@@ -148,8 +155,12 @@ export class RoomManager {
   clearAllTimers(room: Room): void {
     if (room._timer) { clearTimeout(room._timer); room._timer = null; }
     if (room._holdSafetyTimer) { clearTimeout(room._holdSafetyTimer); room._holdSafetyTimer = null; }
+    if (room._pauseTimer) { clearTimeout(room._pauseTimer); room._pauseTimer = null; }
+    if (room._resumeTimer) { clearTimeout(room._resumeTimer); room._resumeTimer = null; }
+    room._pauseWaitingFor = [];
     room._timerCallback = null;
     room.held = false;
+    room.paused = false;
   }
 
   deleteRoom(gameCode: string): void {
@@ -189,6 +200,7 @@ export class RoomManager {
     room.currentPlayer = null;
     room.round = 0;
     room.phase = null;
+    room.currentPhoto = null;
   }
 
   /** No connected player left (all disconnected without leaving): delete the room unless someone rejoins. */

@@ -11,6 +11,7 @@ const GAME_START_DELAY = 1_000;
 const PHOTO_WAIT_TIMEOUT = 15_000;
 const HOLD_SAFETY_TIMEOUT = 30_000;
 const READY_TIMEOUT = 10_000;
+const PAUSE_TIMEOUT = 5 * 60_000;
 
 const PHOTO = "https://example.invalid/photo.jpg";
 
@@ -180,13 +181,16 @@ describe("im-ready and ready timeout", () => {
     expect(room.currentPlayer!.username).not.toBe("carol");
   });
 
-  it("ends the game at the timeout when fewer than 2 players are connected", () => {
+  it("pauses at the timeout when fewer than 2 players are connected, and ends the game when nobody returns", () => {
     room = startedNotReady();
     engine.markReady(room, player("alice"));
     roomManager.markDisconnected(room.gameCode, "bob", "sock-bob");
     roomManager.markDisconnected(room.gameCode, "carol", "sock-carol");
     vi.advanceTimersByTime(READY_TIMEOUT + GAME_START_DELAY);
     expect(events("your-turn")).toHaveLength(0);
+    expect(events("game-paused")).toHaveLength(1);
+    expect(events("game-over")).toHaveLength(0);
+    vi.advanceTimersByTime(PAUSE_TIMEOUT);
     expect(events("game-over")).toHaveLength(1);
     expect(room.started).toBe(false);
     expect(vi.getTimerCount()).toBe(0);
@@ -615,12 +619,14 @@ describe("offline players and skip cap", () => {
     expect(events("game-over")).toHaveLength(1);
   });
 
-  it("ends the game instead of looping when fewer than 2 players are connected", () => {
+  it("pauses instead of looping when fewer than 2 players are connected, then ends when nobody returns", () => {
     room = setupStartedRoom(10);
     roomManager.markDisconnected(room.gameCode, "bob", "sock-bob");
     roomManager.markDisconnected(room.gameCode, "carol", "sock-carol");
     vi.advanceTimersByTime(GAME_START_DELAY);
 
+    expect(events("game-paused")).toHaveLength(1);
+    vi.advanceTimersByTime(PAUSE_TIMEOUT);
     expect(events("your-turn")).toHaveLength(0);
     expect(events("round-skipped")).toHaveLength(0);
     expect(events("game-over")).toHaveLength(1);
@@ -628,13 +634,16 @@ describe("offline players and skip cap", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("ends the game at the next round boundary when players go offline mid-game", () => {
+  it("pauses at the next round boundary when players go offline unnoticed, and ends when nobody returns", () => {
     room = setupStartedRoom(10);
     vi.advanceTimersByTime(GAME_START_DELAY);
     engine.onPhotoReceived(room, PHOTO, room.currentPlayer!.username);
     roomManager.markDisconnected(room.gameCode, "bob", "sock-bob");
     roomManager.markDisconnected(room.gameCode, "carol", "sock-carol");
     vi.advanceTimersByTime(ANSWER_TIME + REVEAL_TIME + SCORE_DISPLAY_TIME);
+    expect(events("game-paused")).toHaveLength(1);
+    expect(events("game-over")).toHaveLength(0);
+    vi.advanceTimersByTime(PAUSE_TIMEOUT);
     expect(events("game-over")).toHaveLength(1);
     expect(vi.getTimerCount()).toBe(0);
   });

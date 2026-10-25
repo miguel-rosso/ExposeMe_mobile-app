@@ -9,6 +9,12 @@
 //   node qa/lab/bots.mjs --rooms 20 --bots 4 --host       # load: 20 parallel rooms
 //   options: --server URL  --photos DIR  --out FILE  --chaos 0.1  --upload-fail 0.2  --timeout 600
 //            --no-ready K   the last K bots never send im-ready (game must start via the server's ready timeout)
+//            --drop-round R --drop-secs S [--drop-bot K]
+//                           bot K (1-based, default the last one) drops at round R's round-start and reconnects
+//                           S seconds later (rejoin + game-state snapshot). With --bots 2 the game must pause
+//                           (game-paused) and resume (game-resumed) for the other bot.
+//   node qa/lab/bots.mjs --bots 3 --host --drop-round 2 --drop-secs 3     # drop mid-round, game goes on
+//   node qa/lab/bots.mjs --bots 2 --host --drop-round 2 --drop-secs 8     # 2 players: pause → resume
 import { io } from "socket.io-client";
 import fs from "node:fs";
 import path from "node:path";
@@ -28,6 +34,9 @@ const CHAOS = Number(args.chaos || 0);
 const UPLOAD_FAIL = Number(args["upload-fail"] || 0);
 const NO_READY = Number(args["no-ready"] || 0);
 const TIMEOUT_S = Number(args.timeout || 900);
+const DROP_ROUND = Number(args["drop-round"] || 0);
+const DROP_SECS = Number(args["drop-secs"] || 5);
+const DROP_BOT = Number(args["drop-bot"] || N_BOTS) - 1;
 const PHOTOS = args.photos ? fs.readdirSync(args.photos).filter((f) => f.endsWith(".jpg")).map((f) => path.join(args.photos, f)) : [];
 
 const now = () => performance.timeOrigin + performance.now();
@@ -119,6 +128,13 @@ function runRoom(roomIdx, fixedCode) {
         rec("round-start", d.round, { owner: d.owner, photo: d.photo, duration: d.duration });
         bot.round = d.round;
         bot.guess = bot.players[Math.floor(Math.random() * bot.players.length)] || "";
+        if (DROP_ROUND && i === DROP_BOT && d.round === DROP_ROUND && !bot.dropped) {
+          bot.dropped = true;
+          rec("planned-disconnect", d.round, { secs: DROP_SECS });
+          socket.disconnect();
+          setTimeout(() => { socket.connect(); }, DROP_SECS * 1000);
+          return;
+        }
         if (CHAOS && Math.random() < CHAOS) {
           rec("chaos-disconnect", d.round);
           socket.disconnect();
@@ -131,6 +147,17 @@ function runRoom(roomIdx, fixedCode) {
       });
       socket.on("round-scores", (d) => rec("round-scores", d.round, { scores: d.scores }));
       socket.on("round-skipped", () => rec("round-skipped", bot.round));
+      // Rejoin snapshot: catch up like the app does (guess in reveal, im-ready in the ready phase)
+      socket.on("game-state", (d) => {
+        rec("game-state", d.round, { phase: d.phase, paused: !!d.pause, started: d.started });
+        if (!d.started) return;
+        bot.players = d.players.map((p) => p.username);
+        if (d.round !== bot.round) { bot.round = d.round; bot.guess = bot.players[Math.floor(Math.random() * bot.players.length)] || ""; }
+        if (d.phase === "reveal") socket.emit("submit-answer", { guess: bot.guess });
+        if (d.phase === null && i < N_BOTS - NO_READY) socket.emit("im-ready");
+      });
+      socket.on("game-paused", (d) => rec("game-paused", bot.round, { waitingFor: d.waitingFor }));
+      socket.on("game-resumed", (d) => rec("game-resumed", bot.round, { phase: d.phase }));
       socket.on("hold-start", () => rec("hold-start", bot.round));
       socket.on("hold-resume", (d) => rec("hold-resume", bot.round, d));
       socket.on("game-over", (d) => {
@@ -152,6 +179,9 @@ function runRoom(roomIdx, fixedCode) {
     for (let i = 0; i < N_BOTS; i++) makeBot(i);
   });
 }
+
+/** Times the busiest player received `ev` (a room-wide event counted once). */
+const perBotMax = (r, ev) => Math.max(0, ...r.players.map((n) => r.events.filter((e) => e.bot === n && e.ev === ev).length));
 
 function analyse(r) {
   const consistency = [];
@@ -176,6 +206,20 @@ function analyse(r) {
     const st = starts.find((s) => s.bot === rv.bot && s.round === rv.round);
     if (st && st.payload.owner !== rv.payload.correctAnswer) consistency.push(`round ${rv.round}: owner ${st.payload.owner} != reveal ${rv.payload.correctAnswer} (${rv.bot})`);
   }
+  // No double rounds: a player never gets two round-starts for the same round number
+  const startKeys = starts.map((s) => `${s.bot}#${s.round}`);
+  const dupes = [...new Set(startKeys.filter((k, i) => startKeys.indexOf(k) !== i))];
+  if (dupes.length) consistency.push(`duplicate round-start: ${dupes.join(", ")}`);
+  // Planned drop: the bot must come back with a snapshot; with 2 players the game must pause and resume
+  const drops = r.events.filter((e) => e.ev === "planned-disconnect");
+  for (const d of drops) {
+    if (!r.events.some((e) => e.bot === d.bot && e.ev === "game-state" && e.t > d.t)) consistency.push(`${d.bot} rejoined without a game-state snapshot`);
+    if (r.players.length === 2) {
+      const other = r.players.find((n) => n !== d.bot);
+      if (!r.events.some((e) => e.bot === other && e.ev === "game-paused" && e.t > d.t)) consistency.push(`2 players: ${other} never got game-paused`);
+      if (!r.events.some((e) => e.bot === other && e.ev === "game-resumed" && e.t > d.t)) consistency.push(`2 players: ${other} never got game-resumed`);
+    }
+  }
   const roundsSeen = [...new Set(starts.map((s) => s.round))].sort((a, b) => a - b);
   roundsSeen.forEach((n, i) => { if (n !== i + 1) consistency.push(`round numbering gap: expected ${i + 1}, got ${n}`); });
   const phaseGaps = [];
@@ -189,11 +233,15 @@ function analyse(r) {
     players: r.players.length,
     rounds_played: roundsSeen.length,
     rounds_skipped: new Set(r.events.filter((e) => e.ev === "round-skipped").map((e) => e.round)).size,
+    disconnects: r.events.filter((e) => e.ev === "chaos-disconnect" || e.ev === "planned-disconnect").length,
+    resyncs: r.events.filter((e) => e.ev === "game-state").length,
+    pauses: perBotMax(r, "game-paused"),
+    resumes: perBotMax(r, "game-resumed"),
     skew_ms: { p50: pct(skews, 50)?.toFixed(1), p95: pct(skews, 95)?.toFixed(1), max: skews.length ? Math.max(...skews).toFixed(1) : null },
     answer_phase_overrun_ms: { p50: pct(phaseGaps, 50)?.toFixed(1), max: phaseGaps.length ? Math.max(...phaseGaps).toFixed(1) : null },
     upload_ms: { p50: pct(r.uploads, 50)?.toFixed(0), max: r.uploads.length ? Math.max(...r.uploads).toFixed(0) : null },
     uploads_rate_limited: r.rateLimited,
-    missed_events: missed, // phase events a player never received (e.g. after a reconnect) — no resync
+    missed_events: missed, // phase events a player never received while offline (game-state resyncs them)
     consistency_errors: consistency,
     errors: r.errors,
   };

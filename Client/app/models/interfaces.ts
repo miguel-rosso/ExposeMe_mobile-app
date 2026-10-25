@@ -51,6 +51,36 @@ export interface RoomOfGameResponse {
   rejoinToken?: string; // Only sent to the joining player; keep it to rejoin after a reconnect
 }
 
+export type ServerPhase = "waiting-photo" | "answering" | "reveal" | "scores";
+
+/** `game-paused`: fewer than 2 players connected; the game ends when `duration` (ms) runs out */
+export interface GamePausedData {
+  duration: number;
+  waitingFor: string[];
+}
+
+/** `game-resumed`: the paused phase continues with `duration` ms */
+export interface GameResumedData {
+  phase: ServerPhase | null;
+  duration: number;
+}
+
+/** `game-state`: snapshot sent to a player who rejoins (see Server/GAME_FLOW.md) */
+export interface GameStateSnapshot {
+  started: boolean;
+  phase: ServerPhase | null;
+  round: number;
+  totalRounds: number;
+  owner: string | null;
+  photo: string | null;
+  correctAnswer: string | null;
+  duration: number;
+  held: boolean;
+  pause: GamePausedData | null;
+  scores: ScoreRound[];
+  players: Player[];
+}
+
 export interface GameContextProps {
   socket: Socket | null;
   gameCode: string | null;

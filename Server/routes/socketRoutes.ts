@@ -55,9 +55,29 @@ function leaveBinding(socket: Socket, gameCode: string, username: string, owned:
       if (result.newHost) io.to(gameCode).emit("new-host", roomManager.publicPlayer(result.newHost));
       if (!result.isEmpty) io.to(gameCode).emit("player-left", username);
       gameEngine.checkReady(room); // ready phase: the others may all be ready now
+      gameEngine.onConnectionChange(room); // mid-game: pause (or end) if fewer than 2 remain connected
     }
   }
   socket.leave(gameCode);
+}
+
+/**
+ * Cut a socket off a room for good: out of the socket.io room (no more broadcasts such as round-start photo
+ * URLs), session cleared (its later events and its disconnect are ignored), connection closed.
+ */
+function evictSocket(target: Socket, gameCode: string): void {
+  target.leave(gameCode);
+  target.data.gameCode = null;
+  target.data.username = null;
+  target.disconnect(true);
+}
+
+/** Every socket in the room bound to `username` (live, replaced or stale), except `exceptId`. */
+function socketsOf(gameCode: string, username: string, exceptId?: string): Socket[] {
+  const ids = io.sockets.adapter.rooms.get(gameCode) ?? new Set<string>();
+  return [...ids]
+    .map((id) => io.sockets.sockets.get(id))
+    .filter((s): s is Socket => !!s && s.id !== exceptId && s.data.username === username);
 }
 
 function leaveCurrentRoom(socket: Socket): void {
@@ -130,7 +150,11 @@ io.on("connection", (socket: Socket) => {
           socket.emit("room-of-game", { success: true, room: roomManager.safeRoomData(result.room), rounds: result.room.rounds, rejoinToken: player.rejoinToken });
           // Only broadcast player-joined for new players, not rejoins
           if (!result.rejoin) socket.broadcast.to(gameCode).emit("player-joined", roomManager.publicPlayer(player));
+          // A rejoin replaces the player's previous socket(s): they must not keep receiving the room's events
+          if (result.rejoin) socketsOf(gameCode, username, socket.id).forEach((old) => evictSocket(old, gameCode));
           console.log(`[${gameCode}] ${username} ${result.rejoin ? "rejoined" : "joined"}`);
+          // Reconnect: snapshot of the current game to this socket, and resume a paused game
+          if (result.rejoin) gameEngine.onPlayerRejoined(result.room, player);
         } else {
           socket.emit("room-of-game", { success: false, message: result.message });
         }
@@ -172,6 +196,7 @@ io.on("connection", (socket: Socket) => {
       // Room gets cleaned up after 30min inactivity.
       console.log(`[${gameCode}] ${username} disconnected — keeping in room`);
       gameEngine.checkReady(room); // ready phase: don't wait for a player who is gone
+      gameEngine.onConnectionChange(room); // mid-game: pause if fewer than 2 players remain connected
     } catch (e) { console.error("disconnect error:", e); }
   });
 
@@ -318,9 +343,12 @@ io.on("connection", (socket: Socket) => {
       const removed = roomManager.removePlayerBySocketId(room.gameCode, data.socketId);
       if (removed) {
         io.to(room.gameCode).emit("player-removed", roomManager.publicPlayer(removed));
+        // The kicked player's current socket and any other socket still bound to them in this room
         const target = io.sockets.sockets.get(data.socketId);
-        if (target) { target.leave(room.gameCode); target.disconnect(true); }
+        if (target) evictSocket(target, room.gameCode);
+        socketsOf(room.gameCode, removed.username).forEach((old) => evictSocket(old, room.gameCode));
         gameEngine.checkReady(room);
+        gameEngine.onConnectionChange(room);
       }
     } catch (e) { console.error("remove-player error:", e); }
   });

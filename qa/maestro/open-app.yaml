@@ -47,7 +47,10 @@ appId: com.socketNull.ExposeMe
           when:
             platform: iOS
           commands:
+            # Drag the sheet itself (a plain DOWN swipe starts above the sheet and does nothing)
             - swipe:
+                from:
+                  text: "Runtime version:.*|Connected to:.*"
                 direction: DOWN
 - extendedWaitUntil:
     visible:

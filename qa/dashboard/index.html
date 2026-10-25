@@ -44,7 +44,12 @@
 #dash-root .qa-ask li.rec { font-weight: 700; }
 #dash-root .qa-ask code { font-family: var(--qa-mono); font-size: 0.9rem; background: color-mix(in srgb, var(--color-fg) 8%, transparent); padding: 0.1rem 0.35rem; border-radius: 6px; word-break: break-all; }
 #dash-root .qa-ask .how { font-size: 0.9rem; color: var(--color-fg-muted); border-top: 1px dashed color-mix(in srgb, var(--color-fg) 20%, transparent); padding-top: 0.6rem; }
+#dash-root h2 .qa-total { font-size: 0.95rem; font-weight: 600; color: var(--color-fg-muted); margin-left: 0.4rem; }
 #dash-root .qa-ask .answer { font-weight: 600; color: var(--qa-green); }
+#dash-root .qa-ask details.explain { border-radius: 10px; padding: 0.6rem 0.8rem; background: color-mix(in srgb, var(--color-fg) 5%, transparent); }
+#dash-root .qa-ask details.explain summary { cursor: pointer; font-weight: 700; font-size: 0.95rem; }
+#dash-root .qa-ask details.explain p { margin-top: 0.5rem; font-size: 0.95rem; line-height: 1.5; }
+#dash-root .qa-ask details.explain p.h { font-weight: 700; margin-top: 0.8rem; }
 #dash-root .qa-form { display: flex; flex-direction: column; gap: 0.5rem; border-top: 1px dashed color-mix(in srgb, var(--color-fg) 20%, transparent); padding-top: 0.6rem; }
 #dash-root .qa-form label.opt { display: flex; gap: 0.5rem; align-items: flex-start; cursor: pointer; padding: 0.35rem 0.5rem; border-radius: 8px; }
 #dash-root .qa-form label.opt:hover { background: color-mix(in srgb, var(--color-fg) 6%, transparent); }
@@ -169,8 +174,6 @@
 #dash-root .qa-ask.done .tag { background: var(--qa-green); }
 #dash-root .qa-kpi.c-yellow { background: color-mix(in srgb, var(--qa-yellow) var(--qa-tint), var(--color-panel)); border-color: color-mix(in srgb, var(--qa-yellow) 45%, transparent); }
 #dash-root .qa-kpi.c-yellow .val { color: #b88a00; }
-#dash-root .qa-colors { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.9rem; }
-#dash-root .qa-colors .pill { font-size: 0.8rem; }
 /* Filter chips carry their meaning's colour instead of a generic red */
 #dash-root #issues .qa-chip[data-filter] { border: 0; padding: calc(0.4rem + 1px) calc(0.9rem + 1px); }
 #dash-root #issues .qa-chip[data-filter="active"] { background: color-mix(in srgb, var(--qa-yellow) 20%, transparent); }
@@ -178,6 +181,13 @@
 #dash-root #issues .qa-chip[data-filter="all"] { background: color-mix(in srgb, var(--qa-blue) 20%, transparent); }
 #dash-root #issues .qa-chip[data-filter="active"][aria-pressed="true"] { background: var(--qa-yellow); color: #2b2100; }
 #dash-root #issues .qa-chip[data-filter="done"][aria-pressed="true"] { background: var(--qa-green); color: #fff; }
+#dash-root #issues .qa-chip[data-filter="in-progress"] { background: color-mix(in srgb, var(--qa-orange) 20%, transparent); }
+#dash-root #issues .qa-chip[data-filter="blocked"] { background: color-mix(in srgb, var(--qa-red) 20%, transparent); }
+#dash-root #issues .qa-chip[data-filter="in-progress"][aria-pressed="true"] { background: var(--qa-orange); color: #fff; }
+#dash-root #issues .qa-chip[data-filter="blocked"][aria-pressed="true"] { background: var(--qa-red); color: #fff; }
+#dash-root #issues .qa-chip[data-filter="wontfix"] { background: color-mix(in srgb, #6b7280 20%, transparent); }
+#dash-root #issues .qa-chip[data-filter="wontfix"][aria-pressed="true"] { background: #6b7280; color: #fff; }
+#dash-root #issues .qa-chip[hidden] { display: none; }
 #dash-root #issues .qa-chip[data-filter="all"][aria-pressed="true"] { background: var(--qa-blue); color: #fff; }
 #dash-root #issue-extra { flex-basis: 100%; flex-direction: column; align-items: flex-start; gap: 0.5rem; }
 #dash-root .qa-group { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; }
@@ -211,9 +221,6 @@
       <b data-source="kpis" data-field="done" data-row="0" class="dash-skeleton">—</b> resueltas en <b data-source="kpis" data-field="changes" data-row="0" class="dash-skeleton">—</b> cambios.
       Te esperan <b data-source="kpis" data-field="pending" data-row="0" class="dash-skeleton">—</b> respuestas o acciones.
     </p>
-    <div class="qa-colors" aria-label="Leyenda de colores">
-      <span class="pill st-blocked">bloqueado</span><span class="pill st-open">abierto</span><span class="pill st-in-progress">en curso / depende de ti</span><span class="pill st-fixed">hecho</span><span class="pill st-verified">verificado en móvil</span><span class="pill fs-planeado">planeado</span><span class="pill st-wontfix">descartado</span>
-    </div>
   </header>
 
   <section id="now" aria-label="Ahora mismo">
@@ -233,12 +240,15 @@
   </section>
 
   <section class="qa-card" id="issues">
-    <h2>Incidencias</h2>
+    <h2>Incidencias <span class="qa-total"><span data-source="kpis" data-field="total" data-row="0" class="dash-skeleton">—</span> en total</span></h2>
     <p class="qa-hint">Encontradas por el auditor, el revisor de seguridad, los bots y las partidas en dispositivos.</p>
     <div class="qa-tools">
       <input id="issue-search" type="search" placeholder="Buscar incidencias" aria-label="Buscar incidencias">
-      <button class="qa-chip" data-filter="active" aria-pressed="true">Abiertas</button>
-      <button class="qa-chip" data-filter="done" aria-pressed="false">Resueltas</button>
+      <button class="qa-chip" data-filter="active" aria-pressed="true">Abiertas · <span data-source="kpis" data-field="open" data-row="0"></span></button>
+      <button class="qa-chip" data-filter="in-progress" aria-pressed="false" hidden>En curso · <span data-source="kpis" data-field="in_progress" data-row="0"></span></button>
+      <button class="qa-chip" data-filter="blocked" aria-pressed="false" hidden>Bloqueadas · <span data-source="kpis" data-field="blocked" data-row="0"></span></button>
+      <button class="qa-chip" data-filter="done" aria-pressed="false">Resueltas · <span data-source="kpis" data-field="done" data-row="0"></span></button>
+      <button class="qa-chip" data-filter="wontfix" aria-pressed="false" hidden>Descartadas · <span data-source="kpis" data-field="wontfix" data-row="0"></span></button>
       <button class="qa-chip" data-filter="all" aria-pressed="false">Todas</button>
       <span id="issue-extra" class="qa-tools"></span>
     </div>
@@ -339,7 +349,11 @@ dash.calc("kpis", {
     const measured = runs.filter((r) => r.p95_skew_ms !== null && r.p95_skew_ms !== undefined);
     const last = measured[measured.length - 1] || {};
     return [{
+      total: issues.length,
+      wontfix: issues.filter((i) => i.status === "wontfix").length,
       open: active.length,
+      in_progress: issues.filter((i) => i.status === "in-progress").length,
+      blocked: issues.filter((i) => i.status === "blocked").length,
       open_high: active.filter((i) => i.severity === "critical" || i.severity === "high").length,
       done: issues.filter((i) => i.status === "fixed" || i.status === "verified").length,
       verified: issues.filter((i) => i.status === "verified").length,
@@ -390,6 +404,12 @@ dash.calc("by_type", {
       const v = row[e.dataset.field];
       e.textContent = v === null || v === undefined ? "—" : typeof v === "number" ? d3.format(",")(v) : v;
       e.classList.remove("dash-skeleton");
+    });
+    // Per-status chips only show up while some issue is in that state
+    [["in-progress", row.in_progress], ["blocked", row.blocked], ["wontfix", row.wontfix]].forEach(([st, n]) => {
+      const b = document.querySelector(`#issues .qa-chip[data-filter="${st}"]`);
+      b.hidden = !n;
+      if (!n && issueFilter === st) b.parentElement.querySelector('[data-filter="active"]').click();
     });
   }
 
@@ -494,6 +514,15 @@ dash.calc("by_type", {
       card.appendChild(el("span", "tag", `${p.kind} · ${p.id}${p.status === "resuelta" ? " · resuelta" : ""}`));
       card.appendChild(el("h3", null, p.title));
       card.appendChild(el("p", null, p.context));
+      // Optional long explanation: newline-separated paragraphs, "## " marks a subheading
+      if (p.details) {
+        const det = el("details", "explain");
+        det.open = p.status !== "resuelta";
+        det.appendChild(el("summary", null, "Explicación con ejemplos"));
+        String(p.details).split("\n").map((t) => t.trim()).filter(Boolean)
+          .forEach((t) => det.appendChild(t.startsWith("## ") ? el("p", "h", t.slice(3)) : el("p", null, t)));
+        card.appendChild(det);
+      }
       // Nested arrays arrive as JSON text from the file source: use the newline-joined export field
       const opts = String(p.options_text || "").split("\n").map((o) => o.trim()).filter(Boolean);
       // Open decisions list their options inside the answer form instead
@@ -663,7 +692,7 @@ dash.calc("by_type", {
     if (r.status === "error") { const tr = body.insertRow(); const c = tr.insertCell(); c.colSpan = 6; failLine(c); return; }
     if (r.status !== "ok") return;
     const q = (document.getElementById("issue-search").value || "").toLowerCase();
-    let rows = r.data.filter((i) => issueFilter === "all" || (issueFilter === "active" ? ACTIVE.includes(i.status) : DONE.includes(i.status)));
+    let rows = r.data.filter((i) => issueFilter === "all" || (issueFilter === "active" ? ACTIVE.includes(i.status) : issueFilter === "done" ? DONE.includes(i.status) : i.status === issueFilter));
     // Chip groups are built from the status-filtered set so their counts stay meaningful
     const base = rows;
     const extra = document.getElementById("issue-extra");

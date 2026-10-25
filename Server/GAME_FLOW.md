@@ -270,7 +270,14 @@ unknown room or a token that is not a current member of it → **403**.
   has actually been played (planted photos: lobby, ready phase, or `waiting-photo` while `room.round` is still 0,
   also after skips; the app uploads it from the lobby; `plant-photo` follows exactly the same rule), and after
   that only from the player whose photo the server is awaiting (`waiting-photo` and they are the picked owner, paused
-  or not); otherwise **403**. At most 100 stored photos per room (**429** beyond). If the game ends, the room closes or the player
+  or not); otherwise **403**. Each upload is a *turn* upload (sent while the server awaits this player's photo) or a
+  *planted* one (anything else: lobby, ready phase, round 1 not yet played). Each player holds at most **two unused
+  uploads per round and kind**: a new upload deletes the same player's older uploads of the same round (`room.round`
+  when stored) and kind that were neither planted nor shown, keeping the newest earlier one (it may still be about
+  to be planted/sent: the app can run its planted-photo retry and its round-1 upload at once). A turn upload thus
+  never drops a lobby pick. A new `plant-photo` deletes the planted photo it replaces; planted and played photos stay
+  until `game-over`. So one member can't fill the room (re-picking in the lobby, retries on their turn). At most 100
+  stored photos per room (**429** beyond, a backstop). If the game ends, the room closes or the player
   leaves while the image is being processed, nothing is stored (**409**).
 - `GET /temp/<photo>` serves the photo only to members of the room it was uploaded in (`Cache-Control: no-store,
   private`); a photo of another room, a deleted/expired one or any other path under `/temp` → **404**. A player who
@@ -298,7 +305,7 @@ unknown room or a token that is not a current member of it → **403**.
 | 400 | No file, malformed multipart, more than one file, wrong field, undecodable image |
 | 413 | File over 10MB, or image over 24 megapixels |
 | 415 | Not JPEG/PNG/WebP (e.g. HEIC) |
-| 429 | Room already holds 100 photos, or per-IP rate limit (`Retry-After`) — default 60 uploads/min, env `UPLOAD_RATE_MAX` / `UPLOAD_RATE_WINDOW_MS`; `qa/lab/lab.sh server` raises it for bot load tests |
+| 429 | Room already holds 100 photos, or rate limit (`Retry-After`). Credentials are checked first: only **rejected** requests (the 401/403 above) count per IP, default 30/min (env `UPLOAD_REJECTED_MAX`), and once over it that IP's unauthenticated requests get 429 instead of 401/403. Members are never limited by IP (a party shares one public IP): per member, default 20/min (env `UPLOAD_PLAYER_RATE_MAX`), and per room, default 12 × the member limit (env `UPLOAD_ROOM_RATE_MAX`), so neither a stranger on the Wi-Fi nor a member over their own limit can make another member's upload fail. Same window for all, env `UPLOAD_RATE_WINDOW_MS` (60 s); `qa/lab/lab.sh server` raises the member and room limits for bot load tests |
 | 503 | Server busy processing other uploads (`Retry-After`) |
 
 Behind a reverse proxy, env `TRUST_PROXY` is the number of proxy hops used to read the client IP (default 1 when `RENDER` is set, otherwise 0). Env `UPLOAD_DIR` overrides the storage directory (default `Server/temp`); it must be a dedicated directory: if it is the OS temp dir, the filesystem root or the home directory the sweep refuses to run (one warning in the log).

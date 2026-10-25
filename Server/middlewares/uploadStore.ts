@@ -13,7 +13,16 @@ export interface UploadRecord {
   file: string;
   /** Exact TTL deletion timer (UploadController); cleared when the record goes away earlier */
   timer?: NodeJS.Timeout;
+  /** room.round when it was stored: a photo shown since then was stored at an earlier round (rounds only advance on show) */
+  round?: number;
+  /** Authorized as the awaited owner's turn photo, or as a (candidate) planted photo; see releaseSuperseded */
+  kind?: "turn" | "planted";
+  /** Planted with plant-photo (pending or already shown): only a later plant-photo of the same player releases it */
+  planted?: boolean;
 }
+
+/** Store name of a `/temp/<name>` path (or the name itself). */
+const nameOf = (pathOrName: string) => (pathOrName.startsWith("/temp/") ? pathOrName.slice("/temp/".length) : pathOrName);
 
 export class UploadStore {
   private byName = new Map<string, UploadRecord>();
@@ -62,6 +71,40 @@ export class UploadStore {
     fs.unlink(record.file, (err) => {
       if (err && err.code !== "ENOENT") console.error("Error deleting room upload:", err.code);
     });
+  }
+
+  /**
+   * A new upload `name` of this player was stored: releases their earlier uploads of the same round and kind (a turn
+   * upload never drops a lobby pick and vice versa) that were neither planted nor shown (`keep`: the photo on
+   * screen), except the newest of them. That one may still be about
+   * to be used: the app can run two uploads at once (planted-photo retry + its round-1 photo) and sends plant-photo /
+   * photo-sent only after each answers. Each player thus holds at most two unused uploads per round and kind, so
+   * re-picking a photo (lobby or own turn) can't pile files up towards the room cap.
+   */
+  releaseSuperseded(name: string, keep?: string | null): void {
+    const record = this.byName.get(name);
+    if (!record) return;
+    const keepName = keep ? nameOf(keep) : null;
+    // byRoom keeps registration order: the last candidate is the newest
+    const unused = [...(this.byRoom.get(record.gameCode) ?? [])].filter((other) => {
+      const r = this.byName.get(other);
+      if (other === name || other === keepName || !r || r.planted) return false;
+      return r.username === record.username && r.round === record.round && r.kind === record.kind;
+    });
+    for (const other of unused.slice(0, -1)) this.remove(other);
+  }
+
+  /**
+   * plant-photo: marks `next` as this player's planted photo and releases the one it replaces (`previous`, their
+   * current plantedPhoto; never one already shown, which the engine clears from the player when it is drawn).
+   */
+  replacePlanted(previous: string | undefined, next: string): void {
+    const record = this.byName.get(nameOf(next));
+    if (!record) return;
+    record.planted = true;
+    if (!previous || nameOf(previous) === nameOf(next)) return;
+    const old = this.byName.get(nameOf(previous));
+    if (old?.gameCode === record.gameCode && old.username === record.username) this.remove(nameOf(previous));
   }
 
   /** Game over / room emptied: deletes all of the room's photos and refuses uploads authorized before now. */

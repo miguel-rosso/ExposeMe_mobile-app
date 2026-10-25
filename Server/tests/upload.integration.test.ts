@@ -7,11 +7,10 @@ import sharp from "sharp";
 import exifr from "exifr";
 import { io, server } from "../app";
 import { roomManager } from "../routes/socketRoutes";
-import { UPLOAD_RATE_MAX } from "../middlewares/rateLimit";
 import { MAX_OUTPUT_SIDE } from "../controllers/sanitizeImage";
 import { MAX_FILE_SIZE } from "../middlewares/upload";
 
-// POST /upload on a real server: random file names, metadata stripped, size limits, per-IP rate limit,
+// POST /upload on a real server: random file names, metadata stripped, size limits,
 // and the returned paths are accepted by photo-sent.
 
 // Uploads go to a throwaway directory (set before ../app and middlewares/upload, which creates it, are loaded)
@@ -19,8 +18,8 @@ const UPLOAD_DIR = vi.hoisted(() => {
   const tmp = (process.env.TMPDIR || "/tmp").replace(/\/$/, "");
   const dir = `${tmp}/exposeme-upload-test-${process.pid}-${Date.now()}`;
   process.env.UPLOAD_DIR = dir;
-  delete process.env.UPLOAD_RATE_MAX; // default limit, even if the shell exports a lab override
-  delete process.env.UPLOAD_RATE_WINDOW_MS;
+  // Rate limits (tests/uploadRateLimits.integration.test.ts) out of the way: one member does all uploads here
+  process.env.UPLOAD_PLAYER_RATE_MAX = "100000";
   return dir;
 });
 
@@ -29,7 +28,6 @@ const LEAKY_NAME = "Screenshot_20261024-231502_Bank Santander.jpg";
 const HEIC_FIXTURE = path.join(__dirname, "fixtures/gps.heic"); // synthetic 64x48 HEIC with GPS EXIF
 
 let url: string;
-let uploadsDone = 0; // every POST /upload counts towards the rate limit (shared IP in this file)
 const clients: ClientSocket[] = [];
 
 // Synthetic JPEG with GPS + device EXIF, 64x48 pixels stored with orientation 6 (display 48x64)
@@ -48,7 +46,6 @@ async function gpsJpeg(): Promise<Buffer> {
 let auth: Record<string, string> = {};
 
 async function uploadFile(data: Buffer, filename: string, type = "image/jpeg", headers = auth) {
-  uploadsDone++;
   const form = new FormData();
   form.append("image", new Blob([new Uint8Array(data)], { type }), filename);
   return fetch(`${url}/upload`, { method: "POST", body: form, headers });
@@ -178,7 +175,7 @@ describe("POST /upload", () => {
 
   it("answers malformed uploads with JSON, never an HTML error page", async () => {
     const tiny = await sharp({ create: { width: 2, height: 2, channels: 3, background: "#000" } }).jpeg().toBuffer();
-    const post = (form: FormData) => { uploadsDone++; return fetch(`${url}/upload`, { method: "POST", body: form, headers: auth }); };
+    const post = (form: FormData) => fetch(`${url}/upload`, { method: "POST", body: form, headers: auth });
     const expectJson = async (res: Response, status: number) => {
       expect(res.status).toBe(status);
       expect(res.headers.get("content-type")).toMatch(/application\/json/);
@@ -263,14 +260,5 @@ describe("POST /upload", () => {
     expect(await roundStart).toMatchObject({ photo, isOwner: owner === "alice" });
 
     for (const c of [alice, bob, carol]) c.emit("leave-room");
-  });
-
-  it("rate limits uploads per IP (429 once the window is full)", async () => {
-    const tiny = await sharp({ create: { width: 2, height: 2, channels: 3, background: "#000" } }).jpeg().toBuffer();
-    while (uploadsDone < UPLOAD_RATE_MAX) expect((await uploadFile(tiny, "t.jpg")).status).toBe(200);
-
-    const limited = await uploadFile(tiny, "t.jpg");
-    expect(limited.status).toBe(429);
-    expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
   });
 });

@@ -2,8 +2,8 @@ import crypto from "crypto";
 import express from "express";
 import { UploadRouter } from "../controllers/UploadController";
 import { singleImage } from "../middlewares/upload";
-import { uploadRateLimit } from "../middlewares/rateLimit";
-import { requireRoomMember, requireUploadAllowed } from "../middlewares/uploadAccess";
+import { uploadPlayerRateLimit, uploadRoomRateLimit } from "../middlewares/rateLimit";
+import { requireUploadAllowed, requireUploadMember } from "../middlewares/uploadAccess";
 import { joinPageCsp } from "../middlewares/securityHeaders";
 
 const router = express.Router();
@@ -29,7 +29,9 @@ const toScriptString = (value: string) =>
     .replace(/\u2029/g, "\\u2029");
 
 // Room members only (session credential in headers), and only when the room accepts a photo from them
-router.post("/upload", uploadRateLimit, requireRoomMember, requireUploadAllowed, singleImage("image"), (req, res, next) => {
+// Rejected requests are rate limited per IP, members per member and per room (see middlewares/rateLimit)
+const uploadLimits = [requireUploadMember, uploadPlayerRateLimit, uploadRoomRateLimit];
+router.post("/upload", ...uploadLimits, requireUploadAllowed, singleImage("image"), (req, res, next) => {
   UploadRouter(req, res).catch(next);
 });
 

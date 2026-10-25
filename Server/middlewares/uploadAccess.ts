@@ -1,6 +1,7 @@
 import { NextFunction, Request, Response } from "express";
 import { Player, Room } from "../models/interfaces";
 import { uploadStore } from "./uploadStore";
+import { uploadRejectionLimit } from "./rateLimit";
 
 // ── Room-member access to /upload and /temp ──
 // Both need the player's session credential from join-create-game: header `X-Game-Code: <room code>` plus
@@ -40,18 +41,26 @@ function readCredentials(req: Request): { gameCode: string; token: string } | nu
   return { gameCode: code.trim().toUpperCase(), token: m[1] };
 }
 
+/** The member these credentials belong to, or the status to refuse them with (401 missing/malformed, 403 wrong). */
+function authenticateRequest(req: Request): Member | 401 | 403 {
+  const creds = readCredentials(req);
+  if (!creds) return 401;
+  return rooms?.authenticate(creds.gameCode, creds.token) ?? 403;
+}
+
 /** 401 without valid-looking credentials, 403 if they don't match a current room member; else res.locals.member. */
 export function requireRoomMember(req: Request, res: Response, next: NextFunction) {
-  const creds = readCredentials(req);
-  if (!creds) {
-    res.status(401).json({ error: "Unauthorized" });
-    return;
-  }
-  const member = rooms?.authenticate(creds.gameCode, creds.token) ?? null;
-  if (!member) {
-    res.status(403).json({ error: "Forbidden" });
-    return;
-  }
+  const member = authenticateRequest(req);
+  if (member === 401) return void res.status(401).json({ error: "Unauthorized" });
+  if (member === 403) return void res.status(403).json({ error: "Forbidden" });
+  res.locals.member = member;
+  next();
+}
+
+/** requireRoomMember for POST /upload: rejections are rate limited per IP (429 instead of 401/403), members aren't. */
+export function requireUploadMember(req: Request, res: Response, next: NextFunction) {
+  const member = authenticateRequest(req);
+  if (member === 401 || member === 403) return uploadRejectionLimit.reject(req, res, member);
   res.locals.member = member;
   next();
 }
@@ -81,6 +90,8 @@ export function requireUploadAllowed(_req: Request, res: Response, next: NextFun
     return;
   }
   res.locals.uploadEpoch = uploadStore.epoch(room.gameCode);
+  // Turn photo or planted photo: a new upload only supersedes older unused ones of the same kind (uploadStore)
+  res.locals.uploadKind = awaited ? "turn" : "planted";
   next();
 }
 

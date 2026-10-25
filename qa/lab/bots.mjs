@@ -158,7 +158,7 @@ async function uploadPhoto(label, auth) {
   const form = new FormData();
   form.append("image", blob, `${label}.jpg`);
   const res = await fetch(`${SERVER}/upload`, { method: "POST", body: form, headers: auth });
-  if (res.status === 429) throw Object.assign(new Error("upload 429 rate-limited (raise UPLOAD_RATE_MAX on the server)"), { rateLimited: true });
+  if (res.status === 429) throw Object.assign(new Error("upload 429 rate-limited (raise UPLOAD_PLAYER_RATE_MAX / UPLOAD_ROOM_RATE_MAX on the server)"), { rateLimited: true });
   if (!res.ok) throw new Error(`upload ${res.status}`);
   return { url: (await res.json()).url, ms: now() - t0 };
 }

@@ -211,8 +211,10 @@ cmd_server() {
   [ "$port" != "$SERVER_PORT" ] && { name="server-$port"; logf="$RUNS/server-$port.log"; }
   if [ $stop = 1 ]; then bg_stop "$name" "$port"; log "$name stopped"; return 0; fi
   [ $restart = 1 ] && bg_stop "$name" "$port"
-  # Bots/load tests upload from one IP: lift the per-IP /upload rate limit (override with UPLOAD_RATE_MAX=...)
-  bg_start "$name" "$logf" "$ROOT/Server" env PORT="$port" UPLOAD_RATE_MAX="${UPLOAD_RATE_MAX:-100000}" npx ts-node server.ts
+  # Bots/load tests: lift the per-player and per-room /upload rate limits
+  # (override with UPLOAD_PLAYER_RATE_MAX=... / UPLOAD_ROOM_RATE_MAX=...)
+  bg_start "$name" "$logf" "$ROOT/Server" env PORT="$port" UPLOAD_ROOM_RATE_MAX="${UPLOAD_ROOM_RATE_MAX:-100000}" \
+    UPLOAD_PLAYER_RATE_MAX="${UPLOAD_PLAYER_RATE_MAX:-100000}" npx ts-node server.ts
   for _ in $(seq 1 30); do curl -fs "http://localhost:$port/health" >/dev/null && { log "$name healthy on :$port"; return 0; }; sleep 1; done
   die "$name did not become healthy — see $logf"
 }

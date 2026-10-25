@@ -16,7 +16,6 @@ const UPLOAD_DIR = vi.hoisted(() => {
   const tmp = (process.env.TMPDIR || "/tmp").replace(/\/$/, "");
   const dir = `${tmp}/exposeme-upload-access-${process.pid}-${Date.now()}`;
   process.env.UPLOAD_DIR = dir;
-  delete process.env.UPLOAD_RATE_MAX;
   delete process.env.UPLOAD_RATE_WINDOW_MS;
   return dir;
 });
@@ -211,10 +210,11 @@ describe("uploads are deleted with the game / room", () => {
     const started = members.map((m) => once(m.socket, "game-started"));
     members[0].socket.emit("start-game");
     await Promise.all(started);
-    const planted = await uploadAs(members[1]);
     const turn = new Promise<Member>((resolve) => members.forEach((m) => m.socket.once("your-turn", () => resolve(m))));
     members.forEach((m) => m.socket.emit("im-ready"));
     const owner = await turn;
+    // Another member's upload while round 1 is awaited (the owner's own earlier one would be replaced, EXP-147)
+    const planted = await uploadAs(members.find((m) => m !== owner)!);
     const photo = await uploadAs(owner);
     const start = once(members[0].socket, "round-start");
     owner.socket.emit("photo-sent", { photo });

@@ -95,6 +95,66 @@ describe("UploadStore", () => {
     clearTimeout(timer);
   });
 
+  // EXP-147: re-picking a photo replaces the player's previous unused upload instead of piling up files
+  it("releaseSuperseded deletes the player's older unused uploads of the same round, keeping the newest earlier one", async () => {
+    const NAME_D = "d".repeat(32) + ".jpg", NAME_E = "e".repeat(32) + ".jpg", NAME_F = "f".repeat(32) + ".jpg";
+    const [a, b, c, d, f, e] = [NAME_A, NAME_B, NAME_C, NAME_D, NAME_F, NAME_E].map(put);
+    store.register(NAME_A, { gameCode: "111111", username: "ann", file: a, round: 0 }, 0); // superseded
+    store.register(NAME_B, { gameCode: "111111", username: "ann", file: b, round: 0 }, 0); // planted
+    store.register(NAME_C, { gameCode: "111111", username: "ann", file: c, round: 1 }, 0); // older round (shown)
+    store.register(NAME_D, { gameCode: "111111", username: "ben", file: d, round: 0 }, 0); // another player
+    store.register(NAME_F, { gameCode: "111111", username: "ann", file: f, round: 0 }, 0); // newest earlier: may be in use
+    store.replacePlanted(undefined, `/temp/${NAME_B}`);
+    store.register(NAME_E, { gameCode: "111111", username: "ann", file: e, round: 0 }, 0); // the new upload
+
+    store.releaseSuperseded(NAME_E);
+    await settled(() => !fs.existsSync(a));
+    expect(store.get(NAME_A)).toBeUndefined();
+    for (const [name, file] of [[NAME_B, b], [NAME_C, c], [NAME_D, d], [NAME_F, f], [NAME_E, e]]) {
+      expect(store.get(name)).toBeDefined();
+      expect(fs.existsSync(file)).toBe(true);
+    }
+  });
+
+  it("releaseSuperseded only replaces uploads of the same kind (a turn upload never drops a lobby pick)", () => {
+    const NAME_D = "d".repeat(32) + ".jpg";
+    for (const name of [NAME_A, NAME_B]) {
+      store.register(name, { gameCode: "111111", username: "ann", file: put(name), round: 0, kind: "planted" }, 0);
+    }
+    for (const name of [NAME_C, NAME_D]) {
+      store.register(name, { gameCode: "111111", username: "ann", file: put(name), round: 0, kind: "turn" }, 0);
+      store.releaseSuperseded(name);
+    }
+    for (const name of [NAME_A, NAME_B, NAME_C, NAME_D]) expect(store.get(name)).toBeDefined();
+  });
+
+  it("releaseSuperseded keeps the photo on screen", () => {
+    const NAME_D = "d".repeat(32) + ".jpg";
+    for (const name of [NAME_A, NAME_D, NAME_B, NAME_C]) {
+      store.register(name, { gameCode: "111111", username: "ann", file: put(name), round: 2 }, 0);
+    }
+    store.releaseSuperseded(NAME_C, `/temp/${NAME_A}`);
+    expect(store.get(NAME_A)).toBeDefined(); // on screen
+    expect(store.get(NAME_D)).toBeUndefined(); // older unused
+    expect(store.get(NAME_B)).toBeDefined(); // newest earlier unused
+  });
+
+  it("replacePlanted deletes the replaced planted photo, never another player's or the same one", async () => {
+    const a = put(NAME_A), b = put(NAME_B), c = put(NAME_C);
+    store.register(NAME_A, { gameCode: "111111", username: "ann", file: a, round: 0 }, 0);
+    store.register(NAME_B, { gameCode: "111111", username: "ann", file: b, round: 0 }, 0);
+    store.register(NAME_C, { gameCode: "111111", username: "ben", file: c, round: 0 }, 0);
+    store.replacePlanted(undefined, `/temp/${NAME_A}`);
+    store.replacePlanted(`/temp/${NAME_A}`, `/temp/${NAME_A}`); // same photo again: kept
+    expect(store.get(NAME_A)).toBeDefined();
+    store.replacePlanted(`/temp/${NAME_C}`, `/temp/${NAME_B}`); // not ann's: kept
+    expect(store.get(NAME_C)).toBeDefined();
+    store.replacePlanted(`/temp/${NAME_A}`, `/temp/${NAME_B}`);
+    await settled(() => !fs.existsSync(a));
+    expect(store.get(NAME_A)).toBeUndefined();
+    expect(store.get(NAME_B)?.planted).toBe(true);
+  });
+
   it("forget drops a single entry (TTL expiry)", () => {
     store.register(NAME_A, { gameCode: "111111", username: "ann", file: put(NAME_A) }, 0);
     store.forget(NAME_A);

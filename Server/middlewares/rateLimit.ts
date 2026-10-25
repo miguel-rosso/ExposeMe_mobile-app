@@ -1,38 +1,84 @@
 import { NextFunction, Request, Response } from "express";
 
-/**
- * In-memory sliding-window rate limit keyed by client IP (req.ip; see "trust proxy" in app.ts).
- * At most `max` requests per IP in any `windowMs`; extra requests get 429 and are not counted.
- */
-export function createRateLimiter({ max, windowMs }: { max: number; windowMs: number }) {
+export const clientIp = (req: Request) => req.ip || req.socket.remoteAddress || "unknown";
+
+/** In-memory sliding window: at most `max` hits per key in any `windowMs`. */
+export function createSlidingWindow({ max, windowMs }: { max: number; windowMs: number }) {
   const hits = new Map<string, number[]>();
 
-  // Drop idle IPs so the map does not grow without bound
+  // Drop idle keys so the map does not grow without bound
   const sweep = setInterval(() => {
     const now = Date.now();
-    for (const [ip, times] of hits) {
-      if (!times.length || now - times[times.length - 1] >= windowMs) hits.delete(ip);
+    for (const [key, times] of hits) {
+      if (!times.length || now - times[times.length - 1] >= windowMs) hits.delete(key);
     }
   }, windowMs);
   sweep.unref();
 
-  const middleware = (req: Request, res: Response, next: NextFunction) => {
-    const ip = req.ip || req.socket.remoteAddress || "unknown";
+  /** Seconds until `key` may hit again, or 0 if it is under the limit now. */
+  const retryAfter = (key: string): number => {
     const now = Date.now();
-    const times = hits.get(ip) ?? [];
+    const times = hits.get(key);
+    if (!times) return 0;
     while (times.length && now - times[0] >= windowMs) times.shift();
-    if (times.length >= max) {
-      res.setHeader("Retry-After", String(Math.ceil((windowMs - (now - times[0])) / 1000)));
-      res.status(429).json({ error: "Too many uploads" });
-      return;
-    }
-    times.push(now);
-    hits.set(ip, times);
+    return times.length >= max ? Math.ceil((windowMs - (now - times[0])) / 1000) : 0;
+  };
+  const hit = (key: string) => {
+    const times = hits.get(key) ?? [];
+    times.push(Date.now());
+    hits.set(key, times);
+  };
+  return { retryAfter, hit, tracked: () => hits.size };
+}
+
+function tooMany(res: Response, retryAfterS: number) {
+  res.setHeader("Retry-After", String(retryAfterS));
+  res.status(429).json({ error: "Too many uploads" });
+}
+
+/**
+ * Sliding-window rate limit middleware keyed by client IP (req.ip; see "trust proxy" in app.ts), or by `key`.
+ * At most `max` requests per key in any `windowMs`; extra requests get 429 and are not counted.
+ */
+export function createRateLimiter({
+  max,
+  windowMs,
+  key = clientIp,
+}: {
+  max: number;
+  windowMs: number;
+  key?: (req: Request, res: Response) => string;
+}) {
+  const window = createSlidingWindow({ max, windowMs });
+  const middleware = (req: Request, res: Response, next: NextFunction) => {
+    const k = key(req, res);
+    const wait = window.retryAfter(k);
+    if (wait) return tooMany(res, wait);
+    window.hit(k);
     next();
   };
-  /** Number of IPs currently tracked (for tests). */
-  middleware.trackedIps = () => hits.size;
+  /** Number of keys currently tracked (for tests). */
+  middleware.trackedIps = window.tracked;
   return middleware;
+}
+
+/**
+ * Per-IP limit on *rejected* requests only (missing or wrong credentials): `reject` answers 429 instead of 401/403
+ * once an IP has had `max` rejections in the window. Authenticated members never touch it, so other devices on the
+ * same Wi-Fi (one public IP at a party) can neither block nor observe a room's uploads through it.
+ */
+export function createRejectionLimiter({ max, windowMs }: { max: number; windowMs: number }) {
+  const window = createSlidingWindow({ max, windowMs });
+  return {
+    reject(req: Request, res: Response, status: 401 | 403) {
+      const ip = clientIp(req);
+      const wait = window.retryAfter(ip);
+      if (wait) return tooMany(res, wait);
+      window.hit(ip);
+      res.status(status).json({ error: status === 401 ? "Unauthorized" : "Forbidden" });
+    },
+    trackedIps: window.tracked,
+  };
 }
 
 /** Integer env var clamped to [min, max]; `fallback` when unset or not an integer. */
@@ -62,9 +108,29 @@ export function parseTrustProxy(raw: string | undefined, onRender: boolean): num
 }
 
 // ── POST /upload limits ──
-// Generous because a whole party often shares one Wi-Fi (one public IP): ~1 upload per round per room
-// plus one planted photo per player. Overridable for load tests (qa/lab/lab.sh server raises the max).
-export const UPLOAD_RATE_MAX = envInt("UPLOAD_RATE_MAX", 60, 1, 100_000);
+// Credentials are checked first, and only rejected requests are counted per IP (a whole party often shares one
+// public IP). Members are limited per member and per room, never by IP: neither a stranger on the Wi-Fi nor a
+// member who hit their own limit can make another member's upload fail. ~1 upload per round per room plus a few
+// lobby re-picks per player is far below these. Overridable for load tests (qa/lab/lab.sh server raises them).
 export const UPLOAD_RATE_WINDOW_MS = envInt("UPLOAD_RATE_WINDOW_MS", 60_000, 1_000, 3_600_000);
+export const UPLOAD_REJECTED_MAX = envInt("UPLOAD_REJECTED_MAX", 30, 1, 100_000);
+export const UPLOAD_PLAYER_RATE_MAX = envInt("UPLOAD_PLAYER_RATE_MAX", 20, 1, 100_000);
+/** Defaults to a full room (12 players) at the member limit, so one member can never use it up. */
+export const UPLOAD_ROOM_RATE_MAX = envInt("UPLOAD_ROOM_RATE_MAX", 12 * UPLOAD_PLAYER_RATE_MAX, 1, 1_000_000);
 
-export const uploadRateLimit = createRateLimiter({ max: UPLOAD_RATE_MAX, windowMs: UPLOAD_RATE_WINDOW_MS });
+interface MemberLocals { room: { gameCode: string }; player: { username: string } }
+const member = (res: Response) => res.locals.member as MemberLocals;
+
+export const uploadRejectionLimit = createRejectionLimiter({ max: UPLOAD_REJECTED_MAX, windowMs: UPLOAD_RATE_WINDOW_MS });
+
+export const uploadPlayerRateLimit = createRateLimiter({
+  max: UPLOAD_PLAYER_RATE_MAX,
+  windowMs: UPLOAD_RATE_WINDOW_MS,
+  key: (_req, res) => `${member(res).room.gameCode}\n${member(res).player.username}`,
+});
+
+export const uploadRoomRateLimit = createRateLimiter({
+  max: UPLOAD_ROOM_RATE_MAX,
+  windowMs: UPLOAD_RATE_WINDOW_MS,
+  key: (_req, res) => member(res).room.gameCode,
+});

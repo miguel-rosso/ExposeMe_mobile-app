@@ -339,6 +339,7 @@ io.on("connection", (socket: Socket) => {
       // Accept planted photos until the first round actually starts playing (same rule as POST /upload)
       if (!acceptsPlantedPhoto(room)) return;
       // Replaces an earlier planted photo of this player; the mark only goes back to them (room-of-game)
+      uploadStore.replacePlanted(player.plantedPhoto, photoUrl); // the replaced planted photo is deleted
       player.plantedPhoto = photoUrl;
       player.hasPlantedPhoto = true;
       gameEngine.onLatePlantedPhoto(room); // retry sent after the planted rounds were drawn

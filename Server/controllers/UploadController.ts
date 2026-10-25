@@ -32,7 +32,13 @@ export const UploadRouter = async (req: Request, res: Response) => {
   // Unguessable name; nothing from the client (originalname, MIME) ends up in the URL
   const filename = `${crypto.randomBytes(16).toString("hex")}.${image.ext}`;
   const filePath = path.join(uploadPath, filename);
-  const record: UploadRecord = { gameCode: member.room.gameCode, username: member.player.username, file: filePath };
+  const record: UploadRecord = {
+    gameCode: member.room.gameCode,
+    username: member.player.username,
+    file: filePath,
+    round: member.room.round,
+    kind: res.locals.uploadKind,
+  };
   if (!uploadStore.register(filename, record, res.locals.uploadEpoch)) return refuseStale(res);
   try {
     await fs.promises.writeFile(filePath, image.data, { flag: "wx" });
@@ -57,6 +63,9 @@ export const UploadRouter = async (req: Request, res: Response) => {
     });
   }, UPLOAD_TTL_MS);
   record.timer.unref();
+
+  // Supersedes this player's older unused uploads of the same round (lobby re-pick, own-turn retry)
+  uploadStore.releaseSuperseded(filename, member.room.currentPhoto);
 
   res.json({ url: `/temp/${filename}` });
 };

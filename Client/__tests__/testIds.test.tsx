@@ -83,6 +83,10 @@ describe("E2E testIDs (EXP-008)", () => {
       roundsOptionId(0).replace("0", ".*"),
       // EXP-085 tie flow: the device user and a bot
       ...["${USERNAME}", "bot1"].flatMap((u) => [winnerNameId(u), finalWinnerId(u), finalRankId(u)]),
+      // System photo picker and crop screen used by plant-photo.yaml (not our components)
+      "com.google.android.providers.media.module:id/icon_thumbnail",
+      "com.socketNull.ExposeMe:id/crop_image_menu_crop",
+      "Done",
     ];
     const flows = fs.readdirSync(MAESTRO_DIR).filter((f) => f.endsWith(".yaml"));
     const used = flows.flatMap((f) =>

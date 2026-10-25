@@ -1,28 +1,34 @@
 # EXP-039 / EXP-040: between rounds every player sees the waiting screen ("Someone is choosing a photo…" with the
 # server's progress bar) instead of a frozen scoreboard, and a skipped round leaves a notice on it.
-# Run after join-room.yaml with bots that report photo-unavailable on their turns, e.g.:
-#   node qa/lab/bots.mjs --bots 1 --code $GAME_CODE --photo-unavailable 1
-# (every bot turn is skipped at once with reason "unavailable" and the next attempt goes to the device, whose own
-# turns upload normally; with one bot the game never hits 3 skips in a row).
+# Entry point for `lab.sh play` with bots that report photo-unavailable on their turns, e.g.:
+#   qa/lab/lab.sh play --flow waiting-photo --bots 1 --devices pair --bot-args "--photo-unavailable 1"
+# The notice only lasts until the next round-start, so when the next attempt goes to a device (uploads in ~1-2 s)
+# Maestro can miss it. Bots that also stay silent keep it on screen for the 15 s wait:
+#   qa/lab/lab.sh play --flow waiting-photo --bots 3 --devices pair --bot-args "--photo-unavailable 0.5 --upload-fail 1"
+# (3 skips in a row end the game; play-rounds.yaml then just reaches the results screen).
 # Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
+# env: GAME_CODE, USERNAME, METRO_URL (url-encoded)
 appId: com.socketNull.ExposeMe
 ---
+- runFlow: open-app.yaml
+- runFlow: join-room.yaml
+# One wait (no separate assert): with fast uploads the waiting screen can be gone between two checks
 - extendedWaitUntil:
     visible:
-      id: "game-waiting-photo"
+      id: "waiting-photo-text"
     timeout: 60000
-- assertVisible:
-    id: "waiting-photo-text"
 - takeScreenshot: waiting-photo-${USERNAME}
 # A bot's turn is skipped right away: the notice shows on the waiting screen (no 15 s freeze)
 - extendedWaitUntil:
     visible:
       id: "round-skipped-notice"
-    timeout: 30000
+    timeout: 120000
 - takeScreenshot: round-skipped-${USERNAME}
-# The game goes on: a round eventually starts (the device's own photo)
+# The game goes on: a round eventually starts, or 3 skips in a row end it
 - extendedWaitUntil:
     visible:
-      id: "player-option-.*"
+      id: "player-option-.*|winner-modal|final-score-modal"
     timeout: 60000
 - takeScreenshot: round-after-skip-${USERNAME}
+# Finish the game so the bots' run ends cleanly
+- runFlow: play-rounds.yaml

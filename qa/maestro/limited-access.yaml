@@ -1,0 +1,44 @@
+# EXP-041: play without clearState or permission grants, so a limited/partial photo access set by the tester
+# survives (open-app.yaml would reset it). The app must already be on the home screen.
+# The Create/Join gate (index.tsx requestGalleryPermission) still demands full access, so with limited access the
+# join ends on SettingsInstructionsScreen. To test the in-game path, join with full access and switch to limited once
+# the game has started. iOS simulator: TCC.db kTCCServicePhotos auth_value=3 for the app +
+# `xcrun simctl spawn <udid> launchctl kickstart -k user/foreground/com.apple.tccd` (the app keeps running; the
+# limited selection made earlier in the system picker is kept). Android revokes kill the app, so only the join can be
+# checked there.
+#   qa/lab/lab.sh play --flow limited-access --bots 2 --devices ios-b
+# On its turn the device must stay in the game (an allowed photo, or the in-game skip notice).
+# env: GAME_CODE, USERNAME
+appId: com.socketNull.ExposeMe
+---
+# Expo dev-menu onboarding sheet / open dev menu left over from the manual launch
+- runFlow:
+    when:
+      visible: "This is the developer menu.*"
+    commands:
+      - tapOn: "Continue"
+- runFlow:
+    when:
+      visible: "Connected to:|Runtime version:.*"
+    commands:
+      - runFlow:
+          when:
+            platform: Android
+          commands:
+            - pressKey: Back
+      - runFlow:
+          when:
+            platform: iOS
+          commands:
+            - swipe:
+                from:
+                  text: "Runtime version:.*|Connected to:.*"
+                direction: DOWN
+- extendedWaitUntil:
+    visible:
+      id: "join-game-button"
+    timeout: 60000
+- runFlow: join-room.yaml
+- runFlow: play-rounds.yaml
+- assertNotVisible:
+    id: "initial-screen"

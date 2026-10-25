@@ -433,7 +433,7 @@ const WaitingRoom = ({}) => {
             {t.playerDisconnected}
           </Text>
         )}
-        {isMe && <Text style={tw`text-white/40 text-xs`}>You</Text>}
+        {isMe && <Text style={tw`text-white/40 text-xs`}>{t.you}</Text>}
       </TouchableOpacity>
     );
   };

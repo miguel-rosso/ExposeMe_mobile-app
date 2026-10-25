@@ -1,6 +1,6 @@
 import { Socket } from "socket.io";
 import { io } from "../app";
-import { RoomManager } from "../managers/RoomManager";
+import { isAllowedRounds, RoomManager } from "../managers/RoomManager";
 import { GameEngine } from "../managers/GameEngine";
 import { acceptsPlantedPhoto, setUploadRooms } from "../middlewares/uploadAccess";
 import { uploadStore } from "../middlewares/uploadStore";
@@ -234,7 +234,7 @@ io.on("connection", (socket: Socket) => {
     try {
       const s = session(socket);
       if (!s || !s.player.isHost || s.room.started) return;
-      if (![10, 15, 20].includes(data?.rounds)) return;
+      if (!isAllowedRounds(data?.rounds)) return;
       if (roomManager.setRounds(s.room.gameCode, data.rounds)) io.to(s.room.gameCode).emit("rounds-updated", data.rounds);
     } catch (e) { console.error("set-rounds error:", e); }
   });

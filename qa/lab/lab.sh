@@ -212,8 +212,9 @@ cmd_server() {
   if [ $stop = 1 ]; then bg_stop "$name" "$port"; log "$name stopped"; return 0; fi
   [ $restart = 1 ] && bg_stop "$name" "$port"
   # Bots/load tests: lift the per-player and per-room /upload rate limits
-  # (override with UPLOAD_PLAYER_RATE_MAX=... / UPLOAD_ROOM_RATE_MAX=...)
-  bg_start "$name" "$logf" "$ROOT/Server" env PORT="$port" UPLOAD_ROOM_RATE_MAX="${UPLOAD_ROOM_RATE_MAX:-100000}" \
+  # (override with UPLOAD_PLAYER_RATE_MAX=... / UPLOAD_ROOM_RATE_MAX=...).
+  # ALLOW_QA_ROUNDS=1: accept QA-only 3-round games (play --rounds 3); production never sets it
+  bg_start "$name" "$logf" "$ROOT/Server" env PORT="$port" ALLOW_QA_ROUNDS=1 UPLOAD_ROOM_RATE_MAX="${UPLOAD_ROOM_RATE_MAX:-100000}" \
     UPLOAD_PLAYER_RATE_MAX="${UPLOAD_PLAYER_RATE_MAX:-100000}" npx ts-node server.ts
   for _ in $(seq 1 30); do curl -fs "http://localhost:$port/health" >/dev/null && { log "$name healthy on :$port"; return 0; }; sleep 1; done
   die "$name did not become healthy — see $logf"

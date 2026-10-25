@@ -432,7 +432,7 @@ const GameScreen = () => {
             {item.username}
           </Text>
           <View style={tw`flex-row items-center`}>
-            {isMe && <Text style={tw`text-white text-xs bg-gray-600 px-1 py-0.5 rounded-full ml-1`}>You</Text>}
+            {isMe && <Text style={tw`text-white text-xs bg-gray-600 px-1 py-0.5 rounded-full ml-1`}>{t.you}</Text>}
           </View>
         </View>
       </TouchableOpacity>

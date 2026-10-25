@@ -37,6 +37,8 @@ qa/lab/lab.sh down                                   # when finished
 ```
 `play` = bots create the room and wait for `bots + devices` players → each device runs `qa/maestro/play-game.yaml` in parallel (open → join with the code → play, tapping `bot1` as its guess and screenshotting every loop) → host bot starts → results in `qa/runs/<RUN_ID>/` (`bots.json`, `bots.log`, `maestro/<device>/…`, junit xml).
 
+`--rounds` takes 10/15/20, or 3 for short QA runs (~1 min): 3 is QA-only, accepted only because `lab.sh server` starts the server with `ALLOW_QA_ROUNDS=1` (a server started another way, or production, ignores it and the bots report a `game-started with 10 rounds, asked for 3` consistency error). The app never offers 3 rounds.
+
 ## Why the photos are labelled
 `make-photos.swift` stamps `IOS-A · #3`, `ANDROID-B · #7`, `BOT · #2` on each picture. In a screenshot you can see whose gallery the photo came from and check it against the revealed owner — a direct test of the "who's photo" logic and of cross-device sync.
 

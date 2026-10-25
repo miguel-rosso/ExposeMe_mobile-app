@@ -257,7 +257,8 @@ function runRoom(roomIdx, fixedCode) {
           code = d.room.gameCode;
           if (args["code-file"]) fs.writeFileSync(args["code-file"], code);
           console.log(`[room ${roomIdx}] code ${code}`);
-          if ([10, 15, 20].includes(ROUNDS)) socket.emit("set-rounds", { gameCode: code, rounds: ROUNDS });
+          // 3 is QA-only: the server accepts it only with ALLOW_QA_ROUNDS=1 (qa/lab/lab.sh server sets it)
+          if ([3, 10, 15, 20].includes(ROUNDS)) socket.emit("set-rounds", { gameCode: code, rounds: ROUNDS });
           bots.filter((b) => !b.isHost).forEach((b) => b.socket.connected && b.join());
         }
         // Like the app picking a photo to plant in the lobby: uploaded and planted at once
@@ -289,10 +290,10 @@ function runRoom(roomIdx, fixedCode) {
           errors.push(`${name} planted upload: ${e.message}`);
         }
       };
-      socket.on("game-started", (players) => {
+      socket.on("game-started", (players, rounds) => {
         bot.inGame = true;
         bot.players = players.map((p) => p.username);
-        rec("game-started", 0);
+        rec("game-started", 0, { rounds });
         if (i >= N_BOTS - NO_READY) { rec("im-ready-skipped-on-purpose", 0); return; }
         socket.emit("im-ready", { gameCode: code, username: name });
       });
@@ -431,6 +432,11 @@ const perBotMax = (r, ev) => Math.max(0, ...r.players.map((n) => r.events.filter
 
 function analyse(r) {
   const consistency = [];
+  // The hosted game must use the requested --rounds (a server without ALLOW_QA_ROUNDS=1 ignores set-rounds 3)
+  if (args.host && [3, 10, 15, 20].includes(ROUNDS)) {
+    const gs = r.events.find((e) => e.ev === "game-started");
+    if (gs && gs.payload?.rounds !== ROUNDS) consistency.push(`game-started with ${gs.payload?.rounds} rounds, asked for ${ROUNDS}${ROUNDS === 3 ? " (3 needs ALLOW_QA_ROUNDS=1 on the server)" : ""}`);
+  }
   const skews = [];
   const byKey = new Map();
   for (const e of r.events) {

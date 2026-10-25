@@ -13,6 +13,17 @@ export const MAX_ROOMS = 5000;
  * role over, and a game start removes them. Shorter absences (app switch, brief signal loss) go unnoticed (DEC-009).
  */
 export const DISCONNECT_GRACE = 15_000;
+/** Round counts the host can pick in the app. */
+export const ROUND_OPTIONS = [10, 15, 20];
+/** QA-only short game (EXP-100): accepted only when the server runs with ALLOW_QA_ROUNDS=1; never offered in the app. */
+export const QA_ROUNDS = 3;
+
+/** Whether `rounds` is a valid set-rounds value. The env is read per call, so the QA flag is off unless set. */
+export function isAllowedRounds(rounds: unknown, env: NodeJS.ProcessEnv = process.env): rounds is number {
+  if (typeof rounds !== "number") return false;
+  if (ROUND_OPTIONS.includes(rounds)) return true;
+  return rounds === QA_ROUNDS && env.ALLOW_QA_ROUNDS === "1";
+}
 
 export class RoomManager {
   private rooms = new Map<string, Room>();

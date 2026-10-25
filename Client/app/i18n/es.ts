@@ -138,4 +138,7 @@ export default {
 
   // WaitingRoom: player gone (disconnected past the server's grace)
   playerDisconnected: "desconectado",
+
+  // WaitingRoom / GameScreen: tag next to your own name in player lists
+  you: "Tú",
 } as const;

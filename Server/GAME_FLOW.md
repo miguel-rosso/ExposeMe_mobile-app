@@ -140,7 +140,9 @@ After last round: game-over
   and they join fresh with a new token and 0 points). A player disconnected for less than the grace (a socket
   reconnecting right when the host presses Start) stays in the game: they rejoin normally, and if they don't come
   back the ready timeout and the pause logic below apply as for any mid-game disconnect.
-- Host only: `set-rounds` (lobby only), `start-game` (not while a game is running), `remove-player { username }`
+- Host only: `set-rounds` (lobby only; 10/15/20, anything else is ignored. **QA-only:** 3 rounds is also accepted
+  when the server runs with `ALLOW_QA_ROUNDS=1`, which `qa/lab/lab.sh server` sets for short device runs; it is off
+  by default, so production rejects it, and the app never offers it), `start-game` (not while a game is running), `remove-player { username }`
   (by username, socket ids are never sent to clients; the host can't remove itself; evicts every socket bound to
   the removed player in that room, like a rejoin evicts the replaced one).
 - `im-ready` only counts between `game-started` and the first round (`started && phase === null`).
@@ -290,7 +292,7 @@ All game events are **atomic** — each contains everything the client needs.
 | Event | Data | Description |
 |-------|------|-------------|
 | `join-create-game` | `{ gameCode \| null, username, rejoinToken? }` | Create/join; rejoin needs `rejoinToken` (also after every reconnect in game) |
-| `set-rounds` | `{ rounds }` (10/15/20) | Host only, lobby only |
+| `set-rounds` | `{ rounds }` (10/15/20; 3 only with `ALLOW_QA_ROUNDS=1`, QA-only) | Host only, lobby only |
 | `start-game` | - | Host only |
 | `remove-player` | `{ username }` | Host only: removes that player (not the host) and evicts their sockets |
 | `im-ready` | - | Player ready to start (session player; payload ignored) |

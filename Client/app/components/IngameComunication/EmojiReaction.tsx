@@ -1,17 +1,20 @@
 import React, { useEffect, useRef } from "react";
 import { Text, Animated } from "react-native";
 import tw from "twrnc";
+import { SCREENSHOT_EMOJI } from "../../utils/reactions";
 
 interface EmojiReactionProps {
   username: string;
   emoji: string;
+  // Translated text shown after the screenshot emoji ("took a screenshot")
+  screenshotLabel?: string;
   onAnimationEnd: () => void;
 }
 
-const EmojiReaction: React.FC<EmojiReactionProps> = ({ username, emoji, onAnimationEnd }) => {
+const EmojiReaction: React.FC<EmojiReactionProps> = ({ username, emoji, screenshotLabel, onAnimationEnd }) => {
   const opacity = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(-10)).current;
-  const isScreenshot = emoji.includes("Screenshot");
+  const isScreenshot = emoji === SCREENSHOT_EMOJI;
 
   useEffect(() => {
     // Animation sequence: fade in, hold, fade out
@@ -55,7 +58,7 @@ const EmojiReaction: React.FC<EmojiReactionProps> = ({ username, emoji, onAnimat
       ]}
     >
       <Text style={tw`text-white font-medium ${isScreenshot ? "text-xs" : "text-sm"} mr-1`}>{username}</Text>
-      <Text style={tw`${isScreenshot ? "text-sm" : "text-2xl"} text-white`}>{emoji}</Text>
+      <Text style={tw`${isScreenshot ? "text-sm" : "text-2xl"} text-white`}>{isScreenshot && screenshotLabel ? `${emoji} ${screenshotLabel}` : emoji}</Text>
     </Animated.View>
   );
 };

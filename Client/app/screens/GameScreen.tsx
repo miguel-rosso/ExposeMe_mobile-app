@@ -30,6 +30,8 @@ import { withHost, withoutPlayer } from "../utils/roomPlayers";
 import PausedModal from "@/app/components/modals/PausedModal";
 import GalleryAccessModal from "@/app/components/modals/GalleryAccessModal";
 import { useGalleryAccessGuard } from "@/app/hooks/useGalleryAccessGuard";
+import { useScreenshotReaction } from "../hooks/useScreenshotReaction";
+import { appendCapped, isAllowedReaction, MAX_VISIBLE_REACTIONS } from "../utils/reactions";
 
 const { SERVER_URL } = getEnvVars();
 const PICK_SEND_INTERVAL = 200; // ms between submit-answer sends (server: 10 per socket, refilled 5/s)
@@ -49,6 +51,8 @@ const GameScreen = () => {
   const router = useRouter();
   // Photo access revoked / no photos left (re-checked on foreground): blocking overlay, the game screen stays
   const galleryGuard = useGalleryAccessGuard({ watch: true });
+  // One screenshot listener for the whole game (EmojisButton remounts every round)
+  useScreenshotReaction(socket);
 
   // ── Round state (reset each round) ───────────────────
   const [photo, setPhoto] = useState<string | null>(null);
@@ -375,8 +379,11 @@ const GameScreen = () => {
     socket.on("player-removed", (removed: Player) => { console.log(`[GAME] player-removed: ${removed.username}`); dropPlayer(removed.username); });
     socket.on("new-host", (host: Player) => setPlayers(withHost(playersRef.current, host.username)));
 
+    // Only the picker's emojis (and the screenshot one), only while a photo is shown, at most a few on screen
     socket.on("emoji-reaction", (data: { username: string; emoji: string }) => {
-      setEmojiReactions((c) => [...c, { id: `${Date.now()}-${Math.random()}`, ...data }]);
+      if (!roundRef.current.photo || !isAllowedReaction(data?.emoji) || typeof data.username !== "string") return;
+      const reaction = { id: `${Date.now()}-${Math.random()}`, username: data.username, emoji: data.emoji };
+      setEmojiReactions((c) => appendCapped(c, reaction, MAX_VISIBLE_REACTIONS));
     });
 
     setIsReady(true);
@@ -401,6 +408,8 @@ const GameScreen = () => {
   }, [isReady]);
 
   const handleWinnerEnd = () => { setShowWinner(false); setShowFinalScore(true); };
+  // Reactions belong to the photo they were sent on: drop them whenever it changes (waiting-photo, resume, snapshot)
+  useEffect(() => { setEmojiReactions([]); }, [photo]);
   const removeEmoji = (id: string) => setEmojiReactions((c) => c.filter((r) => r.id !== id));
 
   // ── Render helpers ───────────────────────────────────
@@ -491,7 +500,7 @@ const GameScreen = () => {
             {/* Emoji reactions */}
             <View style={tw`absolute top-4 left-4 z-90`}>
               {emojiReactions.map((r) => (
-                <EmojiReaction key={r.id} username={r.username} emoji={r.emoji} onAnimationEnd={() => removeEmoji(r.id)} />
+                <EmojiReaction key={r.id} username={r.username} emoji={r.emoji} screenshotLabel={t.tookScreenshot} onAnimationEnd={() => removeEmoji(r.id)} />
               ))}
             </View>
 

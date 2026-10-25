@@ -141,4 +141,7 @@ export default {
 
   // WaitingRoom / GameScreen: tag next to your own name in player lists
   you: "Tú",
+
+  // GameScreen: shown next to a player's name when they take a screenshot
+  tookScreenshot: "hizo una captura",
 } as const;

@@ -31,6 +31,7 @@ import GalleryAccessModal from "@/app/components/modals/GalleryAccessModal";
 import { useGalleryAccessGuard } from "@/app/hooks/useGalleryAccessGuard";
 import { Ionicons } from "@expo/vector-icons";
 import ChatMessage from "@/app/components/IngameComunication/ChatMessage";
+import { appendCapped, MAX_CHAT_MESSAGES } from "@/app/utils/reactions";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import SuccessAlert from "@/app/components/SuccessAlert";
 import { LinearGradient } from "expo-linear-gradient";
@@ -150,14 +151,9 @@ const WaitingRoom = ({}) => {
 
         // Add message locally for the sender
         const messageId = `${Date.now()}-${Math.random()}`;
-        setChatMessages((prev) => [
-          ...prev,
-          {
-            id: messageId,
-            username: username || "You",
-            message: chatMessage.trim(),
-          },
-        ]);
+        setChatMessages((prev) =>
+          appendCapped(prev, { id: messageId, username: username || "You", message: chatMessage.trim() }, MAX_CHAT_MESSAGES)
+        );
 
         setChatMessage("");
         setLastSentTime(currentTime);
@@ -289,7 +285,8 @@ const WaitingRoom = ({}) => {
 
     socket.on("chat-message", (data: { username: string; message: string }) => {
       if (data.username !== username) {
-        setChatMessages((prev) => [...prev, { id: `${Date.now()}-${Math.random()}`, username: data.username, message: data.message }]);
+        const msg = { id: `${Date.now()}-${Math.random()}`, username: data.username, message: data.message };
+        setChatMessages((prev) => appendCapped(prev, msg, MAX_CHAT_MESSAGES));
       }
     });
 

@@ -112,9 +112,14 @@ where it is ignored). The snapshot is taken after the rejoin's effect on a pause
   Every connected client shows the countdown from that `duration` and "pause N of M" (`pause` of `maxPauses`;
   on the last one, a warning that the game ends if nobody returns).
 - **Pause limit**: every pause gets a full `PAUSE_TIMEOUT` (5 min) countdown (`duration` 300000), but there are
-  at most `MAX_PAUSES` (**3**) pauses per game (`pause` is 1, 2, 3). When a 4th pause would be needed the game
-  ends at once (`game-over`, no `game-paused`). This cap is also what stops a flapping connection from freezing
-  a game indefinitely. "Play again" starts with no pauses used.
+  at most `MAX_PAUSES` (**3**) counted pauses per game (`pause` is 1, 2, 3). A pause that resumes less than
+  `PAUSE_GRACE` (**10 s**) after it started is **refunded**: it doesn't count, so short drops (answering a message,
+  flaky network) don't use up the game's pauses. Since that is only known at resume time, `pause` is always the
+  would-be number of the pause in progress (counted pauses + 1); after a refund the next pause shows the same
+  number again (`pause` may repeat, but never goes back below the counted pauses). On top of that there are at
+  most `MAX_TOTAL_PAUSES` (**10**) pauses per game, counted or not, so a flapping connection can't freeze a game
+  indefinitely. When a pause would exceed either cap (a 4th counted one, or an 11th in all) the game ends at once
+  (`game-over`, no `game-paused`). "Play again" starts with no pauses used.
   If the players who are gone left for good (nobody disconnected remains), the game ends right away instead,
   also while already paused. While paused, when the list of awaited players changes (someone awaited leaves
   or is removed) `game-paused` is sent again with the new `waitingFor` and the remaining `duration` (same pause, same `pause` number).

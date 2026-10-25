@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GameEngine, MAX_PAUSES, PAUSE_MIN_DURATION, PAUSE_TIMEOUT } from "../managers/GameEngine";
+import { GameEngine, MAX_PAUSES, MAX_TOTAL_PAUSES, PAUSE_GRACE, PAUSE_MIN_DURATION, PAUSE_TIMEOUT } from "../managers/GameEngine";
 import { RoomManager } from "../managers/RoomManager";
 import { GameStateSnapshot, Player, Room } from "../models/interfaces";
 import { CapturedEmit, createFakeIo } from "./helpers";
@@ -298,7 +298,7 @@ describe("pause abuse and edge cases (EXP-006 security review)", () => {
     const other = room.currentPlayer!.username === "alice" ? "bob" : "alice";
     for (let n = 1; n < MAX_PAUSES; n++) {
       drop(other);
-      vi.advanceTimersByTime(PAUSE_MIN_DURATION);
+      vi.advanceTimersByTime(PAUSE_GRACE);
       rejoin(other);
     }
     drop(other);
@@ -315,7 +315,7 @@ describe("pause abuse and edge cases (EXP-006 security review)", () => {
     const other = room.currentPlayer!.username === "alice" ? "bob" : "alice";
     for (let n = 1; n <= MAX_PAUSES; n++) {
       drop(other);
-      vi.advanceTimersByTime(PAUSE_MIN_DURATION);
+      vi.advanceTimersByTime(PAUSE_GRACE);
       rejoin(other);
     }
     drop(other);
@@ -329,19 +329,19 @@ describe("pause abuse and edge cases (EXP-006 security review)", () => {
     expect(last("game-paused")!.args[0]).toMatchObject({ duration: PAUSE_TIMEOUT, pause: 1 });
   });
 
-  it("a flapping connection (drop/rejoin every 500 ms) can't freeze the game: pauses last >= 2 s and the pause cap ends it", () => {
+  it("a flapping connection (drop/rejoin every 500 ms) can't freeze the game: pauses last >= 2 s and the total cap ends it", () => {
     room = startedRoom(["alice", "bob"]);
     engine.onPhotoReceived(room, PHOTO, room.currentPlayer!.username);
     const other = room.currentPlayer!.username === "alice" ? "bob" : "alice";
-    for (let t = 0; t < 20_000; t += 1_000) {
+    for (let t = 0; t < 60_000; t += 1_000) {
       drop(other);
       vi.advanceTimersByTime(500);
       rejoin(other);
       vi.advanceTimersByTime(500);
     }
-    // Never more than one pause per 2 s, never more than MAX_PAUSES: the 4th drop ends the game
-    expect(events("game-paused")).toHaveLength(MAX_PAUSES);
-    expect(events("game-resumed")).toHaveLength(MAX_PAUSES);
+    // Never more than one pause per 2 s; all short (refunded), so MAX_TOTAL_PAUSES is what ends the game
+    expect(events("game-paused")).toHaveLength(MAX_TOTAL_PAUSES);
+    expect(events("game-resumed")).toHaveLength(MAX_TOTAL_PAUSES);
     expect(room.started).toBe(false);
     expect(events("game-over")).toHaveLength(1);
   });
@@ -441,5 +441,120 @@ describe("pause abuse and edge cases (EXP-006 security review)", () => {
     expect(points(snap.scores)).toEqual(points(shown.scores));
     expect(points(snap.players)).toEqual(points(shown.scores));
     expect(points(snap.scores)[guessers[0]]).toBe(1);
+  });
+});
+
+describe("short pauses are refunded (EXP-093)", () => {
+  const otherOf = () => (room.currentPlayer!.username === "alice" ? "bob" : "alice");
+
+  it("a pause resumed within PAUSE_GRACE doesn't count: the next pause shows the same number", () => {
+    expect(PAUSE_GRACE).toBe(10_000);
+    room = startedRoom(["alice", "bob"]);
+    engine.onPhotoReceived(room, PHOTO, room.currentPlayer!.username);
+    const other = otherOf();
+
+    drop(other);
+    expect(last("game-paused")!.args[0]).toMatchObject({ pause: 1, maxPauses: MAX_PAUSES });
+    vi.advanceTimersByTime(PAUSE_GRACE - 1);
+    rejoin(other);
+    expect(room.paused).toBe(false);
+
+    drop(other); // still pause 1: the short one was refunded
+    expect(last("game-paused")!.args[0]).toMatchObject({ duration: PAUSE_TIMEOUT, pause: 1, maxPauses: MAX_PAUSES });
+    vi.advanceTimersByTime(PAUSE_GRACE);
+    rejoin(other); // this one lasted PAUSE_GRACE: it counts
+
+    drop(other);
+    expect(last("game-paused")!.args[0]).toMatchObject({ pause: 2, maxPauses: MAX_PAUSES });
+  });
+
+  it("a rejoin within PAUSE_MIN_DURATION (resume scheduled at 2 s) is refunded too", () => {
+    room = startedRoom(["alice", "bob"]);
+    const other = otherOf();
+    for (let i = 0; i < MAX_PAUSES + 2; i++) {
+      drop(other);
+      vi.advanceTimersByTime(300);
+      rejoin(other);
+      vi.advanceTimersByTime(PAUSE_MIN_DURATION);
+      expect(room.paused).toBe(false);
+    }
+    expect(events("game-paused").map((e) => (e.args[0] as { pause: number }).pause)).toEqual(Array(MAX_PAUSES + 2).fill(1));
+    expect(events("game-over")).toHaveLength(0);
+  });
+
+  it("3 long pauses plus quick ones in between: the 4th long pause ends the game", () => {
+    room = startedRoom(["alice", "bob"]);
+    engine.onPhotoReceived(room, PHOTO, room.currentPlayer!.username);
+    const other = otherOf();
+    const seen: number[] = [];
+    for (let n = 1; n <= MAX_PAUSES; n++) {
+      drop(other); // quick
+      seen.push((last("game-paused")!.args[0] as { pause: number }).pause);
+      vi.advanceTimersByTime(PAUSE_MIN_DURATION);
+      rejoin(other);
+      drop(other); // long
+      seen.push((last("game-paused")!.args[0] as { pause: number }).pause);
+      vi.advanceTimersByTime(60_000);
+      rejoin(other);
+    }
+    expect(seen).toEqual([1, 1, 2, 2, 3, 3]);
+    expect(events("game-over")).toHaveLength(0);
+    drop(other);
+    expect(events("game-paused")).toHaveLength(2 * MAX_PAUSES);
+    expect(events("game-over")).toHaveLength(1);
+    expect(room.started).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("MAX_TOTAL_PAUSES = 10 quick pauses are allowed; the 11th drop ends the game at once", () => {
+    expect(MAX_TOTAL_PAUSES).toBe(10);
+    room = startedRoom(["alice", "bob"]);
+    engine.onPhotoReceived(room, PHOTO, room.currentPlayer!.username);
+    const other = otherOf();
+    for (let n = 1; n <= MAX_TOTAL_PAUSES; n++) {
+      drop(other);
+      expect(last("game-paused")!.args[0]).toMatchObject({ pause: 1 });
+      vi.advanceTimersByTime(PAUSE_MIN_DURATION);
+      rejoin(other);
+      expect(room.paused).toBe(false);
+    }
+    expect(events("game-over")).toHaveLength(0);
+    drop(other);
+    expect(events("game-paused")).toHaveLength(MAX_TOTAL_PAUSES);
+    expect(events("game-over")).toHaveLength(1);
+    expect(room.started).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("the snapshot on rejoin matches the game-paused number, also after a refund", () => {
+    room = startedRoom(["alice", "bob", "carol"]);
+    engine.onPhotoReceived(room, PHOTO, room.currentPlayer!.username);
+    const others = room.players.filter((p) => p !== room.currentPlayer).map((p) => p.username);
+    // A long pause (counted), then a short one (refunded)
+    others.forEach(drop);
+    vi.advanceTimersByTime(30_000);
+    rejoin(others[0]);
+    drop(others[0]);
+    expect(last("game-paused")!.args[0]).toMatchObject({ pause: 2 });
+    vi.advanceTimersByTime(PAUSE_MIN_DURATION);
+    rejoin(others[0]);
+    expect(room.paused).toBe(false);
+
+    // Next pause: number 2 again; a rejoin that doesn't resume it gets the same number in its snapshot
+    drop(others[0]);
+    const paused = last("game-paused")!.args[0];
+    expect(paused).toMatchObject({ pause: 2, maxPauses: MAX_PAUSES, waitingFor: others });
+    vi.advanceTimersByTime(5_000);
+    rm.removePlayer(room.gameCode, others[0]);
+    engine.onConnectionChange(room);
+    expect(last("game-paused")!.args[0]).toMatchObject({ pause: 2, waitingFor: [others[1]] });
+    // others[1] returns: resume (snapshot pause: null), and that pause (5 s) was refunded
+    const p = rejoin(others[1]);
+    expect(snapshotFor(p.socketId).pause).toBeNull();
+    expect(room._pauseCount).toBe(1);
+    drop(others[1]);
+    vi.advanceTimersByTime(500);
+    const q = rejoin(others[1]);
+    expect(snapshotFor(q.socketId).pause).toEqual({ duration: PAUSE_TIMEOUT - 500, waitingFor: [], pause: 2, maxPauses: MAX_PAUSES });
   });
 });

@@ -12,12 +12,17 @@ const HOLD_SAFETY_TIMEOUT = 30_000;
 const HOLD_MIN_REMAINING = 1_500; // Stop allowing hold when less than this remains
 const MAX_CONSECUTIVE_SKIPS = 3; // End the game after this many photo timeouts in a row
 export const PAUSE_TIMEOUT = 5 * 60_000; // Fewer than 2 connected: countdown of each pause before game over
-export const MAX_PAUSES = 3; // Pauses per game; when another one would be needed the game ends
+export const MAX_PAUSES = 3; // Counted pauses per game; when another one would be needed the game ends
+export const PAUSE_GRACE = 10_000; // A pause resumed sooner than this is refunded (doesn't count toward MAX_PAUSES)
+export const MAX_TOTAL_PAUSES = 10; // Pauses per game counted or not, so quick flaps can't freeze a game forever
 export const PAUSE_MIN_DURATION = 2_000; // A pause is never shorter than this (flapping connections)
 const RESUME_MIN_REMAINING = 1_500; // A resumed phase gets at least this much time
 const PHOTO_RESUME_MIN_REMAINING = 5_000; // ...and the photo owner at least this much to (re)send the photo
 
 export class GameEngine {
+  /** Pauses started in each room's current game, refunded or not (capped by MAX_TOTAL_PAUSES) */
+  private totalPauses = new WeakMap<Room, number>();
+
   constructor(private io: Server, private roomManager: RoomManager) {}
 
   // ── Public API ───────────────────────────────────────
@@ -30,6 +35,7 @@ export class GameEngine {
     room.plantedPhotosShown = 0;
     room._consecutiveSkips = 0;
     room._pauseCount = 0;
+    this.totalPauses.set(room, 0);
     // "Play again" reuses the room: drop scores and answers from the previous game
     room.players.forEach((p) => { p.points = 0; p.lastGuess = ""; p.lastAnswerCorrect = false; });
     console.log(`[${room.gameCode}] Game started`);
@@ -228,9 +234,11 @@ export class GameEngine {
 
   private pauseGame(room: Room): void {
     if (!room.started || room.paused) return;
-    // Each pause gets the full PAUSE_TIMEOUT, but only MAX_PAUSES per game: repeated drops can't keep a game frozen
-    if (room._pauseCount >= MAX_PAUSES) {
-      console.log(`[${room.gameCode}] ${MAX_PAUSES} pauses used up — ending game`);
+    // Each pause gets the full PAUSE_TIMEOUT, but only MAX_PAUSES counted (and MAX_TOTAL_PAUSES in all) per game:
+    // repeated drops can't keep a game frozen
+    const total = this.totalPauses.get(room) ?? 0;
+    if (room._pauseCount >= MAX_PAUSES || total >= MAX_TOTAL_PAUSES) {
+      console.log(`[${room.gameCode}] Pauses used up (${room._pauseCount}/${MAX_PAUSES} counted, ${total}/${MAX_TOTAL_PAUSES} in all) — ending game`);
       this.endGame(room);
       return;
     }
@@ -243,7 +251,9 @@ export class GameEngine {
       this.pauseTimer(room);
     }
     room.paused = true;
+    // Counted up front (the payload shows the would-be number); resumeGame refunds it if the pause was short
     room._pauseCount++;
+    this.totalPauses.set(room, total + 1);
     room._pauseStartedAt = Date.now();
     room._pauseTimer = setTimeout(() => {
       room._pauseTimer = null;
@@ -267,9 +277,11 @@ export class GameEngine {
     room.paused = false;
     room._pauseWaitingFor = [];
     if (room._pauseTimer) { clearTimeout(room._pauseTimer); room._pauseTimer = null; }
+    // A short absence (back within PAUSE_GRACE) doesn't use up one of the game's MAX_PAUSES
+    if (Date.now() - room._pauseStartedAt < PAUSE_GRACE) room._pauseCount--;
     const min = room.phase === "waiting-photo" && room.currentPlayer ? PHOTO_RESUME_MIN_REMAINING : RESUME_MIN_REMAINING;
     room._timerDuration = Math.max(min, room._timerDuration);
-    console.log(`[${room.gameCode}] RESUMED "${room.phase}" with ${room._timerDuration}ms`);
+    console.log(`[${room.gameCode}] RESUMED "${room.phase}" with ${room._timerDuration}ms (${room._pauseCount}/${MAX_PAUSES} pauses counted)`);
     this.io.to(room.gameCode).emit("game-resumed", { phase: room.phase, duration: room._timerDuration });
     // A photo sent while paused was ignored: ask the owner again
     if (room.phase === "waiting-photo" && room.currentPlayer?.connected) {
@@ -278,7 +290,10 @@ export class GameEngine {
     this.resumeTimer(room);
   }
 
-  /** `game-paused` payload / snapshot `pause`: countdown left of the pause in progress and which pause it is. */
+  /**
+   * `game-paused` payload / snapshot `pause`: countdown left of the pause in progress and which pause it is
+   * (the would-be number: if the pause ends within PAUSE_GRACE it is refunded and the next one repeats it).
+   */
   private pauseInfo(room: Room): PauseInfo {
     return {
       duration: Math.max(0, PAUSE_TIMEOUT - (Date.now() - room._pauseStartedAt)),

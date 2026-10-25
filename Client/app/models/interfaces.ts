@@ -55,7 +55,8 @@ export type ServerPhase = "waiting-photo" | "answering" | "reveal" | "scores";
 
 /**
  * `game-paused`: fewer than 2 players connected; the game ends when `duration` (ms) runs out.
- * `pause` is this pause's number (1..maxPauses); when another pause would be needed the game ends.
+ * `pause` is this pause's would-be number (1..maxPauses); it repeats after a pause resumed within 10 s
+ * (not counted). The game ends when another counted pause would be needed, or after 10 pauses in all.
  */
 export interface GamePausedData {
   duration: number;

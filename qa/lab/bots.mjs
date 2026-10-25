@@ -13,7 +13,9 @@
 //                           bot K (1-based, default the last one) drops at round R's round-start and reconnects
 //                           S seconds later (rejoin + game-state snapshot). With --bots 2 the game must pause
 //                           (game-paused) and resume (game-resumed) for the other bot. Each pause carries
-//                           pause N of maxPauses (3 per game, each with a full 5 min countdown; a 4th ends the game).
+//                           pause N of maxPauses (3 counted per game, each with a full 5 min countdown; a 4th ends the
+//                           game). A pause resumed within 10 s is refunded (the next pause repeats its number); at most
+//                           10 pauses in all per game.
 //   node qa/lab/bots.mjs --bots 3 --host --drop-round 2 --drop-secs 3     # drop mid-round, game goes on
 //   node qa/lab/bots.mjs --bots 2 --host --drop-round 2 --drop-secs 8     # 2 players: pause → resume
 import { io } from "socket.io-client";
@@ -224,12 +226,28 @@ function analyse(r) {
       if (!r.events.some((e) => e.bot === other && e.ev === "game-resumed" && e.t > d.t)) consistency.push(`2 players: ${other} never got game-resumed`);
     }
   }
-  // Pause N of M: every game-paused says which pause it is, never beyond the cap, never going back
+  // Pause N of M: every game-paused says which pause it is (the would-be number), never beyond the cap.
+  // Re-sends within one pause keep the number; the next pause repeats it if the last one was refunded
+  // (resumed within PAUSE_GRACE = 10 s) and is one more if it counted. Never going back.
+  const PAUSE_GRACE_MS = 10_000, GRACE_SLACK_MS = 500; // near the boundary, network latency decides: accept both
   const lastPause = {};
-  for (const e of r.events.filter((x) => x.ev === "game-paused")) {
+  const pauseState = {}; // bot -> { number, startedAt, resumedAt }
+  for (const e of r.events.filter((x) => x.ev === "game-paused" || x.ev === "game-resumed")) {
+    const st = pauseState[e.bot] || (pauseState[e.bot] = { number: 0, startedAt: null, resumedAt: null });
+    if (e.ev === "game-resumed") { if (st.startedAt !== null && st.resumedAt === null) st.resumedAt = e.t; continue; }
     const { pause, maxPauses } = e.payload;
-    if (!Number.isInteger(pause) || !Number.isInteger(maxPauses) || pause < 1 || pause > maxPauses) consistency.push(`${e.bot}: bad game-paused pause ${pause}/${maxPauses}`);
-    else if (pause < (lastPause[e.bot] || 0)) consistency.push(`${e.bot}: pause number went back ${lastPause[e.bot]} -> ${pause}`);
+    if (!Number.isInteger(pause) || !Number.isInteger(maxPauses) || pause < 1 || pause > maxPauses) { consistency.push(`${e.bot}: bad game-paused pause ${pause}/${maxPauses}`); continue; }
+    const samePause = st.startedAt !== null && st.resumedAt === null;
+    if (samePause) {
+      if (pause !== st.number) consistency.push(`${e.bot}: pause number changed within one pause ${st.number} -> ${pause}`);
+    } else if (st.startedAt !== null) {
+      const lasted = st.resumedAt - st.startedAt;
+      const allowed = lasted < PAUSE_GRACE_MS - GRACE_SLACK_MS ? [st.number]
+        : lasted > PAUSE_GRACE_MS + GRACE_SLACK_MS ? [st.number + 1] : [st.number, st.number + 1];
+      if (pause < st.number) consistency.push(`${e.bot}: pause number went back ${st.number} -> ${pause}`);
+      else if (!allowed.includes(pause)) consistency.push(`${e.bot}: pause ${st.number} lasted ${lasted}ms, next pause should be ${allowed.join(" or ")}, got ${pause}`);
+    }
+    if (!samePause) Object.assign(st, { number: pause, startedAt: e.t, resumedAt: null });
     lastPause[e.bot] = pause;
   }
   const roundsSeen = [...new Set(starts.map((s) => s.round))].sort((a, b) => a - b);

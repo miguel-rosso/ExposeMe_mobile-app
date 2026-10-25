@@ -215,7 +215,9 @@ io.on("connection", (socket: Socket) => {
       // Room gets cleaned up after 30min inactivity.
       console.log(`[${gameCode}] ${username} disconnected — keeping in room`);
       gameEngine.checkReady(room); // ready phase: don't wait for a player who is gone
-      gameEngine.onConnectionChange(room); // mid-game: pause if fewer than 2 players remain connected
+      // Lobby: after DISCONNECT_GRACE they are shown as gone and a gone host hands over; mid-game: pause if fewer than 2
+      // players remain connected
+      gameEngine.onConnectionChange(room);
     } catch (e) { console.error("disconnect error:", e); }
   });
 

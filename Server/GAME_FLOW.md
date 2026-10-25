@@ -130,13 +130,16 @@ After last round: game-over
 - Limits: at most **5 `join-create-game` per socket in any 10 s** (excess answered with
   `{ success: false, message: "Too many attempts" }`), and at most **5000 rooms** in memory (`MAX_ROOMS`;
   creating beyond it answers `"Server is busy"`, joining existing rooms still works).
-- **Game start drops disconnected players.** On every `start-game` (first game and "Play again"), each player who is
-  `connected: false` at that moment is removed from the room exactly like a leave: uploads released (planted photo
+- **Game start drops gone players.** On every `start-game` (first game and "Play again"), each player who has been
+  disconnected for longer than `DISCONNECT_GRACE` (**15 s**, see "Disconnected players") at that moment is removed
+  from the room exactly like a leave: uploads released (planted photo
   included), host handed over if needed (`new-host`) and `player-left <username>` to the room, all before
   `game-started` (whose player list no longer has them). If fewer than 2 players are left, the start is refused
   (nothing else is emitted; the lobby shows the updated list). A removed player who comes back is a new player: their
   old `rejoinToken` no longer rejoins (`"Game already started"` while the game runs; in the lobby the name is free
-  and they join fresh with a new token and 0 points).
+  and they join fresh with a new token and 0 points). A player disconnected for less than the grace (a socket
+  reconnecting right when the host presses Start) stays in the game: they rejoin normally, and if they don't come
+  back the ready timeout and the pause logic below apply as for any mid-game disconnect.
 - Host only: `set-rounds` (lobby only), `start-game` (not while a game is running), `remove-player { username }`
   (by username, socket ids are never sent to clients; the host can't remove itself; evicts every socket bound to
   the removed player in that room, like a rejoin evicts the replaced one).
@@ -154,7 +157,8 @@ After last round: game-over
 - **Public player data.** Every player object sent to clients (`player-joined`, `game-started`, `new-host`,
   `player-removed`, `room-of-game.room.players`, `game-state.players`) is built by one allowlist
   (`RoomManager.publicPlayer`): `{ username, points, isHost, connected, lastGuess,
-  lastAnswerCorrect }`. Never `socketId`, `rejoinToken`, `plantedPhoto` or `hasPlantedPhoto` (of anyone: whether a
+  lastAnswerCorrect }` (`connected` is false only for a player disconnected for longer than `DISCONNECT_GRACE`:
+  short absences are not shown). Never `socketId`, `rejoinToken`, `plantedPhoto` or `hasPlantedPhoto` (of anyone: whether a
   player planted a photo only goes back to that player, in `room-of-game.hasPlantedPhoto`), nor `isReady` (who is
   ready last could point at a player still uploading). While the round in play
   is in `answering`/`reveal`, `lastGuess: ""`, `lastAnswerCorrect: false` and `points` without the point a correct
@@ -168,8 +172,19 @@ After last round: game-over
 
 - A socket disconnect keeps the player in the room (they can rejoin with the same username and their
   `rejoinToken`) but marks
-  them `connected: false`; rejoining marks them `connected: true` again. Whoever is still disconnected when the next
-  game starts is removed (see "Game start drops disconnected players").
+  them `connected: false`; rejoining marks them `connected: true` again. Whoever has been disconnected for longer than
+  **`DISCONNECT_GRACE` (15 s)** is *gone*; shorter absences (switching apps, a brief signal loss) go unnoticed
+  (DEC-009). Gone players still in the room when the next game starts are removed (see "Game start drops gone
+  players").
+- **Lobby** (no game running), when a player has been gone for the grace (`GameEngine.reviewLobby`, also run at
+  `game-over` for players who dropped during the game):
+  - the room gets **`player-connection { username, connected: false }`**; when they rejoin it gets
+    `player-connection { username, connected: true }`. The app shows gone players dimmed with a "disconnected" label.
+    Nothing is sent for an absence shorter than the grace.
+  - if the gone player is the **host**, the role goes to the first connected player (`new-host`, as on a leave).
+    The old host keeps their place and, if they come back, is a normal player. With nobody connected the role stays
+    put until someone rejoins. Mid-game the host never changes this way (only by leaving).
+  - When the host leaves, the role goes to the first *connected* player (the first player if nobody is connected).
 - A client that silently loses network is detected by the socket.io heartbeat within
   `PING_INTERVAL + PING_TIMEOUT` (**10 s + 15 s**, `Server/app.ts`), overridable with
   `SOCKET_PING_INTERVAL_MS` / `SOCKET_PING_TIMEOUT_MS` (clamped to 1 s..300 s).
@@ -267,6 +282,8 @@ All game events are **atomic** — each contains everything the client needs.
 | `game-resumed` | any | `{ phase, duration }` | Paused phase continues with remaining time |
 | `game-state` | any | snapshot (see "Pause and reconnect") | Only to a rejoining socket (or one re-sending its join in a started game): render current phase |
 | `game-over` | - | `{ finalScores }` | Show final results |
+| `player-connection` | lobby | `{ username, connected }` | A player is gone (disconnected > 15 s) or back: dim / undim them in the lobby list |
+| `new-host` | any | public player | The host left (lobby or mid-game), was removed at game start, or has been gone > 15 s in the lobby (also checked at game-over): this player is the host now |
 
 ## Events (Client → Server)
 

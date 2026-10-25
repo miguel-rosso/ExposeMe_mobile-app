@@ -1,8 +1,8 @@
 import { Server } from "socket.io";
 import {
-  GameStateSnapshot, PauseInfo, Player, Room, RoundSkippedData, RoundStartData, ScoreRound, WaitingPhotoData, YourTurnData,
+  GameStateSnapshot, PauseInfo, Player, PlayerConnectionData, Room, RoundSkippedData, RoundStartData, ScoreRound, WaitingPhotoData, YourTurnData,
 } from "../models/interfaces";
-import { RoomManager } from "./RoomManager";
+import { DISCONNECT_GRACE, RoomManager } from "./RoomManager";
 import { uploadStore } from "../middlewares/uploadStore";
 
 const ANSWER_TIME = 8_000;
@@ -66,8 +66,10 @@ export class GameEngine {
   // ── Public API ───────────────────────────────────────
 
   /**
-   * start-game. Every disconnected player is removed from the room first (they come back as new players), so a
-   * "Play again" has no ghosts among the answers or the ranking. Refused (returns false) if fewer than 2 are left.
+   * start-game. Every gone player (disconnected for longer than DISCONNECT_GRACE) is removed from the room first
+   * (they come back as new players), so a "Play again" has no ghosts among the answers or the ranking. A player
+   * reconnecting right now (within the grace) stays; if they don't return, the ready/pause logic handles them.
+   * Refused (returns false) if fewer than 2 are left.
    */
   startGame(room: Room): boolean {
     this.removeDisconnected(room);
@@ -98,9 +100,10 @@ export class GameEngine {
     return true;
   }
 
-  /** Game start: drop disconnected players like a leave (uploads released, host handed over, room notified). */
+  /** Game start: drop gone players like a leave (uploads released, host handed over, room notified). */
   private removeDisconnected(room: Room): void {
-    for (const ghost of room.players.filter((p) => !p.connected)) {
+    if (room._lobbyTimer) { clearTimeout(room._lobbyTimer); room._lobbyTimer = null; }
+    for (const ghost of room.players.filter((p) => this.roomManager.isGone(p))) {
       const result = this.roomManager.removePlayer(room.gameCode, ghost.username);
       if (!result.removed) continue;
       console.log(`[${room.gameCode}] ${ghost.username} removed at game start (disconnected)`);
@@ -262,9 +265,11 @@ export class GameEngine {
    * Call after a player disconnects, rejoins, leaves or is removed. Mid-game (after the ready phase):
    * fewer than 2 connected → pause, or game over if nobody who is gone can come back (they all left);
    * 2 or more connected while paused → resume (not before PAUSE_MIN_DURATION). Ready phase: checkReady.
+   * Lobby: reviewLobby.
    */
   onConnectionChange(room: Room): void {
-    if (!room.started || room.phase === null) return;
+    if (!room.started) { this.reviewLobby(room); return; }
+    if (room.phase === null) return;
     const connected = room.players.filter((p) => p.connected).length;
     if (connected >= 2) { this.resumeGame(room); return; }
     if (room.players.length === connected) { this.endGame(room); return; } // nobody can come back
@@ -275,6 +280,37 @@ export class GameEngine {
     if (waitingFor.join("\n") !== room._pauseWaitingFor.join("\n")) {
       room._pauseWaitingFor = waitingFor;
       this.io.to(room.gameCode).emit("game-paused", this.pauseInfo(room));
+    }
+  }
+
+  /**
+   * Lobby: announce players who are gone (disconnected > DISCONNECT_GRACE) or back (`player-connection`), hand a gone
+   * host's role to the first connected player (`new-host`), and wake up again when the next grace runs out.
+   * Short absences go unnoticed (DEC-009).
+   */
+  reviewLobby(room: Room): void {
+    if (room._lobbyTimer) { clearTimeout(room._lobbyTimer); room._lobbyTimer = null; }
+    if (room.started) return;
+    const now = Date.now();
+    const announce = (p: Player, connected: boolean) => {
+      p.goneAnnounced = !connected;
+      const data: PlayerConnectionData = { username: p.username, connected };
+      this.io.to(room.gameCode).emit("player-connection", data);
+    };
+    for (const p of room.players) {
+      if (p.connected && p.goneAnnounced) announce(p, true);
+      else if (!p.goneAnnounced && this.roomManager.isGone(p, now)) announce(p, false);
+    }
+    const newHost = this.roomManager.handOverGoneHost(room);
+    if (newHost) {
+      console.log(`[${room.gameCode}] Host gone — ${newHost.username} is the new host`);
+      this.io.to(room.gameCode).emit("new-host", this.roomManager.publicPlayer(newHost, room));
+    }
+    const pending = room.players
+      .filter((p) => !p.connected && !this.roomManager.isGone(p, now))
+      .map((p) => (p.disconnectedAt ?? now) + DISCONNECT_GRACE - now);
+    if (pending.length) {
+      room._lobbyTimer = setTimeout(() => { room._lobbyTimer = null; this.reviewLobby(room); }, Math.max(0, Math.min(...pending)));
     }
   }
 
@@ -632,6 +668,8 @@ export class GameEngine {
     room.currentPhoto = null;
     // Every photo of this game (played or planted) is deleted now, not at the 30-min expiry
     uploadStore.releaseRoom(room.gameCode);
+    // Back in the lobby: whoever is gone is shown so, and a gone host hands the role over
+    this.reviewLobby(room);
   }
 
   // ── Private: Timer (single timer per room) ───────────

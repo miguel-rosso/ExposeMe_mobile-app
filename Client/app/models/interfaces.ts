@@ -163,6 +163,12 @@ export interface PhotoContextProps {
   handleContinue: () => Promise<void>;
 }
 
+/** player-connection (server → lobby): a player is gone (disconnected past the grace) or came back */
+export interface PlayerConnectionData {
+  username: string;
+  connected: boolean;
+}
+
 export interface PhotoProviderProps {
   children: React.ReactNode;
 }

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ANSWER_GRACE, GameEngine, MAX_PAUSES, MAX_TOTAL_PAUSES, PAUSE_GRACE, PAUSE_MIN_DURATION, PAUSE_TIMEOUT } from "../managers/GameEngine";
-import { RoomManager } from "../managers/RoomManager";
+import { DISCONNECT_GRACE, RoomManager } from "../managers/RoomManager";
 import { GameStateSnapshot, Player, Room } from "../models/interfaces";
 import { CapturedEmit, createFakeIo } from "./helpers";
 
@@ -289,6 +289,10 @@ describe("pause abuse and edge cases (EXP-006 security review)", () => {
     expect(events("game-paused")).toHaveLength(MAX_PAUSES);
     expect(events("game-over")).toHaveLength(1);
     expect(room.started).toBe(false);
+    // No game timer left: only the lobby's disconnect-grace review for the player who just dropped (EXP-157)
+    expect(room._lobbyTimer).not.toBeNull();
+    expect(vi.getTimerCount()).toBe(1);
+    vi.advanceTimersByTime(DISCONNECT_GRACE);
     expect(vi.getTimerCount()).toBe(0);
   });
 
@@ -503,6 +507,10 @@ describe("short pauses are refunded (EXP-093)", () => {
     expect(events("game-paused")).toHaveLength(2 * MAX_PAUSES);
     expect(events("game-over")).toHaveLength(1);
     expect(room.started).toBe(false);
+    // No game timer left: only the lobby's disconnect-grace review for the player who just dropped (EXP-157)
+    expect(room._lobbyTimer).not.toBeNull();
+    expect(vi.getTimerCount()).toBe(1);
+    vi.advanceTimersByTime(DISCONNECT_GRACE);
     expect(vi.getTimerCount()).toBe(0);
   });
 
@@ -523,6 +531,10 @@ describe("short pauses are refunded (EXP-093)", () => {
     expect(events("game-paused")).toHaveLength(MAX_TOTAL_PAUSES);
     expect(events("game-over")).toHaveLength(1);
     expect(room.started).toBe(false);
+    // No game timer left: only the lobby's disconnect-grace review for the player who just dropped (EXP-157)
+    expect(room._lobbyTimer).not.toBeNull();
+    expect(vi.getTimerCount()).toBe(1);
+    vi.advanceTimersByTime(DISCONNECT_GRACE);
     expect(vi.getTimerCount()).toBe(0);
   });
 

@@ -1,0 +1,25 @@
+# EXP-157: the host drops in the lobby and never comes back. After the server's 15 s disconnect grace (DEC-009: shorter
+# absences go unnoticed) the device sees the host row marked "disconnected" and becomes host itself (start button).
+# Run with ONE bot (the host) and ONE device, so the device is the first connected player and gets the role:
+#   qa/lab/lab.sh play --flow lobby-host-drop --bots 1 --devices <label> --bot-args --lobby-host-drop
+# bot1 drops as soon as the device has joined, and the bots run ends there (nobody starts a game).
+# env: GAME_CODE, USERNAME, METRO_URL (url-encoded)
+# Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
+appId: com.socketNull.ExposeMe
+---
+- runFlow: open-app.yaml
+- runFlow: join-room.yaml
+- assertVisible:
+    id: "lobby-player-bot1"
+# Short absence: nothing changes before the grace runs out
+- assertNotVisible:
+    id: "start-game-button"
+- extendedWaitUntil:
+    visible:
+      id: "lobby-player-offline-bot1"
+    timeout: 30000
+- extendedWaitUntil:
+    visible:
+      id: "start-game-button"
+    timeout: 10000
+- takeScreenshot: lobby-host-drop-${USERNAME}

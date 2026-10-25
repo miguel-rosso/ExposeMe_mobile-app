@@ -15,7 +15,7 @@ import {
 import tw from "twrnc";
 import { useGameContext } from "@/app/providers/GameContext";
 import { useRouter, useLocalSearchParams } from "expo-router";
-import { RoomOfGameResponse, Player, GameStateSnapshot } from "@/app/models/interfaces";
+import { RoomOfGameResponse, Player, GameStateSnapshot, PlayerConnectionData } from "@/app/models/interfaces";
 import ImageBlur from "@/app/components/ImageBlur/ImageBlur";
 import { ImageBlurView } from "@/app/components/ImageBlur";
 import { useBackgroundContext } from "@/app/providers/BackgroundContext";
@@ -35,7 +35,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import SuccessAlert from "@/app/components/SuccessAlert";
 import { LinearGradient } from "expo-linear-gradient";
 import { useI18n } from "../i18n";
-import { TEST_IDS, lobbyPlayerId, roundsOptionId } from "../utils/testIds";
+import { TEST_IDS, lobbyPlayerId, lobbyPlayerOfflineId, roundsOptionId } from "../utils/testIds";
+import { isHostIn, withConnection, withHost } from "../utils/roomPlayers";
 
 // Define chat message interface
 interface ChatMessageType {
@@ -295,7 +296,8 @@ const WaitingRoom = ({}) => {
     socket.on("rounds-updated", (rounds: number) => setRoundsOfGame(rounds));
     socket.on("player-joined", (p: Player) => setPlayers((prev) => [...prev, p]));
     socket.on("player-left", (name: string) => setPlayers((prev) => prev.filter((p) => p.username !== name)));
-    socket.on("new-host", (h: Player) => setPlayers((prev) => prev.map((p) => ({ ...p, isHost: p.username === h.username }))));
+    socket.on("new-host", (h: Player) => setPlayers((prev) => withHost(prev, h.username)));
+    socket.on("player-connection", (d: PlayerConnectionData) => setPlayers((prev) => withConnection(prev, d.username, d.connected)));
 
     socket.on("game-started", (players: Player[]) => {
       setPlayersProvider(players);
@@ -396,11 +398,12 @@ const WaitingRoom = ({}) => {
 
   const renderPlayer = ({ item }: { item: Player }) => {
     const isMe = item.username === username;
+    const offline = item.connected === false;
     return (
       <TouchableOpacity
         testID={lobbyPlayerId(item.username)}
         onPress={() => {
-          if (players[0].username === username && !isMe) confirmRemovePlayer(item);
+          if (isHost && !isMe) confirmRemovePlayer(item);
         }}
         activeOpacity={isMe || !isHost ? 1 : 0.7}
         style={[
@@ -409,6 +412,7 @@ const WaitingRoom = ({}) => {
             backgroundColor: isMe ? "rgba(0,0,0,0.55)" : "rgba(0,0,0,0.45)",
             borderWidth: 1,
             borderColor: isMe ? "rgba(255,255,255,0.3)" : "rgba(255,255,255,0.12)",
+            opacity: offline ? 0.5 : 1,
           },
         ]}
       >
@@ -424,12 +428,17 @@ const WaitingRoom = ({}) => {
         <Text style={tw`text-white text-base flex-1 ${isMe ? "font-bold" : "font-medium"}`}>
           {item.username}
         </Text>
+        {offline && (
+          <Text testID={lobbyPlayerOfflineId(item.username)} style={tw`text-white/60 text-xs italic mr-2`}>
+            {t.playerDisconnected}
+          </Text>
+        )}
         {isMe && <Text style={tw`text-white/40 text-xs`}>You</Text>}
       </TouchableOpacity>
     );
   };
 
-  const isHost = players.length > 0 && players[0].username === username;
+  const isHost = isHostIn(players, username);
 
   return (
     <View style={tw`flex-1`}>
@@ -559,7 +568,7 @@ const WaitingRoom = ({}) => {
 
             {/* Bottom controls section */}
             <View style={tw`w-full mt-2 mb-4`}>
-              {players.length > 0 && players[0].username == username && players.length >= 2 ? (
+              {isHost && players.length >= 2 ? (
                 <>
                   {/* Round selector — pill style */}
                   <View style={[tw`flex-row justify-center mb-3 rounded-full p-1`, { backgroundColor: "rgba(255,255,255,0.08)" }]}>

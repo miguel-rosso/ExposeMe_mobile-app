@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GameEngine } from "../managers/GameEngine";
-import { RoomManager } from "../managers/RoomManager";
+import { DISCONNECT_GRACE, RoomManager } from "../managers/RoomManager";
 import { uploadStore } from "../middlewares/uploadStore";
 import { Room } from "../models/interfaces";
 import { CapturedEmit, createFakeIo, registerUpload } from "./helpers";
 
 // EXP-129 (DEC-016 A): a game start drops every disconnected player from the room, so "Play again" has no ghosts
-// (answer options, tied winners with 0). If they come back they join as new players.
+// (answer options, tied winners with 0). If they come back they join as new players. Only players disconnected for
+// longer than DISCONNECT_GRACE count (EXP-149, see lobbyDisconnectGrace.test.ts): these tests let it run out.
 
 const ANSWER_TIME = 8_000;
 const GAME_START_DELAY = 1_000;
@@ -47,6 +48,7 @@ describe("game start removes disconnected players (EXP-129)", () => {
   it("first game: a player disconnected in the lobby is removed, player-left goes out before game-started", () => {
     const room = lobby(["alice", "bob", "carol"]);
     rm.markDisconnected(room.gameCode, "carol", "sock-carol");
+    vi.advanceTimersByTime(DISCONNECT_GRACE);
     expect(engine.startGame(room)).toBe(true);
     expect(names(room)).toEqual(["alice", "bob"]);
     const left = events("player-left");
@@ -82,6 +84,7 @@ describe("game start removes disconnected players (EXP-129)", () => {
   it("hands the host over (new-host) when the host is the disconnected one", () => {
     const room = lobby(["alice", "bob", "carol"]);
     rm.markDisconnected(room.gameCode, "alice", "sock-alice");
+    vi.advanceTimersByTime(DISCONNECT_GRACE);
     expect(engine.startGame(room)).toBe(true);
     expect(names(room)).toEqual(["bob", "carol"]);
     expect(room.players[0].isHost).toBe(true);
@@ -97,6 +100,7 @@ describe("game start removes disconnected players (EXP-129)", () => {
     registerUpload(room.gameCode, "bob", PHOTO);
     room.players[2].plantedPhoto = GHOST_PHOTO;
     rm.markDisconnected(room.gameCode, "carol", "sock-carol");
+    vi.advanceTimersByTime(DISCONNECT_GRACE);
     engine.startGame(room);
     expect(uploadStore.get(GHOST_PHOTO.slice("/temp/".length))).toBeUndefined();
     expect(uploadStore.get(PHOTO.slice("/temp/".length))).toBeDefined();
@@ -106,6 +110,7 @@ describe("game start removes disconnected players (EXP-129)", () => {
     const room = lobby(["alice", "bob", "carol"]);
     const oldToken = room.players[2].rejoinToken;
     rm.markDisconnected(room.gameCode, "carol", "sock-carol");
+    vi.advanceTimersByTime(DISCONNECT_GRACE);
     engine.startGame(room);
     // Game in progress: the old token no longer rejoins
     expect(rm.joinRoom(room.gameCode, "carol", "sock-carol2", oldToken)).toEqual({ success: false, message: "Game already started" });
@@ -124,6 +129,7 @@ describe("game start removes disconnected players (EXP-129)", () => {
   it("refuses to start when fewer than 2 players are left after the cleanup (lobby list still updated)", () => {
     const room = lobby(["alice", "bob"]);
     rm.markDisconnected(room.gameCode, "bob", "sock-bob");
+    vi.advanceTimersByTime(DISCONNECT_GRACE);
     expect(engine.startGame(room)).toBe(false);
     expect(room.started).toBe(false);
     expect(names(room)).toEqual(["alice"]);

@@ -135,4 +135,7 @@ export default {
   yourPhoto: "Tu foto",
   theirPhoto: "Su foto",
   pointsOne: "{points} punto",
+
+  // WaitingRoom: player gone (disconnected past the server's grace)
+  playerDisconnected: "desconectado",
 } as const;

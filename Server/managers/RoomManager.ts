@@ -8,6 +8,11 @@ const SOLO_ROOM_CLEANUP_DELAY = 2 * 60 * 1000;
 export const MAX_PLAYERS_PER_ROOM = 12;
 /** Global cap on rooms held in memory; creating beyond it is refused with "Server is busy". */
 export const MAX_ROOMS = 5000;
+/**
+ * A player disconnected for longer than this is "gone": the lobby shows them as disconnected, a gone host hands the
+ * role over, and a game start removes them. Shorter absences (app switch, brief signal loss) go unnoticed (DEC-009).
+ */
+export const DISCONNECT_GRACE = 15_000;
 
 export class RoomManager {
   private rooms = new Map<string, Room>();
@@ -40,6 +45,7 @@ export class RoomManager {
       _timerDuration: 0,
       held: false,
       _holdSafetyTimer: null,
+      _lobbyTimer: null,
     };
     this.rooms.set(gameCode, room);
     return room;
@@ -74,6 +80,7 @@ export class RoomManager {
       this.cancelRoomDeletion(gameCode);
       existing.socketId = socketId; // Update socket ID
       existing.connected = true;
+      delete existing.disconnectedAt;
       return { success: true, room, rejoin: true };
     }
 
@@ -99,8 +106,8 @@ export class RoomManager {
     this.releasePlayerUploads(room, player);
     let newHost: Player | undefined;
     if (player.isHost && room.players.length > 0) {
-      room.players[0].isHost = true;
-      newHost = room.players[0];
+      newHost = room.players.find((p) => p.connected) ?? room.players[0];
+      newHost.isHost = true;
     }
     if (room.players.length === 0) {
       this.resetRoom(room);
@@ -116,8 +123,25 @@ export class RoomManager {
     const player = this.getPlayer(gameCode, username);
     if (!player || player.socketId !== socketId) return undefined;
     player.connected = false;
+    player.disconnectedAt = Date.now();
     this.scheduleDeletionIfAbandoned(this.rooms.get(gameCode)!);
     return player;
+  }
+
+  /** Disconnected for longer than DISCONNECT_GRACE (a short absence doesn't count; no disconnect time = just now). */
+  isGone(player: Player, now = Date.now()): boolean {
+    return !player.connected && now - (player.disconnectedAt ?? now) >= DISCONNECT_GRACE;
+  }
+
+  /** The host is gone: the first connected player becomes host (returned). The old host stays as a normal player. */
+  handOverGoneHost(room: Room): Player | undefined {
+    const host = room.players.find((p) => p.isHost);
+    if (host && !this.isGone(host)) return undefined;
+    const next = room.players.find((p) => p.connected);
+    if (!next) return undefined;
+    if (host) host.isHost = false;
+    next.isHost = true;
+    return next;
   }
 
   /** Host kick (remove-player): drops the player without host handover (the host is the one kicking). */
@@ -179,7 +203,7 @@ export class RoomManager {
       username: player.username,
       points: player.points,
       isHost: player.isHost,
-      connected: player.connected,
+      connected: !this.isGone(player), // short absences are not shown (DEC-009)
       lastAnswerCorrect: player.lastAnswerCorrect,
       lastGuess: player.lastGuess,
     };
@@ -201,6 +225,7 @@ export class RoomManager {
     if (room._holdSafetyTimer) { clearTimeout(room._holdSafetyTimer); room._holdSafetyTimer = null; }
     if (room._pauseTimer) { clearTimeout(room._pauseTimer); room._pauseTimer = null; }
     if (room._resumeTimer) { clearTimeout(room._resumeTimer); room._resumeTimer = null; }
+    if (room._lobbyTimer) { clearTimeout(room._lobbyTimer); room._lobbyTimer = null; }
     room._pauseWaitingFor = [];
     room._timerCallback = null;
     room.held = false;

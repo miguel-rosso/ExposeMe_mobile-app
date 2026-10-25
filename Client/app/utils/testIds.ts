@@ -66,6 +66,8 @@ export const TEST_IDS = {
 
 export const playerOptionId = (username: string) => `player-option-${username}`;
 export const lobbyPlayerId = (username: string) => `lobby-player-${username}`;
+/** "disconnected" label on a gone player's lobby row (EXP-157) */
+export const lobbyPlayerOfflineId = (username: string) => `lobby-player-offline-${username}`;
 export const winnerNameId = (username: string) => `winner-name-${username}`;
 export const finalWinnerId = (username: string) => `final-winner-${username}`;
 export const finalRankId = (username: string) => `final-rank-${username}`;

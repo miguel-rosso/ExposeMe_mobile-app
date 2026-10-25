@@ -6,6 +6,10 @@ export interface Player {
   isReady: boolean;
   /** False while the player's socket is disconnected (kept in the room so they can rejoin) */
   connected: boolean;
+  /** When the player last disconnected (ms epoch); unset while connected. See RoomManager.isGone. */
+  disconnectedAt?: number;
+  /** The lobby was told (player-connection) that this player is gone; cleared when they rejoin */
+  goneAnnounced?: boolean;
   lastAnswerCorrect: boolean;
   lastGuess: string;
   hasPlantedPhoto?: boolean;
@@ -103,6 +107,15 @@ export interface Room {
   // Hold
   held: boolean;
   _holdSafetyTimer: NodeJS.Timeout | null;
+
+  /** Lobby: fires when the next disconnected player's DISCONNECT_GRACE runs out (GameEngine.reviewLobby) */
+  _lobbyTimer: NodeJS.Timeout | null;
+}
+
+/** `player-connection` (lobby only): a player is gone (disconnected > DISCONNECT_GRACE) or came back */
+export interface PlayerConnectionData {
+  username: string;
+  connected: boolean;
 }
 
 export interface JoinCreateGameData {

@@ -33,6 +33,13 @@
 //                           ("consistency"), and no payload says who planted or who is ready ("payload-leak"; only a
 //                           bot's own room-of-game has its own planted mark, and it must be true after planting).
 //   node qa/lab/bots.mjs --bots 3 --host --plant 2
+//            --lobby-host-drop  once everyone joined, the host bot drops in the lobby and never comes back (EXP-157):
+//                           after the 15 s disconnect grace (not before) every other bot gets player-connection
+//                           { host, connected: false } and new-host for the second bot, which then starts the game; the
+//                           old host is removed at game start (not in game-started) and the game runs to game-over.
+//                           With --bots 1 (one bot host + real devices, see qa/maestro/lobby-host-drop.yaml) no bot is
+//                           left: the run ends right after the drop (reason "lobby-host-drop") and the device checks it.
+//   node qa/lab/bots.mjs --bots 3 --host --lobby-host-drop
 //   Every bot records waiting-photo { round, duration } (room-wide, owner secret): same payload for all, skew measured.
 //   Photos: uploads send the room code + the bot's rejoin token (X-Game-Code / Authorization: Bearer), like the app;
 //   on each round-start one non-owner bot GETs the photo with them (must be 200) and without (must be 401): "photo-access".
@@ -89,6 +96,8 @@ const DROP_BOT = Number(args["drop-bot"] || N_BOTS) - 1;
 // (and any your-turn with it) is missed while switching screens, then the join is re-sent on the same socket,
 // which answers with a fresh game-state (and your-turn for an awaited photo)
 const APP_RESYNC = !!args["app-resync"];
+const LOBBY_HOST_DROP = !!args["lobby-host-drop"];
+const DISCONNECT_GRACE_MS = 15_000; // server: a player disconnected this long is gone (lobby shows it, host hands over)
 const PHOTOS = args.photos ? fs.readdirSync(args.photos).filter((f) => f.endsWith(".jpg")).map((f) => path.join(args.photos, f)) : [];
 
 const now = () => performance.timeOrigin + performance.now();
@@ -259,6 +268,12 @@ function runRoom(roomIdx, fixedCode) {
       });
       socket.on("player-joined", (p) => { bot.players.push(p.username); maybeStart(); });
       socket.on("player-left", (n) => { bot.players = bot.players.filter((x) => x !== n); });
+      socket.on("player-connection", (d) => rec("player-connection", 0, d));
+      socket.on("new-host", (p) => {
+        rec("new-host", 0, { username: p.username });
+        // The host role was handed to us (EXP-157): we start the game
+        if (p.username === name && !bot.gone && !bot.isHost) { bot.isHost = true; maybeStart(); }
+      });
       const plant = async () => {
         bot.plantSent = true;
         try {
@@ -383,7 +398,7 @@ function runRoom(roomIdx, fixedCode) {
       socket.on("hold-resume", (d) => rec("hold-resume", bot.round, d));
       socket.on("game-over", (d) => {
         rec("game-over", bot.round, { finalScore: d.finalScore });
-        if (++finished === bots.length) done("game-over");
+        if (++finished === bots.filter((b) => !b.gone).length) done("game-over");
       });
       return bot;
     };
@@ -392,6 +407,16 @@ function runRoom(roomIdx, fixedCode) {
       const host = bots.find((b) => b.isHost);
       if (!host || started || !code) return;
       if (host.players.length >= WAIT_PLAYERS) {
+        // EXP-157: the host drops in the lobby for good; whoever gets new-host starts instead
+        if (LOBBY_HOST_DROP && !host.gone && !bots.some((b) => b.gone)) {
+          host.gone = true;
+          host.isHost = false;
+          events.push({ bot: host.name, ev: "lobby-host-drop", round: 0, t: now() });
+          host.socket.disconnect(); // manual disconnect: socket.io-client doesn't reconnect
+          // Only real devices remain (Maestro checks the handover): nothing more for the bots to do
+          if (bots.every((b) => b.gone)) done("lobby-host-drop");
+          return;
+        }
         started = true;
         setTimeout(() => host.socket.emit("start-game", { gameCode: code }), 500);
       }
@@ -531,6 +556,23 @@ function analyse(r) {
     if (!samePause) Object.assign(st, { number: pause, startedAt: e.t, resumedAt: null });
     lastPause[e.bot] = pause;
   }
+  // Lobby host drop (EXP-157): after the grace, not before, the others see the host gone and get a new host who can
+  // start; the old host is not in the game
+  const hostDrop = r.events.find((e) => e.ev === "lobby-host-drop");
+  if (hostDrop) {
+    const others = r.players.filter((n) => n !== hostDrop.bot);
+    for (const n of others) {
+      const gone = r.events.find((e) => e.bot === n && e.ev === "player-connection" && e.payload.username === hostDrop.bot && e.payload.connected === false);
+      const nh = r.events.find((e) => e.bot === n && e.ev === "new-host");
+      if (!gone) consistency.push(`${n}: never got player-connection { ${hostDrop.bot}, connected: false }`);
+      if (!nh) { consistency.push(`${n}: never got new-host after the host dropped`); continue; }
+      if (nh.payload.username === hostDrop.bot) consistency.push(`${n}: new-host named the dropped host`);
+      if (nh.t - hostDrop.t < DISCONNECT_GRACE_MS - 1_000) consistency.push(`${n}: new-host ${Math.round(nh.t - hostDrop.t)}ms after the drop (grace is ${DISCONNECT_GRACE_MS}ms)`);
+      const gs = r.events.find((e) => e.bot === n && e.ev === "game-started");
+      if (!gs) consistency.push(`${n}: the new host never started the game`);
+    }
+    if (r.events.some((e) => e.bot === hostDrop.bot && e.ev === "game-started")) consistency.push(`${hostDrop.bot}: dropped host got game-started`);
+  }
   const roundsSeen = [...new Set(starts.map((s) => s.round))].sort((a, b) => a - b);
   roundsSeen.forEach((n, i) => { if (n !== i + 1) consistency.push(`round numbering gap: expected ${i + 1}, got ${n}`); });
   const phaseGaps = [];
@@ -573,7 +615,7 @@ const summary = {
   rooms: rooms.length,
   bots_per_room: N_BOTS,
   duration_s: Math.round((Date.now() - t0) / 1000),
-  pass: rooms.every((r) => r.reason === "game-over" && r.consistency_errors.length === 0 && r.errors.length === 0),
+  pass: rooms.every((r) => (r.reason === "game-over" || (LOBBY_HOST_DROP && r.reason === "lobby-host-drop")) && r.consistency_errors.length === 0 && r.errors.length === 0),
   worst_skew_ms: Math.max(...rooms.map((r) => Number(r.skew_ms.max || 0))),
   uploads_rate_limited: rooms.reduce((n, r) => n + r.uploads_rate_limited, 0), // >0: server limit too low for this load, not a game bug
   rooms_detail: rooms,

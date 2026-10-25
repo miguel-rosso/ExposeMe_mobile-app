@@ -15,5 +15,13 @@
       "Bash(eas submit:*)",
       "Bash(npx eas-cli submit:*)"
     ]
+  },
+  "hooks": {
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/qa/scripts/dashboard-hook.sh", "timeout": 20 }] }
+    ],
+    "PostToolUse": [
+      { "matcher": "Agent", "hooks": [{ "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/qa/scripts/dashboard-hook.sh", "timeout": 20 }] }
+    ]
   }
 }

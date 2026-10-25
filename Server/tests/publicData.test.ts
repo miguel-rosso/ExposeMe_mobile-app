@@ -158,6 +158,25 @@ describe("answers of the round in play stay hidden until round-scores", () => {
     expect(guesser.points).toBe(0); // the later game-state snapshot (game over) agrees with game-over
   });
 
+  // EXP-148 security check: the EXP-017 rollback in endGame also covers a game that ends during answering, after a
+  // re-selected pick (only the last pick's point is in play, and it is dropped)
+  it("game-over during answering doesn't count (or reveal) that round's picks", () => {
+    answeringRoom();
+    const owner = room.currentPlayer!.username;
+    const guesser = room.players.find((p) => p.username !== owner)!;
+    const other = room.players.find((p) => p !== guesser && p.username !== owner)!;
+    engine.recordAnswer(room, guesser.username, other.username);
+    engine.recordAnswer(room, guesser.username, owner);
+    expect(guesser.points).toBe(1);
+    for (const p of room.players.filter((x) => x !== guesser).map((x) => x.username)) rm.removePlayer(room.gameCode, p);
+    engine.onConnectionChange(room);
+    const over = emits.find((e) => e.event === "game-over")!;
+    expect(over).toBeDefined();
+    const { finalScore } = over.args[0] as { finalScore: unknown[] };
+    expect(finalScore).toEqual([expect.objectContaining({ username: guesser.username, points: 0, lastGuess: "", lastAnswerCorrect: false })]);
+    expect(guesser.points).toBe(0);
+  });
+
   it("game-over after round-scores keeps the round's answers and points", () => {
     answeringRoom();
     const owner = room.currentPlayer!.username;

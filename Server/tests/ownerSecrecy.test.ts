@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GameEngine } from "../managers/GameEngine";
+import { ANSWER_GRACE, GameEngine } from "../managers/GameEngine";
 import { RoomManager } from "../managers/RoomManager";
 import { Player, Room } from "../models/interfaces";
 import { CapturedEmit, createFakeIo, receivedBy } from "./helpers";
@@ -87,7 +87,7 @@ describe("photo owner secrecy before the reveal (EXP-128)", () => {
     for (const p of room.players) {
       const starts = receivedBy(emits.slice(since), p.socketId, room.gameCode).filter((e) => e.event === "round-start");
       expect(starts).toHaveLength(1);
-      expect(starts[0].args[0]).toEqual({ photo: PHOTO, round: 1, duration: ANSWER_TIME, isOwner: p === owner });
+      expect(starts[0].args[0]).toEqual({ photo: PHOTO, round: 1, duration: ANSWER_TIME - ANSWER_GRACE, isOwner: p === owner });
     }
     expect(room.players.flatMap((p) => leaksFor(p, owner.username, since))).toEqual([]);
   });
@@ -100,7 +100,7 @@ describe("photo owner secrecy before the reveal (EXP-128)", () => {
     for (const p of room.players) {
       const starts = receivedBy(emits, p.socketId, room.gameCode).filter((e) => e.event === "round-start");
       expect(starts).toHaveLength(1);
-      expect(starts[0].args[0]).toEqual({ photo: PLANTED, round: 1, duration: ANSWER_TIME, isOwner: p === carol });
+      expect(starts[0].args[0]).toEqual({ photo: PLANTED, round: 1, duration: ANSWER_TIME - ANSWER_GRACE, isOwner: p === carol });
     }
     expect(room.players.flatMap((p) => leaksFor(p, "carol", 0))).toEqual([]);
   });

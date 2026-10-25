@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GameEngine, PAUSE_MIN_DURATION } from "../managers/GameEngine";
+import { ANSWER_GRACE, GameEngine, PAUSE_MIN_DURATION } from "../managers/GameEngine";
 import { RoomManager } from "../managers/RoomManager";
 import { GameStateSnapshot, Player, Room } from "../models/interfaces";
 import { CapturedEmit, createFakeIo, receivedBy } from "./helpers";
@@ -107,7 +107,7 @@ describe("planted photos stay anonymous", () => {
     expect(starts.find((e) => e.target === room.gameCode)).toMatchObject({ except: "sock-bob" });
     for (const e of starts) {
       expect(Object.keys(e.args[0] as object).sort()).toEqual(["duration", "isOwner", "photo", "round"]);
-      expect(e.args[0]).toMatchObject({ photo: PLANTED, round: 1, duration: ANSWER_TIME });
+      expect(e.args[0]).toMatchObject({ photo: PLANTED, round: 1, duration: ANSWER_TIME - ANSWER_GRACE });
     }
     expect(starts.find((e) => e.target === "sock-bob")!.args[0]).toMatchObject({ isOwner: true });
     expect(events("your-turn")).toHaveLength(0);

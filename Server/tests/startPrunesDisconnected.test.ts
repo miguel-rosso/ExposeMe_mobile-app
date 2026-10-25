@@ -153,13 +153,14 @@ describe("no guess is stored as an empty string (EXP-132)", () => {
     return room;
   }
 
-  it("an empty guess is recorded as \"\" (never an English placeholder) and counts as the player's one answer", () => {
+  it("an empty guess is recorded as \"\" (never an English placeholder); a guess once the reveal shows the owner is ignored", () => {
     const room = answering();
     const owner = room.currentPlayer!;
     const guesser = room.players.find((p) => p !== owner)!;
     engine.recordAnswer(room, guesser.username, "");
     expect(guesser.lastGuess).toBe("");
-    // A second answer after the empty one (e.g. once the reveal shows the owner) is ignored
+    // Answers freeze when answering ends (EXP-148): a guess sent during the reveal is ignored
+    vi.advanceTimersByTime(ANSWER_TIME);
     engine.recordAnswer(room, guesser.username, owner.username);
     expect(guesser.lastGuess).toBe("");
     expect(guesser.lastAnswerCorrect).toBe(false);

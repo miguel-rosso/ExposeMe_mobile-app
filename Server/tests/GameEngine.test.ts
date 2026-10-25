@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GameEngine } from "../managers/GameEngine";
+import { ANSWER_GRACE, GameEngine } from "../managers/GameEngine";
 import { RoomManager } from "../managers/RoomManager";
 import { Room } from "../models/interfaces";
 import { CapturedEmit, createFakeIo } from "./helpers";
@@ -281,9 +281,9 @@ describe("round phases", () => {
     const starts = events("round-start");
     expect(starts).toHaveLength(2);
     expect(starts[0]).toMatchObject({ target: room.gameCode, except: socketOf(owner) });
-    expect(starts[0].args[0]).toEqual({ photo: PHOTO, round: 1, duration: ANSWER_TIME, isOwner: false });
+    expect(starts[0].args[0]).toEqual({ photo: PHOTO, round: 1, duration: ANSWER_TIME - ANSWER_GRACE, isOwner: false });
     expect(starts[1].target).toBe(socketOf(owner));
-    expect(starts[1].args[0]).toEqual({ photo: PHOTO, round: 1, duration: ANSWER_TIME, isOwner: true });
+    expect(starts[1].args[0]).toEqual({ photo: PHOTO, round: 1, duration: ANSWER_TIME - ANSWER_GRACE, isOwner: true });
 
     vi.advanceTimersByTime(ANSWER_TIME - 1);
     expect(events("round-reveal")).toHaveLength(0);
@@ -461,7 +461,7 @@ describe("recordAnswer", () => {
   });
 
   // EXP-128: the owner knows the answer, so their vote is never recorded nor scored (server-side, whatever the client)
-  it("rejects the photo owner's vote, during answering and reveal", () => {
+  it("rejects the photo owner's vote", () => {
     engine.onPhotoReceived(room, PHOTO, owner);
     engine.recordAnswer(room, owner, owner);
     expect(player(owner)).toMatchObject({ points: 0, lastAnswerCorrect: false, lastGuess: "" });
@@ -471,24 +471,67 @@ describe("recordAnswer", () => {
     expect(player(owner)).toMatchObject({ points: 0, lastAnswerCorrect: false, lastGuess: "" });
   });
 
-  it("only accepts the first answer per round", () => {
+  // EXP-148: the app sends its pick when tapped and may change it until answering ends; the last one counts
+  it("keeps the last selection made during answering (re-selecting moves the point)", () => {
     engine.onPhotoReceived(room, PHOTO, owner);
     engine.recordAnswer(room, guessers[0], guessers[1]);
-    engine.recordAnswer(room, guessers[0], owner);
     expect(player(guessers[0])).toMatchObject({ points: 0, lastAnswerCorrect: false, lastGuess: guessers[1] });
+    engine.recordAnswer(room, guessers[0], owner);
+    expect(player(guessers[0])).toMatchObject({ points: 1, lastAnswerCorrect: true, lastGuess: owner });
+    engine.recordAnswer(room, guessers[0], owner); // same pick again: still one point
+    expect(player(guessers[0]).points).toBe(1);
+    engine.recordAnswer(room, guessers[0], guessers[1]); // switched away from the right answer: point taken back
+    expect(player(guessers[0])).toMatchObject({ points: 0, lastAnswerCorrect: false, lastGuess: guessers[1] });
+    engine.recordAnswer(room, guessers[0], owner);
+    engine.recordAnswer(room, guessers[0], ""); // deselected
+    expect(player(guessers[0])).toMatchObject({ points: 0, lastAnswerCorrect: false, lastGuess: "" });
+    engine.recordAnswer(room, guessers[0], owner); // last selection before answering ends
+    vi.advanceTimersByTime(ANSWER_TIME + REVEAL_TIME);
+    const { scores } = lastEvent("round-scores")!.args[0] as { scores: { username: string; lastGuess: string; points: number }[] };
+    expect(scores.find((x) => x.username === guessers[0])).toMatchObject({ points: 1, lastGuess: owner });
   });
 
-  it("accepts answers during reveal but not during scores", () => {
+  // EXP-148: round-reveal broadcasts correctAnswer, so answers are frozen when answering ends
+  it("ignores answers during reveal and scores, without changing a pick made during answering", () => {
     engine.onPhotoReceived(room, PHOTO, owner);
+    engine.recordAnswer(room, guessers[1], guessers[0]); // wrong pick while answering
     vi.advanceTimersByTime(ANSWER_TIME);
     expect(room.phase).toBe("reveal");
-    engine.recordAnswer(room, guessers[0], owner);
-    expect(player(guessers[0]).points).toBe(1);
+    engine.recordAnswer(room, guessers[0], owner); // hadn't voted, now knows the answer
+    engine.recordAnswer(room, guessers[1], owner); // tries to fix the wrong pick
+    expect(player(guessers[0])).toMatchObject({ points: 0, lastAnswerCorrect: false, lastGuess: "" });
+    expect(player(guessers[1])).toMatchObject({ points: 0, lastAnswerCorrect: false, lastGuess: guessers[0] });
 
     vi.advanceTimersByTime(REVEAL_TIME);
     expect(room.phase).toBe("scores");
-    engine.recordAnswer(room, guessers[1], owner);
-    expect(player(guessers[1]).points).toBe(0);
+    engine.recordAnswer(room, guessers[0], owner);
+    expect(player(guessers[0])).toMatchObject({ points: 0, lastGuess: "" });
+  });
+
+  // EXP-148: clients are shown ANSWER_TIME - ANSWER_GRACE, but answers are taken until ANSWER_TIME, so a tap made
+  // at the very end of the bar still arrives in time
+  it("shows the answer time minus a grace and still takes answers until the real end of answering", () => {
+    engine.onPhotoReceived(room, PHOTO, owner);
+    expect(ANSWER_GRACE).toBeGreaterThan(0);
+    expect((events("round-start")[0].args[0] as { duration: number }).duration).toBe(ANSWER_TIME - ANSWER_GRACE);
+    vi.advanceTimersByTime(ANSWER_TIME - 1);
+    expect(room.phase).toBe("answering");
+    expect(engine.snapshot(room).duration).toBe(0); // the bar has run out on every client
+    engine.recordAnswer(room, guessers[0], owner); // sent as the bar ended: counts
+    vi.advanceTimersByTime(1);
+    expect(room.phase).toBe("reveal");
+    expect(player(guessers[0])).toMatchObject({ points: 1, lastGuess: owner });
+  });
+
+  // EXP-148: a player who left (the owner included) is no longer an option
+  it("ignores a guess for a player who is no longer in the room, keeping the previous pick", () => {
+    engine.onPhotoReceived(room, PHOTO, owner);
+    engine.recordAnswer(room, guessers[0], guessers[1]);
+    engine.recordAnswer(room, guessers[0], "nobody");
+    expect(player(guessers[0]).lastGuess).toBe(guessers[1]);
+    roomManager.removePlayer(room.gameCode, owner);
+    engine.recordAnswer(room, guessers[0], owner);
+    expect(player(guessers[0])).toMatchObject({ points: 0, lastAnswerCorrect: false, lastGuess: guessers[1] });
   });
 
   it("stores an empty guess as \"\" (the client translates it, EXP-132)", () => {

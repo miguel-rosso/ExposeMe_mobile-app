@@ -46,6 +46,12 @@
 //   whose photo it is ("payload-leak"). Only the owner's own round-start / game-state says `isOwner: true` (the bot
 //   records "owner-signal"); after the reveal it must match `correctAnswer`, and the owner's vote must never count
 //   ("consistency"). Bots guess at random among the other players; the owner bot doesn't vote (empty guess).
+//   Answers (EXP-148): like the app, a bot sends submit-answer while answering (sometimes a first pick changed once:
+//   the last one counts), never at the reveal. At each round-reveal the first bot also sends the revealed answer, which
+//   the server must ignore: every bot's lastGuess in round-scores equals its last pick sent while answering ("" if
+//   none) ("consistency"; bots that went offline are left out). round-start's duration is the answer time minus a
+//   300 ms grace (answers are taken until the real end); bots send at most 3 picks per round (server limit: 10 per
+//   socket, refilled 5/s), and there are no correct-answer / incorrect-answer aliases.
 import { io } from "socket.io-client";
 import fs from "node:fs";
 import path from "node:path";
@@ -299,6 +305,7 @@ function runRoom(roomIdx, fixedCode) {
         }
       });
       socket.on("round-start", (d) => {
+        bot.phase = "answering";
         // Recorded without isOwner (the only per-recipient field), so every bot must get the same payload
         rec("round-start", d.round, { photo: d.photo, duration: d.duration });
         bot.round = d.round;
@@ -320,15 +327,33 @@ function runRoom(roomIdx, fixedCode) {
           socket.disconnect();
           setTimeout(() => { socket.connect(); }, 1500 + Math.random() * 2000);
         }
+        // Like a player tapping during the answer time (8 s): sometimes a first pick, then the final one
+        const round = d.round;
+        const decoy = pickGuess(bot);
+        if (decoy && decoy !== bot.guess && Math.random() < 0.5) setTimeout(() => {
+          if (bot.round === round && bot.phase === "answering" && socket.connected) socket.emit("submit-answer", { guess: decoy });
+        }, 200 + Math.random() * 400);
+        setTimeout(() => sendGuess(round), 800 + Math.random() * 1200);
       });
-      socket.on("round-reveal", (d) => {
-        rec("round-reveal", bot.round, { correctAnswer: d.correctAnswer });
+      // Pick sent during answering only (EXP-148): the last one before the reveal is the one that counts
+      const sendGuess = (round) => {
+        if (!bot.guess || bot.round !== round || bot.phase !== "answering" || !socket.connected) return;
         socket.emit("submit-answer", { guess: bot.guess });
+        rec("guess-sent", round, { guess: bot.guess });
+      };
+      socket.on("round-reveal", (d) => {
+        bot.phase = "reveal";
+        rec("round-reveal", bot.round, { correctAnswer: d.correctAnswer });
+        // Fair play: a vote sent once the answer is public must be ignored (checked against round-scores)
+        if (i === 0 && !bot.isOwner && d.correctAnswer) {
+          socket.emit("submit-answer", { guess: d.correctAnswer });
+          rec("late-submit", bot.round, { guess: d.correctAnswer });
+        }
       });
-      socket.on("round-scores", (d) => rec("round-scores", d.round, { scores: d.scores }));
+      socket.on("round-scores", (d) => { bot.phase = "scores"; rec("round-scores", d.round, { scores: d.scores }); });
       socket.on("waiting-photo", (d) => rec("waiting-photo", d.round, d));
       socket.on("round-skipped", (d) => rec("round-skipped", d?.round ?? bot.round, d));
-      // Rejoin snapshot: catch up like the app does (guess in reveal, im-ready in the ready phase)
+      // Rejoin snapshot: catch up like the app does (pick again in answering, im-ready in the ready phase)
       socket.on("game-state", (d) => {
         rec("game-state", d.round, { phase: d.phase, paused: !!d.pause, pause: d.pause?.pause, maxPauses: d.pause?.maxPauses, started: d.started });
         if (!d.started) return;
@@ -345,7 +370,8 @@ function runRoom(roomIdx, fixedCode) {
         if (bot.isOwner) rec("owner-signal", d.round, { via: "game-state" });
         if (d.round !== bot.round) { bot.round = d.round; bot.guess = pickGuess(bot); }
         else if (bot.isOwner) bot.guess = "";
-        if (d.phase === "reveal") socket.emit("submit-answer", { guess: bot.guess });
+        bot.phase = d.phase;
+        if (d.phase === "answering") sendGuess(d.round); // a pick sent while offline was lost; never in reveal
         if (d.phase === null && i < N_BOTS - NO_READY) socket.emit("im-ready");
       });
       socket.on("game-paused", (d) => {
@@ -438,6 +464,19 @@ function analyse(r) {
     const sc = r.events.find((e) => e.ev === "round-scores" && e.round === round);
     const own = sc?.payload?.scores?.find((x) => x.username === answer);
     if (own && (own.lastGuess || own.lastAnswerCorrect)) consistency.push(`round ${round}: the owner's vote counted (${own.lastGuess})`);
+  }
+  // Answers freeze when answering ends (EXP-148): each bot's lastGuess in round-scores is its last pick sent while
+  // answering ("" if none); a late-submit (the revealed answer, sent at round-reveal) never counts
+  const scoredRounds = new Map();
+  for (const e of r.events.filter((x) => x.ev === "round-scores")) if (!scoredRounds.has(e.round)) scoredRounds.set(e.round, e);
+  for (const [round, sc] of scoredRounds) {
+    for (const row of sc.payload?.scores ?? []) {
+      if (wentOffline.has(row.username) || !r.players.includes(row.username)) continue;
+      const sent = r.events.filter((e) => e.bot === row.username && e.ev === "guess-sent" && e.round === round && e.t <= sc.t).pop();
+      const expected = sent?.payload.guess ?? "";
+      const late = r.events.some((e) => e.bot === row.username && e.ev === "late-submit" && e.round === round);
+      if (row.lastGuess !== expected) consistency.push(`round ${round}: ${row.username} scored with "${row.lastGuess}" but its last pick while answering was "${expected}"${late ? " (a vote sent during the reveal counted)" : ""}`);
+    }
   }
   // No double rounds: a player never gets two round-starts for the same round number
   const startKeys = starts.map((s) => `${s.bot}#${s.round}`);

@@ -32,6 +32,7 @@ import GalleryAccessModal from "@/app/components/modals/GalleryAccessModal";
 import { useGalleryAccessGuard } from "@/app/hooks/useGalleryAccessGuard";
 
 const { SERVER_URL } = getEnvVars();
+const PICK_SEND_INTERVAL = 200; // ms between submit-answer sends (server: 10 per socket, refilled 5/s)
 
 interface EmojiReactionData { id: string; username: string; emoji: string }
 type Phase = "waiting-photo" | "answering" | "reveal" | "scores" | null;
@@ -61,6 +62,36 @@ const GameScreen = () => {
   const [mySelection, _setMySelection] = useState("");
   const mySelectionRef = useRef("");
   const setMySelection = (val: string) => { mySelectionRef.current = val; _setMySelection(val); };
+  // My pick goes to the server as soon as it changes: answers are only taken while answering (EXP-148), the last counts.
+  // Rapid taps are coalesced: at most one send per PICK_SEND_INTERVAL, then a trailing send of the latest pick (within
+  // the server's 300 ms grace), so its per-socket rate limit never drops the pick that counts.
+  // pickSentRef: the current pick was emitted while connected (one made offline is lost: the rejoin drops it)
+  const pickSentRef = useRef(true);
+  const lastPickSentAt = useRef(0);
+  const pickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sendPick = () => {
+    pickTimer.current = null;
+    lastPickSentAt.current = Date.now();
+    pickSentRef.current = !!socket?.connected;
+    socket?.emit("submit-answer", { guess: mySelectionRef.current });
+  };
+  const pickGuess = (val: string) => {
+    setMySelection(val);
+    pickSentRef.current = false;
+    if (pickTimer.current) return; // the pending trailing send takes the latest pick
+    const wait = lastPickSentAt.current + PICK_SEND_INTERVAL - Date.now();
+    if (wait <= 0) { sendPick(); return; }
+    const pickRound = roundRef.current.round;
+    pickTimer.current = setTimeout(() => {
+      // A new round (or its photo wait) started meanwhile: that pick belonged to the previous one
+      if (roundRef.current.round === pickRound && roundRef.current.phase !== "waiting-photo") sendPick();
+      else pickTimer.current = null;
+    }, wait);
+  };
+  useEffect(() => () => { if (pickTimer.current) clearTimeout(pickTimer.current); }, []);
+  // The answer bar (server duration) has run out: no more picks this phase (phaseKey changes with every phase/resume)
+  const [answersClosedKey, setAnswersClosedKey] = useState(-1);
+  const answersClosed = phase === "answering" && answersClosedKey === phaseKey;
   // Current round/photo for the game-state handler (socket listeners would see stale state)
   const roundRef = useRef<{ round: number; photo: string | null; phase: Phase }>({ round: 0, photo: null, phase: null });
   roundRef.current = { round, photo, phase };
@@ -233,10 +264,9 @@ const GameScreen = () => {
       });
     });
 
-    // Atomic: answer revealed — submit answer NOW using ref (always current)
+    // Atomic: answer revealed (my pick was already sent when tapped; the server froze answers before this)
     socket.on("round-reveal", (data: { correctAnswer: string; duration: number }) => {
       console.log(`[GAME] round-reveal: ${data.correctAnswer}, my guess: ${mySelectionRef.current}`);
-      socket.emit("submit-answer", { guess: mySelectionRef.current || "" });
       setPhase("reveal");
       setCorrectAnswer(data.correctAnswer);
       setPhaseDuration(data.duration);
@@ -318,13 +348,16 @@ const GameScreen = () => {
       currentTurnRef.current = null;
       setTurnUploading(false);
       if (snap.phase !== "waiting-photo") setSkipNotice(null);
-      const result = applyGameState(snap, SERVER_URL, roundRef.current, {
+      const result = applyGameState(snap, SERVER_URL, { ...roundRef.current, pickSent: pickSentRef.current }, {
         setPhoto, setIsOwner, setRound, setPhase, setPhaseDuration, setPhaseKey,
         setCorrectAnswer, setScores, setMySelection, setGameHeld, setPressing, setPause,
       });
       if (result.gameOver) showGameOver(snap.scores);
       if (result.sendReady) socket.emit("im-ready");
-      if (result.submitGuess) socket.emit("submit-answer", { guess: mySelectionRef.current || "" });
+      if (result.resendGuess && mySelectionRef.current) {
+        socket.emit("submit-answer", { guess: mySelectionRef.current });
+        pickSentRef.current = true;
+      }
     });
 
     socket.on("game-over", (data: { finalScore: ScoreRound[] }) => {
@@ -336,7 +369,7 @@ const GameScreen = () => {
     // Someone left or was kicked: no longer an answer option (a disconnected player stays, they may come back)
     const dropPlayer = (name: string) => {
       setPlayers(withoutPlayer(playersRef.current, name));
-      if (roundRef.current.phase === "answering" && mySelectionRef.current === name) setMySelection("");
+      if (roundRef.current.phase === "answering" && mySelectionRef.current === name) pickGuess("");
     };
     socket.on("player-left", (name: string) => { console.log(`[GAME] player-left: ${name}`); dropPlayer(name); });
     socket.on("player-removed", (removed: Player) => { console.log(`[GAME] player-removed: ${removed.username}`); dropPlayer(removed.username); });
@@ -391,8 +424,8 @@ const GameScreen = () => {
       <TouchableOpacity
         testID={playerOptionId(item.username)}
         style={tw`p-3 rounded-lg mb-2 mx-1 flex-grow flex-basis-[48%] ${bg}`}
-        onPress={() => !isRevealOrScores && !isOwner && setMySelection(item.username)}
-        disabled={isRevealOrScores || isOwner}
+        onPress={() => phase === "answering" && !answersClosed && !isOwner && item.username !== mySelection && pickGuess(item.username)}
+        disabled={isRevealOrScores || isOwner || answersClosed}
       >
         <View style={tw`flex-row items-center justify-between`}>
           <Text style={tw`text-white text-base flex-1 ${isMe ? "font-bold" : ""}`} numberOfLines={1} ellipsizeMode="tail">
@@ -469,7 +502,11 @@ const GameScreen = () => {
                 {(phase === "answering" || phase === "scores") && phaseDuration > 0 && pauseEndsAt === null && (
                   <View style={tw`absolute top-15 left-0 right-0 p-4 items-center`}>
                     <View style={tw`w-full max-w-[500px]`}>
-                      <ProgressBar key={phaseKey} duration={phaseDuration} />
+                      <ProgressBar
+                        key={phaseKey}
+                        duration={phaseDuration}
+                        onEnd={phase === "answering" ? () => setAnswersClosedKey(phaseKey) : undefined}
+                      />
                     </View>
                   </View>
                 )}

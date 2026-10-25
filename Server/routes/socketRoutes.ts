@@ -18,6 +18,9 @@ const CHAT_COOLDOWN = 250;
 const JOIN_MAX_ATTEMPTS = 5;
 const JOIN_WINDOW_MS = 10_000;
 const chatCooldowns = new Map<string, number>();
+// submit-answer rate limit, per socket: token bucket of ANSWER_BURST refilled at ANSWER_RATE_PER_S
+const ANSWER_BURST = 10;
+const ANSWER_RATE_PER_S = 5;
 const MAX_USERNAME_LENGTH = 20;
 const MAX_CHAT_LENGTH = 100;
 const MAX_EMOJI_LENGTH = 16;
@@ -272,23 +275,20 @@ io.on("connection", (socket: Socket) => {
     } catch (e) { console.error("photo-unavailable error:", e); }
   });
 
-  const onAnswer = (data: { guess: string }) => {
-    const s = session(socket);
-    if (!s) return;
-    const guess = typeof data?.guess === "string" && data.guess.length <= MAX_USERNAME_LENGTH ? data.guess : "";
-    gameEngine.recordAnswer(s.room, s.player.username, guess);
-  };
-
+  // The app sends a pick on every tap: token bucket per socket (lives and dies with it), excess dropped silently
+  const answerBucket = { tokens: ANSWER_BURST, at: Date.now() };
   socket.on("submit-answer", (data: { guess: string }) => {
-    try { onAnswer(data); } catch (e) { console.error("submit-answer error:", e); }
-  });
-
-  // Legacy answer events → same handler
-  socket.on("correct-answer", (data: { guess: string }) => {
-    try { onAnswer(data); } catch (e) { console.error("answer error:", e); }
-  });
-  socket.on("incorrect-answer", (data: { guess: string }) => {
-    try { onAnswer(data); } catch (e) { console.error("answer error:", e); }
+    try {
+      const now = Date.now();
+      answerBucket.tokens = Math.min(ANSWER_BURST, answerBucket.tokens + ((now - answerBucket.at) / 1000) * ANSWER_RATE_PER_S);
+      answerBucket.at = now;
+      if (answerBucket.tokens < 1) return;
+      answerBucket.tokens--;
+      const s = session(socket);
+      if (!s) return;
+      const guess = typeof data?.guess === "string" && data.guess.length <= MAX_USERNAME_LENGTH ? data.guess : "";
+      gameEngine.recordAnswer(s.room, s.player.username, guess);
+    } catch (e) { console.error("submit-answer error:", e); }
   });
 
   // ── Hold ───────────────────────────────────────────

@@ -1,9 +1,11 @@
 import React from "react";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
+import { StyleSheet } from "react-native";
+import tw from "twrnc";
 import { applyGameState, formatCountdown, GameStateSetters, turnUploadAction } from "../app/utils/gameState";
 import { useGameConnection } from "../app/hooks/useGameConnection";
 import { GameStateSnapshot } from "../app/models/interfaces";
-import { TEST_IDS } from "../app/utils/testIds";
+import { TEST_IDS, playerOptionId } from "../app/utils/testIds";
 // Loaded with the file (jest.mock calls below are hoisted above it), not inside a test: a cold transform of
 // the screen and its imports must not count against the 5 s per-test timeout
 import GameScreen from "../app/screens/GameScreen";
@@ -83,7 +85,7 @@ describe("applyGameState", () => {
   it("renders the current answering phase with the remaining time and keeps the guess of the same round", () => {
     const s = makeSetters();
     const r = applyGameState(snapshot(), "http://srv", { round: 3, photo: "http://srv/temp/1-a.jpg" }, s);
-    expect(r).toEqual({ gameOver: false, sendReady: false, submitGuess: false });
+    expect(r).toEqual({ gameOver: false, sendReady: false, resendGuess: true });
     expect(s.setPhoto).toHaveBeenCalledWith("http://srv/temp/1-a.jpg");
     expect(s.setIsOwner).toHaveBeenCalledWith(false);
     expect(s.setPhase).toHaveBeenCalledWith("answering");
@@ -108,13 +110,30 @@ describe("applyGameState", () => {
     expect(s.setMySelection).toHaveBeenCalledWith("");
   });
 
-  it("asks to submit the guess in reveal and shows scores in scores", () => {
+  // EXP-148: answers freeze when answering ends, so a guess is only (re)sent in answering, never in reveal
+  it("never asks to send the guess in reveal, and shows scores in scores", () => {
     const s = makeSetters();
-    expect(applyGameState(snapshot({ phase: "reveal", correctAnswer: "alice" }), "", { round: 3, photo: "http://srv/temp/1-a.jpg" }, s).submitGuess).toBe(true);
+    expect(applyGameState(snapshot({ phase: "reveal", correctAnswer: "alice" }), "", { round: 3, photo: "http://srv/temp/1-a.jpg" }, s).resendGuess).toBe(false);
     expect(s.setCorrectAnswer).toHaveBeenCalledWith("alice");
     const s2 = makeSetters();
     applyGameState(snapshot({ phase: "scores", correctAnswer: "alice" }), "", { round: 3, photo: "http://srv/temp/1-a.jpg" }, s2);
     expect(s2.setScores).toHaveBeenCalledWith(snapshot().scores);
+  });
+
+  // EXP-148: a pick made while offline never reached the server; once answers are frozen it must not be coloured
+  it("clears a pick that was never sent when a same-round snapshot is past answering", () => {
+    for (const phase of ["reveal", "scores"] as const) {
+      const s = makeSetters();
+      applyGameState(snapshot({ phase, correctAnswer: "alice" }), "http://srv", { round: 3, photo: "http://srv/temp/1-a.jpg", pickSent: false }, s);
+      expect(s.setMySelection).toHaveBeenCalledWith("");
+      const sent = makeSetters();
+      applyGameState(snapshot({ phase, correctAnswer: "alice" }), "http://srv", { round: 3, photo: "http://srv/temp/1-a.jpg", pickSent: true }, sent);
+      expect(sent.setMySelection).not.toHaveBeenCalled();
+    }
+    // Still answering: kept (and re-sent by the screen)
+    const a = makeSetters();
+    applyGameState(snapshot(), "http://srv", { round: 3, photo: "http://srv/temp/1-a.jpg", pickSent: false }, a);
+    expect(a.setMySelection).not.toHaveBeenCalled();
   });
 
   it("shows the server's pause countdown", () => {
@@ -225,6 +244,7 @@ describe("useGameConnection", () => {
 
 const mockReplace = jest.fn();
 const mockSocket = new FakeSocket();
+const mockPlayersProvider: { current: { username: string; points: number; isHost: boolean }[] } = { current: [] };
 jest.mock("expo-router", () => ({
   useRouter: () => ({ replace: mockReplace }),
   useFocusEffect: () => {},
@@ -235,7 +255,7 @@ jest.mock("../app/providers/GameContext", () => {
     ...actual,
     useGameContext: () => ({
       username: "bob", gameCode: "123456", socket: mockSocket, endSocket: jest.fn(),
-      playersProvider: [], setPlayersProvider: jest.fn(), roundsOfGame: 10, plantedPhotoUri: null,
+      playersProvider: mockPlayersProvider.current, setPlayersProvider: jest.fn(), roundsOfGame: 10, plantedPhotoUri: null,
       plantedPhotoSent: false, plantPhoto: jest.fn(), getRejoinToken: async () => "tok-123", saveRejoinToken: jest.fn(),
     }),
   };
@@ -291,12 +311,53 @@ describe("GameScreen reconnect handling", () => {
     act(() => r.unmount());
   });
 
-  it("submits the guess when the snapshot says reveal (the round-reveal was missed)", async () => {
+  // EXP-148: the server only takes answers while answering; a pick sent while offline is re-sent from the snapshot
+  it("sends nothing when the snapshot says reveal (the answer is public by then)", async () => {
     let r!: TestRenderer.ReactTestRenderer;
     await act(async () => { r = TestRenderer.create(<GameScreen />); });
     mockSocket.emitted = [];
     act(() => mockSocket.fire("game-state", snapshot({ phase: "reveal", correctAnswer: "alice" })));
-    expect(mockSocket.emitted).toContainEqual(["submit-answer", { guess: "" }]);
+    expect(mockSocket.emitted.filter(([ev]) => ev === "submit-answer")).toEqual([]);
     act(() => r.unmount());
+  });
+
+  it("re-sends my pick of the same round when the snapshot says answering", async () => {
+    const players = [
+      { username: "alice", points: 2, isHost: true, connected: true, lastAnswerCorrect: false, lastGuess: "" },
+      { username: "bob", points: 0, isHost: false, connected: true, lastAnswerCorrect: false, lastGuess: "" },
+    ];
+    mockPlayersProvider.current = players;
+    let r!: TestRenderer.ReactTestRenderer;
+    await act(async () => { r = TestRenderer.create(<GameScreen />); });
+    act(() => mockSocket.fire("game-state", snapshot({ players })));
+    const pick = r.root.find((n) => n.props.testID === playerOptionId("alice") && typeof n.props.onPress === "function");
+    act(() => pick.props.onPress());
+    expect(mockSocket.emitted).toContainEqual(["submit-answer", { guess: "alice" }]);
+    mockSocket.emitted = [];
+    act(() => mockSocket.fire("game-state", snapshot({ players, duration: 3000 })));
+    expect(mockSocket.emitted.filter(([ev]) => ev === "submit-answer")).toEqual([["submit-answer", { guess: "alice" }]]);
+    act(() => r.unmount());
+    mockPlayersProvider.current = [];
+  });
+
+  it("drops the colour of a pick made while offline when the snapshot comes back in reveal", async () => {
+    const players = [
+      { username: "alice", points: 2, isHost: true, connected: true, lastAnswerCorrect: false, lastGuess: "" },
+      { username: "bob", points: 0, isHost: false, connected: true, lastAnswerCorrect: false, lastGuess: "" },
+    ];
+    mockPlayersProvider.current = players;
+    let r!: TestRenderer.ReactTestRenderer;
+    await act(async () => { r = TestRenderer.create(<GameScreen />); });
+    act(() => mockSocket.fire("game-state", snapshot({ players })));
+    const option = () => r.root.findAll((n) => n.props.testID === playerOptionId("alice") && typeof n.type === "string")[0];
+    const bg = () => StyleSheet.flatten(option().props.style).backgroundColor;
+    act(() => { mockSocket.connected = false; mockSocket.fire("disconnect", "transport close"); });
+    act(() => r.root.find((n) => n.props.testID === playerOptionId("alice") && typeof n.props.onPress === "function").props.onPress());
+    expect(bg()).toBe(tw`bg-blue-500`.backgroundColor);
+    mockSocket.connected = true;
+    act(() => mockSocket.fire("game-state", snapshot({ players, phase: "reveal", correctAnswer: "alice" })));
+    expect(bg()).toBe(tw`bg-gray-700`.backgroundColor); // never reached the server: neither green nor red
+    act(() => r.unmount());
+    mockPlayersProvider.current = [];
   });
 });

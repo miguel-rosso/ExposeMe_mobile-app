@@ -4,6 +4,7 @@ import { io as connect, Socket as ClientSocket } from "socket.io-client";
 import { io, server } from "../app";
 import { roomManager } from "../routes/socketRoutes";
 import { registerUpload } from "./helpers";
+import { ANSWER_GRACE } from "../managers/GameEngine";
 
 // EXP-128: real server + real clients, every event each socket receives is recorded. Until round-reveal, no
 // non-owner receives the photo owner's identity (no `owner` key, no `isOwner: true`, the owner's name nowhere but in
@@ -98,7 +99,7 @@ describe("photo owner secrecy over the socket (EXP-128)", () => {
     registerUpload(gameCode, owner, PHOTO);
     socks[owner].emit("photo-sent", { photo: PHOTO });
     const startData = await Promise.all(starts);
-    NAMES.forEach((n, i) => expect(startData[i]).toEqual({ photo: PHOTO, round: 1, duration: 8_000, isOwner: n === owner }));
+    NAMES.forEach((n, i) => expect(startData[i]).toEqual({ photo: PHOTO, round: 1, duration: 8_000 - ANSWER_GRACE, isOwner: n === owner }));
 
     // The owner tries to vote for themselves: never recorded
     socks[owner].emit("submit-answer", { guess: owner });

@@ -117,8 +117,10 @@ describe("GameScreen: players leaving mid-game (EXP-042)", () => {
   it("drops my pick if that player leaves before the reveal", () => {
     press(r.root, "carol");
     act(() => mockSocket.fire("player-left", "carol"));
+    act(() => { jest.advanceTimersByTime(200); }); // coalesced: the withdrawal goes out 200 ms after the pick
     act(() => mockSocket.fire("round-reveal", { correctAnswer: "alice", duration: 3_000 }));
-    expect(mockSocket.emitted.filter(([ev]) => ev === "submit-answer").map(([, d]) => d)).toEqual([{ guess: "" }]);
+    // Sent when tapped, then withdrawn when carol left (EXP-148: nothing is sent at the reveal)
+    expect(mockSocket.emitted.filter(([ev]) => ev === "submit-answer").map(([, d]) => d)).toEqual([{ guess: "carol" }, { guess: "" }]);
   });
 
   it("keeps my pick when somebody else leaves", () => {

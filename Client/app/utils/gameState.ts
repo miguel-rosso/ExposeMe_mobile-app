@@ -24,21 +24,23 @@ export interface GameStateResult {
   gameOver: boolean;
   /** Still in the ready phase: send im-ready again (one sent while offline was dropped) */
   sendReady: boolean;
-  /** Reveal phase: submit the current guess (the round-reveal that triggers it was missed) */
-  submitGuess: boolean;
+  /** Answering phase: send the current pick again (one sent while offline was dropped). Never in reveal: answers
+   *  freeze when answering ends, since round-reveal makes the answer public */
+  resendGuess: boolean;
 }
 
 /**
  * Renders the `game-state` snapshot a rejoining player receives. `current` is the round and photo URL the screen
- * showed before the reconnect: the guess is kept only if it is still the same round.
+ * showed before the reconnect: the guess is kept only if it is still the same round. `pickSent: false` means the
+ * current pick was made while disconnected: past answering (answers frozen) it never counted, so it is cleared.
  */
 export const applyGameState = (
   snap: GameStateSnapshot,
   serverUrl: string,
-  current: { round: number; photo: string | null },
+  current: { round: number; photo: string | null; pickSent?: boolean },
   s: GameStateSetters
 ): GameStateResult => {
-  const result: GameStateResult = { gameOver: false, sendReady: false, submitGuess: false };
+  const result: GameStateResult = { gameOver: false, sendReady: false, resendGuess: false };
   s.setPressing(false);
   if (!snap.started) {
     s.setPause(null);
@@ -52,7 +54,7 @@ export const applyGameState = (
   if (inRound && snap.photo) {
     const photo = `${serverUrl}${snap.photo}`;
     const sameRound = snap.round === current.round && photo === current.photo;
-    if (!sameRound) s.setMySelection("");
+    if (!sameRound || (snap.phase !== "answering" && current.pickSent === false)) s.setMySelection("");
     s.setPhoto(photo);
     s.setIsOwner(snap.isOwner === true);
     s.setRound(snap.round);
@@ -61,7 +63,7 @@ export const applyGameState = (
     s.setPhaseKey((k) => k + 1);
     s.setCorrectAnswer(snap.correctAnswer ?? "");
     s.setScores(snap.phase === "scores" ? snap.scores : null);
-    return { ...result, submitGuess: snap.phase === "reveal" };
+    return { ...result, resendGuess: snap.phase === "answering" };
   }
 
   // Waiting for the next photo: same screen as `waiting-photo` (snapshot round is the last played one)

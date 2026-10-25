@@ -6,6 +6,9 @@ import { RoomManager } from "./RoomManager";
 import { uploadStore } from "../middlewares/uploadStore";
 
 const ANSWER_TIME = 8_000;
+// Clients are shown ANSWER_TIME minus this, while answers are taken until ANSWER_TIME: a tap at the very end of the
+// bar still reaches the server in "answering" (latency margin)
+export const ANSWER_GRACE = 300;
 const REVEAL_TIME = 3_000;
 const SCORE_DISPLAY_TIME = 5_000;
 const GAME_START_DELAY = 1_000;
@@ -57,8 +60,6 @@ export class GameEngine {
   private plantedWaits = new WeakMap<Room, PlantedWait>();
   /** How long this room's real photo waits took (ms, waiting-photo → accepted photo-sent), newest last */
   private waitHistory = new WeakMap<Room, number[]>();
-  /** Players who already answered the round in play (an empty guess counts: lastGuess "" can't tell them apart) */
-  private answered = new WeakMap<Room, Set<string>>();
 
   constructor(private io: Server, private roomManager: RoomManager) {}
 
@@ -162,8 +163,7 @@ export class GameEngine {
    * payload with `isOwner: false`, except the owner's socket, which gets `isOwner: true` (hold button, no self-vote).
    */
   private emitRoundStart(room: Room, owner: Player, photo: string): void {
-    this.answered.set(room, new Set()); // every round that takes answers starts here
-    const data: Omit<RoundStartData, "isOwner"> = { photo, round: room.round, duration: ANSWER_TIME };
+    const data: Omit<RoundStartData, "isOwner"> = { photo, round: room.round, duration: ANSWER_TIME - ANSWER_GRACE };
     // Relies on a rejoin evicting/disconnecting the owner's replaced socket, so only owner.socketId is the owner's
 
     this.io.to(room.gameCode).except(owner.socketId).emit("round-start", { ...data, isOwner: false } satisfies RoundStartData);
@@ -194,18 +194,17 @@ export class GameEngine {
   }
 
   recordAnswer(room: Room, username: string, guess: string): void {
-    // Accept during "answering" AND "reveal" (client submits when reveal arrives)
-    if (room.phase !== "answering" && room.phase !== "reveal") return;
+    // Only while answering: round-reveal broadcasts correctAnswer, so answers freeze when answering ends
+    if (room.phase !== "answering") return;
     const player = room.players.find((p) => p.username === username);
     if (!player) return;
     // The owner knows the answer: their vote is never recorded nor scored
     if (player === room.currentPlayer) return;
-    // Only accept first answer per round (ignore duplicates, also after an empty one)
-    const answered = this.answered.get(room) ?? new Set<string>();
-    if (answered.has(username) || player.lastGuess !== "") return;
-    answered.add(username);
-    this.answered.set(room, answered);
-    const correct = room.currentPlayer?.username === guess;
+    // Only players still in the room are options (a player who left, the owner included, can't be voted for)
+    if (guess !== "" && !room.players.some((p) => p.username === guess)) return;
+    // The app sends its pick on every tap: the last one replaces the previous (and its point)
+    if (player.lastAnswerCorrect) player.points--;
+    const correct = guess !== "" && room.currentPlayer?.username === guess;
     player.lastGuess = guess; // "" = no guess (the client shows it translated)
     player.lastAnswerCorrect = correct;
     if (correct) player.points++;
@@ -325,7 +324,7 @@ export class GameEngine {
       isOwner: inRound && !!recipient && room.currentPlayer === recipient,
       photo: inRound ? room.currentPhoto : null,
       correctAnswer: shown ? room.currentPlayer?.username ?? null : null,
-      duration: room.started ? this.shownDuration(room) ?? duration : 0,
+      duration: room.started ? this.clientDuration(room, duration) : 0,
       held: room.held,
       pause: room.paused ? this.pauseInfo(room) : null,
       scores,
@@ -394,7 +393,7 @@ export class GameEngine {
       room._timerDuration = Math.max(min, room._timerDuration);
     }
     console.log(`[${room.gameCode}] RESUMED "${room.phase}" with ${room._timerDuration}ms (${room._pauseCount}/${MAX_PAUSES} pauses counted)`);
-    this.io.to(room.gameCode).emit("game-resumed", { phase: room.phase, duration: this.shownDuration(room) ?? room._timerDuration });
+    this.io.to(room.gameCode).emit("game-resumed", { phase: room.phase, duration: this.clientDuration(room, room._timerDuration) });
     // A photo sent while paused was ignored: ask the owner again
     if (room.phase === "waiting-photo" && room.currentPlayer?.connected) {
       this.io.to(room.currentPlayer.socketId).emit("your-turn", this.yourTurn(room));
@@ -528,6 +527,16 @@ export class GameEngine {
     const wait = this.plantedWait(room);
     if (!wait) return undefined;
     return Math.max(0, wait.shown - (wait.shownSince === null ? 0 : Date.now() - wait.shownSince));
+  }
+
+  /**
+   * Countdown sent to clients for a phase timer with `remaining` ms left: the planted wait's shown countdown, and in
+   * answering ANSWER_GRACE less than the real timer (answers are still taken until it fires).
+   */
+  private clientDuration(room: Room, remaining: number): number {
+    const planted = this.shownDuration(room);
+    if (planted !== undefined) return planted;
+    return room.phase === "answering" ? Math.max(0, remaining - ANSWER_GRACE) : remaining;
   }
 
   /** How long until a planted photo appears: a random past real wait of this room with jitter, else 1-3 s. */

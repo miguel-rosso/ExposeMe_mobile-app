@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GameEngine, MAX_PAUSES, MAX_TOTAL_PAUSES, PAUSE_GRACE, PAUSE_MIN_DURATION, PAUSE_TIMEOUT } from "../managers/GameEngine";
+import { ANSWER_GRACE, GameEngine, MAX_PAUSES, MAX_TOTAL_PAUSES, PAUSE_GRACE, PAUSE_MIN_DURATION, PAUSE_TIMEOUT } from "../managers/GameEngine";
 import { RoomManager } from "../managers/RoomManager";
 import { GameStateSnapshot, Player, Room } from "../models/interfaces";
 import { CapturedEmit, createFakeIo } from "./helpers";
@@ -91,10 +91,10 @@ describe("pause with fewer than 2 connected players", () => {
 
     const p = rejoin(other);
     expect(room.paused).toBe(false);
-    expect(last("game-resumed")).toMatchObject({ target: room.gameCode, args: [{ phase: "answering", duration: ANSWER_TIME - 3_000 }] });
+    expect(last("game-resumed")).toMatchObject({ target: room.gameCode, args: [{ phase: "answering", duration: ANSWER_TIME - 3_000 - ANSWER_GRACE }] });
     // Snapshot to the returning socket, after the resume: same round, photo, frozen time, no stale pause
     const snap = snapshotFor(p.socketId);
-    expect(snap).toMatchObject({ started: true, phase: "answering", round: 1, isOwner: false, photo: PHOTO, correctAnswer: null, duration: ANSWER_TIME - 3_000, pause: null });
+    expect(snap).toMatchObject({ started: true, phase: "answering", round: 1, isOwner: false, photo: PHOTO, correctAnswer: null, duration: ANSWER_TIME - 3_000 - ANSWER_GRACE, pause: null });
     expect(JSON.stringify(snap)).not.toContain("rejoinToken");
     const order = emits.map((e) => e.event);
     expect(order.lastIndexOf("game-state")).toBeGreaterThan(order.lastIndexOf("game-resumed"));
@@ -251,9 +251,9 @@ describe("rejoin without a pause (3+ players)", () => {
     expect(snapshotFor(p.socketId)).toMatchObject({ phase: "reveal", round: 1, isOwner: false, photo: PHOTO, correctAnswer: owner, duration: REVEAL_TIME - 1_000, pause: null, held: false });
     expect(events("game-paused")).toHaveLength(0);
     expect(events("game-resumed")).toHaveLength(0);
-    // A guess sent after the snapshot still counts during reveal
+    // The answer is public in reveal: a guess sent after the snapshot doesn't count (EXP-148)
     engine.recordAnswer(room, away, owner);
-    expect(player(away).points).toBe(1);
+    expect(player(away)).toMatchObject({ points: 0, lastGuess: "" });
   });
 
   it("the photo owner returning while their photo is awaited gets your-turn again", () => {

@@ -4,17 +4,21 @@ import tw from "twrnc";
 
 interface ProgressBarProps {
   duration: number;
+  /** Called once when the bar fills up (not when it is unmounted or restarted first) */
+  onEnd?: () => void;
 }
 
-const ProgressBar: React.FC<ProgressBarProps> = ({ duration }) => {
+const ProgressBar: React.FC<ProgressBarProps> = ({ duration, onEnd }) => {
   const progress = useRef(new Animated.Value(0)).current;
+  const onEndRef = useRef(onEnd);
+  onEndRef.current = onEnd;
 
   useEffect(() => {
     Animated.timing(progress, {
       toValue: 1,
       duration: duration,
       useNativeDriver: false,
-    }).start();
+    }).start(({ finished }) => { if (finished) onEndRef.current?.(); });
   }, [duration]);
 
   return (

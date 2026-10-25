@@ -9,6 +9,17 @@ appId: com.socketNull.ExposeMe
 - tapOn:
     id: "username-input"
 - inputText: ${USERNAME}
+# With two iOS simulators driven in parallel the typed name is sometimes lost (field still empty, so the
+# join button does nothing): type it again once if the field does not hold the name
+- runFlow:
+    when:
+      notVisible:
+        id: "username-input"
+        text: "${USERNAME}"
+    commands:
+      - tapOn:
+          id: "username-input"
+      - inputText: ${USERNAME}
 # Submit instead of hideKeyboard: on Android hideKeyboard sends Back, which (SDK 58) also closes the app
 # on the home screen; on iOS 26 hideKeyboard leaves the keyboard covering the join button.
 - pressKey: Enter

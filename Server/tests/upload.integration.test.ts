@@ -44,17 +44,20 @@ async function gpsJpeg(): Promise<Buffer> {
     .toBuffer();
 }
 
-async function uploadFile(data: Buffer, filename: string, type = "image/jpeg") {
+// Uploads need a room member's credentials (a lobby room created in beforeAll; see uploadAccess.integration.test.ts)
+let auth: Record<string, string> = {};
+
+async function uploadFile(data: Buffer, filename: string, type = "image/jpeg", headers = auth) {
   uploadsDone++;
   const form = new FormData();
   form.append("image", new Blob([new Uint8Array(data)], { type }), filename);
-  return fetch(`${url}/upload`, { method: "POST", body: form });
+  return fetch(`${url}/upload`, { method: "POST", body: form, headers });
 }
 
-async function fetchUploaded(res: Response): Promise<{ path: string; body: Buffer }> {
+async function fetchUploaded(res: Response, headers = auth): Promise<{ path: string; body: Buffer }> {
   expect(res.status).toBe(200);
   const { url: p } = (await res.json()) as { url: string };
-  const got = await fetch(`${url}${p}`);
+  const got = await fetch(`${url}${p}`, { headers });
   expect(got.status).toBe(200);
   return { path: p, body: Buffer.from(await got.arrayBuffer()) };
 }
@@ -89,6 +92,11 @@ beforeAll(async () => {
   vi.spyOn(console, "log").mockImplementation(() => {});
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const host = await newClient();
+  const created = once<{ room: { gameCode: string }; rejoinToken: string }>(host, "room-of-game");
+  host.emit("join-create-game", { gameCode: null, username: "uploader" });
+  const { room, rejoinToken } = await created;
+  auth = { Authorization: `Bearer ${rejoinToken}`, "X-Game-Code": room.gameCode };
 });
 
 afterAll(async () => {
@@ -170,7 +178,7 @@ describe("POST /upload", () => {
 
   it("answers malformed uploads with JSON, never an HTML error page", async () => {
     const tiny = await sharp({ create: { width: 2, height: 2, channels: 3, background: "#000" } }).jpeg().toBuffer();
-    const post = (form: FormData) => { uploadsDone++; return fetch(`${url}/upload`, { method: "POST", body: form }); };
+    const post = (form: FormData) => { uploadsDone++; return fetch(`${url}/upload`, { method: "POST", body: form, headers: auth }); };
     const expectJson = async (res: Response, status: number) => {
       expect(res.status).toBe(status);
       expect(res.headers.get("content-type")).toMatch(/application\/json/);
@@ -223,18 +231,20 @@ describe("POST /upload", () => {
     for (const [name, data] of files) expect({ name, status: (await uploadFile(data, name)).status }).toEqual({ name, status: 415 });
   });
 
-  it("an uploaded path is accepted by photo-sent", async () => {
-    const { path: photo } = await fetchUploaded(await uploadFile(await gpsJpeg(), LEAKY_NAME));
-
+  it("the owner's uploaded path is accepted by photo-sent", async () => {
     const [alice, bob, carol] = [await newClient(), await newClient(), await newClient()];
     const byName: Record<string, ClientSocket> = { alice, bob, carol };
-    const created = once<{ room: { gameCode: string } }>(alice, "room-of-game");
+    const tokens: Record<string, string> = {};
+    const created = once<{ room: { gameCode: string }; rejoinToken: string }>(alice, "room-of-game");
     alice.emit("join-create-game", { gameCode: null, username: "alice" });
-    const gameCode = (await created).room.gameCode;
+    const { room: { gameCode }, rejoinToken } = await created;
+    tokens.alice = rejoinToken;
     for (const [name, sock] of [["bob", bob], ["carol", carol]] as const) {
-      const joined = once<{ success: boolean }>(sock, "room-of-game");
+      const joined = once<{ success: boolean; rejoinToken: string }>(sock, "room-of-game");
       sock.emit("join-create-game", { gameCode, username: name });
-      expect((await joined).success).toBe(true);
+      const j = await joined;
+      expect(j.success).toBe(true);
+      tokens[name] = j.rejoinToken;
     }
     const started = [alice, bob, carol].map((c) => once(c, "game-started"));
     alice.emit("start-game", { gameCode });
@@ -245,6 +255,8 @@ describe("POST /upload", () => {
     });
     for (const [name, sock] of Object.entries(byName)) sock.emit("im-ready", { gameCode, username: name });
     const owner = await turn;
+    const ownerAuth = { Authorization: `Bearer ${tokens[owner]}`, "X-Game-Code": gameCode };
+    const { path: photo } = await fetchUploaded(await uploadFile(await gpsJpeg(), LEAKY_NAME, "image/jpeg", ownerAuth), ownerAuth);
 
     const roundStart = once<{ photo: string; owner: string }>(alice, "round-start");
     byName[owner].emit("photo-sent", { photo, gameCode });

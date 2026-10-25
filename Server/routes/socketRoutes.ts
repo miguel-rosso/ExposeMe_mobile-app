@@ -2,10 +2,14 @@ import { Socket } from "socket.io";
 import { io } from "../app";
 import { RoomManager } from "../managers/RoomManager";
 import { GameEngine } from "../managers/GameEngine";
+import { acceptsPlantedPhoto, setUploadRooms } from "../middlewares/uploadAccess";
+import { uploadStore } from "../middlewares/uploadStore";
 import { JoinCreateGameData, PhotoUnavailableData, Player, Room } from "../models/interfaces";
 
 const roomManager = new RoomManager();
 const gameEngine = new GameEngine(io, roomManager);
+// POST /upload and GET /temp authenticate room members against these rooms
+setUploadRooms(roomManager);
 /** Exported for test teardown (roomManager.clear()). */
 export { roomManager };
 
@@ -23,6 +27,13 @@ const UPLOAD_PATH_RE = /^\/temp\/[0-9a-f]{32}\.(?:jpg|png|webp)$/;
 
 function isUploadPath(value: unknown): value is string {
   return typeof value === "string" && value.length <= MAX_PHOTO_URL_LENGTH && UPLOAD_PATH_RE.test(value);
+}
+
+/** A /upload path that this player uploaded in this room (and that hasn't been deleted). */
+function isOwnUpload(value: unknown, room: Room, player: Player): value is string {
+  if (!isUploadPath(value)) return false;
+  const record = uploadStore.get(value.slice("/temp/".length));
+  return record?.gameCode === room.gameCode && record.username === player.username;
 }
 
 /**
@@ -238,11 +249,11 @@ io.on("connection", (socket: Socket) => {
 
   // ── In-game ────────────────────────────────────────
 
-  // Only the current photo owner, and only with a path returned by /upload
+  // Only the current photo owner, and only with a path this player uploaded in this room
   socket.on("photo-sent", (data: { photo: string }) => {
     try {
       const s = session(socket);
-      if (!s || !isUploadPath(data?.photo)) return;
+      if (!s || !isOwnUpload(data?.photo, s.room, s.player)) return;
       gameEngine.onPhotoReceived(s.room, data.photo, s.player.username);
     } catch (e) { console.error("photo-sent error:", e); }
   });
@@ -327,10 +338,10 @@ io.on("connection", (socket: Socket) => {
     try {
       const s = session(socket);
       const photoUrl = data?.photoUrl;
-      if (!s || !isUploadPath(photoUrl)) return;
+      if (!s || !isOwnUpload(photoUrl, s.room, s.player)) return;
       const { room, player } = s;
-      // Accept planted photos until the first round actually starts playing
-      if (room.phase === "answering" || room.phase === "reveal" || room.phase === "scores") return;
+      // Accept planted photos until the first round actually starts playing (same rule as POST /upload)
+      if (!acceptsPlantedPhoto(room)) return;
       player.plantedPhoto = photoUrl;
       console.log(`[${room.gameCode}] Planted photo received from ${player.username}`);
     } catch (e) { console.error("plant-photo error:", e); }

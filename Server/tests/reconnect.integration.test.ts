@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { io as connect, Socket as ClientSocket } from "socket.io-client";
 import { io, server } from "../app";
 import { roomManager } from "../routes/socketRoutes";
+import { registerUpload } from "./helpers";
 
 // EXP-006: a player who drops mid-round and comes back on a new socket (socket.io reconnect) rejoins
 // with the rejoin token and gets a game-state snapshot; with only 2 players the game pauses meanwhile.
@@ -63,6 +64,7 @@ async function gameInAnsweringPhase(names: string[]) {
   names.forEach((n) => socks[n].emit("im-ready"));
   const owner = await Promise.race(turns.map((p) => p.then((n) => n ?? new Promise<string>(() => {}))));
   const starts = names.map((n) => once<{ round: number; owner: string }>(socks[n], "round-start"));
+  registerUpload(gameCode, owner, PHOTO); // as if the owner had uploaded it (photo-sent takes only own uploads)
   socks[owner].emit("photo-sent", { photo: PHOTO });
   await Promise.all(starts);
   return { gameCode, socks, tokens, owner };
@@ -221,6 +223,7 @@ describe("reconnect mid-round", () => {
     live.forEach((c) => c.emit("im-ready"));
     const owner = await Promise.race(turns.map((p) => p.then((c) => c ?? new Promise<ClientSocket>(() => {}))));
     const starts = live.map((c) => once(c, "round-start"));
+    registerUpload(gameCode, ["host", "bob", "dave"][live.indexOf(owner)], PHOTO);
     owner.emit("photo-sent", { photo: PHOTO });
     await Promise.all(starts);
     expect(await Promise.all(cutOff)).toEqual([true, true, true]);

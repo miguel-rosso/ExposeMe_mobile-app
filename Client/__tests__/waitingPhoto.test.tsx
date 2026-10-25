@@ -57,7 +57,11 @@ jest.mock("../app/providers/PhotoContext", () => ({
 }));
 jest.mock("@/app/utils/uploadPhoto", () => ({ uploadPhoto: (...a: unknown[]) => mockUploadPhoto(...a) }));
 jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/en").default }) }));
-jest.mock("@/app/components/PhotoComponent", () => () => null);
+const mockPhotoProps: { photoUrl: string; headers?: Record<string, string> }[] = [];
+jest.mock("@/app/components/PhotoComponent", () => (p: { photoUrl: string; headers?: Record<string, string> }) => {
+  mockPhotoProps.push(p);
+  return null;
+});
 jest.mock("@/app/components/modals/ScoreModal", () => () => null);
 jest.mock("@/app/components/modals/FinalScoreModal", () => () => null);
 jest.mock("@/app/components/modals/WinnerModal", () => () => null);
@@ -157,6 +161,15 @@ describe("GameScreen while a photo is awaited", () => {
     expect(has(r.root, TEST_IDS.roundSkippedNotice)).toBe(false);
   });
 
+  // EXP-069: the room's photo is only requested with the room credentials
+  it("shows the round's photo only with the room credentials as image headers", async () => {
+    await flush();
+    mockPhotoProps.length = 0;
+    act(() => mockSocket.fire("round-start", { photo: "/temp/y.jpg", owner: "carol", round: 1, duration: 8_000 }));
+    expect(mockPhotoProps.length).toBeGreaterThan(0);
+    for (const p of mockPhotoProps) expect(p.headers).toEqual({ Authorization: "Bearer tok-123", "X-Game-Code": "123456" });
+  });
+
   it("my turn shows 'uploading your photo' and sends the uploaded photo", async () => {
     mockPickGamePhoto.mockResolvedValue({ uri: "file:///p1.jpg" });
     mockUploadPhoto.mockResolvedValue("/temp/" + "a".repeat(32) + ".jpg");
@@ -166,6 +179,8 @@ describe("GameScreen while a photo is awaited", () => {
     await flush();
     expect(mockSocket.emitted).toContainEqual(["photo-sent", { photo: "/temp/" + "a".repeat(32) + ".jpg" }]);
     expect(mockSocket.emitted.some(([ev]) => ev === "photo-unavailable")).toBe(false);
+    // EXP-069: uploaded as this room member (room code + rejoin token)
+    expect(mockUploadPhoto).toHaveBeenCalledWith(expect.any(String), "file:///p1.jpg", { gameCode: "123456", token: "tok-123" });
   });
 
   it("no gallery access on my turn: reports photo-unavailable, stays in the game and explains why (EXP-040/041)", async () => {

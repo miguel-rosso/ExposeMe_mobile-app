@@ -1,5 +1,6 @@
 import { randomBytes, timingSafeEqual } from "crypto";
 import { Player, PublicPlayer, Room, SafeRoom } from "../models/interfaces";
+import { uploadStore } from "../middlewares/uploadStore";
 
 const ROOM_CLEANUP_DELAY = 30 * 60 * 1000;
 /** Cleanup delay for rooms that never had a second player (created and abandoned). */
@@ -95,6 +96,7 @@ export class RoomManager {
     const idx = room.players.findIndex((p) => p.username === username);
     if (idx === -1) return { removed: false, isEmpty: false };
     const player = room.players.splice(idx, 1)[0];
+    this.releasePlayerUploads(room, player);
     let newHost: Player | undefined;
     if (player.isHost && room.players.length > 0) {
       room.players[0].isHost = true;
@@ -123,7 +125,15 @@ export class RoomManager {
     if (!room) return undefined;
     const idx = room.players.findIndex((p) => p.socketId === socketId);
     if (idx === -1) return undefined;
-    return room.players.splice(idx, 1)[0];
+    const player = room.players.splice(idx, 1)[0];
+    this.releasePlayerUploads(room, player);
+    return player;
+  }
+
+  /** A player left / was removed: their photos go, except the one on screen this round (deleted at game over). */
+  private releasePlayerUploads(room: Room, player: Player): void {
+    const onScreen = room.currentPhoto?.startsWith("/temp/") ? room.currentPhoto.slice("/temp/".length) : null;
+    uploadStore.releasePlayer(room.gameCode, player.username, onScreen);
   }
 
   setRounds(gameCode: string, rounds: number): boolean {
@@ -131,6 +141,13 @@ export class RoomManager {
     if (!room) return false;
     room.rounds = rounds;
     return true;
+  }
+
+  /** Room member whose rejoin token is `token` (constant-time compare), for HTTP access to the room's photos. */
+  authenticate(gameCode: string, token: string): { room: Room; player: Player } | null {
+    const room = this.rooms.get(gameCode);
+    const player = room?.players.find((p) => this.tokenMatches(p.rejoinToken, token));
+    return room && player ? { room, player } : null;
   }
 
   getPlayer(gameCode: string, username: string): Player | undefined {
@@ -168,6 +185,7 @@ export class RoomManager {
     if (room) this.clearAllTimers(room);
     this.rooms.delete(gameCode);
     this.cancelRoomDeletion(gameCode);
+    uploadStore.dropRoom(gameCode); // its photos go with it
   }
 
   /** Delete every room and cancel all their timers (server shutdown / test teardown). */
@@ -193,8 +211,10 @@ export class RoomManager {
     return code;
   }
 
+  /** Last player left: game state reset and the room's photos deleted (nobody is left to see them). */
   private resetRoom(room: Room): void {
     this.clearAllTimers(room);
+    uploadStore.releaseRoom(room.gameCode);
     room.started = false;
     room.plantedPhotosShown = 0;
     room.currentPlayer = null;

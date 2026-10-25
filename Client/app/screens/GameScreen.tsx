@@ -22,6 +22,7 @@ import EmojisButton from "@/app/components/IngameComunication/EmojisButtons";
 import { useI18n } from "../i18n";
 import { applyRoundStart, RoundStartData } from "../utils/roundStart";
 import { uploadPhoto } from "@/app/utils/uploadPhoto";
+import { photoAuthHeaders, resolvePhotoAuth } from "@/app/utils/photoAuth";
 import { applyGameState, turnUploadAction, TurnUpload } from "../utils/gameState";
 import { applyWaitingPhoto, SkipNotice, skipNoticeFor, skipNoticeText } from "../utils/waitingPhoto";
 import { useGameConnection } from "../hooks/useGameConnection";
@@ -98,8 +99,17 @@ const GameScreen = () => {
   // Hold button: mounted during scores phase for photo owner (or while pressing to catch onPressOut)
   const holdButtonMounted = isOwner && (phase === "scores" || pressing);
 
-  // ── Upload helper ────────────────────────────────────
-  const uploadImage = (uri: string): Promise<string> => uploadPhoto(SERVER_URL, uri);
+  // ── Photo access (room members only: room code + rejoin token) ─
+  const uploadImage = async (uri: string): Promise<string> =>
+    uploadPhoto(SERVER_URL, uri, await resolvePhotoAuth(getRejoinToken, gameCode, username));
+  const [photoHeaders, setPhotoHeaders] = useState<Record<string, string> | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    resolvePhotoAuth(getRejoinToken, gameCode, username)
+      .then((auth) => { if (live) setPhotoHeaders(photoAuthHeaders(auth)); })
+      .catch(() => console.warn("[GAME] no session token: room photos can't be loaded"));
+    return () => { live = false; };
+  }, [gameCode, username]);
 
   // ── Block back button ────────────────────────────────
   useFocusEffect(useCallback(() => {
@@ -434,7 +444,8 @@ const GameScreen = () => {
           </View>
         ) : photo ? (
           <>
-            <PhotoComponent photoUrl={photo} />
+            {/* Server photos need the room credentials: never request one without them (black until ready) */}
+            {photoHeaders && <PhotoComponent photoUrl={photo} headers={photoHeaders} />}
 
             {/* Emoji reactions */}
             <View style={tw`absolute top-4 left-4 z-90`}>

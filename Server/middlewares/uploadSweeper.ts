@@ -129,13 +129,13 @@ export function serveUpload(dir: string, ttlMs = UPLOAD_TTL_MS) {
   return (req: Request, res: Response) => {
     const name = req.params.name;
     const notFound = () => {
-      if (!res.headersSent) res.status(404).end();
+      if (!res.headersSent) res.status(404).json({ error: "Not found" });
     };
     if (typeof name !== "string" || !UPLOAD_FILE_RE.test(name)) return notFound();
     fs.lstat(path.join(dir, name), (err, st) => {
       if (err || !st.isFile() || remainingMs(st.mtimeMs, ttlMs, Date.now()) <= 0) return notFound();
       res.setHeader("Cache-Control", "no-store, private");
-      res.sendFile(name, { root: dir, dotfiles: "deny", cacheControl: false }, (sendErr) => {
+      res.sendFile(name, { root: dir, dotfiles: "deny", cacheControl: false, etag: false, lastModified: false }, (sendErr) => {
         if (sendErr) notFound();
       });
     });

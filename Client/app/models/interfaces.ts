@@ -13,6 +13,8 @@ export interface Player {
 
 export interface PhotoComponentProps {
   photoUrl: string;
+  /** Request headers for photoUrl: server photos need photoAuthHeaders (room members only) */
+  headers?: Record<string, string>;
   onLongPress?: () => void;
   onPressOut?: () => void;
 }

@@ -7,6 +7,7 @@ import { uploadPath } from "./middlewares/upload";
 import { parseTrustProxy } from "./middlewares/rateLimit";
 import { serveUpload, startUploadSweeper } from "./middlewares/uploadSweeper";
 import { errorHandler } from "./middlewares/errorHandler";
+import { requireRoomMember, requireRoomUpload } from "./middlewares/uploadAccess";
 
 const app = express();
 
@@ -19,10 +20,11 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Uploads: exact /temp/<32 hex>.<ext> route only (no static directory listing of other files)
-app.get("/temp/:name", serveUpload(uploadPath));
+// Uploads: exact /temp/<32 hex>.<ext> route only (no static directory listing of other files), and only to members
+// of the room the photo was uploaded in (session credential in headers, see middlewares/uploadAccess)
+app.get("/temp/:name", requireRoomMember, requireRoomUpload, serveUpload(uploadPath));
 app.use("/temp", (_req, res) => {
-  res.status(404).end();
+  res.status(404).json({ error: "Not found" });
 });
 app.use("/", uploadRoutes);
 // Last: JSON errors without stack traces or server paths (bad URL encoding, body parse errors, disk failures)

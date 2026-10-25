@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useMemo } from 'react';
 import { Image, View, ViewStyle } from 'react-native';
 
 import { ImageBlurProvider } from '../../providers/ImageBlurContext';
@@ -20,6 +20,8 @@ export type ImageBlurProps = {
   children?: React.ReactNode;
   resizeMode?: ImageBlurShapeProps['resizeMode'];
   src: string;
+  /** Request headers for `src` (server photos need the room credentials) */
+  headers?: Record<string, string>;
   blurRadius?: ImageBlurRadius;
   style?: ViewStyle;
 };
@@ -29,6 +31,7 @@ const ImageBlur = ({
   children,
   resizeMode = 'cover',
   src,
+  headers,
   blurRadius = 10,
   style,
 }: ImageBlurProps) => {
@@ -38,6 +41,8 @@ const ImageBlur = ({
   });
 
   const containerRef = useRef<View | null>(null);
+  // Backdrop image; server photos need the room credentials. Memoised so the native image doesn't reload.
+  const source = useMemo(() => getImageSource(src, headers), [src, headers]);
 
   useEffect(() => {
     if (containerRef.current) {
@@ -69,6 +74,7 @@ const ImageBlur = ({
               image={{
                 height: containerSize.height,
                 src,
+                headers,
                 width: containerSize.width,
               }}
               resizeMode={resizeMode}
@@ -82,7 +88,7 @@ const ImageBlur = ({
       <Image
         style={[styles.sticked, styles.fitAvailableSpace]}
         resizeMode={resizeMode}
-        source={getImageSource(src)}
+        source={source}
         blurRadius={blurRadius}
       />
       {children}

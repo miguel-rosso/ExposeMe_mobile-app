@@ -28,6 +28,8 @@
 //                           silent, so the server skips by timeout (reason "timeout").
 //   node qa/lab/bots.mjs --bots 3 --host --photo-unavailable 0.3
 //   Every bot records waiting-photo { round, duration } (room-wide, owner secret): same payload for all, skew measured.
+//   Photos: uploads send the room code + the bot's rejoin token (X-Game-Code / Authorization: Bearer), like the app;
+//   on each round-start one non-owner bot GETs the photo with them (must be 200) and without (must be 401): "photo-access".
 import { io } from "socket.io-client";
 import fs from "node:fs";
 import path from "node:path";
@@ -65,14 +67,17 @@ const now = () => performance.timeOrigin + performance.now();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const pct = (xs, p) => (xs.length ? [...xs].sort((a, b) => a - b)[Math.min(xs.length - 1, Math.floor((p / 100) * xs.length))] : null);
 
-async function uploadPhoto(label) {
+// /upload and /temp only answer members of the photo's room: room code + the bot's rejoin token (never logged)
+const photoAuth = (code, token) => ({ Authorization: `Bearer ${token}`, "X-Game-Code": code });
+
+async function uploadPhoto(label, auth) {
   const t0 = now();
   let blob;
   if (PHOTOS.length) blob = new Blob([fs.readFileSync(PHOTOS[Math.floor(Math.random() * PHOTOS.length)])], { type: "image/jpeg" });
   else blob = new Blob([Buffer.from("/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=", "base64")], { type: "image/jpeg" });
   const form = new FormData();
   form.append("image", blob, `${label}.jpg`);
-  const res = await fetch(`${SERVER}/upload`, { method: "POST", body: form });
+  const res = await fetch(`${SERVER}/upload`, { method: "POST", body: form, headers: auth });
   if (res.status === 429) throw Object.assign(new Error("upload 429 rate-limited (raise UPLOAD_RATE_MAX on the server)"), { rateLimited: true });
   if (!res.ok) throw new Error(`upload ${res.status}`);
   return { url: (await res.json()).url, ms: now() - t0 };
@@ -96,6 +101,21 @@ function runRoom(roomIdx, fixedCode) {
       resolve({ code, events, errors, uploads, rateLimited, reason, players: bots.map((b) => b.name) });
     };
     const timer = setTimeout(() => { errors.push(`timeout after ${TIMEOUT_S}s`); done("timeout"); }, TIMEOUT_S * 1000);
+
+    const checkPhotoAccess = async (name, photo, auth, round) => {
+      try {
+        const member = await fetch(`${SERVER}${photo}`, { headers: auth });
+        await member.arrayBuffer();
+        const anon = await fetch(`${SERVER}${photo}`);
+        await anon.arrayBuffer();
+        events.push({ bot: name, ev: "photo-access", round, t: now(), payload: { member: member.status, anonymous: anon.status } });
+        // 404 for a member is fine only if the game already ended meanwhile (photos are deleted at game-over)
+        if (member.status !== 200 && !(member.status === 404 && finished)) errors.push(`${name}: room photo GET ${member.status} (expected 200)`);
+        if (anon.status !== 401) errors.push(`${name}: photo GET without credentials ${anon.status} (expected 401)`);
+      } catch (e) {
+        errors.push(`${name}: photo GET failed: ${e.message}`);
+      }
+    };
 
     const makeBot = (i) => {
       const name = `${prefix}bot${i + 1}`;
@@ -148,7 +168,7 @@ function runRoom(roomIdx, fixedCode) {
         if (Math.random() < UPLOAD_FAIL) { rec("upload-skipped-on-purpose", d.round); return; }
         try {
           await sleep(200 + Math.random() * 800); // gallery pick on a phone
-          const up = await uploadPhoto(name);
+          const up = await uploadPhoto(name, photoAuth(code, bot.token));
           uploads.push(up.ms);
           socket.emit("photo-sent", { photo: up.url });
         } catch (e) {
@@ -160,6 +180,9 @@ function runRoom(roomIdx, fixedCode) {
         rec("round-start", d.round, { owner: d.owner, photo: d.photo, duration: d.duration });
         bot.round = d.round;
         bot.guess = pickGuess(bot);
+        // Photo access: one non-owner per room loads the photo like the app's <Image> (with credentials), and
+        // checks that it is refused without them
+        if (name === bots.find((b) => b.name !== d.owner)?.name) checkPhotoAccess(name, d.photo, photoAuth(code, bot.token), d.round);
         if (DROP_ROUND && i === DROP_BOT && d.round === DROP_ROUND && !bot.dropped) {
           bot.dropped = true;
           rec("planned-disconnect", d.round, { secs: DROP_SECS });

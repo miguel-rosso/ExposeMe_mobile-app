@@ -5,6 +5,7 @@ import http from "http";
 import { AddressInfo } from "net";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { startUploadSweeper, sweepUploads, SWEEP_INTERVAL_MS, UPLOAD_TTL_MS } from "../middlewares/uploadSweeper";
+import type { Player, Room } from "../models/interfaces";
 
 // Uploads expire by mtime on disk, so photos left behind by a server restart are still deleted, and /temp
 // only serves exact, unexpired upload names.
@@ -150,9 +151,11 @@ describe("GET /temp on the app", () => {
   let mod: typeof import("../app");
   let port: number;
 
-  const raw = (method: string, p: string) =>
+  // /temp only serves a room's photos to its members (uploadAccess): a fake room whose member sends AUTH
+  const AUTH = { authorization: "Bearer member-token", "x-game-code": "123456" };
+  const raw = (method: string, p: string, headers: Record<string, string> = AUTH) =>
     new Promise<{ status: number; headers: http.IncomingHttpHeaders; body: string }>((resolve, reject) => {
-      const req = http.request({ host: "127.0.0.1", port, method, path: p }, (res) => {
+      const req = http.request({ host: "127.0.0.1", port, method, path: p, headers }, (res) => {
         let body = "";
         res.on("data", (c) => (body += c));
         res.on("end", () => resolve({ status: res.statusCode ?? 0, headers: res.headers, body }));
@@ -165,6 +168,15 @@ describe("GET /temp on the app", () => {
     process.env.UPLOAD_DIR = appDir;
     vi.resetModules();
     mod = await import("../app");
+    const { setUploadRooms } = await import("../middlewares/uploadAccess");
+    const { uploadStore } = await import("../middlewares/uploadStore");
+    const player = { username: "ann", rejoinToken: "member-token" } as Player;
+    const room = { gameCode: "123456", phase: null, players: [player], currentPlayer: null } as unknown as Room;
+    setUploadRooms({
+      getRoom: (code) => (code === room.gameCode ? room : undefined),
+      authenticate: (code, token) => (code === room.gameCode && token === player.rejoinToken ? { room, player } : null),
+    });
+    for (const name of [STALE, FRESH]) uploadStore.register(name, { gameCode: room.gameCode, username: "ann", file: path.join(appDir, name) }, 0);
     mod.server.listen(0);
     await new Promise((r) => mod.server.once("listening", r));
     port = (mod.server.address() as AddressInfo).port;
@@ -197,6 +209,11 @@ describe("GET /temp on the app", () => {
     ["uppercase extension", `/temp/${STALE.replace(".jpg", ".JPG")}`],
   ])("refuses an expired upload: %s", async (_label, p) => {
     expect((await raw("GET", p)).status).toBe(404);
+  });
+
+  it("requires a room member's credentials", async () => {
+    expect((await raw("GET", `/temp/${FRESH}`, {})).status).toBe(401);
+    expect((await raw("GET", `/temp/${FRESH}`, { ...AUTH, authorization: "Bearer other" })).status).toBe(403);
   });
 
   it("refuses anything that is not an upload name", async () => {

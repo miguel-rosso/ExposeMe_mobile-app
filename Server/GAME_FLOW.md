@@ -205,20 +205,43 @@ All game events are **atomic** — each contains everything the client needs.
 | `set-rounds` | `{ rounds }` (10/15/20) | Host only, lobby only |
 | `start-game` | - | Host only |
 | `im-ready` | - | Player ready to start (session player; payload ignored) |
-| `photo-sent` | `{ photo }` | Photo uploaded; only from the current owner, `photo` must be a `/upload` path (`/temp/<32 hex>.jpg\|png\|webp`) |
+| `photo-sent` | `{ photo }` | Photo uploaded; only from the current owner, `photo` must be a path the owner got from `/upload` in this room (`/temp/<32 hex>.jpg\|png\|webp`) |
 | `photo-unavailable` | `{ round, attempt }` (from its `your-turn`) | The awaited owner has no photo to send (no access, no photos, upload failed): skip the round now |
 | `submit-answer` | `{ guess }` | Player's answer |
 | `hold-start` | - | Photo owner pressed hold |
 | `hold-end` | - | Photo owner released hold |
 | `chat-message` | `{ message }` (≤100 chars) | Broadcast as `{ username, message }` with the session username |
 | `emoji-reaction` | `{ emoji }` (≤16 chars) | Broadcast as `{ username, emoji }` with the session username |
-| `plant-photo` / `mark-player-planted` | `{ photoUrl }` / - | Applies to the session player; `photoUrl` must be a `/upload` path |
+| `plant-photo` / `mark-player-planted` | `{ photoUrl }` / - | Applies to the session player; `photoUrl` must be the player's own `/upload` path in this room; accepted until the first round is played |
 
 Payload `gameCode`/`username` fields are ignored for all of the above; identity comes from the session.
 
 ## Photo upload (HTTP)
 
-`POST /upload` (multipart, one file in field `image`, ≤10MB) → `200 { url: "/temp/<32 random hex>.<jpg|png|webp>" }`, served from `/temp` for 30 min (`UPLOAD_TTL_MS`, by file mtime: a sweep at startup and every 5 min deletes expired uploads and schedules exact deletion for those expiring before the next sweep, so restarts don't leave photos behind). Only `GET/HEAD /temp/<32 hex>.<jpg|png|webp>` is served (`Cache-Control: no-store, private`); expired or any other path under `/temp` → 404.
+`POST /upload` (multipart, one file in field `image`, ≤10MB) → `200 { url: "/temp/<32 random hex>.<jpg|png|webp>" }`.
+
+**Room members only.** Both `POST /upload` and `GET/HEAD /temp/<photo>` need the player's session credential from
+`room-of-game`, as headers: `X-Game-Code: <room code>` and `Authorization: Bearer <rejoinToken>` (the token never
+goes in a URL; the app passes the same headers to `<Image source={{ uri, headers }}>`). Missing or malformed → **401**,
+unknown room or a token that is not a current member of it → **403**.
+
+- Every upload is bound to the room and player that sent it. It is accepted from any member until the first round
+  has actually been played (planted photos: lobby, ready phase, or `waiting-photo` while `room.round` is still 0,
+  also after skips; the app uploads it before `im-ready`; `plant-photo` follows exactly the same rule), and after
+  that only from the player whose photo the server is awaiting (`waiting-photo` and they are the picked owner, paused
+  or not); otherwise **403**. At most 100 stored photos per room (**429** beyond). If the game ends, the room closes or the player
+  leaves while the image is being processed, nothing is stored (**409**).
+- `GET /temp/<photo>` serves the photo only to members of the room it was uploaded in (`Cache-Control: no-store,
+  private`); a photo of another room, a deleted/expired one or any other path under `/temp` → **404**. A player who
+  left or was removed is no longer a member (403).
+- **Deletion**: all of a room's photos (played and planted) are deleted at `game-over`, when its last player leaves,
+  and when the room is deleted. A player's own photos are deleted when they leave or are removed, except the photo
+  on screen this round (deleted with the rest at `game-over`). The 30-min TTL stays as a backstop (`UPLOAD_TTL_MS`, by file mtime: a sweep at
+  startup and every 5 min deletes expired uploads and schedules exact deletion for those expiring before the next
+  sweep, so restarts don't leave photos behind).
+- `photo-sent` / `plant-photo` take the returned `/temp/...` path, and only a photo that **the sender uploaded in
+  this room** (and that still exists); anything else (another player's or another room's photo, a path never
+  uploaded) is ignored.
 - Accepted formats: JPEG, PNG, WebP, detected from the file contents (the file name and declared MIME type are ignored). The app is expected to send JPEG; HEIC and anything else is refused.
 - The stored image is re-encoded: orientation applied, scaled down to fit 2048×2048, all metadata (EXIF incl. GPS, XMP, ICC) removed, same format as the input.
 - Images are processed one at a time with a short bounded queue (`controllers/sanitizeImage.ts`).
@@ -226,10 +249,13 @@ Payload `gameCode`/`username` fields are ignored for all of the above; identity 
 
 | Status | When |
 |--------|------|
+| 401 | Missing/malformed `X-Game-Code` or `Authorization: Bearer` header |
+| 403 | Not a member of that room, or the room isn't accepting a photo from this player now |
+| 409 | The game ended / room closed / player left while the upload was processed (nothing stored) |
 | 400 | No file, malformed multipart, more than one file, wrong field, undecodable image |
 | 413 | File over 10MB, or image over 24 megapixels |
 | 415 | Not JPEG/PNG/WebP (e.g. HEIC) |
-| 429 | Per-IP rate limit (`Retry-After`) — default 60 uploads/min, env `UPLOAD_RATE_MAX` / `UPLOAD_RATE_WINDOW_MS`; `qa/lab/lab.sh server` raises it for bot load tests |
+| 429 | Room already holds 100 photos, or per-IP rate limit (`Retry-After`) — default 60 uploads/min, env `UPLOAD_RATE_MAX` / `UPLOAD_RATE_WINDOW_MS`; `qa/lab/lab.sh server` raises it for bot load tests |
 | 503 | Server busy processing other uploads (`Retry-After`) |
 
 Behind a reverse proxy, env `TRUST_PROXY` is the number of proxy hops used to read the client IP (default 1 when `RENDER` is set, otherwise 0). Env `UPLOAD_DIR` overrides the storage directory (default `Server/temp`).

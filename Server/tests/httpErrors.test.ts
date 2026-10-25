@@ -3,6 +3,8 @@ import { AddressInfo } from "net";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import sharp from "sharp";
 import { io, server } from "../app";
+import { setUploadRooms } from "../middlewares/uploadAccess";
+import type { Player, Room } from "../models/interfaces";
 
 // Final HTTP error handling: whatever goes wrong (bad URL encoding, body parse errors, a failing disk write)
 // the client gets a short JSON error, never Express' default HTML page with a stack trace and server paths.
@@ -75,7 +77,12 @@ describe("final error handler", () => {
     const jpeg = await sharp({ create: { width: 4, height: 4, channels: 3, background: "#123" } }).jpeg().toBuffer();
     const form = new FormData();
     form.append("image", new Blob([new Uint8Array(jpeg)], { type: "image/jpeg" }), "a.jpg");
-    const res = await fetch(`${url}/upload`, { method: "POST", body: form });
+    // Uploads need a room member (uploadAccess): a fake lobby room
+    const player = { username: "ann", rejoinToken: "tok" } as Player;
+    const room = { gameCode: "123456", phase: null, players: [player], currentPlayer: null } as unknown as Room;
+    setUploadRooms({ getRoom: () => room, authenticate: () => ({ room, player }) });
+    const res = await fetch(`${url}/upload`, { method: "POST", body: form, headers: { Authorization: "Bearer tok", "X-Game-Code": "123456" } });
+    setUploadRooms(null);
 
     const body = await expectSafeJson(res, 500);
     expect(body.error).not.toMatch(/ENOSPC|exposeme/i);

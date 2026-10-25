@@ -1,5 +1,6 @@
 import { File } from "expo-file-system";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
+import { PhotoAuth, photoAuthHeaders } from "./photoAuth";
 
 // ── Upload of a local photo to POST /upload ──
 
@@ -41,8 +42,11 @@ export const convertForUpload = async (uri: string): Promise<string> => {
   }
 };
 
-/** Converts and uploads the photo at `uri`; returns the server path (`/temp/...`). Throws on failure. */
-export const uploadPhoto = async (serverUrl: string, uri: string): Promise<string> => {
+/**
+ * Converts and uploads the photo at `uri` as the room member `auth`; returns the server path (`/temp/...`).
+ * Throws on failure (also 401/403: not a member of the room, or the server isn't awaiting a photo from us).
+ */
+export const uploadPhoto = async (serverUrl: string, uri: string, auth: PhotoAuth): Promise<string> => {
   const file = new File(await convertForUpload(uri));
   try {
     const formData = new FormData();
@@ -53,7 +57,7 @@ export const uploadPhoto = async (serverUrl: string, uri: string): Promise<strin
       type: UPLOAD_FILE_TYPE,
       bytes: () => file.bytes(),
     } as unknown as Blob);
-    const response = await fetch(`${serverUrl}/upload`, { method: "POST", body: formData });
+    const response = await fetch(`${serverUrl}/upload`, { method: "POST", body: formData, headers: photoAuthHeaders(auth) });
     if (!response.ok) throw new Error(`Upload failed: ${response.status}`);
     return (await response.json()).url;
   } finally {

@@ -40,7 +40,8 @@ jest.mock("expo-file-system", () => ({
 }));
 
 // Path check applied by Server/routes/socketRoutes.ts to photo-sent / plant-photo URLs
-const SERVER_UPLOAD_PATH_RE = /^\/temp\/\d+-[A-Za-z0-9._-]+$/;
+const SERVER_UPLOAD_PATH_RE = /^\/temp\/[0-9a-f]{32}\.(?:jpg|png|webp)$/;
+const SERVER_PHOTO = "/temp/" + "0123456789abcdef".repeat(2) + ".jpg";
 
 type Part = [string, { name: string; type: string; bytes: () => Promise<Uint8Array> }];
 let parts: Part[];
@@ -49,6 +50,8 @@ class FakeFormData {
     parts.push([field, value]);
   }
 }
+
+const AUTH = { gameCode: "123456", token: "tok-123" };
 
 const okResponse = (url: string) => ({ ok: true, status: 200, json: async () => ({ url }) });
 
@@ -61,7 +64,7 @@ beforeEach(() => {
   mockRenderAsync.mockResolvedValue({ width: 1600, height: 1200, saveAsync: mockSaveAsync, release: mockImageRelease });
   manipulate.mockReturnValue({ renderAsync: mockRenderAsync, release: mockContextRelease });
   (global as any).FormData = FakeFormData;
-  (global as any).fetch = jest.fn(async () => okResponse("/temp/1761000000000-photo.jpg"));
+  (global as any).fetch = jest.fn(async () => okResponse(SERVER_PHOTO));
 });
 
 describe("uploadPhoto (EXP-038)", () => {
@@ -74,16 +77,16 @@ describe("uploadPhoto (EXP-038)", () => {
     ["file:///Pictures/Screenshot_20261024-231502_Bank%20Santander.jpg", "photo.jpg", "image/jpeg"],
     ["file:///DCIM/PXL_20261024_231502123.jpg", "photo.jpg", "image/jpeg"],
   ])("sends %s as a neutral, server-safe filename", async (uri, name, type) => {
-    const url = await uploadPhoto("http://server", uri);
+    const url = await uploadPhoto("http://server", uri, AUTH);
 
-    expect(url).toBe("/temp/1761000000000-photo.jpg");
+    expect(url).toBe(SERVER_PHOTO);
     expect(fetch).toHaveBeenCalledWith("http://server/upload", expect.objectContaining({ method: "POST" }));
     expect(parts).toHaveLength(1);
     const [field, part] = parts[0];
     expect(field).toBe("image");
     expect(part.name).toBe(name);
     expect(part.type).toBe(type);
-    expect(`/temp/${Date.now()}-${part.name}`).toMatch(SERVER_UPLOAD_PATH_RE);
+    expect(url).toMatch(SERVER_UPLOAD_PATH_RE);
     await expect(part.bytes()).resolves.toEqual(new Uint8Array([1, 2, 3]));
     // The converted copy is uploaded, never the original
     expect(mockReadFrom).toEqual([CONVERTED_URI]);
@@ -91,9 +94,23 @@ describe("uploadPhoto (EXP-038)", () => {
 
   it("throws when the server answers non-200", async () => {
     (global as any).fetch = jest.fn(async () => ({ ok: false, status: 413, json: async () => ({}) }));
-    await expect(uploadPhoto("http://server", "file:///DCIM/a.jpg")).rejects.toThrow("Upload failed: 413");
+    await expect(uploadPhoto("http://server", "file:///DCIM/a.jpg", AUTH)).rejects.toThrow("Upload failed: 413");
   });
 
+  // EXP-069: uploads are only accepted from a member of the room, identified by room code + rejoin token
+  it("sends the room code and the player's rejoin token as headers, never in the URL", async () => {
+    await uploadPhoto("http://server", "file:///DCIM/a.jpg", AUTH);
+    const [calledUrl, init] = (fetch as jest.Mock).mock.calls[0];
+    expect(calledUrl).toBe("http://server/upload");
+    expect(init.headers).toEqual({ Authorization: "Bearer tok-123", "X-Game-Code": "123456" });
+  });
+
+  it("surfaces 401/403 (not a member / not my turn) as a failed upload", async () => {
+    for (const status of [401, 403]) {
+      (global as any).fetch = jest.fn(async () => ({ ok: false, status, json: async () => ({ error: "x" }) }));
+      await expect(uploadPhoto("http://server", "file:///DCIM/a.jpg", AUTH)).rejects.toThrow(`Upload failed: ${status}`);
+    }
+  });
 });
 
 describe("uploadPhoto converts before uploading (EXP-007)", () => {
@@ -103,7 +120,7 @@ describe("uploadPhoto converts before uploading (EXP-007)", () => {
     ["large 12 MP JPEG", "file:///DCIM/PXL_4032x3024.jpg"],
     ["WebP", "file:///Download/a.webp"],
   ])("re-encodes a %s as a bounded JPEG", async (_label, uri) => {
-    await uploadPhoto("http://server", uri);
+    await uploadPhoto("http://server", uri, AUTH);
 
     expect(manipulate).toHaveBeenCalledTimes(1);
     expect(manipulate).toHaveBeenCalledWith(uri, { maxWidth: UPLOAD_MAX_SIDE, maxHeight: UPLOAD_MAX_SIDE });
@@ -122,7 +139,7 @@ describe("uploadPhoto converts before uploading (EXP-007)", () => {
   });
 
   it("releases native refs and deletes the converted copy after uploading", async () => {
-    await uploadPhoto("http://server", "file:///DCIM/a.heic");
+    await uploadPhoto("http://server", "file:///DCIM/a.heic", AUTH);
     expect(mockImageRelease).toHaveBeenCalled();
     expect(mockContextRelease).toHaveBeenCalled();
     expect(mockDeleted).toEqual([CONVERTED_URI]);
@@ -130,13 +147,13 @@ describe("uploadPhoto converts before uploading (EXP-007)", () => {
 
   it("deletes the converted copy even when the upload fails", async () => {
     (global as any).fetch = jest.fn(async () => ({ ok: false, status: 500, json: async () => ({}) }));
-    await expect(uploadPhoto("http://server", "file:///DCIM/a.heic")).rejects.toThrow("Upload failed: 500");
+    await expect(uploadPhoto("http://server", "file:///DCIM/a.heic", AUTH)).rejects.toThrow("Upload failed: 500");
     expect(mockDeleted).toEqual([CONVERTED_URI]);
   });
 
   it("throws a clear error and uploads nothing when the conversion fails", async () => {
     mockRenderAsync.mockRejectedValue(new Error("Could not decode image"));
-    await expect(uploadPhoto("http://server", "file:///DCIM/broken.heic")).rejects.toThrow(
+    await expect(uploadPhoto("http://server", "file:///DCIM/broken.heic", AUTH)).rejects.toThrow(
       "Photo conversion failed: Could not decode image",
     );
     expect(fetch).not.toHaveBeenCalled();
@@ -145,7 +162,7 @@ describe("uploadPhoto converts before uploading (EXP-007)", () => {
 
   it("throws a clear error when saving the JPEG fails", async () => {
     mockSaveAsync.mockRejectedValue(new Error("disk full"));
-    await expect(uploadPhoto("http://server", "file:///DCIM/a.png")).rejects.toThrow("Photo conversion failed: disk full");
+    await expect(uploadPhoto("http://server", "file:///DCIM/a.png", AUTH)).rejects.toThrow("Photo conversion failed: disk full");
     expect(fetch).not.toHaveBeenCalled();
     expect(mockImageRelease).toHaveBeenCalled();
   });
@@ -161,10 +178,10 @@ describe("uploadPhoto with expo/fetch's real multipart serializer", () => {
     let sent: unknown;
     (global as any).fetch = jest.fn(async (_url: string, init: { body: unknown }) => {
       sent = init.body;
-      return okResponse("/temp/1761000000000-photo.jpg");
+      return okResponse(SERVER_PHOTO);
     });
 
-    await uploadPhoto("http://server", "file:///Pictures/Screenshot_20261024-231502_Bank%20Santander.jpg");
+    await uploadPhoto("http://server", "file:///Pictures/Screenshot_20261024-231502_Bank%20Santander.jpg", AUTH);
 
     const { body } = await convertFormDataAsync(sent, "BOUNDARY");
     const text = new TextDecoder().decode(body);

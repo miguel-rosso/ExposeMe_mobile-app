@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Image,
   type ImageResizeMode,
@@ -17,6 +17,8 @@ import styles from './ImageBlur.styles';
 type BlurShapeImage = {
   height: number;
   src: string;
+  /** Request headers for `src` (server photos need the room credentials) */
+  headers?: Record<string, string>;
   width: number;
 };
 
@@ -60,6 +62,8 @@ const ImageBlurShape = ({
     null,
   );
 
+  const source = useMemo(() => getImageSource(image.src, image.headers), [image.src, image.headers]);
+
   const blurredElements = getRefList();
   const showBlur =
     childrenRect &&
@@ -87,7 +91,7 @@ const ImageBlurShape = ({
         ]}
       >
         <Image
-          source={getImageSource(image.src)}
+          source={source}
           style={[
             {
               width: image.width,

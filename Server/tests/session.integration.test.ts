@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { io as connect, Socket as ClientSocket } from "socket.io-client";
 import { io, server } from "../app";
 import { roomManager } from "../routes/socketRoutes";
+import { registerUpload } from "./helpers";
 
 // Session hardening: identity (room + username) comes from the server-side session set on join,
 // rejoining an existing username requires the rejoin token, and the token never leaves its owner.
@@ -379,17 +380,25 @@ describe("photo-sent", () => {
     const owner = ownerName === "alice" ? alice : bob2;
     const other = ownerName === "alice" ? bob2 : alice;
 
+    const OWN = "/temp/0123456789abcdef0123456789abcdef.jpg";
+    const OTHERS = "/temp/" + "b".repeat(32) + ".jpg"; // uploaded by the other player of this room
+    const FOREIGN = "/temp/" + "c".repeat(32) + ".jpg"; // uploaded by the owner's username in another room
+    const UNREGISTERED = "/temp/" + "d".repeat(32) + ".jpg"; // right shape, never uploaded
+    registerUpload(gameCode, ownerName, OWN);
+    registerUpload(gameCode, ownerName === "alice" ? "bob" : "alice", OTHERS);
+    registerUpload("999999", ownerName, FOREIGN);
+
     const quiet = silent(alice, "round-start", 500);
-    other.emit("photo-sent", { photo: "/temp/0123456789abcdef0123456789abcdef.jpg" });
-    bob.emit("photo-sent", { photo: "/temp/0123456789abcdef0123456789abcdef.jpg" }); // replaced socket
-    for (const photo of ["https://example.invalid/x.jpg", "/temp/../app.ts", "/temp/1-a/b.jpg", "/temp/1700000000000-photo.jpg", "/temp/0123456789abcdef0123456789abcdef.gif", "/temp/", 42, "/temp/1-" + "a".repeat(2050)]) {
+    other.emit("photo-sent", { photo: OWN });
+    bob.emit("photo-sent", { photo: OWN }); // replaced socket
+    for (const photo of [OTHERS, FOREIGN, UNREGISTERED, "https://example.invalid/x.jpg", "/temp/../app.ts", "/temp/1-a/b.jpg", "/temp/1700000000000-photo.jpg", "/temp/0123456789abcdef0123456789abcdef.gif", "/temp/", 42, "/temp/1-" + "a".repeat(2050)]) {
       owner.emit("photo-sent", { photo });
     }
     expect(await quiet).toBe(true);
 
     const start = once<{ owner: string; photo: string }>(alice, "round-start");
-    owner.emit("photo-sent", { photo: "/temp/0123456789abcdef0123456789abcdef.jpg" });
-    expect(await start).toMatchObject({ owner: ownerName, photo: "/temp/0123456789abcdef0123456789abcdef.jpg" });
+    owner.emit("photo-sent", { photo: OWN });
+    expect(await start).toMatchObject({ owner: ownerName, photo: OWN });
 
     // answer from the replaced socket is ignored; alice's counts
     bob.emit("submit-answer", { guess: ownerName });

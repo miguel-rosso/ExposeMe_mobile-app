@@ -1,6 +1,7 @@
 import { Server } from "socket.io";
 import { GameStateSnapshot, PauseInfo, Player, Room, RoundSkippedData, ScoreRound, WaitingPhotoData, YourTurnData } from "../models/interfaces";
 import { RoomManager } from "./RoomManager";
+import { uploadStore } from "../middlewares/uploadStore";
 
 const ANSWER_TIME = 8_000;
 const REVEAL_TIME = 3_000;
@@ -467,6 +468,9 @@ export class GameEngine {
     this.io.to(room.gameCode).emit("game-over", { finalScore: this.buildScores(room) });
     // Unused planted photos belong to this game only (photos planted for the next one arrive after this)
     room.players.forEach((p) => { p.hasPlantedPhoto = false; p.plantedPhoto = undefined; });
+    room.currentPhoto = null;
+    // Every photo of this game (played or planted) is deleted now, not at the 30-min expiry
+    uploadStore.releaseRoom(room.gameCode);
   }
 
   // ── Private: Timer (single timer per room) ───────────

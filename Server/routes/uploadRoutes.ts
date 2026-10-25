@@ -2,6 +2,7 @@ import express from "express";
 import { UploadRouter } from "../controllers/UploadController";
 import { singleImage } from "../middlewares/upload";
 import { uploadRateLimit } from "../middlewares/rateLimit";
+import { requireRoomMember, requireUploadAllowed } from "../middlewares/uploadAccess";
 
 const router = express.Router();
 
@@ -25,7 +26,8 @@ const toScriptString = (value: string) =>
     .replace(/\u2028/g, "\\u2028")
     .replace(/\u2029/g, "\\u2029");
 
-router.post("/upload", uploadRateLimit, singleImage("image"), (req, res, next) => {
+// Room members only (session credential in headers), and only when the room accepts a photo from them
+router.post("/upload", uploadRateLimit, requireRoomMember, requireUploadAllowed, singleImage("image"), (req, res, next) => {
   UploadRouter(req, res).catch(next);
 });
 

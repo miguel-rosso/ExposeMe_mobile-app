@@ -104,9 +104,12 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
 
   const uploadPlantedPhoto = async (): Promise<string | null> => {
     if (!plantedPhotoUri) return null;
+    // The server only accepts uploads from a member of the room (room code + rejoin token)
+    const entry = rejoinTokenRef.current;
+    if (!entry) return null;
 
     try {
-      return await uploadPhoto(SERVER_URL, plantedPhotoUri);
+      return await uploadPhoto(SERVER_URL, plantedPhotoUri, { gameCode: entry.gameCode, token: entry.token });
     } catch (error) {
       console.error("Error uploading planted photo:", error);
       return null;

@@ -6,6 +6,7 @@ import uploadRoutes from "./routes/uploadRoutes";
 import { uploadPath } from "./middlewares/upload";
 import { parseTrustProxy } from "./middlewares/rateLimit";
 import { serveUpload, startUploadSweeper } from "./middlewares/uploadSweeper";
+import { errorHandler } from "./middlewares/errorHandler";
 
 const app = express();
 
@@ -24,6 +25,8 @@ app.use("/temp", (_req, res) => {
   res.status(404).end();
 });
 app.use("/", uploadRoutes);
+// Last: JSON errors without stack traces or server paths (bad URL encoding, body parse errors, disk failures)
+app.use(errorHandler);
 
 // ── Socket heartbeat ──
 // The server pings every PING_INTERVAL and drops a client that doesn't answer within PING_TIMEOUT, so a

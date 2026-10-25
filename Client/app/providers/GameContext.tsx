@@ -4,6 +4,7 @@ import { io, Socket } from "socket.io-client";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { GameContextProps, GameProviderProps, Player } from "@/app/models/interfaces";
 import getEnvVars from "@/config";
+import { uploadPhoto } from "@/app/utils/uploadPhoto";
 
 const { SERVER_URL } = getEnvVars();
 const REJOIN_TOKEN_KEY = "rejoinToken";
@@ -103,22 +104,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     if (!plantedPhotoUri) return null;
 
     try {
-      const formData = new FormData();
-      formData.append("image", {
-        uri: plantedPhotoUri,
-        name: "planted-photo.jpg",
-        type: "image/jpeg",
-      } as any);
-
-      const response = await fetch(`${SERVER_URL}/upload`, {
-        method: "POST",
-        body: formData,
-      });
-      if (!response.ok) {
-        throw new Error(`Upload failed: ${response.status}`);
-      }
-      const data = await response.json();
-      return data.url;
+      return await uploadPhoto(SERVER_URL, plantedPhotoUri);
     } catch (error) {
       console.error("Error uploading planted photo:", error);
       return null;

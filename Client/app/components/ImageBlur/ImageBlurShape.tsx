@@ -53,7 +53,7 @@ const ImageBlurShape = ({
   image,
   resizeMode,
   blurRadius = 10,
-}: ImageBlurShapeProps): JSX.Element => {
+}: ImageBlurShapeProps): React.JSX.Element => {
   const { getRefList, getBlurProps } = useImageBlur();
 
   const [childrenRect, setChildrenRect] = useState<LayoutRectangle[] | null>(

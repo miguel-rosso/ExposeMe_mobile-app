@@ -22,7 +22,7 @@ import * as Animatable from "react-native-animatable";
 import ImageBlur from "@/app/components/ImageBlur/ImageBlur";
 import { ImageBlurView } from "@/app/components/ImageBlur";
 import { useBackHandler } from "@react-native-community/hooks";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect } from "expo-router";
 // import logoIndex from "@/assets/images/icon_index.png";
 import { useFonts } from "expo-font";
 import * as SplashScreen from "expo-splash-screen";
@@ -32,6 +32,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useI18n } from "./i18n";
 import LanguageToggle from "./components/LanguageToggle";
 import { TEST_IDS } from "./utils/testIds";
+import { handleHomeBackPress } from "./utils/homeBackPress";
 
 SplashScreen.preventAutoHideAsync();
 // Animaciones personalizadas para React Native Animatable
@@ -240,13 +241,9 @@ const Index = () => {
   }, [isJoiningGame]);
 
   // Manejar el evento de retroceso en Android
-  useBackHandler(() => {
-    if (isJoiningGame) {
-      handleCancelJoinGame();
-      return true; // Prevenir el comportamiento por defecto (salir de la app)
-    }
-    return false; // Permitir el comportamiento por defecto
-  });
+  useBackHandler(() =>
+    handleHomeBackPress({ keyboard: Keyboard, isJoiningGame, cancelJoin: handleCancelJoinGame })
+  );
 
   // Manejar el cambio de nombre de usuario
   const handleUsernameChange = async (text: string) => {

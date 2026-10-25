@@ -11,6 +11,13 @@ appId: com.socketNull.ExposeMe
 - openLink: "exp+expose-me://expo-development-client/?url=${METRO_URL}"
 - waitForAnimationToEnd:
     timeout: 5000
+# iOS 26+/Xcode 27 simulators confirm custom-scheme links with a system alert
+- runFlow:
+    when:
+      platform: iOS
+      visible: "Open in Expose Me\\?|¿Abrir en Expose Me\\?"
+    commands:
+      - tapOn: "Open|Abrir"
 # After clearState the dev client may stay on its launcher instead of loading the bundle
 - runFlow:
     when:
@@ -26,10 +33,10 @@ appId: com.socketNull.ExposeMe
       visible: "This is the developer menu.*"
     commands:
       - tapOn: "Continue"
-# The full dev menu stays open after onboarding: close it
+# The full dev menu stays open after onboarding: close it (SDK 58 menu header shows "Runtime version")
 - runFlow:
     when:
-      visible: "Connected to:"
+      visible: "Connected to:|Runtime version:.*"
     commands:
       - runFlow:
           when:
@@ -57,8 +64,9 @@ appId: com.socketNull.ExposeMe
             id: "initial-continue-button"
       - tapOn:
           id: "initial-continue-button"
+# iOS photo-library alert (shown even when simctl/launchApp pre-granted photos)
 - tapOn:
-    text: "Allow Full Access|Allow all|Allow"
+    text: "Allow Full Access|Allow all|Allow|Permitir acceso total|Permitir todo|Permitir"
     optional: true
 - extendedWaitUntil:
     visible:

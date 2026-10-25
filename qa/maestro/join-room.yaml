@@ -9,13 +9,20 @@ appId: com.socketNull.ExposeMe
 - tapOn:
     id: "username-input"
 - inputText: ${USERNAME}
-- hideKeyboard
+# Submit instead of hideKeyboard: on Android hideKeyboard sends Back, which (SDK 58) also closes the app
+# on the home screen; on iOS 26 hideKeyboard leaves the keyboard covering the join button.
+- pressKey: Enter
 - tapOn:
     id: "join-game-button"
 - tapOn:
     id: "game-code-input"
 - inputText: ${GAME_CODE}
-- hideKeyboard
+# number-pad: Enter submits/blurs on Android; on iOS the search button stays above the shorter number pad
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - pressKey: Enter
 - tapOn:
     id: "search-room-button"
 # Lobby (guest or host) or already in the game

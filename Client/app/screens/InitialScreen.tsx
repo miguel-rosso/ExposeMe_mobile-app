@@ -40,7 +40,7 @@ const InitialScreen: React.FC = () => {
 
   return (
     <SafeAreaView testID={TEST_IDS.initialScreen} style={tw`flex-1 bg-gray-900`}>
-      <StatusBar barStyle="light-content" backgroundColor="#111827" />
+      <StatusBar barStyle="light-content" />
       <ScrollView contentContainerStyle={tw`flex-grow`} showsVerticalScrollIndicator={false}>
         <View style={tw`flex-1 px-4 pt-4 pb-6 max-w-[500px] w-full self-center`}>
           {/* Header */}

@@ -15,7 +15,7 @@
 #   install                     Install the last built binaries on every lab device
 #   open                        Open the app on every device, pointed at local Metro
 #   shot <label>                Screenshot every device into qa/runs/<RUN_ID>/shots/<label>-<device>.png
-#   play [--bots N] [--rounds R] [--devices all|ios|android|none] [--flow play-game]
+#   play [--bots N] [--rounds R] [--devices all|pair|ios|android|none|<label,label>] [--flow play-game]
 #                               Full multiplayer session: bots host a room, devices join and play
 #   bots [args]                 Run qa/lab/bots.mjs directly (headless players / load / sync metrics)
 set -euo pipefail
@@ -45,6 +45,16 @@ adbs() { "$ADB" -s "$@" </dev/null; }
 log() { printf '\033[1;36m[lab]\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31m[lab] %s\033[0m\n' "$*" >&2; exit 1; }
 run_id() { echo "${RUN_ID:-$(date +%Y%m%d-%H%M%S)}"; }
+# Expo SDK 58 tooling needs an LTS Node (22.13+/24.3+, no odd releases): Client commands
+# (Metro, native builds) use the newest nvm v24/v22 when the default node is unsupported.
+client_path() {
+  local major; major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
+  if [ $((major % 2)) -eq 1 ] || [ "$major" -lt 22 ]; then
+    local bin; bin="$(ls -d "$HOME"/.nvm/versions/node/v2[24].*/bin 2>/dev/null | sort -V | tail -1)"
+    [ -n "$bin" ] && { echo "$bin:$PATH"; return; }
+  fi
+  echo "$PATH"
+}
 
 ios_udid() { xcrun simctl list devices available -j | jq -r --arg n "$1" '[.devices[][] | select(.name==$n)][0].udid // empty'; }
 emu_serial_for_avd() {
@@ -172,7 +182,7 @@ cmd_server() {
 
 cmd_metro() {
   [ "${1:-}" = --restart ] && bg_stop metro $METRO_PORT
-  bg_start metro "$RUNS/metro.log" "$ROOT/Client" env EXPO_PUBLIC_SERVER_URL="http://localhost:$SERVER_PORT" npx expo start --dev-client --port $METRO_PORT
+  bg_start metro "$RUNS/metro.log" "$ROOT/Client" env PATH="$(client_path)" EXPO_PUBLIC_SERVER_URL="http://localhost:$SERVER_PORT" npx expo start --dev-client --port $METRO_PORT
   for _ in $(seq 1 60); do [[ "$(curl -fs "http://localhost:$METRO_PORT/status" 2>/dev/null)" == *running* ]] && { log "metro ready"; return 0; }; sleep 1; done
   die "metro not ready — see $RUNS/metro.log"
 }
@@ -201,15 +211,18 @@ cmd_build() {
   if [ "$what" = ios ] || [ "$what" = all ]; then
     log "Building iOS dev client with xcodebuild (slow, log: $RUNS/build-ios.log)"
     # expo run:ios needs Simulator.app to resolve devices; xcodebuild + simctl install does not
-    (cd "$ROOT/Client/ios" && { [ -d Pods ] || pod install; } && xcodebuild -workspace ExposeMe.xcworkspace -scheme ExposeMe \
+    # Every target (incl. pods declaring older minimums) builds at the app's prebuild deployment target
+    (cd "$ROOT/Client/ios" && export PATH="$(client_path)" && { [ -d Pods ] || pod install; } \
+      && dt="$(grep -m1 -o 'IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*' ExposeMe.xcodeproj/project.pbxproj | awk '{print $3}')" \
+      && xcodebuild -workspace ExposeMe.xcworkspace -scheme ExposeMe \
       -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
-      -derivedDataPath "$ROOT/Client/ios/build" CODE_SIGNING_ALLOWED=NO IPHONEOS_DEPLOYMENT_TARGET=15.1 build) >"$RUNS/build-ios.log" 2>&1 \
+      -derivedDataPath "$ROOT/Client/ios/build" CODE_SIGNING_ALLOWED=NO IPHONEOS_DEPLOYMENT_TARGET="$dt" build) >"$RUNS/build-ios.log" 2>&1 \
       && echo "$ROOT/Client/ios/build/Build/Products/Debug-iphonesimulator/ExposeMe.app" >"$STATE/ios-app-path" \
       && log "iOS build OK" || { log "iOS build FAILED — tail $RUNS/build-ios.log"; rc=1; }
   fi
   if [ "$what" = android ] || [ "$what" = all ]; then
     log "Building Android dev client (slow, log: $RUNS/build-android.log)"
-    (cd "$ROOT/Client/android" && ./gradlew :app:assembleDebug) >"$RUNS/build-android.log" 2>&1 \
+    (cd "$ROOT/Client/android" && PATH="$(client_path)" ./gradlew :app:assembleDebug) >"$RUNS/build-android.log" 2>&1 \
       && echo "$ROOT/Client/android/app/build/outputs/apk/debug/app-debug.apk" >"$STATE/android-apk-path" \
       && log "Android build OK" || { log "Android build FAILED — tail $RUNS/build-android.log"; rc=1; }
   fi
@@ -258,6 +271,12 @@ cmd_play() {
   export RUN_ID; RUN_ID="$(run_id)"; local dir="$RUNS/$RUN_ID"; mkdir -p "$dir/maestro"
   local sel='.'; [ "$which" = ios ] && sel='select(.platform=="ios")'; [ "$which" = android ] && sel='select(.platform=="android")'
   [ "$which" = none ] && sel='select(false)'
+  # pair = first iOS + first Android (default for per-fix checks); a,b = explicit labels
+  if [ "$which" = pair ]; then
+    which="$(jq -r '[(map(select(.platform=="ios"))[0].label), (map(select(.platform=="android"))[0].label)] | map(select(. != null)) | join(",")' "$DEVICES_JSON")"
+  fi
+  case $which in all|ios|android|none) ;; *)
+    sel="select(.label as \$l | \"$which\" | split(\",\") | index(\$l))";; esac
   local n_dev; n_dev="$(devices | jq -c "$sel" | wc -l | tr -d ' ')"
   local total=$((bots + n_dev))
   [ "$total" -ge 2 ] || die "need at least 2 players"

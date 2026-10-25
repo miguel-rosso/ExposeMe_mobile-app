@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { View, Text, TouchableOpacity, StatusBar, FlatList, BackHandler, AppState } from "react-native";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect } from "expo-router";
 import tw from "twrnc";
 import { useGameContext } from "../providers/GameContext";
 import { Player, ScoreRound } from "../models/interfaces";
@@ -17,6 +17,7 @@ import EmojiReaction from "@/app/components/IngameComunication/EmojiReaction";
 import EmojisButton from "@/app/components/IngameComunication/EmojisButtons";
 import { useI18n } from "../i18n";
 import { applyRoundStart, RoundStartData } from "../utils/roundStart";
+import { uploadPhoto } from "@/app/utils/uploadPhoto";
 
 const { SERVER_URL } = getEnvVars();
 
@@ -66,19 +67,12 @@ const GameScreen = () => {
   const holdButtonMounted = isOwner && (phase === "scores" || pressing);
 
   // ── Upload helper ────────────────────────────────────
-  const uploadImage = async (uri: string): Promise<string> => {
-    const formData = new FormData();
-    formData.append("image", { uri, name: "photo.jpg", type: "image/jpeg" } as any);
-    const response = await fetch(`${SERVER_URL}/upload`, { method: "POST", body: formData });
-    if (!response.ok) throw new Error(`Upload failed: ${response.status}`);
-    return (await response.json()).url;
-  };
+  const uploadImage = (uri: string): Promise<string> => uploadPhoto(SERVER_URL, uri);
 
   // ── Block back button ────────────────────────────────
   useFocusEffect(useCallback(() => {
-    const h = () => true;
-    BackHandler.addEventListener("hardwareBackPress", h);
-    return () => BackHandler.removeEventListener("hardwareBackPress", h);
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => true);
+    return () => sub.remove();
   }, []));
 
   // ── Hold handlers ────────────────────────────────────

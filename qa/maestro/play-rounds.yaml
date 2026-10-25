@@ -11,9 +11,12 @@ appId: com.socketNull.ExposeMe
       notVisible:
         id: "winner-modal|final-score-modal"
     commands:
+      # Short settle wait: the answer progress bar never settles, so on Android the default wait
+      # delayed the tap 8-15 s, past the 8 s answer window (guess was always empty)
       - tapOn:
           id: "player-option-bot1"
           optional: true
+          waitToSettleTimeoutMs: 500
       - evalScript: ${output.shot = (output.shot || 0) + 1}
       - takeScreenshot: round-${USERNAME}-${output.shot}
       - waitForAnimationToEnd:

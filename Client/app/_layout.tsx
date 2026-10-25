@@ -42,7 +42,7 @@ export default function RootLayout() {
     <PhotoProvider>
       <GameProvider>
         <BackgroundProvider>
-          <StatusBar hidden={true} translucent={true} />
+          <StatusBar hidden={true} />
           <Stack>
             <Stack.Screen name="index" options={{ headerShown: false, animation: "fade" }} />
             <Stack.Screen name="screens/OwnPhotos" options={{ headerShown: false, animation: "fade" }} />

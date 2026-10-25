@@ -2,7 +2,6 @@ import React, { createContext, useContext, useState, useCallback, useMemo } from
 import * as MediaLibrary from "expo-media-library";
 import { useRouter } from "expo-router";
 import { PhotoContextProps, PhotoProviderProps } from "@/app/models/interfaces";
-import { Platform } from "react-native";
 
 const PhotoContext = createContext<PhotoContextProps | undefined>(undefined);
 
@@ -57,41 +56,25 @@ export const PhotoProvider: React.FC<PhotoProviderProps> = ({ children }) => {
       return null;
     }
 
-    const { totalCount } = await MediaLibrary.getAssetsAsync({ mediaType: "photo" });
-    if (totalCount === 0) {
+    // Lightweight metadata of every photo; the file URI is only resolved for the picked one
+    const photos = await new MediaLibrary.Query()
+      .eq(MediaLibrary.AssetField.MEDIA_TYPE, MediaLibrary.MediaType.IMAGE)
+      .exeForMetadata();
+    if (photos.length === 0) {
       console.log("No photos on device.");
       return null;
     }
 
-    // Retry up to 3 times if the random index lands on an empty slot
+    // Retry up to 3 times if the picked asset can't be resolved to a file URI
     for (let i = 0; i < 3; i++) {
-      const randomIndex = Math.floor(Math.random() * totalCount);
+      const randomIndex = Math.floor(Math.random() * photos.length);
       console.log(`Selected photo index: ${randomIndex}`);
 
       let uri: string | null = null;
-
-      if (Platform.OS === "ios") {
-        const { assets } = await MediaLibrary.getAssetsAsync({
-          mediaType: "photo",
-          first: 1,
-          after:
-            randomIndex > 0
-              ? (await MediaLibrary.getAssetsAsync({ mediaType: "photo", first: randomIndex })).assets[randomIndex - 1]?.id
-              : undefined,
-        });
-        if (assets.length > 0) {
-          const assetInfo = await MediaLibrary.getAssetInfoAsync(assets[0].id);
-          uri = assetInfo.localUri || assetInfo.uri;
-        }
-      } else {
-        const { assets } = await MediaLibrary.getAssetsAsync({
-          mediaType: "photo",
-          first: 1,
-          after: randomIndex.toString(),
-        });
-        if (assets.length > 0) {
-          uri = assets[0].uri;
-        }
+      try {
+        uri = await new MediaLibrary.Asset(photos[randomIndex].id).getUri();
+      } catch (e) {
+        console.log("Could not resolve photo URI:", e);
       }
 
       if (uri) {

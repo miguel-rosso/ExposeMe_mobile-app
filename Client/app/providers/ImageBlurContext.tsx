@@ -19,7 +19,7 @@ type ImageBlurContextType = {
 
 export const ImageBlurContext = createContext<ImageBlurContextType | undefined>(undefined);
 
-export const ImageBlurProvider = ({ children }: ImageBlurContextProps): JSX.Element => {
+export const ImageBlurProvider = ({ children }: ImageBlurContextProps): React.JSX.Element => {
   const [blurElementRefList, setBlurElementRefList] = useState<ImageBlurElementRef[] | null>(null);
 
   const blurProps = useRef<ImageBlurEffectProps | undefined>(undefined);

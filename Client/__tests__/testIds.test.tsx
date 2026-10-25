@@ -2,7 +2,9 @@ import React from "react";
 import fs from "fs";
 import path from "path";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
-import { TEST_IDS, playerOptionId, lobbyPlayerId, roundsOptionId } from "../app/utils/testIds";
+import {
+  TEST_IDS, playerOptionId, lobbyPlayerId, roundsOptionId, winnerNameId, finalWinnerId, finalRankId,
+} from "../app/utils/testIds";
 import AlertModal from "../app/components/modals/AlertModal";
 import CloseButton from "../app/components/CloseButton";
 
@@ -67,6 +69,9 @@ describe("E2E testIDs (EXP-008)", () => {
     expect(unused).toEqual([]);
     expect(sources).toContain("playerOptionId(item.username)");
     expect(sources).toContain("lobbyPlayerId(item.username)");
+    expect(sources).toContain("winnerNameId(w.username)");
+    expect(sources).toContain("finalWinnerId(w.username)");
+    expect(sources).toContain("finalRankId(item.username)");
   });
 
   it("only uses registered ids in Maestro flows", () => {
@@ -76,6 +81,8 @@ describe("E2E testIDs (EXP-008)", () => {
       playerOptionId("bot1"),
       lobbyPlayerId(".*"),
       roundsOptionId(0).replace("0", ".*"),
+      // EXP-085 tie flow: the device user and a bot
+      ...["${USERNAME}", "bot1"].flatMap((u) => [winnerNameId(u), finalWinnerId(u), finalRankId(u)]),
     ];
     const flows = fs.readdirSync(MAESTRO_DIR).filter((f) => f.endsWith(".yaml"));
     const used = flows.flatMap((f) =>

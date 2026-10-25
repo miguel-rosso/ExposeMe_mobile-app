@@ -9,7 +9,8 @@ import * as Animatable from "react-native-animatable";
 import LottieView from "lottie-react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useI18n } from "../../i18n";
-import { TEST_IDS } from "@/app/utils/testIds";
+import { TEST_IDS, finalRankId, finalWinnerId } from "@/app/utils/testIds";
+import { Ranked, rankScores } from "@/app/utils/ranking";
 
 interface FinalScoreModalProps {
   visible: boolean;
@@ -32,7 +33,9 @@ const FinalScoreModal: React.FC<FinalScoreModalProps> = ({ visible, finalScore }
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const confettiRef = useRef<LottieView>(null);
 
-  const sortedScores = [...finalScore].sort((a, b) => b.points - a.points);
+  // Tied players share the position (1, 1, 3) and everyone at rank 1 is a winner
+  const sortedScores = rankScores(finalScore);
+  const winners = sortedScores.filter((s) => s.rank === 1);
 
   useEffect(() => {
     if (visible) {
@@ -70,16 +73,17 @@ const FinalScoreModal: React.FC<FinalScoreModalProps> = ({ visible, finalScore }
     navigation.replace("/screens/WaitingRoom");
   };
 
-  const getRankAccent = (index: number) => {
-    if (index === 0) return GOLD;
-    if (index === 1) return SILVER;
-    if (index === 2) return BRONZE;
+  const getRankAccent = (rank: number) => {
+    if (rank === 1) return GOLD;
+    if (rank === 2) return SILVER;
+    if (rank === 3) return BRONZE;
     return "#4B5563";
   };
 
-  const renderScore = ({ item, index }: { item: ScoreRound; index: number }) => {
-    const isWinner = index === 0;
-    const accent = getRankAccent(index);
+  const renderScore = ({ item, index }: { item: Ranked<ScoreRound>; index: number }) => {
+    const isWinner = item.rank === 1;
+    const podium = item.rank <= 3;
+    const accent = getRankAccent(item.rank);
 
     return (
       <Animatable.View animation="fadeInUp" delay={index * 150} duration={500}>
@@ -98,19 +102,20 @@ const FinalScoreModal: React.FC<FinalScoreModalProps> = ({ visible, finalScore }
             style={[
               tw`h-9 w-9 rounded-xl items-center justify-center mr-3`,
               {
-                backgroundColor: index < 3 ? `${accent}20` : "rgba(255,255,255,0.05)",
+                backgroundColor: podium ? `${accent}20` : "rgba(255,255,255,0.05)",
                 borderWidth: 1.5,
-                borderColor: index < 3 ? `${accent}50` : "rgba(255,255,255,0.08)",
+                borderColor: podium ? `${accent}50` : "rgba(255,255,255,0.08)",
               },
             ]}
           >
             <Text
+              testID={finalRankId(item.username)}
               style={[
                 tw`text-sm font-bold`,
-                { color: index < 3 ? accent : "#6B7280", fontVariant: ["tabular-nums"] },
+                { color: podium ? accent : "#6B7280", fontVariant: ["tabular-nums"] },
               ]}
             >
-              {index + 1}
+              {item.rank}
             </Text>
           </View>
 
@@ -196,20 +201,24 @@ const FinalScoreModal: React.FC<FinalScoreModalProps> = ({ visible, finalScore }
           </Text>
           <Text style={[tw`text-2xl font-bold`, { color: "#FAFAFA", letterSpacing: 0.5 }]}>{t.finalResults}</Text>
 
-          {/* Winner highlight */}
-          {sortedScores.length > 0 && (
-            <Animatable.View animation="fadeIn" delay={400} style={tw`mt-3 items-center`}>
-              <View
-                style={[
-                  tw`flex-row items-center px-5 py-2 rounded-full`,
-                  { backgroundColor: "rgba(250, 204, 21, 0.1)", borderWidth: 1, borderColor: "rgba(250, 204, 21, 0.2)" },
-                ]}
-              >
-                <Ionicons name="star" size={14} color={GOLD} style={tw`mr-2`} />
-                <Text style={[tw`text-sm font-bold`, { color: GOLD }]}>
-                  {sortedScores[0].username}
-                </Text>
-              </View>
+          {/* Winner highlight: one pill per tied winner, wrapping onto new lines */}
+          {winners.length > 0 && (
+            <Animatable.View animation="fadeIn" delay={400} style={tw`mt-3 px-4 flex-row flex-wrap justify-center`}>
+              {winners.map((w) => (
+                <View
+                  key={w.username}
+                  testID={finalWinnerId(w.username)}
+                  style={[
+                    tw`flex-row items-center px-5 py-2 m-1 rounded-full`,
+                    { backgroundColor: "rgba(250, 204, 21, 0.1)", borderWidth: 1, borderColor: "rgba(250, 204, 21, 0.2)" },
+                  ]}
+                >
+                  <Ionicons name="star" size={14} color={GOLD} style={tw`mr-2`} />
+                  <Text style={[tw`text-sm font-bold`, { color: GOLD }]} numberOfLines={1}>
+                    {w.username}
+                  </Text>
+                </View>
+              ))}
             </Animatable.View>
           )}
         </View>

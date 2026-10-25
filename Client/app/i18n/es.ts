@@ -65,6 +65,8 @@ export default {
 
   // WinnerModal
   winner: "¡GANADOR!",
+  winners: "¡GANADORES!",
+  tie: "¡Empate!",
   points: "{points} puntos",
   tapToContinue: "Toca para continuar",
 

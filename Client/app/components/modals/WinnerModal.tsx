@@ -1,23 +1,24 @@
 import React, { useEffect, useRef, useState } from "react";
-import { View, Text, Animated, Dimensions, TouchableOpacity } from "react-native";
+import { View, Text, Animated, Dimensions, TouchableOpacity, ScrollView } from "react-native";
 import tw from "twrnc";
 import LottieView from "lottie-react-native";
 import * as Animatable from "react-native-animatable";
 import { ScoreRound } from "@/app/models/interfaces";
 import { useGameContext } from "@/app/providers/GameContext";
 import { useI18n } from "../../i18n";
-import { TEST_IDS } from "@/app/utils/testIds";
+import { TEST_IDS, winnerNameId } from "@/app/utils/testIds";
 
 // Get screen dimensions
 const { width, height } = Dimensions.get("window");
 
 interface WinnerModalProps {
   visible: boolean;
-  winner: ScoreRound | null;
+  /** Every player tied for first place (one entry when there is no tie). */
+  winners: ScoreRound[];
   onAnimationEnd: () => void;
 }
 
-const WinnerModal: React.FC<WinnerModalProps> = ({ visible, winner, onAnimationEnd }) => {
+const WinnerModal: React.FC<WinnerModalProps> = ({ visible, winners, onAnimationEnd }) => {
   const { t } = useI18n();
   const medalAnimation = useRef<LottieView>(null);
   const { endSocket } = useGameContext();
@@ -26,7 +27,6 @@ const WinnerModal: React.FC<WinnerModalProps> = ({ visible, winner, onAnimationE
   const [animationComplete, setAnimationComplete] = useState(false);
 
   useEffect(() => {
-    console.log("WinnerModal visible:", visible);
     if (visible) {
       endSocket();
       // Play the animations
@@ -56,7 +56,9 @@ const WinnerModal: React.FC<WinnerModalProps> = ({ visible, winner, onAnimationE
     }
   }, [visible]);
 
-  if (!winner || !visible) return null;
+  if (winners.length === 0 || !visible) return null;
+
+  const isTie = winners.length > 1;
 
   return (
     <View testID={TEST_IDS.winnerModal} style={tw`absolute top-0 left-0 right-0 bottom-0 z-100`}>
@@ -86,24 +88,40 @@ const WinnerModal: React.FC<WinnerModalProps> = ({ visible, winner, onAnimationE
             <LottieView
               ref={medalAnimation}
               source={require("@/assets/animations/GoldMedalAnimation.json")}
-              style={tw`size-64`}
+              style={isTie ? tw`size-40` : tw`size-64`}
               autoPlay={false}
               loop={false}
             />
 
             {/* Winner text with animated entrance */}
             <Animated.View style={[tw`items-center`, { opacity: fadeAnim }]}>
-              <Text style={tw`text-yellow-400 text-xl font-bold mb-2`}>{t.winner}</Text>
-              <Animatable.Text
-                animation={animationComplete ? "pulse" : undefined}
-                iterationCount="infinite"
-                style={tw`text-white text-4xl font-extrabold text-center`}
+              <Text testID={TEST_IDS.winnerTitle} style={tw`text-yellow-400 text-xl font-bold mb-2`}>
+                {isTie ? t.winners : t.winner}
+              </Text>
+              {isTie && <Text style={tw`text-white text-base opacity-80 mb-2`}>{t.tie}</Text>}
+              {/* Tied winners can be many: cap the list height and let it scroll on small screens */}
+              <ScrollView
+                style={{ maxHeight: height * 0.3, width: width * 0.9 }}
+                contentContainerStyle={tw`items-center`}
+                showsVerticalScrollIndicator={false}
               >
-                {winner.username}
-              </Animatable.Text>
+                {winners.map((w) => (
+                  <Animatable.Text
+                    key={w.username}
+                    testID={winnerNameId(w.username)}
+                    animation={animationComplete ? "pulse" : undefined}
+                    iterationCount="infinite"
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    style={tw`text-white ${isTie ? "text-3xl" : "text-4xl"} font-extrabold text-center`}
+                  >
+                    {w.username}
+                  </Animatable.Text>
+                ))}
+              </ScrollView>
 
               <Animatable.Text animation="fadeIn" delay={1000} style={tw`text-yellow-400 text-2xl font-bold mt-4`}>
-                {t.points.replace("{points}", String(winner.points))}
+                {t.points.replace("{points}", String(winners[0].points))}
               </Animatable.Text>
             </Animated.View>
 

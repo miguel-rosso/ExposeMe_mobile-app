@@ -4,7 +4,8 @@ import tw from "twrnc";
 import { ScoreRound } from "../../models/interfaces";
 import Icon from "react-native-vector-icons/FontAwesome";
 import { useI18n } from "../../i18n";
-import { TEST_IDS } from "@/app/utils/testIds";
+import { TEST_IDS, scoreRankId } from "@/app/utils/testIds";
+import { rankScores } from "@/app/utils/ranking";
 
 interface ScoreModalProps {
   visible: boolean;
@@ -41,11 +42,11 @@ const ScoreModal: React.FC<ScoreModalProps> = ({
         </View>
       )}
 
-      {scoreRound.map((player, index) => (
-        <View key={index} style={tw`w-11/12 max-w-[500px] bg-white mb-2 m-1 rounded-3xl`}>
+      {rankScores(scoreRound).map((player) => (
+        <View key={player.username} style={tw`w-11/12 max-w-[500px] bg-white mb-2 m-1 rounded-3xl`}>
           <View style={tw`flex-row h-12`}>
             <View style={tw`flex items-center w-[12%] min-w-[40px] justify-center rounded-l-full bg-[#e63a35]`}>
-              <Text style={tw`text-lg text-white font-bold`}>{index + 1}</Text>
+              <Text testID={scoreRankId(player.username)} style={tw`text-lg text-white font-bold`}>{player.rank}</Text>
             </View>
             <View style={tw`flex-row px-2 pr-4 items-center flex-1 justify-between`}>
               <View>

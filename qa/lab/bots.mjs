@@ -9,6 +9,7 @@
 //   node qa/lab/bots.mjs --rooms 20 --bots 4 --host       # load: 20 parallel rooms
 //   options: --server URL  --photos DIR  --out FILE  --chaos 0.1  --upload-fail 0.2  --timeout 600
 //            --no-ready K   the last K bots never send im-ready (game must start via the server's ready timeout)
+//            --no-answer    bots always submit an empty guess (everyone ends on 0 points: final tie, see qa/maestro/tie-game.yaml)
 //            --drop-round R --drop-secs S [--drop-bot K]
 //                           bot K (1-based, default the last one) drops at round R's round-start and reconnects
 //                           S seconds later (rejoin + game-state snapshot). With --bots 2 the game must pause
@@ -36,6 +37,9 @@ const WAIT_PLAYERS = Number(args["wait-players"] || N_BOTS);
 const CHAOS = Number(args.chaos || 0);
 const UPLOAD_FAIL = Number(args["upload-fail"] || 0);
 const NO_READY = Number(args["no-ready"] || 0);
+const NO_ANSWER = !!args["no-answer"];
+// --no-answer: bots submit an empty guess like a player who never taps, so nobody scores (tie at 0)
+const pickGuess = (bot) => (NO_ANSWER ? "" : bot.players[Math.floor(Math.random() * bot.players.length)] || "");
 const TIMEOUT_S = Number(args.timeout || 900);
 const DROP_ROUND = Number(args["drop-round"] || 0);
 const DROP_SECS = Number(args["drop-secs"] || 5);
@@ -130,7 +134,7 @@ function runRoom(roomIdx, fixedCode) {
       socket.on("round-start", (d) => {
         rec("round-start", d.round, { owner: d.owner, photo: d.photo, duration: d.duration });
         bot.round = d.round;
-        bot.guess = bot.players[Math.floor(Math.random() * bot.players.length)] || "";
+        bot.guess = pickGuess(bot);
         if (DROP_ROUND && i === DROP_BOT && d.round === DROP_ROUND && !bot.dropped) {
           bot.dropped = true;
           rec("planned-disconnect", d.round, { secs: DROP_SECS });
@@ -155,7 +159,7 @@ function runRoom(roomIdx, fixedCode) {
         rec("game-state", d.round, { phase: d.phase, paused: !!d.pause, pause: d.pause?.pause, maxPauses: d.pause?.maxPauses, started: d.started });
         if (!d.started) return;
         bot.players = d.players.map((p) => p.username);
-        if (d.round !== bot.round) { bot.round = d.round; bot.guess = bot.players[Math.floor(Math.random() * bot.players.length)] || ""; }
+        if (d.round !== bot.round) { bot.round = d.round; bot.guess = pickGuess(bot); }
         if (d.phase === "reveal") socket.emit("submit-answer", { guess: bot.guess });
         if (d.phase === null && i < N_BOTS - NO_READY) socket.emit("im-ready");
       });

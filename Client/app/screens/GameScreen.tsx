@@ -13,6 +13,7 @@ import { TEST_IDS, playerOptionId } from "@/app/utils/testIds";
 import ProgressBar from "@/app/components/ProgressBar";
 import FinalScoreModal from "@/app/components/modals/FinalScoreModal";
 import WinnerModal from "@/app/components/modals/WinnerModal";
+import { getWinners } from "@/app/utils/ranking";
 import EmojiReaction from "@/app/components/IngameComunication/EmojiReaction";
 import EmojisButton from "@/app/components/IngameComunication/EmojisButtons";
 import { useI18n } from "../i18n";
@@ -72,7 +73,7 @@ const GameScreen = () => {
   const [finalScore, setFinalScore] = useState<ScoreRound[] | null>(null);
   const [showFinalScore, setShowFinalScore] = useState(false);
   const [showWinner, setShowWinner] = useState(false);
-  const [winner, setWinner] = useState<ScoreRound | null>(null);
+  const [winners, setWinners] = useState<ScoreRound[]>([]);
   const gameOverRef = useRef(false);
 
   // ── Other ────────────────────────────────────────────
@@ -122,7 +123,7 @@ const GameScreen = () => {
     gameOverRef.current = true;
     setPauseEndsAt(null);
     setFinalScore(finalScore);
-    if (finalScore?.length > 0) { setWinner(finalScore[0]); setShowWinner(true); }
+    if (finalScore?.length > 0) { setWinners(getWinners(finalScore)); setShowWinner(true); }
   };
 
   // ── Socket listeners ─────────────────────────────────
@@ -328,7 +329,7 @@ const GameScreen = () => {
   return (
     <View style={{ flex: 1 }}>
       <StatusBar hidden />
-      <WinnerModal visible={showWinner} winner={winner} onAnimationEnd={handleWinnerEnd} />
+      <WinnerModal visible={showWinner} winners={winners} onAnimationEnd={handleWinnerEnd} />
       <FinalScoreModal visible={showFinalScore} finalScore={finalScore || []} />
       <PausedModal endsAt={finalScore ? null : pauseEndsAt} pause={pauseCount.pause} maxPauses={pauseCount.maxPauses} />
 

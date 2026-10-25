@@ -37,6 +37,7 @@ export const TEST_IDS = {
   scoreModal: "score-modal",
   winnerModal: "winner-modal",
   winnerContinue: "winner-continue",
+  winnerTitle: "winner-title",
   finalScoreModal: "final-score-modal",
   finalExitButton: "final-exit-button",
   playAgainButton: "play-again-button",
@@ -44,4 +45,8 @@ export const TEST_IDS = {
 
 export const playerOptionId = (username: string) => `player-option-${username}`;
 export const lobbyPlayerId = (username: string) => `lobby-player-${username}`;
+export const winnerNameId = (username: string) => `winner-name-${username}`;
+export const finalWinnerId = (username: string) => `final-winner-${username}`;
+export const finalRankId = (username: string) => `final-rank-${username}`;
+export const scoreRankId = (username: string) => `score-rank-${username}`;
 export const roundsOptionId = (rounds: number) => `rounds-option-${rounds}`;

@@ -15,8 +15,9 @@
 #   install                     Install the last built binaries on every lab device
 #   open                        Open the app on every device, pointed at local Metro
 #   shot <label>                Screenshot every device into qa/runs/<RUN_ID>/shots/<label>-<device>.png
-#   play [--bots N] [--rounds R] [--devices all|pair|ios|android|none|<label,label>] [--flow play-game]
+#   play [--bots N] [--rounds R] [--devices all|pair|ios|android|none|<label,label>] [--flow play-game] [--bot-args "..."]
 #                               Full multiplayer session: bots host a room, devices join and play
+#                               (--bot-args: extra bots.mjs flags, e.g. --flow tie-game --bot-args --no-answer)
 #   bots [args]                 Run qa/lab/bots.mjs directly (headless players / load / sync metrics)
 set -euo pipefail
 
@@ -303,9 +304,10 @@ cmd_shot() {
 }
 
 cmd_play() {
-  local bots=3 rounds=10 which=all flow=play-game
+  local bots=3 rounds=10 which=all flow=play-game bot_args=""
   while [ $# -gt 0 ]; do case $1 in
     --bots) bots=$2; shift 2;; --rounds) rounds=$2; shift 2;; --devices) which=$2; shift 2;; --flow) flow=$2; shift 2;;
+    --bot-args) bot_args=$2; shift 2;;
     *) die "bad arg $1";; esac; done
   export RUN_ID; RUN_ID="$(run_id)"; local dir="$RUNS/$RUN_ID"; mkdir -p "$dir/maestro"
   local sel='.'; [ "$which" = ios ] && sel='select(.platform=="ios")'; [ "$which" = android ] && sel='select(.platform=="android")'
@@ -321,7 +323,7 @@ cmd_play() {
   [ "$total" -ge 2 ] || die "need at least 2 players"
   log "RUN $RUN_ID: $bots bots + $n_dev devices, $rounds rounds"
   node "$QA/lab/bots.mjs" --bots "$bots" --host --rounds "$rounds" --wait-players "$total" \
-    --photos "$RUNS/photos/bots" --out "$dir/bots.json" --code-file "$dir/code" >"$dir/bots.log" 2>&1 &
+    --photos "$RUNS/photos/bots" --out "$dir/bots.json" --code-file "$dir/code" $bot_args >"$dir/bots.log" 2>&1 &
   local bots_pid=$!
   for _ in $(seq 1 30); do [ -s "$dir/code" ] && break; sleep 1; done
   [ -s "$dir/code" ] || { kill $bots_pid 2>/dev/null; die "bots did not create a room — see $dir/bots.log"; }

@@ -14,6 +14,17 @@ appId: com.socketNull.ExposeMe
 - pressKey: Enter
 - tapOn:
     id: "join-game-button"
+# The field keeps the last code entered/created in this session (GameContext gameCode) and a tap puts the
+# cursor mid-text, so eraseText alone leaves digits after it: double tap selects the whole number first
+- runFlow:
+    when:
+      visible:
+        id: "game-code-input"
+        text: "[0-9]+"
+    commands:
+      - doubleTapOn:
+          id: "game-code-input"
+      - eraseText: 12
 - tapOn:
     id: "game-code-input"
 - inputText: ${GAME_CODE}

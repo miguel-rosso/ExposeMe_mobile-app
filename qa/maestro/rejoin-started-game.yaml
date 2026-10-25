@@ -9,6 +9,12 @@ appId: com.socketNull.ExposeMe
 - stopApp
 - launchApp:
     stopApp: false
+# Cold start: the dev client takes a few seconds to load the bundle. Typing before the home screen is up
+# lands in the restored username mid-text (e.g. "andrandroioid-a"), which joins as a new player
+- extendedWaitUntil:
+    visible:
+      id: "join-game-button"
+    timeout: 60000
 - runFlow: join-room.yaml
 # Game screen (any phase, possibly paused until the resume), never the lobby
 - extendedWaitUntil:

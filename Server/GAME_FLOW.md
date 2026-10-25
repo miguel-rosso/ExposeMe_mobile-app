@@ -74,6 +74,9 @@ After last round: game-over
 - A socket disconnect keeps the player in the room (they can rejoin with the same username and their
   `rejoinToken`) but marks
   them `connected: false`; rejoining marks them `connected: true` again.
+- A client that silently loses network is detected by the socket.io heartbeat within
+  `PING_INTERVAL + PING_TIMEOUT` (**10 s + 15 s**, `Server/app.ts`), overridable with
+  `SOCKET_PING_INTERVAL_MS` / `SOCKET_PING_TIMEOUT_MS` (clamped to 1 s..300 s).
 - Each round's photo owner is picked only among **connected** players.
 - When no connected player is left (everyone disconnected, or the last connected one left), the room is
   deleted after **30 min** (`ROOM_CLEANUP_DELAY`), or **2 min** if it never had a second player, unless

@@ -62,6 +62,48 @@ appId: com.socketNull.ExposeMe
       visible:
         id: "initial-screen"
     commands:
+      # EXP-122: the onboarding offers the language toggle. Tap it twice (net no change, so later
+      # flows keep the device language) and check the warning header switches language each time.
+      - runFlow:
+          when:
+            visible:
+              id: "initial-warning"
+              text: ".*Warning.*"
+          commands:
+            - tapOn:
+                id: "language-toggle"
+            - extendedWaitUntil:
+                visible:
+                  id: "initial-warning"
+                  text: ".*Aviso.*"
+                timeout: 5000
+            - tapOn:
+                id: "language-toggle"
+            - extendedWaitUntil:
+                visible:
+                  id: "initial-warning"
+                  text: ".*Warning.*"
+                timeout: 5000
+      - runFlow:
+          when:
+            visible:
+              id: "initial-warning"
+              text: ".*Aviso.*"
+          commands:
+            - tapOn:
+                id: "language-toggle"
+            - extendedWaitUntil:
+                visible:
+                  id: "initial-warning"
+                  text: ".*Warning.*"
+                timeout: 5000
+            - tapOn:
+                id: "language-toggle"
+            - extendedWaitUntil:
+                visible:
+                  id: "initial-warning"
+                  text: ".*Aviso.*"
+                timeout: 5000
       - scrollUntilVisible:
           element:
             id: "initial-continue-button"

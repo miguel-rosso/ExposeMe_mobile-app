@@ -127,4 +127,7 @@ export default {
 
   // General
   confirm: "Confirmar",
+
+  // LanguageToggle
+  changeLanguage: "Cambiar idioma",
 } as const;

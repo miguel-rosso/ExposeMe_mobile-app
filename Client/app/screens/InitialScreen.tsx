@@ -12,6 +12,7 @@ import CustomCarousel from "@/app/components/CustomCarousel/CustomCarousel";
 import LottieView from "lottie-react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useI18n } from "../i18n";
+import LanguageToggle from "../components/LanguageToggle";
 import { TEST_IDS } from "../utils/testIds";
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get("window");
@@ -43,10 +44,15 @@ const InitialScreen: React.FC = () => {
       <StatusBar barStyle="light-content" />
       <ScrollView contentContainerStyle={tw`flex-grow`} showsVerticalScrollIndicator={false}>
         <View style={tw`flex-1 px-4 pt-4 pb-6 max-w-[500px] w-full self-center`}>
+          {/* Language (the onboarding carries the privacy notice: let users read it in their language) */}
+          <View style={tw`items-end mb-2`}>
+            <LanguageToggle />
+          </View>
+
           {/* Header */}
           <View style={tw`items-center mb-5`}>
             <View style={tw`bg-amber-900/50 px-4 py-2 rounded-full mb-2`}>
-              <Text style={tw`text-xl font-bold text-amber-400`}>{t.warning}</Text>
+              <Text testID={TEST_IDS.initialWarning} style={tw`text-xl font-bold text-amber-400`}>{t.warning}</Text>
             </View>
             <Text style={tw`text-sm text-gray-300 text-center`}>
               {t.permissionExplanation}

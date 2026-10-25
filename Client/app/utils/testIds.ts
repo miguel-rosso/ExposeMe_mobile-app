@@ -57,6 +57,9 @@ export const TEST_IDS = {
   finalScoreModal: "final-score-modal",
   finalExitButton: "final-exit-button",
   playAgainButton: "play-again-button",
+  // ── Language ──
+  languageToggle: "language-toggle",
+  initialWarning: "initial-warning",
 } as const;
 
 export const playerOptionId = (username: string) => `player-option-${username}`;

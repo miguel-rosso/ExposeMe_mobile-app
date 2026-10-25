@@ -169,17 +169,17 @@ export class RoomManager {
   }
 
   /**
-   * The only shape in which a player is sent to clients (explicit allowlist: never socketId, rejoinToken or
-   * plantedPhoto). With `room`, the answer of the round in play is hidden while guessesHidden(room).
+   * The only shape in which a player is sent to clients (explicit allowlist: never socketId, rejoinToken,
+   * plantedPhoto or hasPlantedPhoto, which only goes to the player themself in room-of-game; nor isReady, which
+   * would tell who is still uploading a planted photo). With `room`, the
+   * answer of the round in play is hidden while guessesHidden(room).
    */
   publicPlayer(player: Player, room?: Room): PublicPlayer {
     const pub: PublicPlayer = {
       username: player.username,
       points: player.points,
       isHost: player.isHost,
-      isReady: player.isReady,
       connected: player.connected,
-      hasPlantedPhoto: !!player.hasPlantedPhoto,
       lastAnswerCorrect: player.lastAnswerCorrect,
       lastGuess: player.lastGuess,
     };

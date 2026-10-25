@@ -82,7 +82,7 @@ afterAll(() => { jest.restoreAllMocks(); });
 
 // Players exactly as the server sends them (public allowlist: no socketId)
 const player = (username: string, isHost: boolean) =>
-  ({ username, points: 0, isHost, isReady: false, connected: true, hasPlantedPhoto: false, lastAnswerCorrect: false, lastGuess: "" });
+  ({ username, points: 0, isHost, connected: true, lastAnswerCorrect: false, lastGuess: "" });
 const players = [player("alice", true), player("bob", false)];
 
 // FlatList schedules cell updates on timers: keep them on fake timers

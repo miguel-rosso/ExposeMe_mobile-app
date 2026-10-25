@@ -12,6 +12,7 @@ interface RoomOfGame {
   success: boolean;
   message?: string;
   rejoinToken?: string;
+  hasPlantedPhoto?: boolean;
   room?: { gameCode: string; rounds: number; players: Record<string, unknown>[] };
 }
 
@@ -145,7 +146,6 @@ describe("join and rejoin", () => {
     const carol = await newClient();
     const carolJoin = await joinAs(carol, gameCode, "carol");
     tokens.carol = carolJoin.rejoinToken!;
-    bob.emit("mark-player-planted", { gameCode, username: "bob" });
     bob.emit("plant-photo", { gameCode, username: "bob", photoUrl: "https://example.invalid/planted.jpg" });
 
     const started = [alice, bob, carol].map((c) => once<Record<string, unknown>[]>(c, "game-started"));
@@ -228,14 +228,14 @@ describe("chat and emoji", () => {
     expect(await quietEmoji).toBe(true);
   });
 
-  it("mark-player-planted only marks the sender", async () => {
-    const { gameCode, bob } = await lobby();
-    bob.emit("mark-player-planted", { gameCode, username: "alice" });
-    const carol = await newClient();
-    const res = await joinAs(carol, gameCode, "carol");
-    const byName = Object.fromEntries(res.room!.players.map((p) => [p.username, p]));
-    expect(byName.alice.hasPlantedPhoto).toBeFalsy();
-    expect(byName.bob.hasPlantedPhoto).toBe(true);
+  it("plant-photo only marks the sender", async () => {
+    const { gameCode, alice, bob } = await lobby();
+    const photo = "/temp/" + "d".repeat(32) + ".jpg";
+    registerUpload(gameCode, "bob", photo);
+    bob.emit("plant-photo", { gameCode, username: "alice", photoUrl: photo });
+    // Each player's own mark comes back only in their own room-of-game (EXP-126)
+    expect((await joinAs(bob, gameCode, "bob")).hasPlantedPhoto).toBe(true);
+    expect((await joinAs(alice, gameCode, "alice")).hasPlantedPhoto).toBe(false);
   });
 });
 

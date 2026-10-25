@@ -59,6 +59,8 @@ function setup(plantedBy?: string): void {
   room.phase = "waiting-photo";
   engine.onAllPlayersReady(room);
   vi.advanceTimersByTime(GAME_START_DELAY);
+  // A planted round starts after a short photo wait (EXP-126, at most 3 s)
+  if (plantedBy) vi.advanceTimersByTime(3_000);
 }
 
 beforeEach(() => {

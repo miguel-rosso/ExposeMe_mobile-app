@@ -12,7 +12,7 @@ const REVEAL_TIME = 3_000;
 const GAME_START_DELAY = 1_000;
 const PHOTO = "/temp/" + "a".repeat(32) + ".jpg";
 const PLANTED = "/temp/" + "b".repeat(32) + ".jpg";
-const PUBLIC_KEYS = ["connected", "hasPlantedPhoto", "isHost", "isReady", "lastAnswerCorrect", "lastGuess", "points", "username"];
+const PUBLIC_KEYS = ["connected", "isHost", "lastAnswerCorrect", "lastGuess", "points", "username"];
 
 let emits: CapturedEmit[];
 let engine: GameEngine;
@@ -48,7 +48,9 @@ function answeringRoom(): Room {
   engine.startGame(room);
   room.players.forEach((p) => engine.markReady(room, p));
   vi.advanceTimersByTime(GAME_START_DELAY);
-  engine.onPhotoReceived(room, PHOTO, room.currentPlayer!.username);
+  // Round 1 may be a planted round: a photo wait with no owner, then round-start within 3 s (EXP-126)
+  if (!room.currentPlayer) vi.advanceTimersByTime(3_000);
+  else engine.onPhotoReceived(room, PHOTO, room.currentPlayer.username);
   expect(room.phase).toBe("answering");
   return room;
 }
@@ -86,7 +88,8 @@ describe("public player data", () => {
     const safe = rm.safeRoomData(room);
     expectNoSecrets(safe);
     expect(safe.players.map((p) => Object.keys(p).sort())).toEqual(room.players.map(() => PUBLIC_KEYS));
-    expect(safe.players[1].hasPlantedPhoto).toBe(true);
+    // Whether bob planted a photo is his own business (EXP-126): told only to him, in room-of-game
+    expect(safe.players[1]).not.toHaveProperty("hasPlantedPhoto");
   });
 
   it("room-of-game never names the photo owner while the photo is awaited", () => {

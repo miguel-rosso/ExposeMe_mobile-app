@@ -23,7 +23,11 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   const [username, setUsername] = useState<string | null>(null);
   const [playersProvider, setPlayersProvider] = useState<Player[]>([]);
   const [roundsOfGame, setRoundsOfGame] = useState<number>(5);
-  const [plantedPhotoUri, setPlantedPhotoUri] = useState<string | null>(null);
+  // Photo picked in the lobby to plant in this game (dropped when the game/room ends), and whether the server has it
+  const [plantedPhotoUri, setPlantedPhotoUriState] = useState<string | null>(null);
+  const [plantedPhotoSent, setPlantedPhotoSent] = useState(false);
+  const plantedUriRef = useRef<string | null>(null);
+  const plantingRef = useRef<string | null>(null); // uri being uploaded (one upload per picked photo at a time)
   const socketRef = useRef<Socket | null>(null);
   const rejoinTokenRef = useRef<StoredRejoinToken | null>(null);
 
@@ -83,6 +87,8 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
 
   const endSocket = () => {
     console.log("Ending socket");
+    // Game over, "Play again", leaving or being kicked all end the socket: a planted photo is for one game only
+    setPlantedPhotoUri(null);
     if (socketRef.current) {
       socketRef.current.removeAllListeners();
       socketRef.current.disconnect();
@@ -102,17 +108,35 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     return () => sub.remove();
   }, []);
 
-  const uploadPlantedPhoto = async (): Promise<string | null> => {
-    if (!plantedPhotoUri) return null;
+  // ── Planted photo ──
+
+  const setPlantedPhotoUri = (uri: string | null) => {
+    plantedUriRef.current = uri;
+    setPlantedPhotoUriState(uri);
+    setPlantedPhotoSent(false);
+  };
+
+  /**
+   * Upload the picked planted photo and send plant-photo, right away from the lobby (so im-ready never waits for
+   * it). Returns true once the server has it. A photo replaced or dropped while uploading is not sent.
+   */
+  const plantPhoto = async (): Promise<boolean> => {
+    const uri = plantedUriRef.current;
     // The server only accepts uploads from a member of the room (room code + rejoin token)
     const entry = rejoinTokenRef.current;
-    if (!entry) return null;
-
+    if (!uri || !entry || plantingRef.current === uri) return false;
+    plantingRef.current = uri;
     try {
-      return await uploadPhoto(SERVER_URL, plantedPhotoUri, { gameCode: entry.gameCode, token: entry.token });
+      const url = await uploadPhoto(SERVER_URL, uri, { gameCode: entry.gameCode, token: entry.token });
+      if (plantedUriRef.current !== uri || !socketRef.current) return false;
+      socketRef.current.emit("plant-photo", { photoUrl: url });
+      setPlantedPhotoSent(true);
+      return true;
     } catch (error) {
       console.error("Error uploading planted photo:", error);
-      return null;
+      return false;
+    } finally {
+      if (plantingRef.current === uri) plantingRef.current = null;
     }
   };
 
@@ -132,7 +156,8 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
         setRoundsOfGame,
         plantedPhotoUri,
         setPlantedPhotoUri,
-        uploadPlantedPhoto,
+        plantedPhotoSent,
+        plantPhoto,
         saveRejoinToken,
         getRejoinToken,
         clearRejoinToken,

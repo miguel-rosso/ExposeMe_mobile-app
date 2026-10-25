@@ -59,7 +59,9 @@ const WaitingRoom = ({}) => {
     username,
     setRoundsOfGame,
     roundsOfGame,
+    plantedPhotoUri,
     setPlantedPhotoUri,
+    plantPhoto,
     saveRejoinToken,
     getRejoinToken,
     clearRejoinToken,
@@ -69,7 +71,12 @@ const WaitingRoom = ({}) => {
   const [dialogVisible, setDialogVisible] = useState<boolean>(false);
   const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
   const [showCopyMessage, setShowCopyMessage] = useState<boolean>(false);
-  const [hasPlantedPhoto, setHasPlantedPhoto] = useState<boolean>(false);
+  // Planted: a photo picked on this device for this game, or the server already has mine (its own mark, only told
+  // to me in room-of-game: e.g. after reopening the app in the lobby)
+  const [serverPlanted, setServerPlanted] = useState<boolean>(false);
+  const hasPlantedPhoto = !!plantedPhotoUri || serverPlanted;
+  const plantedUriRef = useRef(plantedPhotoUri);
+  useEffect(() => { plantedUriRef.current = plantedPhotoUri; }, [plantedPhotoUri]);
   const { requestGalleryPermission } = usePhotoContext();
   const galleryGuard = useGalleryAccessGuard({ watch: true });
   const [showPhotoAddedMessage, setShowPhotoAddedMessage] = useState<boolean>(false);
@@ -188,7 +195,8 @@ const WaitingRoom = ({}) => {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: "images",
-        allowsEditing: true,
+        // No crop: a square planted photo would stand out among the game's uncropped gallery photos
+        allowsEditing: false,
         quality: 0.8,
       });
 
@@ -197,11 +205,11 @@ const WaitingRoom = ({}) => {
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const selectedImage = result.assets[0].uri;
 
-        // Store the URI in context instead of uploading immediately
+        // Upload and plant it now, in the lobby: im-ready must never wait for it (if this fails, the game screen
+        // retries after im-ready)
         setPlantedPhotoUri(selectedImage);
-
-        // Mark that the user has selected a photo to plant
-        setHasPlantedPhoto(true);
+        plantedUriRef.current = selectedImage;
+        plantPhoto();
         setShowPhotoAddedMessage(true);
         setTimeout(() => {
           setShowPhotoAddedMessage(false);
@@ -269,8 +277,12 @@ const WaitingRoom = ({}) => {
         setPlayers(data.room.players);
         setGameCode(data.room.gameCode);
         setRoundsOfGame(data.room.rounds);
-        const me = data.room.players.find((p) => p.username === username);
-        if (me?.hasPlantedPhoto) setHasPlantedPhoto(true);
+        // Lobby only (a rejoin into a started game leaves the planted photo alone): show the server's own mark, and
+        // plant the picked photo again if the server doesn't have it (upload failed, or lost on a new socket)
+        if (!data.room.started) {
+          setServerPlanted(!!data.hasPlantedPhoto);
+          if (!data.hasPlantedPhoto && plantedUriRef.current) plantPhoto();
+        }
       }
     });
 
@@ -520,6 +532,7 @@ const WaitingRoom = ({}) => {
 
               <TouchableOpacity testID={TEST_IDS.plantPhotoButton} onPress={pickAndPlantImage} style={tw`mb-2 items-center`} disabled={isSelecting}>
                 <View
+                  testID={hasPlantedPhoto ? TEST_IDS.plantPhotoPlanted : TEST_IDS.plantPhotoNotPlanted}
                   style={tw`h-14 w-14 rounded-full ${hasPlantedPhoto ? "bg-green-600" : "bg-black/40"} flex justify-center items-center`}
                 >
                   <Icon

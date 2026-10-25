@@ -236,7 +236,7 @@ jest.mock("../app/providers/GameContext", () => {
     useGameContext: () => ({
       username: "bob", gameCode: "123456", socket: mockSocket, endSocket: jest.fn(),
       playersProvider: [], setPlayersProvider: jest.fn(), roundsOfGame: 10, plantedPhotoUri: null,
-      uploadPlantedPhoto: jest.fn(), getRejoinToken: async () => "tok-123", saveRejoinToken: jest.fn(),
+      plantedPhotoSent: false, plantPhoto: jest.fn(), getRejoinToken: async () => "tok-123", saveRejoinToken: jest.fn(),
     }),
   };
 });

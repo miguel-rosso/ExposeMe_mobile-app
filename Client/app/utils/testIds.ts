@@ -18,6 +18,8 @@ export const TEST_IDS = {
   copyCodeButton: "copy-code-button",
   shareCodeButton: "share-code-button",
   plantPhotoButton: "plant-photo-button",
+  plantPhotoPlanted: "plant-photo-planted", // plant button state: a photo is planted
+  plantPhotoNotPlanted: "plant-photo-not-planted",
   startGameButton: "start-game-button",
   lobbyWaiting: "lobby-waiting",
   chatInput: "chat-input",

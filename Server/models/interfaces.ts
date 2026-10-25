@@ -15,16 +15,14 @@ export interface Player {
 }
 
 /**
- * Player as sent to clients: an explicit allowlist (RoomManager.publicPlayer). Never the socket id, rejoin token
- * or planted photo URL; `points`/`lastGuess`/`lastAnswerCorrect` exclude the round in play until round-scores.
+ * Player as sent to clients: an explicit allowlist (RoomManager.publicPlayer). Never the socket id, rejoin token,
+ * planted photo URL, whether they planted one, or whether they sent im-ready; `points`/`lastGuess`/`lastAnswerCorrect` exclude the round in play until round-scores.
  */
 export interface PublicPlayer {
   username: string;
   points: number;
   isHost: boolean;
-  isReady: boolean;
   connected: boolean;
-  hasPlantedPhoto: boolean;
   lastAnswerCorrect: boolean;
   lastGuess: string;
 }
@@ -133,6 +131,8 @@ export interface RoomOfGameResponse {
   rounds?: number;
   /** Only in the response to the joining socket itself */
   rejoinToken?: string;
+  /** The joining player's own planted-photo mark (never sent about anyone else) */
+  hasPlantedPhoto?: boolean;
 }
 
 /** `game-paused` payload: countdown left (ms), who is awaited, and this pause's number (1..maxPauses) */

@@ -1,0 +1,14 @@
+# EXP-035: a planted photo belongs to one game. From the final results modal of a game in which this device planted
+# a photo (plant-photo.yaml in the lobby before start-game): "Play again" → back in the lobby the plant button shows
+# "not planted", and the photo is not re-planted in the next game.
+# env: USERNAME
+appId: com.socketNull.ExposeMe
+---
+- runFlow: play-again.yaml
+- extendedWaitUntil:
+    visible:
+      id: "plant-photo-not-planted"
+    timeout: 10000
+- assertNotVisible:
+    id: "plant-photo-planted"
+- takeScreenshot: again-not-planted-${USERNAME}

@@ -6,9 +6,7 @@ export interface Player {
   username: string;
   points: number;
   isHost: boolean;
-  isReady: boolean;
   connected?: boolean; // Server-side connection state (false while disconnected)
-  hasPlantedPhoto?: boolean;
   lastAnswerCorrect?: boolean;
   lastGuess?: string;
 }
@@ -33,6 +31,7 @@ export interface Room {
   gameCode: string;
   players: Player[];
   rounds: number;
+  started?: boolean;
 }
 
 export interface RandomPhotoResponse {
@@ -53,6 +52,7 @@ export interface RoomOfGameResponse {
   room?: Room;
   message?: string;
   rejoinToken?: string; // Only sent to the joining player; keep it to rejoin after a reconnect
+  hasPlantedPhoto?: boolean; // My own planted-photo mark on the server (never sent about other players)
 }
 
 export type ServerPhase = "waiting-photo" | "answering" | "reveal" | "scores";
@@ -125,9 +125,13 @@ export interface GameContextProps {
   startSocket: () => void;
   endSocket: () => void;
   setRoundsOfGame: (rounds: number) => void;
+  /** Photo picked to plant in this game (cleared when the game socket ends) */
   plantedPhotoUri: string | null;
   setPlantedPhotoUri: (uri: string | null) => void;
-  uploadPlantedPhoto: () => Promise<string | null>;
+  /** The server has the picked planted photo (uploaded + plant-photo) */
+  plantedPhotoSent: boolean;
+  /** Upload the picked photo and send plant-photo; true once the server has it */
+  plantPhoto: () => Promise<boolean>;
   saveRejoinToken: (gameCode: string, username: string, token: string) => void;
   getRejoinToken: (gameCode: string, username: string) => Promise<string | null>;
   clearRejoinToken: () => void;

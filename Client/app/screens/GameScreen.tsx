@@ -40,7 +40,7 @@ const GameScreen = () => {
   const { t } = useI18n();
   const {
     username, gameCode, endSocket, socket, playersProvider, setPlayersProvider, roundsOfGame, plantedPhotoUri,
-    uploadPlantedPhoto, getRejoinToken, saveRejoinToken,
+    plantedPhotoSent, plantPhoto, getRejoinToken, saveRejoinToken,
   } = useGameContext();
   const safeUsername = username ?? "";
   const safeGameCode = gameCode ?? "";
@@ -101,7 +101,6 @@ const GameScreen = () => {
 
   // ── Other ────────────────────────────────────────────
   const [emojiReactions, setEmojiReactions] = useState<EmojiReactionData[]>([]);
-  const [plantedPhotoUploaded, setPlantedPhotoUploaded] = useState(false);
   const [isReady, setIsReady] = useState(false);
 
   // ── Derived ──────────────────────────────────────────
@@ -359,31 +358,13 @@ const GameScreen = () => {
     };
   }, [socket]);
 
-  // Upload planted photo first, THEN signal ready
+  // Signal ready at once (whether a player is still uploading must not show). The planted photo was sent from the
+  // lobby; only if that upload failed, retry it now (the server accepts it until round 1 is played)
   useEffect(() => {
     if (!isReady || !socket) return;
-
-    const ready = async () => {
-      // Upload planted photo before signaling ready
-      if (plantedPhotoUri && !plantedPhotoUploaded) {
-        try {
-          console.log("Uploading planted photo before ready...");
-          const url = await uploadPlantedPhoto();
-          if (url) {
-            socket.emit("plant-photo", { gameCode, username, photoUrl: url });
-            setPlantedPhotoUploaded(true);
-            console.log("Planted photo uploaded");
-          }
-        } catch (e) {
-          console.error("Planted photo upload failed:", e);
-        }
-      }
-
-      console.log("Emitting im-ready");
-      socket.emit("im-ready", { gameCode: safeGameCode, username: safeUsername });
-    };
-
-    ready();
+    console.log("Emitting im-ready");
+    socket.emit("im-ready", { gameCode: safeGameCode, username: safeUsername });
+    if (plantedPhotoUri && !plantedPhotoSent) plantPhoto();
   }, [isReady]);
 
   const handleWinnerEnd = () => { setShowWinner(false); setShowFinalScore(true); };

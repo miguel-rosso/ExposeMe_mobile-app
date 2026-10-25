@@ -12,7 +12,7 @@ import { registerUpload } from "./helpers";
 
 const PHOTO = "/temp/0123456789abcdef0123456789abcdef.jpg";
 const PLANTED = "/temp/fedcba9876543210fedcba9876543210.jpg";
-const FORBIDDEN_KEYS = new Set(["socketId", "rejoinToken", "plantedPhoto"]);
+const FORBIDDEN_KEYS = new Set(["socketId", "rejoinToken", "plantedPhoto", "hasPlantedPhoto", "isReady"]);
 
 interface Received { who: string; ev: string; args: unknown[] }
 
@@ -66,7 +66,8 @@ function leaks(r: Received): string[] {
     } else if (Array.isArray(v)) v.forEach((x, i) => walk(x, [...path, String(i)]));
     else if (v && typeof v === "object") {
       for (const [k, x] of Object.entries(v)) {
-        const isOwnToken = r.ev === "room-of-game" && path.length === 1 && k === "rejoinToken";
+        // room-of-game carries the receiver's own token and planted mark (EXP-126), at the top level only
+        const isOwnToken = r.ev === "room-of-game" && path.length === 1 && (k === "rejoinToken" || k === "hasPlantedPhoto");
         if (FORBIDDEN_KEYS.has(k) && !isOwnToken) out.push(`${r.who} ${r.ev} ${[...path, k].join(".")}: forbidden key`);
         walk(x, [...path, k]);
       }
@@ -102,7 +103,6 @@ describe("player data in socket payloads", () => {
 
     // bob plants a photo (another player than the future owner of round 1, in general)
     registerUpload(gameCode, "bob", PLANTED);
-    byName.bob.emit("mark-player-planted");
     byName.bob.emit("plant-photo", { photoUrl: PLANTED });
 
     // Host kicks dave by username; kicking itself is ignored
@@ -120,7 +120,7 @@ describe("player data in socket payloads", () => {
     alice.emit("start-game");
     const startedPlayers = await started[0];
     await Promise.all(started);
-    expect(startedPlayers.map((p) => Object.keys(p).sort())).toEqual(players.map(() => ["connected", "hasPlantedPhoto", "isHost", "isReady", "lastAnswerCorrect", "lastGuess", "points", "username"]));
+    expect(startedPlayers.map((p) => Object.keys(p).sort())).toEqual(players.map(() => ["connected", "isHost", "lastAnswerCorrect", "lastGuess", "points", "username"]));
 
     // First round: an uploaded photo from the picked owner, or bob's planted photo (round-start never names the
     // owner, EXP-128: it is whoever got your-turn, else the planter)

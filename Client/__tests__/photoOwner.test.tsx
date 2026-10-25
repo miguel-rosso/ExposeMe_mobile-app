@@ -43,7 +43,7 @@ class FakeSocket {
 
 const mockSocket = new FakeSocket();
 const mockPlayers = ["alice", "bob", "carol"].map((username) => ({
-  username, points: 0, isHost: username === "alice", isReady: true, connected: true, hasPlantedPhoto: false,
+  username, points: 0, isHost: username === "alice", connected: true,
   lastGuess: "", lastAnswerCorrect: false,
 }));
 jest.mock("expo-router", () => ({ useRouter: () => ({ replace: jest.fn() }), useFocusEffect: () => {} }));
@@ -51,7 +51,7 @@ jest.mock("../app/providers/GameContext", () => ({
   useGameContext: () => ({
     username: "bob", gameCode: "123456", socket: mockSocket, endSocket: jest.fn(),
     playersProvider: mockPlayers, setPlayersProvider: jest.fn(), roundsOfGame: 10, plantedPhotoUri: null,
-    uploadPlantedPhoto: jest.fn(), getRejoinToken: async () => "tok-123", saveRejoinToken: jest.fn(),
+    plantedPhotoSent: false, plantPhoto: jest.fn(), getRejoinToken: async () => "tok-123", saveRejoinToken: jest.fn(),
   }),
 }));
 jest.mock("../app/providers/PhotoContext", () => ({

@@ -134,7 +134,7 @@ io.on("connection", (socket: Socket) => {
       const current = session(socket);
       if (current && gameCode === current.room.gameCode && username === current.player.username) {
         const { room, player } = current;
-        socket.emit("room-of-game", { success: true, room: roomManager.safeRoomData(room), rounds: room.rounds, rejoinToken: player.rejoinToken });
+        socket.emit("room-of-game", { success: true, room: roomManager.safeRoomData(room), rounds: room.rounds, rejoinToken: player.rejoinToken, hasPlantedPhoto: !!player.hasPlantedPhoto });
         // Game in progress: the app asks again from the game screen, which missed the rejoin snapshot
         gameEngine.resendState(room, player);
         return;
@@ -159,8 +159,11 @@ io.on("connection", (socket: Socket) => {
           socket.join(gameCode);
           socket.data.gameCode = gameCode;
           socket.data.username = username;
-          // rejoinToken goes only to this socket
-          socket.emit("room-of-game", { success: true, room: roomManager.safeRoomData(result.room), rounds: result.room.rounds, rejoinToken: player.rejoinToken });
+          // rejoinToken and the player's own planted mark go only to this socket
+          socket.emit("room-of-game", {
+            success: true, room: roomManager.safeRoomData(result.room), rounds: result.room.rounds,
+            rejoinToken: player.rejoinToken, hasPlantedPhoto: !!player.hasPlantedPhoto,
+          });
           // Only broadcast player-joined for new players, not rejoins
           if (!result.rejoin) socket.broadcast.to(gameCode).emit("player-joined", roomManager.publicPlayer(player));
           // A rejoin replaces the player's previous socket(s): they must not keep receiving the room's events
@@ -181,7 +184,7 @@ io.on("connection", (socket: Socket) => {
         socket.join(room.gameCode);
         socket.data.gameCode = room.gameCode;
         socket.data.username = username;
-        socket.emit("room-of-game", { success: true, room: roomManager.safeRoomData(room), rejoinToken: room.players[0].rejoinToken });
+        socket.emit("room-of-game", { success: true, room: roomManager.safeRoomData(room), rejoinToken: room.players[0].rejoinToken, hasPlantedPhoto: false });
       }
     } catch (e) { console.error("join-create-game error:", e); }
   });
@@ -327,13 +330,6 @@ io.on("connection", (socket: Socket) => {
     } catch (e) { console.error("emoji error:", e); }
   });
 
-  socket.on("mark-player-planted", () => {
-    try {
-      const s = session(socket);
-      if (s) s.player.hasPlantedPhoto = true;
-    } catch (e) { console.error("mark-planted error:", e); }
-  });
-
   socket.on("plant-photo", (data: { photoUrl: string }) => {
     try {
       const s = session(socket);
@@ -342,7 +338,10 @@ io.on("connection", (socket: Socket) => {
       const { room, player } = s;
       // Accept planted photos until the first round actually starts playing (same rule as POST /upload)
       if (!acceptsPlantedPhoto(room)) return;
+      // Replaces an earlier planted photo of this player; the mark only goes back to them (room-of-game)
       player.plantedPhoto = photoUrl;
+      player.hasPlantedPhoto = true;
+      gameEngine.onLatePlantedPhoto(room); // retry sent after the planted rounds were drawn
       console.log(`[${room.gameCode}] Planted photo received from ${player.username}`);
     } catch (e) { console.error("plant-photo error:", e); }
   });

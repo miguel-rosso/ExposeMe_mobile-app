@@ -21,6 +21,26 @@ export const MAX_TOTAL_PAUSES = 10; // Pauses per game counted or not, so quick 
 export const PAUSE_MIN_DURATION = 2_000; // A pause is never shorter than this (flapping connections)
 const RESUME_MIN_REMAINING = 1_500; // A resumed phase gets at least this much time
 const PHOTO_RESUME_MIN_REMAINING = 5_000; // ...and the photo owner at least this much to (re)send the photo
+// A planted round shows a normal photo wait first, as long as a real one: a past wait of this room (waiting-photo →
+// photo-sent) with ±PLANTED_JITTER, or PLANTED_DELAY_MIN..MAX when the room has none yet
+const PLANTED_DELAY_MIN = 1_000;
+const PLANTED_DELAY_MAX = 3_000;
+const PLANTED_JITTER = 0.15;
+const PLANTED_DELAY_FLOOR = 500;
+const WAIT_HISTORY_SIZE = 20; // real photo waits remembered per room
+
+/**
+ * A planted round's photo wait. `shown`/`shownSince` drive the countdown clients see: a normal 15 s photo wait,
+ * frozen while paused (`shownSince` null), independent of the hidden real delay before round-start.
+ */
+interface PlantedWait {
+  planter: Player;
+  photo: string;
+  shown: number;
+  shownSince: number | null;
+  /** The planter left: no photo comes, the wait times out when the countdown ends (like an absent owner) */
+  planterGone?: boolean;
+}
 
 export class GameEngine {
   /** Pauses started in each room's current game, refunded or not (capped by MAX_TOTAL_PAUSES) */
@@ -30,6 +50,13 @@ export class GameEngine {
    * photo-unavailable for an earlier pick (same round number after a skip) can't skip the current one
    */
   private turnAttempts = new WeakMap<Room, number>();
+  /**
+   * Planted round whose photo wait is on screen (phase waiting-photo, no owner picked): its planter, photo and the
+   * delay before its round-start. Nobody is told the round is planted.
+   */
+  private plantedWaits = new WeakMap<Room, PlantedWait>();
+  /** How long this room's real photo waits took (ms, waiting-photo → accepted photo-sent), newest last */
+  private waitHistory = new WeakMap<Room, number[]>();
 
   constructor(private io: Server, private roomManager: RoomManager) {}
 
@@ -44,6 +71,7 @@ export class GameEngine {
     room._consecutiveSkips = 0;
     room._pauseCount = 0;
     this.totalPauses.set(room, 0);
+    this.plantedWaits.delete(room);
     // "Play again" reuses the room: drop scores and answers from the previous game
     room.players.forEach((p) => { p.points = 0; p.lastGuess = ""; p.lastAnswerCorrect = false; });
     console.log(`[${room.gameCode}] Game started`);
@@ -81,6 +109,7 @@ export class GameEngine {
     room.phase = "waiting-photo"; // Out of the ready phase: later im-ready / ready timeout are no-ops
     room.round = 0;
     room.currentPlayer = null; // Picked by startRound; a stale owner from a previous game can't send a photo
+    this.plantedWaits.delete(room);
     this.assignPlantedSlots(room);
     console.log(`[${room.gameCode}] All ready, planted slots: [${[...room.plantedSlots].join(",")}]`);
     this.setTimer(room, GAME_START_DELAY, () => this.startRound(room));
@@ -93,6 +122,7 @@ export class GameEngine {
     // Only the player whose turn it is may provide the photo
     if (room.currentPlayer?.username !== username) return;
 
+    this.recordWait(room);
     room.round++;
     room.phase = "answering";
     room.currentPhoto = photo;
@@ -268,7 +298,7 @@ export class GameEngine {
       isOwner: inRound && !!recipient && room.currentPlayer === recipient,
       photo: inRound ? room.currentPhoto : null,
       correctAnswer: shown ? room.currentPlayer?.username ?? null : null,
-      duration: room.started ? duration : 0,
+      duration: room.started ? this.shownDuration(room) ?? duration : 0,
       held: room.held,
       pause: room.paused ? this.pauseInfo(room) : null,
       scores,
@@ -294,6 +324,8 @@ export class GameEngine {
     } else if (room._timer) {
       this.pauseTimer(room);
     }
+    const wait = this.plantedWait(room);
+    if (wait) { wait.shown = this.shownDuration(room)!; wait.shownSince = null; }
     room.paused = true;
     // Counted up front (the payload shows the would-be number); resumeGame refunds it if the pause was short
     room._pauseCount++;
@@ -323,10 +355,19 @@ export class GameEngine {
     if (room._pauseTimer) { clearTimeout(room._pauseTimer); room._pauseTimer = null; }
     // A short absence (back within PAUSE_GRACE) doesn't use up one of the game's MAX_PAUSES
     if (Date.now() - room._pauseStartedAt < PAUSE_GRACE) room._pauseCount--;
-    const min = room.phase === "waiting-photo" && room.currentPlayer ? PHOTO_RESUME_MIN_REMAINING : RESUME_MIN_REMAINING;
-    room._timerDuration = Math.max(min, room._timerDuration);
+    const wait = this.plantedWait(room);
+    if (wait) {
+      // Planted photo wait: the countdown goes on from where the pause froze it (what the snapshot showed); the photo
+      // arrives after a fresh upload-like delay, as a resumed owner re-sends theirs, never after the countdown
+      room._timerDuration = wait.planterGone ? Math.max(100, wait.shown)
+        : Math.min(Math.max(room._timerDuration, this.plantedDelay(room)), Math.max(100, wait.shown - 100));
+      wait.shownSince = Date.now();
+    } else {
+      const min = room.phase === "waiting-photo" && room.currentPlayer ? PHOTO_RESUME_MIN_REMAINING : RESUME_MIN_REMAINING;
+      room._timerDuration = Math.max(min, room._timerDuration);
+    }
     console.log(`[${room.gameCode}] RESUMED "${room.phase}" with ${room._timerDuration}ms (${room._pauseCount}/${MAX_PAUSES} pauses counted)`);
-    this.io.to(room.gameCode).emit("game-resumed", { phase: room.phase, duration: room._timerDuration });
+    this.io.to(room.gameCode).emit("game-resumed", { phase: room.phase, duration: this.shownDuration(room) ?? room._timerDuration });
     // A photo sent while paused was ignored: ask the owner again
     if (room.phase === "waiting-photo" && room.currentPlayer?.connected) {
       this.io.to(room.currentPlayer.socketId).emit("your-turn", this.yourTurn(room));
@@ -379,25 +420,30 @@ export class GameEngine {
 
     const planted = this.pickPlantedPhoto(room);
     if (planted) {
-      room.currentPlayer = planted;
-      room.plantedPhotosShown++;
-      room.round++;
-      room.phase = "answering";
-      room.currentPhoto = planted.plantedPhoto ?? null;
-      room._consecutiveSkips = 0;
-
-      console.log(`[${room.gameCode}] Round ${room.round}: planted photo from ${planted.username}`);
-
-      this.emitRoundStart(room, planted, planted.plantedPhoto ?? "");
+      // Same visible sequence as an uploaded photo: room-wide waiting-photo, then round-start after an upload-like
+      // delay. No owner is picked meanwhile (nobody gets your-turn, the planter can't send or skip a photo)
+      const photo = planted.plantedPhoto ?? "";
+      // Used now: never shown twice, and the planter's flag is gone
       planted.plantedPhoto = undefined;
+      planted.hasPlantedPhoto = false;
+      room.currentPlayer = null;
+      room.phase = "waiting-photo";
+      room.currentPhoto = null;
+      const delay = this.plantedDelay(room);
+      this.plantedWaits.set(room, { planter: planted, photo, shown: PHOTO_WAIT_TIMEOUT, shownSince: Date.now() });
 
-      this.setTimer(room, ANSWER_TIME, () => this.enterReveal(room));
+      console.log(`[${room.gameCode}] Planted photo from ${planted.username} in ${delay}ms`);
+      const waiting: WaitingPhotoData = { round: room.round + 1, duration: PHOTO_WAIT_TIMEOUT };
+      this.io.to(room.gameCode).emit("waiting-photo", waiting);
+
+      this.setTimer(room, delay, () => this.startPlantedRound(room));
     } else {
       const others = connected.filter((p) => p !== exclude);
       const candidates = others.length > 0 ? others : connected;
       room.currentPlayer = candidates[Math.floor(Math.random() * candidates.length)];
       room.phase = "waiting-photo";
       room.currentPhoto = null;
+      this.plantedWaits.delete(room);
       this.turnAttempts.set(room, (this.turnAttempts.get(room) ?? 0) + 1); // new photo request
 
       console.log(`[${room.gameCode}] Waiting photo from ${room.currentPlayer.username}`);
@@ -413,6 +459,82 @@ export class GameEngine {
         }
       });
     }
+  }
+
+  /** End of a planted round's hidden delay: its round-start, or, if the planter left, a timeout like any owner's. */
+  private startPlantedRound(room: Room): void {
+    const wait = this.plantedWait(room);
+    if (!wait) return;
+    if (!room.players.includes(wait.planter)) {
+      // Like a normal owner who left: no photo comes, the wait runs out (15 s from waiting-photo) and is skipped
+      wait.planterGone = true;
+      this.setTimer(room, this.shownDuration(room)!, () => {
+        this.plantedWaits.delete(room);
+        if (room.phase === "waiting-photo") this.skipRound(room, "timeout");
+      });
+      return;
+    }
+    this.plantedWaits.delete(room);
+
+    room.currentPlayer = wait.planter;
+    room.plantedPhotosShown++;
+    room.round++;
+    room.phase = "answering";
+    room.currentPhoto = wait.photo;
+    room._consecutiveSkips = 0;
+
+    console.log(`[${room.gameCode}] Round ${room.round}: planted photo from ${wait.planter.username}`);
+    this.emitRoundStart(room, wait.planter, wait.photo);
+    this.setTimer(room, ANSWER_TIME, () => this.enterReveal(room));
+  }
+
+  /** The planted photo wait in progress, if any. */
+  private plantedWait(room: Room): PlantedWait | undefined {
+    return room.phase === "waiting-photo" ? this.plantedWaits.get(room) : undefined;
+  }
+
+  /**
+   * Countdown sent to clients in a planted round's photo wait: what a normal 15 s wait would have left (frozen while
+   * paused), never the hidden delay. Undefined outside a planted wait.
+   */
+  private shownDuration(room: Room): number | undefined {
+    const wait = this.plantedWait(room);
+    if (!wait) return undefined;
+    return Math.max(0, wait.shown - (wait.shownSince === null ? 0 : Date.now() - wait.shownSince));
+  }
+
+  /** How long until a planted photo appears: a random past real wait of this room with jitter, else 1-3 s. */
+  private plantedDelay(room: Room): number {
+    const history = this.waitHistory.get(room) ?? [];
+    if (history.length === 0) {
+      return PLANTED_DELAY_MIN + Math.floor(Math.random() * (PLANTED_DELAY_MAX - PLANTED_DELAY_MIN + 1));
+    }
+    const base = history[Math.floor(Math.random() * history.length)];
+    const jittered = base * (1 + (Math.random() * 2 - 1) * PLANTED_JITTER);
+    return Math.round(Math.min(PHOTO_WAIT_TIMEOUT - 1_000, Math.max(PLANTED_DELAY_FLOOR, jittered)));
+  }
+
+  /** A real photo arrived: remember how long its wait took (pauses excluded) for planted rounds to imitate. */
+  private recordWait(room: Room): void {
+    const remaining = room._timer ? room._timerDuration - (Date.now() - room._timerStartedAt) : room._timerDuration;
+    const waited = Math.min(PHOTO_WAIT_TIMEOUT, Math.max(0, PHOTO_WAIT_TIMEOUT - remaining));
+    const history = this.waitHistory.get(room) ?? [];
+    history.push(waited);
+    if (history.length > WAIT_HISTORY_SIZE) history.shift();
+    this.waitHistory.set(room, history);
+  }
+
+  /**
+   * A planted photo arrived after the planted rounds were drawn (the app's retry when its lobby upload failed, sent
+   * after im-ready): give it a free later round so it is still played.
+   */
+  onLatePlantedPhoto(room: Room): void {
+    if (!room.started || room.phase === null) return; // still drawn by onAllPlayersReady
+    const planted = room.players.filter((p) => p.plantedPhoto).length;
+    if (room.plantedSlots.size >= planted) return;
+    const free: number[] = [];
+    for (let r = room.round + 2; r <= room.rounds; r++) if (!room.plantedSlots.has(r)) free.push(r);
+    if (free.length) room.plantedSlots.add(free[Math.floor(Math.random() * free.length)]);
   }
 
   /** The awaited photo won't be played: announce it, then the next round (same number) or game over. */
@@ -464,6 +586,7 @@ export class GameEngine {
       room.players.forEach((p) => Object.assign(p, this.roomManager.hiddenGuess(p)));
     }
     this.roomManager.clearAllTimers(room);
+    this.plantedWaits.delete(room);
     room.started = false;
     room.phase = null;
     room.players.forEach((p) => { p.isReady = false; });

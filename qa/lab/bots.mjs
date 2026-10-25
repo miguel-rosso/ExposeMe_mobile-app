@@ -27,11 +27,17 @@
 //                           (round-skipped reason "unavailable"), not after the 15 s wait. --upload-fail P instead stays
 //                           silent, so the server skips by timeout (reason "timeout").
 //   node qa/lab/bots.mjs --bots 3 --host --photo-unavailable 0.3
+//            --plant K      the first K bots plant a photo like the app: upload + plant-photo in the lobby, right after
+//                           joining (im-ready never waits for it). Planted rounds must look like any other (EXP-126):
+//                           every bot gets waiting-photo before round-start, nobody gets your-turn for them
+//                           ("consistency"), and no payload says who planted or who is ready ("payload-leak"; only a
+//                           bot's own room-of-game has its own planted mark, and it must be true after planting).
+//   node qa/lab/bots.mjs --bots 3 --host --plant 2
 //   Every bot records waiting-photo { round, duration } (room-wide, owner secret): same payload for all, skew measured.
 //   Photos: uploads send the room code + the bot's rejoin token (X-Game-Code / Authorization: Bearer), like the app;
 //   on each round-start one non-owner bot GETs the photo with them (must be 200) and without (must be 401): "photo-access".
-//   Payload privacy (EXP-017/EXP-027): every event a bot receives is scanned; no socketId / rejoinToken / plantedPhoto
-//   key (except the bot's own token in room-of-game), no socket id or other bot's token as a value; during
+//   Payload privacy (EXP-017/EXP-027/EXP-126): every event a bot receives is scanned; no socketId / rejoinToken /
+//   plantedPhoto / hasPlantedPhoto / isReady key (except the bot's own token and planted mark at the top of room-of-game), no socket id or other bot's token as a value; during
 //   answering/reveal no player in room-of-game / game-state (players and scores) / new-host / player-removed shows
 //   this round's guess or more points than at the last round-scores; a waiting-photo game-state has no owner/photo:
 //   "payload-leak".
@@ -60,6 +66,7 @@ const UPLOAD_FAIL = Number(args["upload-fail"] || 0);
 const PHOTO_UNAVAILABLE = Number(args["photo-unavailable"] || 0);
 const UNAVAILABLE_SKIP_MAX_MS = 2_000; // photo-unavailable → round-skipped must be immediate (the wait is 15 s)
 const NO_READY = Number(args["no-ready"] || 0);
+const PLANT = Number(args.plant || 0);
 const NO_ANSWER = !!args["no-answer"];
 // --no-answer: bots submit an empty guess like a player who never taps, so nobody scores (tie at 0).
 // Nobody is told whose photo it is: a bot guesses at random among the others; the owner (isOwner) doesn't vote.
@@ -85,7 +92,9 @@ const pct = (xs, p) => (xs.length ? [...xs].sort((a, b) => a - b)[Math.min(xs.le
 // /upload and /temp only answer members of the photo's room: room code + the bot's rejoin token (never logged)
 const photoAuth = (code, token) => ({ Authorization: `Bearer ${token}`, "X-Game-Code": code });
 
-const PRIVATE_KEYS = new Set(["socketId", "rejoinToken", "plantedPhoto"]);
+const PRIVATE_KEYS = new Set(["socketId", "rejoinToken", "plantedPhoto", "hasPlantedPhoto", "isReady"]);
+// Only in the receiver's own room-of-game, at its top level (its token and its own planted mark)
+const OWN_KEYS = new Set(["rejoinToken", "hasPlantedPhoto"]);
 
 /**
  * Privacy problems in one received event (EXP-017/EXP-027). `ids`: every socket id the room's bots have had;
@@ -100,7 +109,7 @@ function payloadLeaks(me, ev, payload, ids, tokens, ctx = { phase: null, baselin
     } else if (Array.isArray(v)) v.forEach((x, i) => walk(x, `${p}.${i}`));
     else if (v && typeof v === "object") {
       for (const [k, x] of Object.entries(v)) {
-        if (PRIVATE_KEYS.has(k) && !(ev === "room-of-game" && p === "0" && k === "rejoinToken")) out.push(`${ev} ${p}.${k}: private key`);
+        if (PRIVATE_KEYS.has(k) && !(ev === "room-of-game" && p === "0" && OWN_KEYS.has(k))) out.push(`${ev} ${p}.${k}: private key`);
         walk(x, `${p}.${k}`);
       }
     }
@@ -193,7 +202,7 @@ function runRoom(roomIdx, fixedCode) {
       const name = `${prefix}bot${i + 1}`;
       const isHost = !!args.host && i === 0;
       const socket = io(SERVER, { transports: ["websocket"], reconnection: true });
-      const bot = { name, socket, isHost, players: [], guess: "", round: 0, token: null, isOwner: false };
+      const bot = { name, socket, isHost, players: [], guess: "", round: 0, token: null, isOwner: false, plants: i < PLANT };
       bots.push(bot);
       const rec = (ev, round, payload) => events.push({ bot: name, ev, round, t: now(), payload });
 
@@ -236,11 +245,31 @@ function runRoom(roomIdx, fixedCode) {
           if ([10, 15, 20].includes(ROUNDS)) socket.emit("set-rounds", { gameCode: code, rounds: ROUNDS });
           bots.filter((b) => !b.isHost).forEach((b) => b.socket.connected && b.join());
         }
+        // Like the app picking a photo to plant in the lobby: uploaded and planted at once
+        if (bot.plants && !bot.plantSent && !d.room.started) plant();
+        // Its own mark comes back only to itself, once the server has the photo
+        if (bot.plantedAt && !d.room.started && d.hasPlantedPhoto !== true) errors.push(`${name}: room-of-game says not planted after plant-photo`);
         maybeStart();
       });
       socket.on("player-joined", (p) => { bot.players.push(p.username); maybeStart(); });
       socket.on("player-left", (n) => { bot.players = bot.players.filter((x) => x !== n); });
+      const plant = async () => {
+        bot.plantSent = true;
+        try {
+          const up = await uploadPhoto(`${name}-planted`, photoAuth(code, bot.token));
+          uploads.push(up.ms);
+          socket.emit("plant-photo", { photoUrl: up.url });
+          bot.plantedAt = now();
+          rec("planted", 0);
+          // Same-socket re-join (still in the lobby): its room-of-game must carry our own mark
+          setTimeout(() => { if (!bot.inGame) join(); }, 100);
+        } catch (e) {
+          if (e.rateLimited) rateLimited++;
+          errors.push(`${name} planted upload: ${e.message}`);
+        }
+      };
       socket.on("game-started", (players) => {
+        bot.inGame = true;
         bot.players = players.map((p) => p.username);
         rec("game-started", 0);
         if (i >= N_BOTS - NO_READY) { rec("im-ready-skipped-on-purpose", 0); return; }
@@ -414,6 +443,19 @@ function analyse(r) {
   const startKeys = starts.map((s) => `${s.bot}#${s.round}`);
   const dupes = [...new Set(startKeys.filter((k, i) => startKeys.indexOf(k) !== i))];
   if (dupes.length) consistency.push(`duplicate round-start: ${dupes.join(", ")}`);
+  // Planted rounds look like any other (EXP-126): each round-start follows a waiting-photo for that round (or a
+  // rejoin snapshot of it), whoever planted it. Bots that went offline may have missed the wait, so they are left out
+  for (const s of starts) {
+    if (wentOffline.has(s.bot)) continue;
+    const before = r.events.filter((e) => e.bot === s.bot && e.t <= s.t && e !== s
+      && ["waiting-photo", "round-start", "round-skipped", "game-state"].includes(e.ev)).pop();
+    const ok = before && ((before.ev === "waiting-photo" && before.round === s.round)
+      || (before.ev === "game-state" && before.payload?.phase === "waiting-photo"));
+    if (!ok) consistency.push(`${s.bot}: round-start for round ${s.round} without a preceding waiting-photo`);
+  }
+  // Planted rounds: the revealed owner never got your-turn for that round
+  const plantedRounds = [...answerOf].filter(([round, answer]) =>
+    !r.events.some((e) => e.ev === "your-turn" && e.bot === answer && e.round === round)).map(([round]) => round);
   // Payload privacy: no socket ids, other players' tokens or planted photo URLs; guesses hidden until round-scores
   for (const e of r.events.filter((x) => x.ev === "payload-leak")) consistency.push(`${e.bot}: ${e.payload.leak}`);
   // Planned drop: the bot must come back with a snapshot; with 2 players the game must pause and resume
@@ -463,6 +505,8 @@ function analyse(r) {
     players: r.players.length,
     rounds_played: roundsSeen.length,
     rounds_skipped: perBotMax(r, "round-skipped"),
+    planted_sent: r.events.filter((e) => e.ev === "planted").length,
+    planted_rounds: plantedRounds,
     skipped_unavailable: r.events.filter((e) => e.ev === "photo-unavailable-sent").length,
     unavailable_skip_ms: { p50: pct(unavailableSkipMs, 50)?.toFixed(1), max: unavailableSkipMs.length ? Math.max(...unavailableSkipMs).toFixed(1) : null },
     waiting_photo: perBotMax(r, "waiting-photo"),

@@ -407,6 +407,8 @@ describe("game over", () => {
     vi.advanceTimersByTime(GAME_START_DELAY);
 
     for (let i = 0; i < 10; i++) {
+      // Planted round: a photo wait with no owner picked, then round-start within the planted delay (≤3 s)
+      if (room.phase === "waiting-photo" && !room.currentPlayer) vi.advanceTimersByTime(3_000);
       if (room.phase === "waiting-photo") engine.onPhotoReceived(room, PHOTO, room.currentPlayer!.username);
       vi.advanceTimersByTime(ANSWER_TIME + REVEAL_TIME + SCORE_DISPLAY_TIME);
     }
@@ -421,6 +423,8 @@ describe("game over", () => {
     expect(events("round-start").filter((e) => e.target === "sock-bob" && (e.args[0] as { photo: string }).photo === planted))
       .toMatchObject([{ args: [{ isOwner: true }] }]);
     expect(events("your-turn")).toHaveLength(9);
+    // Every round, planted included, was announced with waiting-photo first
+    expect(roomEvents("waiting-photo")).toHaveLength(10);
     expect(room.plantedPhotosShown).toBe(1);
     expect(events("game-over")).toHaveLength(1);
   });

@@ -41,7 +41,23 @@ After last round: game-over
   `"unavailable"` (owner reported photo-unavailable); it never names the owner. The next round (same number)
   follows right away with a new `waiting-photo`. After an `"unavailable"` skip the same player is not picked for
   the next attempt when another connected player can be.
-- Planted rounds go straight to `round-start` (no `waiting-photo`).
+- **Planting.** The app uploads the chosen photo and sends `plant-photo` from the **lobby**, as soon as it is
+  picked (uncropped, like the game's gallery photos), so `im-ready` never waits for it. Only if that upload failed
+  does the game screen retry it, **after** `im-ready` (accepted until round 1 is played; a photo planted after the
+  planted rounds were drawn gets a free later round). Picking another photo replaces it. Whether a player planted
+  one goes back only to that player (`room-of-game.hasPlantedPhoto`); there is no way to drop a planted photo.
+- **Planted rounds look like any other round** (nobody can tell one was planted, nor by whom): the server sends
+  the same room-wide `waiting-photo { round, duration: 15 s }`, sends **no `your-turn`** (not even to the planter),
+  and after a hidden delay the usual per-recipient `round-start` (planter `isOwner: true`). The delay imitates the
+  room's real waits: a random past `waiting-photo` → accepted `photo-sent` time of this room (last 20) with ±15 %
+  jitter, or 1–3 s when there is none yet. During that wait the phase is `waiting-photo` with no owner picked: the
+  planter can't send a photo nor `photo-unavailable`. Clients see the countdown of a normal 15 s wait (rejoin
+  snapshot, `game-resumed`), never the hidden delay; a pause freezes it, `game-resumed` continues from exactly what
+  the snapshot showed during the pause, re-sends no `your-turn`, and the photo comes after a fresh upload-like delay
+  (as a resumed owner re-sends theirs, never past the countdown). If the planter left meanwhile it behaves like an
+  absent owner: no photo, `round-skipped { reason: "timeout" }` when the 15 s run out, then the next
+  `waiting-photo`. The planted photo (`plantedPhoto`, `hasPlantedPhoto`) is cleared when its wait starts, so it is
+  never shown twice.
 
 ## Whose photo it is (secret until the reveal)
 
@@ -59,7 +75,8 @@ After last round: game-over
 - `join-create-game { gameCode, username, rejoinToken? }`: `gameCode: null` creates a room (sender is host).
   `username` must be a string, 1–20 chars and not blank.
 - On success the server answers **only to that socket** with
-  `room-of-game { success, room, rounds?, rejoinToken }`. `rejoinToken` is a random secret per player
+  `room-of-game { success, room, rounds?, rejoinToken, hasPlantedPhoto }`. `hasPlantedPhoto` is the joining
+  player's own planted-photo mark (never sent about anyone else). `rejoinToken` is a random secret per player
   (base64url, 18 bytes) that is never included in any other payload; clients keep it (the app stores it in
   AsyncStorage with the game code and username) to reconnect.
 - Joining with a username that already exists in the room is a **rejoin** and requires the matching
@@ -106,8 +123,10 @@ After last round: game-over
   `lastAnswerCorrect` ("Play again" in the same room starts from zero).
 - **Public player data.** Every player object sent to clients (`player-joined`, `game-started`, `new-host`,
   `player-removed`, `room-of-game.room.players`, `game-state.players`) is built by one allowlist
-  (`RoomManager.publicPlayer`): `{ username, points, isHost, isReady, connected, hasPlantedPhoto, lastGuess,
-  lastAnswerCorrect }`. Never `socketId`, `rejoinToken` or `plantedPhoto` (of anyone). While the round in play
+  (`RoomManager.publicPlayer`): `{ username, points, isHost, connected, lastGuess,
+  lastAnswerCorrect }`. Never `socketId`, `rejoinToken`, `plantedPhoto` or `hasPlantedPhoto` (of anyone: whether a
+  player planted a photo only goes back to that player, in `room-of-game.hasPlantedPhoto`), nor `isReady` (who is
+  ready last could point at a player still uploading). While the round in play
   is in `answering`/`reveal`, `lastGuess: ""`, `lastAnswerCorrect: false` and `points` without the point a correct
   answer earned (shown from `round-scores` on), the same rule as the `game-state` snapshot. A game that ends
   during `answering`/`reveal` (abandoned, pauses used up) drops that unrevealed round's answers and points:
@@ -203,7 +222,7 @@ All game events are **atomic** — each contains everything the client needs.
 
 | Event | Phase | Data | Description |
 |-------|-------|------|-------------|
-| `room-of-game` | - | `{ success, room?, rounds?, message?, rejoinToken? }` | Join result (token only to the joiner) |
+| `room-of-game` | - | `{ success, room?, rounds?, message?, rejoinToken?, hasPlantedPhoto? }` | Join result (token and own planted mark only to the joiner) |
 | `game-started` | - | `players, rounds` | Navigate to game screen (public player data only, see "Public player data") |
 | `waiting-photo` | waiting-photo | `{ round, duration }` | Whole room: a photo is awaited (owner not revealed), show wait bar |
 | `your-turn` | waiting-photo | `{ round, attempt }` | Only the picked player: pick and upload a photo (or send `photo-unavailable`) |
@@ -234,7 +253,7 @@ All game events are **atomic** — each contains everything the client needs.
 | `hold-end` | - | Photo owner released hold |
 | `chat-message` | `{ message }` (≤100 chars) | Broadcast as `{ username, message }` with the session username |
 | `emoji-reaction` | `{ emoji }` (≤16 chars) | Broadcast as `{ username, emoji }` with the session username |
-| `plant-photo` / `mark-player-planted` | `{ photoUrl }` / - | Applies to the session player; `photoUrl` must be the player's own `/upload` path in this room; accepted until the first round is played |
+| `plant-photo` | `{ photoUrl }` | Applies to the session player (replaces their earlier one); `photoUrl` must be the player's own `/upload` path in this room; accepted until the first round is played |
 
 Payload `gameCode`/`username` fields are ignored for all of the above; identity comes from the session.
 
@@ -249,7 +268,7 @@ unknown room or a token that is not a current member of it → **403**.
 
 - Every upload is bound to the room and player that sent it. It is accepted from any member until the first round
   has actually been played (planted photos: lobby, ready phase, or `waiting-photo` while `room.round` is still 0,
-  also after skips; the app uploads it before `im-ready`; `plant-photo` follows exactly the same rule), and after
+  also after skips; the app uploads it from the lobby; `plant-photo` follows exactly the same rule), and after
   that only from the player whose photo the server is awaiting (`waiting-photo` and they are the picked owner, paused
   or not); otherwise **403**. At most 100 stored photos per room (**429** beyond). If the game ends, the room closes or the player
   leaves while the image is being processed, nothing is stored (**409**).

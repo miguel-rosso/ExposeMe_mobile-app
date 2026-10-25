@@ -502,6 +502,7 @@ const GameScreen = () => {
                   scoreRound={scores || []}
                   rounds={{ round, roundsOfGame: roundsOfGame }}
                   correctAnswer={correctAnswer}
+                  myUsername={safeUsername}
                   reserveHoldButton={holdButtonMounted}
                 />
               </View>

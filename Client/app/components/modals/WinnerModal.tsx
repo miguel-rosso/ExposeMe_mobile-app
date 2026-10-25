@@ -121,7 +121,7 @@ const WinnerModal: React.FC<WinnerModalProps> = ({ visible, winners, onAnimation
               </ScrollView>
 
               <Animatable.Text animation="fadeIn" delay={1000} style={tw`text-yellow-400 text-2xl font-bold mt-4`}>
-                {t.points.replace("{points}", String(winners[0].points))}
+                {(winners[0].points === 1 ? t.pointsOne : t.points).replace("{points}", String(winners[0].points))}
               </Animatable.Text>
             </Animated.View>
 

@@ -57,12 +57,23 @@ export class GameEngine {
   private plantedWaits = new WeakMap<Room, PlantedWait>();
   /** How long this room's real photo waits took (ms, waiting-photo → accepted photo-sent), newest last */
   private waitHistory = new WeakMap<Room, number[]>();
+  /** Players who already answered the round in play (an empty guess counts: lastGuess "" can't tell them apart) */
+  private answered = new WeakMap<Room, Set<string>>();
 
   constructor(private io: Server, private roomManager: RoomManager) {}
 
   // ── Public API ───────────────────────────────────────
 
-  startGame(room: Room): void {
+  /**
+   * start-game. Every disconnected player is removed from the room first (they come back as new players), so a
+   * "Play again" has no ghosts among the answers or the ranking. Refused (returns false) if fewer than 2 are left.
+   */
+  startGame(room: Room): boolean {
+    this.removeDisconnected(room);
+    if (room.players.length < 2) {
+      console.log(`[${room.gameCode}] Start refused — fewer than 2 players after removing disconnected ones`);
+      return false;
+    }
     room.started = true;
     room.round = 0;
     room.currentPlayer = null;
@@ -83,6 +94,18 @@ export class GameEngine {
       console.log(`[${room.gameCode}] Ready timeout — starting without: ${missing.join(", ")}`);
       this.onAllPlayersReady(room);
     });
+    return true;
+  }
+
+  /** Game start: drop disconnected players like a leave (uploads released, host handed over, room notified). */
+  private removeDisconnected(room: Room): void {
+    for (const ghost of room.players.filter((p) => !p.connected)) {
+      const result = this.roomManager.removePlayer(room.gameCode, ghost.username);
+      if (!result.removed) continue;
+      console.log(`[${room.gameCode}] ${ghost.username} removed at game start (disconnected)`);
+      if (result.newHost) this.io.to(room.gameCode).emit("new-host", this.roomManager.publicPlayer(result.newHost, room));
+      if (!result.isEmpty) this.io.to(room.gameCode).emit("player-left", ghost.username);
+    }
   }
 
   /** im-ready: only counts between game-started and the first round (phase is null until then). */
@@ -139,6 +162,7 @@ export class GameEngine {
    * payload with `isOwner: false`, except the owner's socket, which gets `isOwner: true` (hold button, no self-vote).
    */
   private emitRoundStart(room: Room, owner: Player, photo: string): void {
+    this.answered.set(room, new Set()); // every round that takes answers starts here
     const data: Omit<RoundStartData, "isOwner"> = { photo, round: room.round, duration: ANSWER_TIME };
     // Relies on a rejoin evicting/disconnecting the owner's replaced socket, so only owner.socketId is the owner's
 
@@ -174,12 +198,15 @@ export class GameEngine {
     if (room.phase !== "answering" && room.phase !== "reveal") return;
     const player = room.players.find((p) => p.username === username);
     if (!player) return;
-    // Only accept first answer per round (ignore duplicates)
-    if (player.lastGuess !== "") return;
     // The owner knows the answer: their vote is never recorded nor scored
     if (player === room.currentPlayer) return;
+    // Only accept first answer per round (ignore duplicates, also after an empty one)
+    const answered = this.answered.get(room) ?? new Set<string>();
+    if (answered.has(username) || player.lastGuess !== "") return;
+    answered.add(username);
+    this.answered.set(room, answered);
     const correct = room.currentPlayer?.username === guess;
-    player.lastGuess = guess || "(no guess)";
+    player.lastGuess = guess; // "" = no guess (the client shows it translated)
     player.lastAnswerCorrect = correct;
     if (correct) player.points++;
   }

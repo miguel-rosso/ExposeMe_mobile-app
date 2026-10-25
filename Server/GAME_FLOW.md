@@ -107,6 +107,13 @@ After last round: game-over
 - Limits: at most **5 `join-create-game` per socket in any 10 s** (excess answered with
   `{ success: false, message: "Too many attempts" }`), and at most **5000 rooms** in memory (`MAX_ROOMS`;
   creating beyond it answers `"Server is busy"`, joining existing rooms still works).
+- **Game start drops disconnected players.** On every `start-game` (first game and "Play again"), each player who is
+  `connected: false` at that moment is removed from the room exactly like a leave: uploads released (planted photo
+  included), host handed over if needed (`new-host`) and `player-left <username>` to the room, all before
+  `game-started` (whose player list no longer has them). If fewer than 2 players are left, the start is refused
+  (nothing else is emitted; the lobby shows the updated list). A removed player who comes back is a new player: their
+  old `rejoinToken` no longer rejoins (`"Game already started"` while the game runs; in the lobby the name is free
+  and they join fresh with a new token and 0 points).
 - Host only: `set-rounds` (lobby only), `start-game` (not while a game is running), `remove-player { username }`
   (by username, socket ids are never sent to clients; the host can't remove itself; evicts every socket bound to
   the removed player in that room, like a rejoin evicts the replaced one).
@@ -138,7 +145,8 @@ After last round: game-over
 
 - A socket disconnect keeps the player in the room (they can rejoin with the same username and their
   `rejoinToken`) but marks
-  them `connected: false`; rejoining marks them `connected: true` again.
+  them `connected: false`; rejoining marks them `connected: true` again. Whoever is still disconnected when the next
+  game starts is removed (see "Game start drops disconnected players").
 - A client that silently loses network is detected by the socket.io heartbeat within
   `PING_INTERVAL + PING_TIMEOUT` (**10 s + 15 s**, `Server/app.ts`), overridable with
   `SOCKET_PING_INTERVAL_MS` / `SOCKET_PING_TIMEOUT_MS` (clamped to 1 s..300 s).
@@ -248,7 +256,7 @@ All game events are **atomic** — each contains everything the client needs.
 | `im-ready` | - | Player ready to start (session player; payload ignored) |
 | `photo-sent` | `{ photo }` | Photo uploaded; only from the current owner, `photo` must be a path the owner got from `/upload` in this room (`/temp/<32 hex>.jpg\|png\|webp`) |
 | `photo-unavailable` | `{ round, attempt }` (from its `your-turn`) | The awaited owner has no photo to send (no access, no photos, upload failed): skip the round now |
-| `submit-answer` | `{ guess }` | Player's answer (ignored from the photo owner) |
+| `submit-answer` | `{ guess }` | Player's answer (ignored from the photo owner); first one per round only, an empty `guess` included. No guess is stored and sent in scores as `lastGuess: ""` (the app shows its own translated "No guess") |
 | `hold-start` | - | Photo owner pressed hold |
 | `hold-end` | - | Photo owner released hold |
 | `chat-message` | `{ message }` (≤100 chars) | Broadcast as `{ username, message }` with the session username |

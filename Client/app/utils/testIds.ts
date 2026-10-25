@@ -70,4 +70,5 @@ export const winnerNameId = (username: string) => `winner-name-${username}`;
 export const finalWinnerId = (username: string) => `final-winner-${username}`;
 export const finalRankId = (username: string) => `final-rank-${username}`;
 export const scoreRankId = (username: string) => `score-rank-${username}`;
+export const scoreGuessId = (username: string) => `score-guess-${username}`;
 export const roundsOptionId = (rounds: number) => `rounds-option-${rounds}`;

@@ -130,4 +130,9 @@ export default {
 
   // LanguageToggle
   changeLanguage: "Change language",
+
+  // ScoreModal: the photo owner's row (they don't vote) / WinnerModal singular
+  yourPhoto: "Your photo",
+  theirPhoto: "Their photo",
+  pointsOne: "{points} point",
 } as const;

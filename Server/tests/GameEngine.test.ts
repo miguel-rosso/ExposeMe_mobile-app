@@ -491,10 +491,10 @@ describe("recordAnswer", () => {
     expect(player(guessers[1]).points).toBe(0);
   });
 
-  it("stores an empty guess as '(no guess)'", () => {
+  it("stores an empty guess as \"\" (the client translates it, EXP-132)", () => {
     engine.onPhotoReceived(room, PHOTO, owner);
     engine.recordAnswer(room, guessers[0], "");
-    expect(player(guessers[0])).toMatchObject({ points: 0, lastGuess: "(no guess)" });
+    expect(player(guessers[0])).toMatchObject({ points: 0, lastGuess: "" });
   });
 
   it("ignores unknown players", () => {

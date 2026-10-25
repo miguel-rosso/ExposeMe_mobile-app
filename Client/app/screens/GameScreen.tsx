@@ -26,6 +26,7 @@ import { photoAuthHeaders, resolvePhotoAuth } from "@/app/utils/photoAuth";
 import { applyGameState, turnUploadAction, TurnUpload } from "../utils/gameState";
 import { applyWaitingPhoto, SkipNotice, skipNoticeFor, skipNoticeText } from "../utils/waitingPhoto";
 import { useGameConnection } from "../hooks/useGameConnection";
+import { withHost, withoutPlayer } from "../utils/roomPlayers";
 import PausedModal from "@/app/components/modals/PausedModal";
 import GalleryAccessModal from "@/app/components/modals/GalleryAccessModal";
 import { useGalleryAccessGuard } from "@/app/hooks/useGalleryAccessGuard";
@@ -63,6 +64,11 @@ const GameScreen = () => {
   // Current round/photo for the game-state handler (socket listeners would see stale state)
   const roundRef = useRef<{ round: number; photo: string | null; phase: Phase }>({ round: 0, photo: null, phase: null });
   roundRef.current = { round, photo, phase };
+  // Latest players list for the room-membership handlers; updated on write too, so back-to-back events
+  // (new-host + player-left arrive together) build on each other
+  const playersRef = useRef<Player[]>(playersProvider);
+  playersRef.current = playersProvider;
+  const setPlayers = (next: Player[]) => { playersRef.current = next; setPlayersProvider(next); };
   // Photo uploaded for my turn: re-sent if the server asks again (after a reconnect or a pause)
   const turnUploadRef = useRef<TurnUpload | null>(null);
 
@@ -308,7 +314,7 @@ const GameScreen = () => {
     // Snapshot after a rejoin: render whatever phase the server is in
     socket.on("game-state", (snap: GameStateSnapshot) => {
       console.log(`[GAME] game-state: ${snap.phase} round ${snap.round}, paused=${!!snap.pause}`);
-      setPlayersProvider(snap.players);
+      setPlayers(snap.players);
       // An awaited photo of mine is asked again with your-turn right after this snapshot
       currentTurnRef.current = null;
       setTurnUploading(false);
@@ -328,6 +334,15 @@ const GameScreen = () => {
       showGameOver(data.finalScore);
     });
 
+    // Someone left or was kicked: no longer an answer option (a disconnected player stays, they may come back)
+    const dropPlayer = (name: string) => {
+      setPlayers(withoutPlayer(playersRef.current, name));
+      if (roundRef.current.phase === "answering" && mySelectionRef.current === name) setMySelection("");
+    };
+    socket.on("player-left", (name: string) => { console.log(`[GAME] player-left: ${name}`); dropPlayer(name); });
+    socket.on("player-removed", (removed: Player) => { console.log(`[GAME] player-removed: ${removed.username}`); dropPlayer(removed.username); });
+    socket.on("new-host", (host: Player) => setPlayers(withHost(playersRef.current, host.username)));
+
     socket.on("emoji-reaction", (data: { username: string; emoji: string }) => {
       setEmojiReactions((c) => [...c, { id: `${Date.now()}-${Math.random()}`, ...data }]);
     });
@@ -339,6 +354,7 @@ const GameScreen = () => {
       socket.off("round-scores"); socket.off("hold-start"); socket.off("hold-end");
       socket.off("hold-resume"); socket.off("round-skipped"); socket.off("game-over");
       socket.off("emoji-reaction"); socket.off("game-paused"); socket.off("game-resumed"); socket.off("game-state");
+      socket.off("player-left"); socket.off("player-removed"); socket.off("new-host");
       endSocket();
     };
   }, [socket]);
@@ -505,6 +521,7 @@ const GameScreen = () => {
                   scoreRound={scores || []}
                   rounds={{ round, roundsOfGame: roundsOfGame }}
                   correctAnswer={correctAnswer}
+                  reserveHoldButton={holdButtonMounted}
                 />
               </View>
             )}

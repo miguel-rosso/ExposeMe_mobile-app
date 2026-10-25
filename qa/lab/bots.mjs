@@ -8,6 +8,7 @@
 //   node qa/lab/bots.mjs --bots 3 --code 123456          # join an existing room
 //   node qa/lab/bots.mjs --rooms 20 --bots 4 --host       # load: 20 parallel rooms
 //   options: --server URL  --photos DIR  --out FILE  --chaos 0.1  --upload-fail 0.2  --timeout 600
+//            --no-ready K   the last K bots never send im-ready (game must start via the server's ready timeout)
 import { io } from "socket.io-client";
 import fs from "node:fs";
 import path from "node:path";
@@ -25,6 +26,7 @@ const ROUNDS = Number(args.rounds || 10);
 const WAIT_PLAYERS = Number(args["wait-players"] || N_BOTS);
 const CHAOS = Number(args.chaos || 0);
 const UPLOAD_FAIL = Number(args["upload-fail"] || 0);
+const NO_READY = Number(args["no-ready"] || 0);
 const TIMEOUT_S = Number(args.timeout || 900);
 const PHOTOS = args.photos ? fs.readdirSync(args.photos).filter((f) => f.endsWith(".jpg")).map((f) => path.join(args.photos, f)) : [];
 
@@ -95,6 +97,7 @@ function runRoom(roomIdx, fixedCode) {
       socket.on("game-started", (players) => {
         bot.players = players.map((p) => p.username);
         rec("game-started", 0);
+        if (i >= N_BOTS - NO_READY) { rec("im-ready-skipped-on-purpose", 0); return; }
         socket.emit("im-ready", { gameCode: code, username: name });
       });
       socket.on("your-turn", async (d) => {

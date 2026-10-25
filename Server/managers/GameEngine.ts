@@ -6,6 +6,7 @@ const ANSWER_TIME = 8_000;
 const REVEAL_TIME = 3_000;
 const SCORE_DISPLAY_TIME = 5_000;
 const GAME_START_DELAY = 1_000;
+const READY_TIMEOUT = 10_000; // After game-started, start the first round with whoever sent im-ready
 const PHOTO_WAIT_TIMEOUT = 15_000;
 const HOLD_SAFETY_TIMEOUT = 30_000;
 const HOLD_MIN_REMAINING = 1_500; // Stop allowing hold when less than this remains
@@ -25,9 +26,37 @@ export class GameEngine {
     room.players.forEach((p) => { p.points = 0; p.lastGuess = ""; p.lastAnswerCorrect = false; });
     console.log(`[${room.gameCode}] Game started`);
     this.io.to(room.gameCode).emit("game-started", room.players.map((p) => this.roomManager.publicPlayer(p)), room.rounds);
+    // Don't wait forever for a player who backgrounds the app or drops before GameScreen mounts
+    this.setTimer(room, READY_TIMEOUT, () => {
+      if (!room.started || room.phase !== null) return;
+      const missing = room.players.filter((p) => !p.isReady).map((p) => p.username);
+      console.log(`[${room.gameCode}] Ready timeout — starting without: ${missing.join(", ")}`);
+      this.onAllPlayersReady(room);
+    });
   }
 
+  /** im-ready: only counts between game-started and the first round (phase is null until then). */
+  markReady(room: Room, player: Player): void {
+    if (!room.started || room.phase !== null) return;
+    player.isReady = true;
+    this.checkReady(room);
+  }
+
+  /**
+   * Ready phase: start early once at least 2 players are connected and all of them are ready.
+   * Call after im-ready and whenever a player disconnects, leaves or is kicked during the ready phase.
+   * Otherwise READY_TIMEOUT decides (a lone player waits for the others to come back).
+   */
+  checkReady(room: Room): void {
+    if (!room.started || room.phase !== null) return;
+    // Disconnected players can't send im-ready; don't hold the others until the timeout for them
+    const connected = room.players.filter((p) => p.connected);
+    if (connected.length >= 2 && connected.every((p) => p.isReady)) this.onAllPlayersReady(room);
+  }
+
+  /** Leaves the ready phase and schedules the first round (replaces the ready timeout). */
   onAllPlayersReady(room: Room): void {
+    room.phase = "waiting-photo"; // Out of the ready phase: later im-ready / ready timeout are no-ops
     room.round = 0;
     this.assignPlantedSlots(room);
     console.log(`[${room.gameCode}] All ready, planted slots: [${[...room.plantedSlots].join(",")}]`);

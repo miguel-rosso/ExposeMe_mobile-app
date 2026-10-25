@@ -179,10 +179,11 @@ describe("failed joins do not keep abandoned rooms alive", () => {
     engine.startGame(room); // everyone goes offline before im-ready
     rm.markDisconnected(room.gameCode, "alice", "sock-alice");
     rm.markDisconnected(room.gameCode, "bob", "sock-bob");
-    vi.advanceTimersByTime(ROOM_CLEANUP_DELAY / 2);
+    // still in the ready phase (the ready timeout ends this game, as nobody is connected)
+    vi.advanceTimersByTime(5_000);
     expect(rm.joinRoom(room.gameCode, "mallory", "sock-m")).toEqual({ success: false, message: "Game already started" });
     expect(rm.joinRoom(room.gameCode, "bob", "sock-m", "wrong-token")).toMatchObject({ success: false });
-    vi.advanceTimersByTime(ROOM_CLEANUP_DELAY / 2);
+    vi.advanceTimersByTime(ROOM_CLEANUP_DELAY - 5_000);
     expect(rm.getRoom(room.gameCode)).toBeUndefined();
   });
 

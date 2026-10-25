@@ -54,6 +54,7 @@ function leaveBinding(socket: Socket, gameCode: string, username: string, owned:
     if (result.removed) {
       if (result.newHost) io.to(gameCode).emit("new-host", roomManager.publicPlayer(result.newHost));
       if (!result.isEmpty) io.to(gameCode).emit("player-left", username);
+      gameEngine.checkReady(room); // ready phase: the others may all be ready now
     }
   }
   socket.leave(gameCode);
@@ -170,6 +171,7 @@ io.on("connection", (socket: Socket) => {
       // Keep all players in room on disconnect — they can rejoin.
       // Room gets cleaned up after 30min inactivity.
       console.log(`[${gameCode}] ${username} disconnected — keeping in room`);
+      gameEngine.checkReady(room); // ready phase: don't wait for a player who is gone
     } catch (e) { console.error("disconnect error:", e); }
   });
 
@@ -203,14 +205,7 @@ io.on("connection", (socket: Socket) => {
     try {
       const s = session(socket);
       if (!s) return;
-      const { room, player } = s;
-      // Only counts between game-started and the first round (phase is null until all are ready)
-      if (!room.started || room.phase !== null) return;
-      player.isReady = true;
-      if (room.players.every((p) => p.isReady)) {
-        room.phase = "waiting-photo"; // Mark as started to prevent double-trigger
-        gameEngine.onAllPlayersReady(room);
-      }
+      gameEngine.markReady(s.room, s.player);
     } catch (e) { console.error("im-ready error:", e); }
   });
 
@@ -325,6 +320,7 @@ io.on("connection", (socket: Socket) => {
         io.to(room.gameCode).emit("player-removed", roomManager.publicPlayer(removed));
         const target = io.sockets.sockets.get(data.socketId);
         if (target) { target.leave(room.gameCode); target.disconnect(true); }
+        gameEngine.checkReady(room);
       }
     } catch (e) { console.error("remove-player error:", e); }
   });

@@ -8,7 +8,7 @@ The client only reacts to server events and renders UI.
 ## Phases
 
 ```
-LOBBY → start-game → im-ready (all) → first round
+LOBBY → start-game → im-ready (every connected player, ≥2 connected, or 10s timeout) → first round (after 1s)
 
 Each round:
   ┌─ waiting-photo ──→ (player uploads) ──→ answering ──→ reveal ──→ scores ──→ next round
@@ -53,6 +53,13 @@ After last round: game-over
   creating beyond it answers `"Server is busy"`, joining existing rooms still works).
 - Host only: `set-rounds` (lobby only), `start-game` (not while a game is running), `remove-player`.
 - `im-ready` only counts between `game-started` and the first round (`started && phase === null`).
+  The first round is scheduled (after `GAME_START_DELAY`, 1 s) as soon as **at least 2 players are connected
+  and all connected players are ready** (checked on `im-ready` and when a player disconnects, leaves or is
+  removed during this phase), or after **10 s** (`READY_TIMEOUT`, started by `start-game`) with whoever is
+  ready, so a player who
+  backgrounds the app or drops before the game screen mounts can't block the game. The photo owner is still
+  picked only among connected players (ready or not); later `im-ready`s are ignored. If fewer than 2 players
+  are connected by then, the game ends (`game-over`).
   `game-over` resets `isReady`, `started` and `phase` and clears unused planted photos
   (`plantedPhoto`, `hasPlantedPhoto`) for every player; `start-game` resets `points`, `lastGuess` and
   `lastAnswerCorrect` ("Play again" in the same room starts from zero).

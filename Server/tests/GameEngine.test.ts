@@ -10,6 +10,7 @@ const SCORE_DISPLAY_TIME = 5_000;
 const GAME_START_DELAY = 1_000;
 const PHOTO_WAIT_TIMEOUT = 15_000;
 const HOLD_SAFETY_TIMEOUT = 30_000;
+const READY_TIMEOUT = 10_000;
 
 const PHOTO = "https://example.invalid/photo.jpg";
 
@@ -96,6 +97,160 @@ describe("start", () => {
     expect(ev.args[0]).toEqual({ round: 1 });
     expect(room.phase).toBe("waiting-photo");
     expect(room.round).toBe(0);
+  });
+});
+
+// ── Ready timeout (EXP-010) ────────────────────────────
+
+describe("im-ready and ready timeout", () => {
+  /** alice, bob, carol in a started game, nobody ready yet. */
+  function startedNotReady(): Room {
+    const r = roomManager.createRoom("alice", "sock-alice");
+    roomManager.joinRoom(r.gameCode, "bob", "sock-bob");
+    roomManager.joinRoom(r.gameCode, "carol", "sock-carol");
+    engine.startGame(r);
+    return r;
+  }
+  const player = (name: string) => room.players.find((p) => p.username === name)!;
+
+  it("starts as soon as every player is ready, and only once", () => {
+    room = startedNotReady();
+    engine.markReady(room, player("alice"));
+    engine.markReady(room, player("bob"));
+    expect(room.phase).toBeNull();
+    engine.markReady(room, player("carol"));
+    expect(room.phase).toBe("waiting-photo");
+    vi.advanceTimersByTime(GAME_START_DELAY);
+    expect(events("your-turn")).toHaveLength(1);
+    // neither a duplicate im-ready nor the ready timeout start the game again
+    engine.markReady(room, player("alice"));
+    vi.advanceTimersByTime(READY_TIMEOUT);
+    expect(events("your-turn")).toHaveLength(1);
+  });
+
+  it("starts with whoever is ready when someone never sends im-ready", () => {
+    room = startedNotReady();
+    engine.markReady(room, player("alice"));
+    engine.markReady(room, player("bob"));
+    vi.advanceTimersByTime(READY_TIMEOUT - 1);
+    expect(room.phase).toBeNull();
+    expect(events("your-turn")).toHaveLength(0);
+
+    vi.advanceTimersByTime(1);
+    expect(room.phase).toBe("waiting-photo");
+    vi.advanceTimersByTime(GAME_START_DELAY);
+    expect(events("your-turn")).toHaveLength(1);
+    expect(lastEvent("your-turn")!.args[0]).toEqual({ round: 1 });
+
+    // a late im-ready does not restart anything
+    engine.markReady(room, player("carol"));
+    vi.advanceTimersByTime(GAME_START_DELAY);
+    expect(events("your-turn")).toHaveLength(1);
+  });
+
+  it("starts after the timeout even if nobody sent im-ready", () => {
+    room = startedNotReady();
+    vi.advanceTimersByTime(READY_TIMEOUT + GAME_START_DELAY);
+    expect(events("your-turn")).toHaveLength(1);
+    expect(events("game-over")).toHaveLength(0);
+  });
+
+  it("does not wait for (or pick) a player who disconnected before im-ready", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.99); // would pick the last player, carol, among all three
+    room = startedNotReady();
+    roomManager.markDisconnected(room.gameCode, "carol", "sock-carol");
+    engine.markReady(room, player("alice"));
+    engine.markReady(room, player("bob"));
+    // every connected player is ready: no need to wait for the timeout
+    expect(room.phase).toBe("waiting-photo");
+    vi.advanceTimersByTime(GAME_START_DELAY);
+    const turn = lastEvent("your-turn")!;
+    expect(turn.target).not.toBe("sock-carol");
+    expect(room.currentPlayer!.username).not.toBe("carol");
+  });
+
+  it("never picks a player who disconnected before the ready timeout", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.99);
+    room = startedNotReady();
+    engine.markReady(room, player("alice"));
+    engine.markReady(room, player("carol"));
+    roomManager.markDisconnected(room.gameCode, "carol", "sock-carol"); // ready, then went away
+    vi.advanceTimersByTime(READY_TIMEOUT + GAME_START_DELAY);
+    expect(events("your-turn")).toHaveLength(1);
+    expect(room.currentPlayer!.username).not.toBe("carol");
+  });
+
+  it("ends the game at the timeout when fewer than 2 players are connected", () => {
+    room = startedNotReady();
+    engine.markReady(room, player("alice"));
+    roomManager.markDisconnected(room.gameCode, "bob", "sock-bob");
+    roomManager.markDisconnected(room.gameCode, "carol", "sock-carol");
+    vi.advanceTimersByTime(READY_TIMEOUT + GAME_START_DELAY);
+    expect(events("your-turn")).toHaveLength(0);
+    expect(events("game-over")).toHaveLength(1);
+    expect(room.started).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("a lone connected player's im-ready does not start the game; the timeout or a rejoin does", () => {
+    room = startedNotReady();
+    roomManager.markDisconnected(room.gameCode, "bob", "sock-bob");
+    roomManager.markDisconnected(room.gameCode, "carol", "sock-carol");
+    engine.markReady(room, player("alice"));
+    expect(room.phase).toBeNull();
+    vi.advanceTimersByTime(READY_TIMEOUT - 1);
+    expect(events("game-over")).toHaveLength(0);
+    expect(events("your-turn")).toHaveLength(0);
+
+    // bob comes back inside the window and gets ready: 2 connected, all ready → start
+    expect(roomManager.joinRoom(room.gameCode, "bob", "sock-bob2", player("bob").rejoinToken).success).toBe(true);
+    engine.markReady(room, player("bob"));
+    expect(room.phase).toBe("waiting-photo");
+    vi.advanceTimersByTime(GAME_START_DELAY);
+    expect(events("your-turn")).toHaveLength(1);
+    expect(room.currentPlayer!.username).not.toBe("carol");
+    expect(events("game-over")).toHaveLength(0);
+  });
+
+  it("checkReady starts right away when the only not-ready player disconnects", () => {
+    room = startedNotReady();
+    engine.markReady(room, player("alice"));
+    engine.markReady(room, player("bob"));
+    roomManager.markDisconnected(room.gameCode, "carol", "sock-carol");
+    engine.checkReady(room);
+    expect(room.phase).toBe("waiting-photo");
+    vi.advanceTimersByTime(GAME_START_DELAY);
+    expect(events("your-turn")).toHaveLength(1);
+    expect(room.currentPlayer!.username).not.toBe("carol");
+  });
+
+  it("checkReady starts right away when the only not-ready player leaves", () => {
+    room = startedNotReady();
+    engine.markReady(room, player("alice"));
+    engine.markReady(room, player("bob"));
+    roomManager.removePlayer(room.gameCode, "carol");
+    engine.checkReady(room);
+    expect(room.phase).toBe("waiting-photo");
+  });
+
+  it("checkReady does nothing with fewer than 2 connected players or someone not ready", () => {
+    room = startedNotReady();
+    engine.markReady(room, player("alice"));
+    engine.checkReady(room); // bob and carol connected, not ready
+    expect(room.phase).toBeNull();
+    roomManager.markDisconnected(room.gameCode, "bob", "sock-bob");
+    roomManager.markDisconnected(room.gameCode, "carol", "sock-carol");
+    engine.checkReady(room); // alice alone
+    expect(room.phase).toBeNull();
+    expect(events("game-over")).toHaveLength(0);
+  });
+
+  it("ignores im-ready outside the ready window", () => {
+    room = roomManager.createRoom("alice", "sock-alice");
+    roomManager.joinRoom(room.gameCode, "bob", "sock-bob");
+    engine.markReady(room, player("alice")); // lobby: game not started
+    expect(player("alice").isReady).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 

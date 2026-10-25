@@ -260,6 +260,48 @@ describe("im-ready", () => {
     for (const c of [alice, bob]) c.emit("leave-room");
   });
 
+  // EXP-010: the ready phase is re-checked when the only missing player goes away (well before READY_TIMEOUT)
+  for (const how of ["disconnects", "leaves", "is removed by the host"] as const) {
+    it(`starts the first round right away when the only not-ready player ${how}`, async () => {
+      const { gameCode, alice, bob } = await lobby();
+      const carol = await newClient();
+      const carolJoin = await joinAs(carol, gameCode, "carol");
+      await startGame(gameCode, alice, [alice, bob, carol]);
+      alice.emit("im-ready");
+      bob.emit("im-ready");
+      expect(await silent(alice, "game-over", QUIET_MS)).toBe(true);
+
+      const turn = Promise.race([once(alice, "your-turn", 3_000), once(bob, "your-turn", 3_000)]);
+      if (how === "disconnects") carol.disconnect();
+      else if (how === "leaves") carol.emit("leave-room");
+      else {
+        const carolSocketId = carolJoin.room!.players.find((p) => p.username === "carol")!.socketId as string;
+        alice.emit("remove-player", { socketId: carolSocketId });
+      }
+      expect(await turn).toEqual({ round: 1 });
+      for (const c of [alice, bob]) c.emit("leave-room");
+    });
+  }
+
+  it("a lone connected ready player does not start (and end) the game; a rejoin + im-ready does", async () => {
+    const { gameCode, alice, bob, tokens } = await lobby();
+    await startGame(gameCode, alice, [alice, bob]);
+    bob.disconnect(); // backgrounded right after start
+    await new Promise((r) => setTimeout(r, 100));
+    const noOver = silent(alice, "game-over", 1_500);
+    const noTurn = silent(alice, "your-turn", 1_500);
+    alice.emit("im-ready");
+    expect(await noOver).toBe(true);
+    expect(await noTurn).toBe(true);
+
+    const bob2 = await newClient();
+    expect((await joinAs(bob2, gameCode, "bob", tokens.bob)).success).toBe(true);
+    const turn = Promise.race([once(alice, "your-turn", 3_000), once(bob2, "your-turn", 3_000)]);
+    bob2.emit("im-ready");
+    expect(await turn).toEqual({ round: 1 });
+    for (const c of [alice, bob2]) c.emit("leave-room");
+  });
+
   it("ignores im-ready before the game started", async () => {
     const { gameCode, alice, bob } = await lobby();
     const quietA = silent(alice, "your-turn", 1_500);

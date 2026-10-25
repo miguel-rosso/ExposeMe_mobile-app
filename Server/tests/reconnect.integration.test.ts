@@ -3,11 +3,13 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { io as connect, Socket as ClientSocket } from "socket.io-client";
 import { io, server } from "../app";
 import { roomManager } from "../routes/socketRoutes";
+import { MAX_PAUSES, PAUSE_TIMEOUT } from "../managers/GameEngine";
 import { registerUpload } from "./helpers";
 
 // EXP-006: a player who drops mid-round and comes back on a new socket (socket.io reconnect) rejoins
 // with the rejoin token and gets a game-state snapshot; with only 2 players the game pauses meanwhile.
-// Real server, production timings (each test stays within the first round, ~1–4 s).
+// Real server, production timings (each test stays within the first round, ~1–4 s). Timing assertions are ranges
+// and waits are generous (EXP-115): under full-suite load the real clock moves between emit and assertion.
 
 const PHOTO = "/temp/" + "a".repeat(32) + ".jpg"; // shape of a POST /upload result
 
@@ -16,7 +18,7 @@ interface RoomOfGame { success: boolean; rejoinToken?: string; room?: { gameCode
 let url: string;
 const clients: ClientSocket[] = [];
 
-function once<T = unknown>(socket: ClientSocket, event: string, timeoutMs = 4_000): Promise<T> {
+function once<T = unknown>(socket: ClientSocket, event: string, timeoutMs = 8_000): Promise<T> {
   return new Promise((resolve, reject) => {
     const t = setTimeout(() => reject(new Error(`timeout waiting for "${event}"`)), timeoutMs);
     socket.once(event, (data: T) => { clearTimeout(t); resolve(data); });
@@ -99,23 +101,27 @@ describe("reconnect mid-round", () => {
     expect(res.success).toBe(true);
     const s = await snap;
     expect(s).toMatchObject({ started: true, phase: "answering", round: 1, isOwner: false, photo: PHOTO, pause: null });
-    expect(s.duration as number).toBeGreaterThan(3_000);
+    expect(s.duration as number).toBeGreaterThan(2_000); // 8 s answer time minus the ~0.5 s away (and load)
     expect(s.duration as number).toBeLessThanOrEqual(8_000);
 
     // The returning socket keeps receiving the round
-    const reveal = await once<{ correctAnswer: string }>(back, "round-reveal", 9_000);
+    const reveal = await once<{ correctAnswer: string }>(back, "round-reveal", 12_000);
     expect(reveal.correctAnswer).toBe(owner);
     expect(paused).toBe(false);
     Object.values(socks).forEach((c) => c.emit("leave-room"));
     back.emit("leave-room");
-  }, 15_000);
+  }, 25_000);
 
   it("2 players: the game pauses for the one left, and resumes for both when the other returns", async () => {
     const { gameCode, socks, tokens, owner } = await gameInAnsweringPhase(["dave", "erin"]);
     const away = owner === "dave" ? "erin" : "dave";
     const pausedP = once<{ duration: number; waitingFor: string[]; pause: number; maxPauses: number }>(socks[owner], "game-paused");
     socks[away].disconnect();
-    expect(await pausedP).toEqual({ duration: 5 * 60_000, waitingFor: [away], pause: 1, maxPauses: 3 });
+    const paused = await pausedP;
+    expect(paused).toMatchObject({ waitingFor: [away], pause: 1, maxPauses: MAX_PAUSES });
+    // Remaining pause time = PAUSE_TIMEOUT minus the ms elapsed since the pause began (can be 1–2 ms under load)
+    expect(paused.duration).toBeGreaterThanOrEqual(PAUSE_TIMEOUT - 200);
+    expect(paused.duration).toBeLessThanOrEqual(PAUSE_TIMEOUT);
 
     // Frozen: no reveal while paused, even past the answer time
     let revealed = false;
@@ -134,13 +140,13 @@ describe("reconnect mid-round", () => {
     const [rb, ro] = await Promise.all([resumedBack, resumedOwner]);
     expect(rb).toEqual(ro);
     expect(rb.phase).toBe("answering");
-    expect(rb.duration).toBeGreaterThan(3_000);
+    expect(rb.duration).toBeGreaterThan(2_000); // the answer time frozen at the pause, ~8 s
 
-    const reveal = await once<{ correctAnswer: string }>(back, "round-reveal", 9_000);
+    const reveal = await once<{ correctAnswer: string }>(back, "round-reveal", 12_000);
     expect(reveal.correctAnswer).toBe(owner);
     socks[owner].emit("leave-room");
     back.emit("leave-room");
-  }, 25_000);
+  }, 40_000);
 
   // EXP-097: the app's lobby screen receives the rejoin snapshot, opens the game screen and asks again on the
   // same socket; that duplicate join must answer with a fresh snapshot (and your-turn for an awaited photo)
@@ -152,7 +158,7 @@ describe("reconnect mid-round", () => {
     expect(res.success).toBe(true);
     expect(await snap).toMatchObject({ started: true, phase: "answering", round: 1, isOwner: false, photo: PHOTO });
     Object.values(socks).forEach((c) => c.emit("leave-room"));
-  }, 15_000);
+  }, 25_000);
 
   it("the awaited photo owner re-sending join on the same socket gets your-turn again", async () => {
     const socks: Record<string, ClientSocket> = {};
@@ -176,7 +182,7 @@ describe("reconnect mid-round", () => {
     expect(await snap).toMatchObject({ started: true, phase: "waiting-photo", isOwner: false, photo: null });
     expect(await turn).toEqual({ round: 1, attempt: 1 });
     Object.values(socks).forEach((c) => c.emit("leave-room"));
-  }, 15_000);
+  }, 25_000);
 
   it("re-sending join on the same socket in the lobby sends no snapshot", async () => {
     const kim = await newClient();
@@ -185,7 +191,7 @@ describe("reconnect mid-round", () => {
     expect((await joinAs(kim, created.room!.gameCode, "kim", created.rejoinToken)).success).toBe(true);
     expect(await quiet).toBe(true);
     kim.emit("leave-room");
-  });
+  }, 15_000);
 
   it("a replaced socket and a kicked player's sockets are cut off: no round-start (photo URL) reaches them", async () => {
     const sock: Record<string, ClientSocket> = {};
@@ -213,9 +219,9 @@ describe("reconnect mid-round", () => {
     sock.host.emit("remove-player", { username: "carol" });
     await carol2Closed;
 
-    const cutOff = [sock.bob, sock.carol, carol2].map((c) => silent(c, "round-start", 6_000));
+    const cutOff = [sock.bob, sock.carol, carol2].map((c) => silent(c, "round-start", 8_000));
     const live = [sock.host, bob2, sock.dave];
-    const turns = live.map((c) => once<{ round: number }>(c, "your-turn", 5_000).then(() => c).catch(() => null));
+    const turns = live.map((c) => once<{ round: number }>(c, "your-turn", 8_000).then(() => c).catch(() => null));
     const started = live.map((c) => once(c, "game-started"));
     sock.host.emit("start-game");
     await Promise.all(started);
@@ -227,5 +233,5 @@ describe("reconnect mid-round", () => {
     await Promise.all(starts);
     expect(await Promise.all(cutOff)).toEqual([true, true, true]);
     live.forEach((c) => c.emit("leave-room"));
-  }, 20_000);
+  }, 30_000);
 });

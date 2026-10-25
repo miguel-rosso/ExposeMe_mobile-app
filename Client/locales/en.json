@@ -1,0 +1,5 @@
+{
+  "ios": {
+    "NSPhotoLibraryUsageDescription": "Expose Me picks random photos from your gallery and shows them to the other players in your game room. You can also choose a photo to plant in the game."
+  }
+}

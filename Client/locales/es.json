@@ -1,0 +1,5 @@
+{
+  "ios": {
+    "NSPhotoLibraryUsageDescription": "Expose Me elige fotos al azar de tu galería y las muestra al resto de jugadores de tu sala. También puedes elegir una foto para colarla en la partida."
+  }
+}

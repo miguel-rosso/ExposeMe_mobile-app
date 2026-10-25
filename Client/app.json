@@ -10,7 +10,10 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.socketNull.ExposeMe",
-      "icon": "./assets/images/adaptive-icon.png"
+      "icon": "./assets/images/adaptive-icon.png",
+      "infoPlist": {
+        "CFBundleAllowMixedLocalizations": true
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -18,11 +21,24 @@
         "backgroundColor": "#d00000"
       },
       "package": "com.socketNull.ExposeMe",
-      "versionCode": 10
+      "versionCode": 10,
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.CAMERA",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.READ_MEDIA_AUDIO",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.ACCESS_MEDIA_LOCATION",
+        "android.permission.SYSTEM_ALERT_WINDOW"
+      ]
     },
     "assetBundlePatterns": [
       "**/*"
     ],
+    "locales": {
+      "en": "./locales/en.json",
+      "es": "./locales/es.json"
+    },
     "plugins": [
       "expo-router",
       [
@@ -31,6 +47,23 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "cover"
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Expose Me picks random photos from your gallery and shows them to the other players in your game room. You can also choose a photo to plant in the game.",
+          "savePhotosPermission": false,
+          "isAccessMediaLocationEnabled": false,
+          "granularPermissions": ["photo"]
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Expose Me picks random photos from your gallery and shows them to the other players in your game room. You can also choose a photo to plant in the game.",
+          "cameraPermission": false,
+          "microphonePermission": false
         }
       ]
     ],

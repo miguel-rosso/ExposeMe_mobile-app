@@ -1,6 +1,21 @@
-import { uploadPhoto, uploadFileMeta } from "../app/utils/uploadPhoto";
+import { uploadPhoto, UPLOAD_MAX_SIDE, UPLOAD_JPEG_QUALITY } from "../app/utils/uploadPhoto";
+import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
+
+// expo-image-manipulator: manipulate(uri, loadOptions) -> context.renderAsync() -> image.saveAsync()
+const mockSaveAsync = jest.fn();
+const mockRenderAsync = jest.fn();
+const mockContextRelease = jest.fn();
+const mockImageRelease = jest.fn();
+jest.mock("expo-image-manipulator", () => ({
+  SaveFormat: { JPEG: "jpeg", PNG: "png", WEBP: "webp" },
+  ImageManipulator: { manipulate: jest.fn() },
+}));
+const manipulate = ImageManipulator.manipulate as jest.Mock;
+const CONVERTED_URI = "file:///cache/ImageManipulator/9F1C-converted.jpg";
 
 // expo-file-system File: name/extension come from the URI, type is the MIME ("" when unknown)
+const mockDeleted: string[] = [];
+const mockReadFrom: string[] = [];
 jest.mock("expo-file-system", () => ({
   File: class {
     uri: string;
@@ -15,7 +30,11 @@ jest.mock("expo-file-system", () => ({
       return "";
     }
     async bytes() {
+      mockReadFrom.push(this.uri);
       return new Uint8Array([1, 2, 3]);
+    }
+    delete() {
+      mockDeleted.push(this.uri);
     }
   },
 }));
@@ -35,6 +54,12 @@ const okResponse = (url: string) => ({ ok: true, status: 200, json: async () => 
 
 beforeEach(() => {
   parts = [];
+  mockDeleted.length = 0;
+  mockReadFrom.length = 0;
+  jest.clearAllMocks();
+  mockSaveAsync.mockResolvedValue({ uri: CONVERTED_URI, width: 1600, height: 1200 });
+  mockRenderAsync.mockResolvedValue({ width: 1600, height: 1200, saveAsync: mockSaveAsync, release: mockImageRelease });
+  manipulate.mockReturnValue({ renderAsync: mockRenderAsync, release: mockContextRelease });
   (global as any).FormData = FakeFormData;
   (global as any).fetch = jest.fn(async () => okResponse("/temp/1761000000000-photo.jpg"));
 });
@@ -42,8 +67,8 @@ beforeEach(() => {
 describe("uploadPhoto (EXP-038)", () => {
   it.each([
     ["file:///DCIM/p1%20copy.jpg", "photo.jpg", "image/jpeg"],
-    ["file:///DCIM/Caf%C3%A9.HEIC", "photo.heic", "image/heic"],
-    ["file:///DCIM/IMG_1234%20(1).PNG", "photo.png", "image/png"],
+    ["file:///DCIM/Caf%C3%A9.HEIC", "photo.jpg", "image/jpeg"],
+    ["file:///DCIM/IMG_1234%20(1).PNG", "photo.jpg", "image/jpeg"],
     ["file:///cache/no-extension", "photo.jpg", "image/jpeg"],
     // Privacy: nothing of the original name (source app, capture time, device) may leak
     ["file:///Pictures/Screenshot_20261024-231502_Bank%20Santander.jpg", "photo.jpg", "image/jpeg"],
@@ -60,6 +85,8 @@ describe("uploadPhoto (EXP-038)", () => {
     expect(part.type).toBe(type);
     expect(`/temp/${Date.now()}-${part.name}`).toMatch(SERVER_UPLOAD_PATH_RE);
     await expect(part.bytes()).resolves.toEqual(new Uint8Array([1, 2, 3]));
+    // The converted copy is uploaded, never the original
+    expect(mockReadFrom).toEqual([CONVERTED_URI]);
   });
 
   it("throws when the server answers non-200", async () => {
@@ -67,9 +94,60 @@ describe("uploadPhoto (EXP-038)", () => {
     await expect(uploadPhoto("http://server", "file:///DCIM/a.jpg")).rejects.toThrow("Upload failed: 413");
   });
 
-  it("falls back to the MIME type when the extension is not an image one", () => {
-    expect(uploadFileMeta(".bin", "image/webp")).toEqual({ name: "photo.webp", type: "image/webp" });
-    expect(uploadFileMeta("", "")).toEqual({ name: "photo.jpg", type: "image/jpeg" });
+});
+
+describe("uploadPhoto converts before uploading (EXP-007)", () => {
+  it.each([
+    ["HEIC from an iPhone", "file:///DCIM/IMG_0001.HEIC"],
+    ["PNG screenshot", "file:///Pictures/Screenshot.png"],
+    ["large 12 MP JPEG", "file:///DCIM/PXL_4032x3024.jpg"],
+    ["WebP", "file:///Download/a.webp"],
+  ])("re-encodes a %s as a bounded JPEG", async (_label, uri) => {
+    await uploadPhoto("http://server", uri);
+
+    expect(manipulate).toHaveBeenCalledTimes(1);
+    expect(manipulate).toHaveBeenCalledWith(uri, { maxWidth: UPLOAD_MAX_SIDE, maxHeight: UPLOAD_MAX_SIDE });
+    expect(mockSaveAsync).toHaveBeenCalledWith({ format: SaveFormat.JPEG, compress: UPLOAD_JPEG_QUALITY });
+    // No EXIF/base64 extras requested
+    expect(mockSaveAsync.mock.calls[0][0]).not.toHaveProperty("base64");
+    const [, part] = parts[0];
+    expect(part.name).toBe("photo.jpg");
+    expect(part.type).toBe("image/jpeg");
+  });
+
+  it("bounds the longest side to a full-screen phone size and uses ~0.8 quality", () => {
+    expect(UPLOAD_MAX_SIDE).toBeGreaterThanOrEqual(1600);
+    expect(UPLOAD_MAX_SIDE).toBeLessThanOrEqual(2048);
+    expect(UPLOAD_JPEG_QUALITY).toBeCloseTo(0.8);
+  });
+
+  it("releases native refs and deletes the converted copy after uploading", async () => {
+    await uploadPhoto("http://server", "file:///DCIM/a.heic");
+    expect(mockImageRelease).toHaveBeenCalled();
+    expect(mockContextRelease).toHaveBeenCalled();
+    expect(mockDeleted).toEqual([CONVERTED_URI]);
+  });
+
+  it("deletes the converted copy even when the upload fails", async () => {
+    (global as any).fetch = jest.fn(async () => ({ ok: false, status: 500, json: async () => ({}) }));
+    await expect(uploadPhoto("http://server", "file:///DCIM/a.heic")).rejects.toThrow("Upload failed: 500");
+    expect(mockDeleted).toEqual([CONVERTED_URI]);
+  });
+
+  it("throws a clear error and uploads nothing when the conversion fails", async () => {
+    mockRenderAsync.mockRejectedValue(new Error("Could not decode image"));
+    await expect(uploadPhoto("http://server", "file:///DCIM/broken.heic")).rejects.toThrow(
+      "Photo conversion failed: Could not decode image",
+    );
+    expect(fetch).not.toHaveBeenCalled();
+    expect(mockContextRelease).toHaveBeenCalled();
+  });
+
+  it("throws a clear error when saving the JPEG fails", async () => {
+    mockSaveAsync.mockRejectedValue(new Error("disk full"));
+    await expect(uploadPhoto("http://server", "file:///DCIM/a.png")).rejects.toThrow("Photo conversion failed: disk full");
+    expect(fetch).not.toHaveBeenCalled();
+    expect(mockImageRelease).toHaveBeenCalled();
   });
 });
 

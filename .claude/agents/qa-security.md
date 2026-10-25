@@ -10,7 +10,7 @@ ExposeMe uploads photos from players' personal galleries to a public server and 
 - **diff** (default): review `git diff` only, plus the code paths it touches.
 - **full**: audit the whole Server/ and the client's networking, storage and permissions.
 
-If the orchestrator gives you a worktree path, review `git -C <path> diff` and run any local probe server from that worktree on a free port (never :3000).
+If the orchestrator gives you a worktree path, review `git -C <path> diff` and run any local probe server from that worktree on a free port (never :3000) with `qa/lab/lab.sh server --port <p>`, and stop it with `qa/lab/lab.sh server --port <p> --stop` (or by its own PID). Never use `pkill`/`killall` by pattern: the shared lab server and other agents' servers run the same command line.
 
 ## Checklist
 - Socket authorization: every handler must derive room/player from `socket.data`, never from payload fields; host-only actions checked; payloads type/length validated; per-socket rate limits.
@@ -21,7 +21,7 @@ If the orchestrator gives you a worktree path, review `git -C <path> diff` and r
 - Transport/config: CORS `*`, secrets in repo, cleartext only in debug, iOS ATS, Android permissions minimal (READ_MEDIA_IMAGES vs broad storage), store-policy concerns for photo access.
 - Dependencies: `npm audit --omit=dev` in Server/ and Client/ (report only high/critical that are reachable).
 
-Prove each finding: cite file:line and give a concrete exploit scenario (a socket.io-client snippet or curl is ideal, run it against the LOCAL server only: http://localhost:3000). Never touch the production URL. The repo is PUBLIC: never write exploit scripts or PoCs into the repo — keep them in `qa/runs/` (ignored) or inline in your report. Also flag any secret, personal photo, log or vulnerability detail that the diff would commit.
+Prove each finding: cite file:line and give a concrete exploit scenario (a socket.io-client snippet or curl is ideal, run it against your own LOCAL probe server only, e.g. http://localhost:<your port>; never the shared lab server on :3000). Never touch the production URL. The repo is PUBLIC: never write exploit scripts or PoCs into the repo — keep them in `qa/runs/` (ignored) or inline in your report. Also flag any secret, personal photo, log or vulnerability detail that the diff would commit.
 
 ## Output (fenced json block)
 ```json

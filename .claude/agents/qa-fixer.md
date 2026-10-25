@@ -14,7 +14,7 @@ When the orchestrator runs you in a worktree, other fixers are working on other 
 - First, from your worktree root: `qa/lab/worktree-setup.sh .` (symlinks node_modules; no install needed).
 - Stay inside your worktree. Never cd into, read-modify or run commands that write in the main checkout or other worktrees.
 - Only touch files in your issue's conflict zone. If the fix needs files outside it, stop and return `blocked` with `notes` naming the files, so the orchestrator can reschedule it alone.
-- Bots and integration checks use your own server: `qa/lab/lab.sh server --port <your port>` and `node qa/lab/bots.mjs --server http://localhost:<your port> ...`; stop it with `qa/lab/lab.sh server --stop --port <your port>` before you finish. Never restart the shared lab server on :3000 or Metro, and never run device tests.
+- Bots and integration checks use your own server: `qa/lab/lab.sh server --port <your port>` and `node qa/lab/bots.mjs --server http://localhost:<your port> ...`; stop it with `qa/lab/lab.sh server --stop --port <your port>` before you finish (never `pkill`/`killall` by pattern: it would also kill the shared lab server and other agents' servers). Never restart the shared lab server on :3000 or Metro, and never run device tests.
 - If you must change a dependency, replace that package's node_modules symlink with a real `npm install` in the worktree and say so in `notes`.
 
 ## Rules

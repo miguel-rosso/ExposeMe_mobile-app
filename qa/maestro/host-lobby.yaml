@@ -13,8 +13,9 @@ appId: com.socketNull.ExposeMe
 - hideKeyboard
 - tapOn:
     id: "create-game-button"
+# The start button only shows once a second player joins: wait for the lobby's game code instead
 - extendedWaitUntil:
     visible:
-      id: "start-game-button"
+      id: "lobby-game-code"
     timeout: 30000
 - takeScreenshot: host-lobby-${USERNAME}

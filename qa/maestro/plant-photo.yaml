@@ -1,0 +1,33 @@
+# Plant a secret photo from the lobby: plant button → alert → system photo picker (newest photo) → crop confirm.
+# Works for the first plant ("Choose Photo") and for replacing one ("Change Photo"), en/es app and system UI.
+# env: USERNAME
+appId: com.socketNull.ExposeMe
+---
+- tapOn:
+    id: "plant-photo-button"
+- tapOn: "CHOOSE PHOTO|Choose Photo|ELEGIR FOTO|Elegir Foto|CHANGE PHOTO|Change Photo|CAMBIAR FOTO|Cambiar Foto"
+# Android system photo picker, then the image-picker crop activity (allowsEditing)
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - tapOn:
+          id: "com.google.android.providers.media.module:id/icon_thumbnail"
+          index: 0
+      - tapOn:
+          id: "com.socketNull.ExposeMe:id/crop_image_menu_crop"
+# iOS PHPicker grid (cells are labelled "Photo, <date>"), then the crop screen's confirm button
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - tapOn:
+          text: "(Foto|Photo), .*"
+          index: 0
+      - tapOn:
+          id: "Done"
+- extendedWaitUntil:
+    visible:
+      id: "plant-photo-button"
+    timeout: 15000
+- takeScreenshot: planted-${USERNAME}

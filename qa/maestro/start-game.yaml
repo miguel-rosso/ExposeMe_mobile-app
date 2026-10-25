@@ -1,0 +1,9 @@
+# Host taps "Start game" in the lobby.
+appId: com.socketNull.ExposeMe
+---
+- extendedWaitUntil:
+    visible:
+      id: "start-game-button"
+    timeout: 20000
+- tapOn:
+    id: "start-game-button"

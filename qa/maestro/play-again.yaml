@@ -1,0 +1,15 @@
+# From the final results modal: "Play again" back to the same room's lobby.
+# env: USERNAME
+appId: com.socketNull.ExposeMe
+---
+- extendedWaitUntil:
+    visible:
+      id: "play-again-button"
+    timeout: 20000
+- tapOn:
+    id: "play-again-button"
+- extendedWaitUntil:
+    visible:
+      id: "lobby-waiting|start-game-button"
+    timeout: 20000
+- takeScreenshot: again-lobby-${USERNAME}

@@ -195,6 +195,18 @@ export class GameEngine {
     }
   }
 
+  /**
+   * A player's live socket asked to join its own started game again (the app's lobby screen received the rejoin
+   * snapshot and handed over to the game screen): send the snapshot again, and your-turn if their photo is awaited.
+   */
+  resendState(room: Room, player: Player): void {
+    if (!room.started) return;
+    this.io.to(player.socketId).emit("game-state", this.snapshot(room));
+    if (!room.paused && room.phase === "waiting-photo" && room.currentPlayer === player) {
+      this.io.to(player.socketId).emit("your-turn", { round: room.round + 1 });
+    }
+  }
+
   snapshot(room: Room): GameStateSnapshot {
     const inRound = room.phase === "answering" || room.phase === "reveal" || room.phase === "scores";
     const shown = room.phase === "reveal" || room.phase === "scores";

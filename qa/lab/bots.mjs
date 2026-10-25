@@ -19,6 +19,9 @@
 //                           10 pauses in all per game.
 //   node qa/lab/bots.mjs --bots 3 --host --drop-round 2 --drop-secs 3     # drop mid-round, game goes on
 //   node qa/lab/bots.mjs --bots 2 --host --drop-round 2 --drop-secs 8     # 2 players: pause → resume
+//            --app-resync   after a rejoin snapshot of a started game, ignore it (and your-turn) and re-send the join
+//                           on the same socket, like the app going from its lobby to the game screen (EXP-097)
+//   node qa/lab/bots.mjs --bots 2 --host --drop-round 2 --drop-secs 8 --app-resync
 import { io } from "socket.io-client";
 import fs from "node:fs";
 import path from "node:path";
@@ -44,6 +47,10 @@ const TIMEOUT_S = Number(args.timeout || 900);
 const DROP_ROUND = Number(args["drop-round"] || 0);
 const DROP_SECS = Number(args["drop-secs"] || 5);
 const DROP_BOT = Number(args["drop-bot"] || N_BOTS) - 1;
+// Like the app rejoining from its lobby screen ("Join" after closing it): the first snapshot of a started game
+// (and any your-turn with it) is missed while switching screens, then the join is re-sent on the same socket,
+// which answers with a fresh game-state (and your-turn for an awaited photo)
+const APP_RESYNC = !!args["app-resync"];
 const PHOTOS = args.photos ? fs.readdirSync(args.photos).filter((f) => f.endsWith(".jpg")).map((f) => path.join(args.photos, f)) : [];
 
 const now = () => performance.timeOrigin + performance.now();
@@ -119,6 +126,7 @@ function runRoom(roomIdx, fixedCode) {
         socket.emit("im-ready", { gameCode: code, username: name });
       });
       socket.on("your-turn", async (d) => {
+        if (bot.resyncing) { rec("your-turn-missed-on-purpose", d.round); return; }
         rec("your-turn", d.round);
         if (Math.random() < UPLOAD_FAIL) { rec("upload-skipped-on-purpose", d.round); return; }
         try {
@@ -158,6 +166,13 @@ function runRoom(roomIdx, fixedCode) {
       socket.on("game-state", (d) => {
         rec("game-state", d.round, { phase: d.phase, paused: !!d.pause, pause: d.pause?.pause, maxPauses: d.pause?.maxPauses, started: d.started });
         if (!d.started) return;
+        if (APP_RESYNC && !bot.resyncing) {
+          bot.resyncing = true;
+          rec("app-resync", d.round);
+          setTimeout(() => join(), 50); // the game screen takes over the socket
+          return;
+        }
+        bot.resyncing = false;
         bot.players = d.players.map((p) => p.username);
         if (d.round !== bot.round) { bot.round = d.round; bot.guess = pickGuess(bot); }
         if (d.phase === "reveal") socket.emit("submit-answer", { guess: bot.guess });

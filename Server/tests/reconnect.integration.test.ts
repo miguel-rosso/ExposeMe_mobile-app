@@ -140,6 +140,51 @@ describe("reconnect mid-round", () => {
     back.emit("leave-room");
   }, 25_000);
 
+  // EXP-097: the app's lobby screen receives the rejoin snapshot, opens the game screen and asks again on the
+  // same socket; that duplicate join must answer with a fresh snapshot (and your-turn for an awaited photo)
+  it("re-sending join on the same socket in a started game resends the snapshot", async () => {
+    const { gameCode, socks, tokens, owner } = await gameInAnsweringPhase(["fay", "gil", "hal"]);
+    const other = ["fay", "gil", "hal"].find((n) => n !== owner)!;
+    const snap = once<Record<string, unknown>>(socks[other], "game-state");
+    const res = await joinAs(socks[other], gameCode, other, tokens[other]);
+    expect(res.success).toBe(true);
+    expect(await snap).toMatchObject({ started: true, phase: "answering", round: 1, owner, photo: PHOTO });
+    Object.values(socks).forEach((c) => c.emit("leave-room"));
+  }, 15_000);
+
+  it("the awaited photo owner re-sending join on the same socket gets your-turn again", async () => {
+    const socks: Record<string, ClientSocket> = {};
+    const tokens: Record<string, string> = {};
+    socks.ivy = await newClient();
+    const created = await joinAs(socks.ivy, null, "ivy");
+    const gameCode = created.room!.gameCode;
+    tokens.ivy = created.rejoinToken!;
+    socks.jon = await newClient();
+    tokens.jon = (await joinAs(socks.jon, gameCode, "jon")).rejoinToken!;
+    const turns = ["ivy", "jon"].map((n) => once(socks[n], "your-turn").then(() => n).catch(() => null));
+    const started = ["ivy", "jon"].map((n) => once(socks[n], "game-started"));
+    socks.ivy.emit("start-game");
+    await Promise.all(started);
+    ["ivy", "jon"].forEach((n) => socks[n].emit("im-ready"));
+    const owner = await Promise.race(turns.map((p) => p.then((n) => n ?? new Promise<string>(() => {}))));
+
+    const snap = once<Record<string, unknown>>(socks[owner], "game-state");
+    const turn = once<{ round: number }>(socks[owner], "your-turn");
+    expect((await joinAs(socks[owner], gameCode, owner, tokens[owner])).success).toBe(true);
+    expect(await snap).toMatchObject({ started: true, phase: "waiting-photo", owner: null, photo: null });
+    expect(await turn).toEqual({ round: 1 });
+    Object.values(socks).forEach((c) => c.emit("leave-room"));
+  }, 15_000);
+
+  it("re-sending join on the same socket in the lobby sends no snapshot", async () => {
+    const kim = await newClient();
+    const created = await joinAs(kim, null, "kim");
+    const quiet = silent(kim, "game-state", 500);
+    expect((await joinAs(kim, created.room!.gameCode, "kim", created.rejoinToken)).success).toBe(true);
+    expect(await quiet).toBe(true);
+    kim.emit("leave-room");
+  });
+
   it("a replaced socket and a kicked player's sockets are cut off: no round-start (photo URL) reaches them", async () => {
     const sock: Record<string, ClientSocket> = {};
     const tokens: Record<string, string> = {};

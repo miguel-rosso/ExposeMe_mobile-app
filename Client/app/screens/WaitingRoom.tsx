@@ -15,7 +15,7 @@ import {
 import tw from "twrnc";
 import { useGameContext } from "@/app/providers/GameContext";
 import { useRouter, useLocalSearchParams } from "expo-router";
-import { RoomOfGameResponse, Player } from "@/app/models/interfaces";
+import { RoomOfGameResponse, Player, GameStateSnapshot } from "@/app/models/interfaces";
 import ImageBlur from "@/app/components/ImageBlur/ImageBlur";
 import { ImageBlurView } from "@/app/components/ImageBlur";
 import { useBackgroundContext } from "@/app/providers/BackgroundContext";
@@ -222,6 +222,10 @@ const WaitingRoom = ({}) => {
   const gameCodeRef = useRef(gameCode);
   useEffect(() => { gameCodeRef.current = gameCode; }, [gameCode]);
   const joinedRef = useRef(false);
+  // Our binding from the last room-of-game (code + rejoin token), to ask for the game state again
+  const bindingRef = useRef<{ gameCode: string; rejoinToken?: string } | null>(null);
+  // Set when we enter a game that was already running (rejoin via "Join" after closing the app)
+  const resyncOnLeaveRef = useRef(false);
 
   // Start socket once on mount
   useEffect(() => {
@@ -257,6 +261,7 @@ const WaitingRoom = ({}) => {
         navigation.replace({ pathname: "/", params: { message: data.message } });
       } else if (data.room) {
         joinedRef.current = true;
+        bindingRef.current = { gameCode: data.room.gameCode, rejoinToken: data.rejoinToken };
         if (data.rejoinToken) saveRejoinToken(data.room.gameCode, username, data.rejoinToken);
         setPlayers(data.room.players);
         setGameCode(data.room.gameCode);
@@ -282,6 +287,16 @@ const WaitingRoom = ({}) => {
       navigation.replace("/screens/GameScreen");
     });
 
+    // Every rejoin is followed by a snapshot; a started game means we came back to a game in progress
+    // (e.g. "Join" after closing the app): go straight to the game screen
+    socket.on("game-state", (snap: GameStateSnapshot) => {
+      if (!snap.started || resyncOnLeaveRef.current) return;
+      resyncOnLeaveRef.current = true;
+      setPlayersProvider(snap.players);
+      setRoundsOfGame(snap.totalRounds);
+      navigation.replace("/screens/GameScreen");
+    });
+
     socket.on("player-removed", (removed: Player) => {
       if (removed.username === username) {
         clearRejoinToken();
@@ -297,6 +312,18 @@ const WaitingRoom = ({}) => {
 
     return () => {
       socket.removeAllListeners();
+      // The snapshot (and a your-turn for an awaited photo) reached this screen, not the game screen. The game
+      // screen's listeners are attached in this same commit, before any server reply can arrive, so ask again:
+      // a join on the same socket answers with a fresh snapshot (and your-turn) for the game screen to render.
+      const binding = bindingRef.current;
+      if (resyncOnLeaveRef.current && binding) {
+        resyncOnLeaveRef.current = false;
+        socket.emit("join-create-game", {
+          gameCode: binding.gameCode,
+          username,
+          ...(binding.rejoinToken ? { rejoinToken: binding.rejoinToken } : {}),
+        });
+      }
     };
   }, [socket, username]);
 

@@ -124,6 +124,8 @@ io.on("connection", (socket: Socket) => {
       if (current && gameCode === current.room.gameCode && username === current.player.username) {
         const { room, player } = current;
         socket.emit("room-of-game", { success: true, room: roomManager.safeRoomData(room), rounds: room.rounds, rejoinToken: player.rejoinToken });
+        // Game in progress: the app asks again from the game screen, which missed the rejoin snapshot
+        gameEngine.resendState(room, player);
         return;
       }
 

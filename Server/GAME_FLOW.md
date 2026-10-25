@@ -41,8 +41,11 @@ After last round: game-over
   the username is free again, so joining with it needs no token.
 - **One socket = one player in one room.** The same live socket re-sending `join-create-game` for the room
   and username it is already bound to (e.g. the WaitingRoom effect re-running, a duplicate join) is a no-op:
-  same `room-of-game` answer with the same token, no token needed, no broadcast. Reconnects arrive on a
-  **new** socket and go through the normal rejoin path with the `rejoinToken`.
+  same `room-of-game` answer with the same token, no token needed, no broadcast. If the game has started it
+  also sends that socket a fresh **`game-state` snapshot** (plus `your-turn` if its photo is awaited and the game
+  is not paused), with no other effect: the app uses it to resync after rejoining from the lobby screen (see
+  "Pause and reconnect"). Reconnects arrive on a **new** socket and go through the normal rejoin path with the
+  `rejoinToken`.
 - Any other `join-create-game` from a bound socket (another room, a new room, or the same room under another
   username) is attempted first; **only if it succeeds** is the previous binding left exactly like
   `leave-room` (player removed, host handed over, `player-left`, socket leaves the socket.io room). A failed
@@ -93,6 +96,12 @@ Short absences (app in the background, brief signal loss) are silent: socket.io 
 the client re-sends `join-create-game` with its `rejoinToken`, and the server answers the rejoin with
 `room-of-game` followed by a **`game-state` snapshot** to that socket only (always on a rejoin, also in the lobby,
 where it is ignored). The snapshot is taken after the rejoin's effect on a pause (resume), so it is never stale. The client keeps the game screen meanwhile and shows a small "Reconnecting…" indicator.
+
+Rejoining from the lobby screen (the app was closed and the player uses "Join" again with their stored
+`rejoinToken`): the WaitingRoom gets `room-of-game` + a `game-state` with `started: true`, opens the game screen
+and, once the game screen listens, re-sends `join-create-game` on the **same** socket; the server answers with a
+fresh snapshot (and `your-turn` for an awaited photo), which the game screen renders like any reconnect. Events
+that reached the lobby screen in between are covered by that snapshot.
 
 - **`game-state`** = `{ started, phase, round, totalRounds, owner, photo, correctAnswer, duration, held, pause,
   scores, players }`. `duration` is the remaining time of the current phase (frozen while paused/held). `owner`
@@ -159,7 +168,7 @@ All game events are **atomic** — each contains everything the client needs.
 | `round-skipped` | - | - | Upload timed out, next player |
 | `game-paused` | any | `{ duration, waitingFor, pause, maxPauses }` | Fewer than 2 connected: freeze, show countdown and "pause N of M" |
 | `game-resumed` | any | `{ phase, duration }` | Paused phase continues with remaining time |
-| `game-state` | any | snapshot (see "Pause and reconnect") | Only to a rejoining socket: render current phase |
+| `game-state` | any | snapshot (see "Pause and reconnect") | Only to a rejoining socket (or one re-sending its join in a started game): render current phase |
 | `game-over` | - | `{ finalScores }` | Show final results |
 
 ## Events (Client → Server)

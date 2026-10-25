@@ -1,0 +1,20 @@
+# EXP-097: closing the app mid-game and joining the same room again (same name, stored rejoin token) must land
+# on the game screen in the current phase, not on the lobby's "Waiting for host…".
+# Run while the device is in a started game in room ${GAME_CODE} as ${USERNAME} (e.g. after join-room.yaml and
+# a game started with bots: node qa/lab/bots.mjs --bots 2 --code $GAME_CODE). With 2 players the others see the
+# pause while the app is closed and the game resumes when it comes back.
+# Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
+appId: com.socketNull.ExposeMe
+---
+- stopApp
+- launchApp:
+    stopApp: false
+- runFlow: join-room.yaml
+# Game screen (any phase, possibly paused until the resume), never the lobby
+- extendedWaitUntil:
+    visible:
+      id: "player-option-.*|score-modal|game-waiting-ready|paused-modal"
+    timeout: 30000
+- assertNotVisible:
+    id: "lobby-waiting"
+- takeScreenshot: rejoined-${USERNAME}

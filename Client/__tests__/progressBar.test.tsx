@@ -43,6 +43,24 @@ describe("ProgressBar", () => {
     act(() => r.unmount());
   });
 
+  // EXP-185: GameScreen passes a new onEnd on every render; the real bar must still fill once and call onEnd once
+  it("re-renders with a new onEnd neither restarts the bar nor call onEnd twice, before or after it fills", () => {
+    const firstOnEnd = jest.fn();
+    const latestOnEnd = jest.fn();
+    let r!: TestRenderer.ReactTestRenderer;
+    act(() => { r = TestRenderer.create(<ProgressBar duration={8_000} onEnd={firstOnEnd} />); });
+    act(() => jest.advanceTimersByTime(5_000));
+    act(() => r.update(<ProgressBar duration={8_000} onEnd={latestOnEnd} />));
+    act(() => jest.advanceTimersByTime(3_100));
+    expect(firstOnEnd).not.toHaveBeenCalled();
+    expect(latestOnEnd).toHaveBeenCalledTimes(1);
+
+    act(() => r.update(<ProgressBar duration={8_000} onEnd={latestOnEnd} />));
+    act(() => jest.advanceTimersByTime(20_000));
+    expect(latestOnEnd).toHaveBeenCalledTimes(1);
+    act(() => r.unmount());
+  });
+
   it("does not call onEnd when unmounted before it fills", () => {
     const onEnd = jest.fn();
     let r!: TestRenderer.ReactTestRenderer;

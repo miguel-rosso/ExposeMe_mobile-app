@@ -1,7 +1,7 @@
 import React from "react";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
-import { Linking } from "react-native";
-import { checkGalleryAccess, GalleryPermission } from "../app/utils/galleryAccess";
+import { Linking, Text } from "react-native";
+import { checkGalleryAccess, GalleryPermission, PHOTO_QUERY_TIMEOUT_MS } from "../app/utils/galleryAccess";
 import GalleryAccessModal from "../app/components/modals/GalleryAccessModal";
 import { TEST_IDS } from "../app/utils/testIds";
 import en from "../app/i18n/en";
@@ -64,6 +64,28 @@ describe("checkGalleryAccess", () => {
     await expect(checkGalleryAccess(d, { ask: false })).resolves.toMatchObject({ status: "denied", canAskAgain: true });
     expect(d.requestPermissions).not.toHaveBeenCalled();
   });
+
+  // EXP-136: the photo query never answered after the permission was changed while the app ran, so Create did nothing
+  describe("photo query that never answers", () => {
+    beforeEach(() => jest.useFakeTimers());
+    afterEach(() => jest.useRealTimers());
+
+    it("reports the gallery as unavailable once the timeout runs out, instead of hanging", async () => {
+      const d = { ...deps(perm("granted", "limited")), hasPhotos: jest.fn(() => new Promise<boolean>(() => {})) };
+      const settled = jest.fn();
+      checkGalleryAccess(d, { ask: true }).then(settled);
+      await jest.advanceTimersByTimeAsync(PHOTO_QUERY_TIMEOUT_MS - 1);
+      expect(settled).not.toHaveBeenCalled();
+      await jest.advanceTimersByTimeAsync(1);
+      expect(settled).toHaveBeenCalledWith({ status: "unavailable", limited: true, canAskAgain: true });
+    });
+
+    it("a query that answers in time keeps its answer and leaves no timer behind", async () => {
+      const d = deps(perm("granted", "all"));
+      await expect(checkGalleryAccess(d, { ask: false })).resolves.toMatchObject({ status: "ok" });
+      expect(jest.getTimerCount()).toBe(0);
+    });
+  });
 });
 
 describe("GalleryAccessModal", () => {
@@ -115,9 +137,21 @@ describe("GalleryAccessModal", () => {
     expect(onRetry).toHaveBeenCalled();
   });
 
+  // EXP-136: a photo query that timed out is not "no photos": no Select photos / Settings, only Try again
+  it("gallery unavailable (even with limited access): says it couldn't be read and only offers Try again", () => {
+    const { r, onRetry } = render({ access: { status: "unavailable", limited: true, canAskAgain: true }, blocking: true });
+    expect(r.root.findByProps({ testID: TEST_IDS.galleryAccessMessage }).props.children).toBe(en.galleryUnavailable);
+    expect(has(r.root, TEST_IDS.gallerySelectPhotosButton)).toBe(false);
+    expect(has(r.root, TEST_IDS.gallerySettingsButton)).toBe(false);
+    expect(has(r.root, TEST_IDS.galleryAllowButton)).toBe(false);
+    expect(r.root.findAllByType(Text).some((n) => n.props.children === en.galleryBlockedNote)).toBe(false);
+    press(r.root, TEST_IDS.galleryRetryButton);
+    expect(onRetry).toHaveBeenCalled();
+  });
+
   it("every gate text is translated in en and es", () => {
     const keys = ["galleryAccessTitle", "galleryAccessDenied", "galleryNoPhotosTitle", "galleryNoPhotos", "galleryNoPhotosLimited",
-      "galleryBlockedNote", "allowAccess", "selectPhotos", "tryAgain", "howToEnable"] as const;
+      "galleryUnavailableTitle", "galleryUnavailable", "galleryBlockedNote", "allowAccess", "selectPhotos", "tryAgain", "howToEnable"] as const;
     for (const k of keys) {
       expect(en[k]).toBeTruthy();
       expect(es[k]).toBeTruthy();

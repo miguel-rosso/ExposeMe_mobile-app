@@ -78,6 +78,8 @@ export default {
   galleryNoPhotosTitle: "No hay fotos",
   galleryNoPhotos: "Necesitas al menos una foto en tu galería para jugar.",
   galleryNoPhotosLimited: "Necesitas al menos una foto en tu galería para jugar. Solo has compartido algunas fotos y ninguna se puede usar: selecciona más fotos o permite el acceso a todas.",
+  galleryUnavailableTitle: "Galería no disponible",
+  galleryUnavailable: "No hemos podido leer tu galería, inténtalo de nuevo.",
   galleryBlockedNote: "Esto desaparecerá en cuanto vuelvas a permitir el acceso.",
   allowAccess: "Permitir acceso",
   selectPhotos: "Seleccionar fotos",

@@ -130,6 +130,23 @@ After last round: game-over
 - Limits: at most **5 `join-create-game` per socket in any 10 s** (excess answered with
   `{ success: false, message: "Too many attempts" }`), and at most **5000 rooms** in memory (`MAX_ROOMS`;
   creating beyond it answers `"Server is busy"`, joining existing rooms still works).
+- **Room codes** are 6 digits drawn with `crypto.randomInt` (not predictable from earlier codes). A code that
+  matches no room (or a non-string code) answers `"Game not found"` and counts against the sender's **IP**: after
+  **30 misses in any 60 s** (env `JOIN_MISS_MAX` / `JOIN_MISS_WINDOW_MS`) every join with a code from that IP answers
+  `"Too many attempts"` whether the code exists or not, until the window clears. Exceptions: a rejoin with the
+  matching `rejoinToken` (a reconnecting player is never locked out), and a join to a room that already has a
+  connected player on the same IP (same network, e.g. the party Wi-Fi: it knows the code anyway), at most **24 per IP
+  per window** (env `JOIN_EXEMPT_MAX`). Misses keep counting while locked; past **3 × `JOIN_MISS_MAX`** in the window
+  the same-network exemption is dropped too (token rejoins only). A socket records at most one miss every 3 s, so one
+  device alone can't fill the window. Creating a room (`gameCode: null`) is
+  not affected. `"Username already taken"`, `"Game already started"` and `"Room is full"` therefore only reach
+  someone who already has a valid code. The client IP follows the same `TRUST_PROXY` hop count as Express (`req.ip`);
+  per-IP limits count IPv4-mapped IPv6 (any notation) as IPv4 and IPv6 by its /64 prefix.
+- **Connections**: at most **100 open sockets per IP** (env `SOCKET_MAX_CONNECTIONS_PER_IP`; a party shares one
+  public IP and a reconnect can briefly overlap its stale socket), counted per transport connection until it closes.
+  Beyond it the socket.io handshake fails with `connect_error` `"Too many connections"`, as does a second socket.io
+  CONNECT on a transport connection that already has a socket (one socket per connection). `qa/lab/lab.sh server`
+  lifts this and the join-miss limit for bots.
 - **Game start drops gone players.** On every `start-game` (first game and "Play again"), each player who has been
   disconnected for longer than `DISCONNECT_GRACE` (**15 s**, see "Disconnected players") at that moment is removed
   from the room exactly like a leave: uploads released (planted photo
@@ -258,11 +275,14 @@ that reached the lobby screen in between are covered by that snapshot.
 
 ## Hold (pause)
 
-- Available to the photo owner during `reveal` and `scores` phases
+- Available to the photo owner during the `scores` phase only (with at least 1.5 s of it left)
 - Press: game pauses for everyone (server stops timer)
 - Release: game resumes from where it paused
-- No time limit on hold
-- Safety: server force-releases after 30s if client never sends release
+- Limits per round: at most **3 holds**, **30 s held in total** (`MAX_HOLDS_PER_ROUND`, `HOLD_BUDGET_PER_ROUND`).
+  A hold is force-released (`hold-end` + `hold-resume`) when it reaches what is left of the budget; once the
+  budget or the count is used up, `hold-start` is ignored until the next round. A pause ends an active hold and
+  charges its time too.
+- `hold-start` is also rate-limited per socket (burst 3, refilled 1 every 2 s; excess dropped); `hold-end` never is
 
 ## Events (Server → Client)
 
@@ -299,10 +319,10 @@ All game events are **atomic** — each contains everything the client needs.
 | `photo-sent` | `{ photo }` | Photo uploaded; only from the current owner, `photo` must be a path the owner got from `/upload` in this room (`/temp/<32 hex>.jpg\|png\|webp`) |
 | `photo-unavailable` | `{ round, attempt }` (from its `your-turn`) | The awaited owner has no photo to send (no access, no photos, upload failed): skip the round now |
 | `submit-answer` | `{ guess }` | Player's pick, sent on every tap (ignored from the photo owner). Only during `answering`, the last one counts (`""` withdraws it); ignored in `reveal`/`scores`, or if `guess` is not a player in the room; at most 10 per socket, refilled 5/s (excess dropped). No guess is stored and sent in scores as `lastGuess: ""` (the app shows its own translated "No guess") |
-| `hold-start` | - | Photo owner pressed hold |
+| `hold-start` | - | Photo owner pressed hold (scores only; per-round limits, see "Hold") |
 | `hold-end` | - | Photo owner released hold |
 | `chat-message` | `{ message }` (≤100 chars) | Broadcast as `{ username, message }` with the session username |
-| `emoji-reaction` | `{ emoji }` (≤16 chars) | Broadcast as `{ username, emoji }` with the session username |
+| `emoji-reaction` | `{ emoji }`, exactly one of 😂 😍 ❓ 😳 🔥 😭 🤡 😡 (the app's picker) or 📸 (the app sends it when a screenshot is taken) | Broadcast as `{ username, emoji }` with the session username. Anything else is dropped; at most 5 per socket, refilled 4/s (excess dropped silently) |
 | `plant-photo` | `{ photoUrl }` | Applies to the session player (replaces their earlier one); `photoUrl` must be the player's own `/upload` path in this room; accepted until the first round is played |
 
 Payload `gameCode`/`username` fields are ignored for all of the above; identity comes from the session.

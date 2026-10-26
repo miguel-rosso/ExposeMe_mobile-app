@@ -175,6 +175,33 @@ describe("pause with fewer than 2 connected players", () => {
     expect(events("your-turn")).toHaveLength(2);
   });
 
+  it("a hold ended by a pause counts against the round's hold budget (EXP-167)", () => {
+    room = startedRoom(["alice", "bob"]);
+    const owner = room.currentPlayer!;
+    const other = room.players.find((p) => p !== owner)!.username;
+    engine.onPhotoReceived(room, PHOTO, owner.username);
+    vi.advanceTimersByTime(ANSWER_TIME + REVEAL_TIME + 1_000); // 4 s left of scores
+    expect(engine.handleHold(room, owner.socketId)).toBe(true);
+    vi.advanceTimersByTime(20_000);
+
+    drop(other); // pause ends the hold after 20 s held
+    expect(room.paused).toBe(true);
+    expect(room.held).toBe(false);
+    vi.advanceTimersByTime(PAUSE_MIN_DURATION);
+    rejoin(other);
+    expect(room.paused).toBe(false);
+    vi.advanceTimersByTime(PAUSE_MIN_DURATION); // past any resume delay
+
+    // 10 s of budget left: the next hold is force-released after exactly that
+    expect(room.phase).toBe("scores");
+    expect(engine.handleHold(room, owner.socketId)).toBe(true);
+    vi.advanceTimersByTime(10_000 - 1);
+    expect(room.held).toBe(true);
+    vi.advanceTimersByTime(1);
+    expect(room.held).toBe(false);
+    expect(engine.handleHold(room, owner.socketId)).toBe(false);
+  });
+
   it("waiting-photo: a photo sent while paused is ignored and the owner is asked again on resume", () => {
     room = startedRoom(["alice", "bob"]);
     const owner = room.currentPlayer!;

@@ -4,6 +4,11 @@ import { isAllowedRounds, RoomManager } from "../managers/RoomManager";
 import { GameEngine } from "../managers/GameEngine";
 import { acceptsPlantedPhoto, setUploadRooms } from "../middlewares/uploadAccess";
 import { uploadStore } from "../middlewares/uploadStore";
+import { createSlidingWindow } from "../middlewares/rateLimit";
+import {
+  ALLOWED_EMOJIS, createConnectionCounter, createTokenBucket, EMOJI_BURST, EMOJI_RATE_PER_S, handshakeKey, HOLD_START_BURST,
+  HOLD_START_RATE_PER_S, JOIN_EXEMPT_MAX, JOIN_MISS_HARD_FACTOR, JOIN_MISS_MAX, JOIN_MISS_SOCKET_INTERVAL_MS, JOIN_MISS_WINDOW_MS, MAX_CONNECTIONS_PER_IP,
+} from "../managers/socketGuards";
 import { JoinCreateGameData, PhotoUnavailableData, Player, Room } from "../models/interfaces";
 
 const roomManager = new RoomManager();
@@ -23,7 +28,20 @@ const ANSWER_BURST = 10;
 const ANSWER_RATE_PER_S = 5;
 const MAX_USERNAME_LENGTH = 20;
 const MAX_CHAT_LENGTH = 100;
-const MAX_EMOJI_LENGTH = 16;
+// Per-IP limits (see managers/socketGuards): open sockets, and join attempts with a code that matches no room
+const connections = createConnectionCounter(MAX_CONNECTIONS_PER_IP);
+const joinMisses = createSlidingWindow({ max: JOIN_MISS_MAX, windowMs: JOIN_MISS_WINDOW_MS }); // locked when full
+const joinMissesHard = createSlidingWindow({ max: JOIN_MISS_HARD_FACTOR * JOIN_MISS_MAX, windowMs: JOIN_MISS_WINDOW_MS });
+const joinExemptions = createSlidingWindow({ max: JOIN_EXEMPT_MAX, windowMs: JOIN_MISS_WINDOW_MS });
+// One socket.io socket per engine.io connection (a second CONNECT on the same transport is refused)
+const connsWithSocket = new WeakSet<object>();
+/** Exported for tests: open connections per IP key. */
+export { connections };
+
+/** Some connected player of `room` is on the same IP key as the sender (that network already knows the code). */
+function hasMemberOnIp(room: Room, ip: string): boolean {
+  return room.players.some((p) => p.connected && io.sockets.sockets.get(p.socketId)?.data.ip === ip);
+}
 const MAX_PHOTO_URL_LENGTH = 2048;
 // Paths returned by POST /upload: `/temp/<32 random hex>.<jpg|png|webp>` (see controllers/UploadController.ts)
 const UPLOAD_PATH_RE = /^\/temp\/[0-9a-f]{32}\.(?:jpg|png|webp)$/;
@@ -102,9 +120,45 @@ function leaveCurrentRoom(socket: Socket): void {
   socket.data.username = null;
 }
 
+// Per-IP cap on concurrent connections. Counted per engine.io connection, whose "close" always fires (also when the
+// socket.io handshake never completes), and checked when the socket.io handshake arrives. Connections that never
+// complete one are closed by socket.io's connectTimeout.
+io.engine.on("connection", (conn: { request: Parameters<typeof handshakeKey>[0]; once: (ev: "close", fn: () => void) => void }) => {
+  const ip = handshakeKey(conn.request);
+  connections.acquire(ip);
+  conn.once("close", () => connections.release(ip));
+});
+
+io.use((socket, next) => {
+  const ip = handshakeKey(socket.request);
+  if (connections.over(ip) || connsWithSocket.has(socket.conn)) return next(new Error("Too many connections"));
+  connsWithSocket.add(socket.conn);
+  socket.data.ip = ip;
+  next();
+});
+
 io.on("connection", (socket: Socket) => {
   console.log(`Connected: ${socket.id}`);
+  const ip: string = socket.data.ip;
   const joinAttempts: number[] = []; // timestamps of recent join-create-game events on this socket
+  let lastMissAt = -Infinity;
+  /**
+   * An unknown code: counts against the IP, at most once per JOIN_MISS_SOCKET_INTERVAL_MS per socket. Also while
+   * locked (towards the hard ceiling); each window stops recording once full, so its timestamps stay bounded.
+   */
+  const recordMiss = () => {
+    const now = Date.now();
+    if (now - lastMissAt < JOIN_MISS_SOCKET_INTERVAL_MS) return;
+    lastMissAt = now;
+    if (!joinMisses.retryAfter(ip)) joinMisses.hit(ip);
+    if (!joinMissesHard.retryAfter(ip)) joinMissesHard.hit(ip);
+  };
+  /** Locked IP: a connected player of `room` on this IP lets the join through, unless past the hard ceiling or the exemption cap. */
+  const sameNetworkExempt = (room: Room | undefined): boolean => {
+    if (!room || joinMissesHard.retryAfter(ip) || joinExemptions.retryAfter(ip) || !hasMemberOnIp(room, ip)) return false;
+    joinExemptions.hit(ip);
+    return true;
+  };
 
   // ── Lobby ──────────────────────────────────────────
 
@@ -125,6 +179,7 @@ io.on("connection", (socket: Socket) => {
         return;
       }
       if (gameCode != null && typeof gameCode !== "string") {
+        recordMiss();
         socket.emit("room-of-game", { success: false, message: "Game not found" });
         return;
       }
@@ -153,6 +208,20 @@ io.on("connection", (socket: Socket) => {
       };
 
       if (gameCode) {
+        // This IP guessed too many unknown codes: no answer reveals whether this code exists, unless the sender
+        // proves it is a player of that room (rejoin with its token) or a connected player of the room is on the
+        // same IP (same network: they know the code anyway; see sameNetworkExempt). Misses still count.
+        const target = roomManager.getRoom(gameCode);
+        if (joinMisses.retryAfter(ip) && !roomManager.canRejoin(gameCode, username, data.rejoinToken) && !sameNetworkExempt(target)) {
+          if (!target) recordMiss();
+          socket.emit("room-of-game", { success: false, message: "Too many attempts" });
+          return;
+        }
+        if (!target) {
+          recordMiss();
+          socket.emit("room-of-game", { success: false, message: "Game not found" });
+          return;
+        }
         // Same room under another username: the socket's own player frees its slot
         const replacing = current && current.room.gameCode === gameCode ? current.player.username : undefined;
         const result = roomManager.joinRoom(gameCode, username, socket.id, data.rejoinToken, replacing);
@@ -295,26 +364,27 @@ io.on("connection", (socket: Socket) => {
 
   // ── Hold ───────────────────────────────────────────
 
+  // Only the photo owner, a few holds per round (GameEngine); hold-start also rate-limited per socket
+  const holdBucket = createTokenBucket(HOLD_START_BURST, HOLD_START_RATE_PER_S);
   socket.on("hold-start", () => {
     try {
-      const { gameCode } = socket.data;
-      const room = roomManager.getRoom(gameCode);
-      if (!room) return;
-      if (gameEngine.handleHold(room, socket.id)) {
-        io.to(gameCode).emit("hold-start");
+      if (!holdBucket.take()) return;
+      const s = session(socket);
+      if (!s) return;
+      if (gameEngine.handleHold(s.room, s.player.socketId)) {
+        io.to(s.room.gameCode).emit("hold-start");
       }
     } catch (e) { console.error("hold-start error:", e); }
   });
 
   socket.on("hold-end", () => {
     try {
-      const { gameCode } = socket.data;
-      const room = roomManager.getRoom(gameCode);
-      if (!room) return;
-      if (gameEngine.handleRelease(room, socket.id)) {
+      const s = session(socket);
+      if (!s) return;
+      if (gameEngine.handleRelease(s.room, s.player.socketId)) {
         // hold-resume is emitted by doRelease in GameEngine
         // hold-end tells clients the hold is over
-        io.to(gameCode).emit("hold-end");
+        io.to(s.room.gameCode).emit("hold-end");
       }
     } catch (e) { console.error("hold-end error:", e); }
   });
@@ -323,11 +393,13 @@ io.on("connection", (socket: Socket) => {
 
   // Social events: payload gameCode/username are ignored, the session decides room and sender
 
+  // Only the emojis the app offers (ALLOWED_EMOJIS), token bucket per socket; anything else is dropped silently
+  const emojiBucket = createTokenBucket(EMOJI_BURST, EMOJI_RATE_PER_S);
   socket.on("emoji-reaction", (data: { emoji: string }) => {
     try {
       const s = session(socket);
       const emoji = data?.emoji;
-      if (!s || typeof emoji !== "string" || !emoji || emoji.length > MAX_EMOJI_LENGTH) return;
+      if (!s || typeof emoji !== "string" || !ALLOWED_EMOJIS.has(emoji) || !emojiBucket.take()) return;
       io.to(s.room.gameCode).emit("emoji-reaction", { username: s.player.username, emoji });
     } catch (e) { console.error("emoji error:", e); }
   });

@@ -7,6 +7,7 @@
 //   node qa/lab/bots.mjs --bots 4 --host --rounds 10 --wait-players 6 --code-file /tmp/code
 //   node qa/lab/bots.mjs --bots 3 --code 123456          # join an existing room
 //   node qa/lab/bots.mjs --rooms 20 --bots 4 --host       # load: 20 parallel rooms
+//            (all bots share one IP: use a server started by lab.sh, which lifts the per-IP socket limits)
 //   options: --server URL  --photos DIR  --out FILE  --chaos 0.1  --upload-fail 0.2  --timeout 600
 //            --no-ready K   the last K bots never send im-ready (game must start via the server's ready timeout)
 //            --no-answer    bots always submit an empty guess (everyone ends on 0 points: final tie, see qa/maestro/tie-game.yaml)

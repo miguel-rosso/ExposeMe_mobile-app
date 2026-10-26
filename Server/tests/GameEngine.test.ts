@@ -667,6 +667,50 @@ describe("hold", () => {
     engine.handleRelease(room, ownerSocket);
     expect(lastEvent("hold-resume")!.args[0]).toEqual({ phase: "scores", duration: 1_500 });
   });
+
+  // Hold limits per round (EXP-167)
+  it("allows at most 3 holds per round", () => {
+    toScores();
+    for (let i = 0; i < 3; i++) {
+      expect(engine.handleHold(room, ownerSocket)).toBe(true);
+      vi.advanceTimersByTime(100);
+      expect(engine.handleRelease(room, ownerSocket)).toBe(true);
+    }
+    expect(engine.handleHold(room, ownerSocket)).toBe(false);
+    expect(room.held).toBe(false);
+  });
+
+  it("caps the total hold time of a round at 30s, across holds", () => {
+    toScores();
+    expect(engine.handleHold(room, ownerSocket)).toBe(true);
+    vi.advanceTimersByTime(20_000);
+    expect(engine.handleRelease(room, ownerSocket)).toBe(true);
+
+    // The second hold only gets what is left of the budget (10s), then is force-released
+    expect(engine.handleHold(room, ownerSocket)).toBe(true);
+    vi.advanceTimersByTime(10_000 - 1);
+    expect(room.held).toBe(true);
+    vi.advanceTimersByTime(1);
+    expect(room.held).toBe(false);
+    expect(events("hold-end")).toHaveLength(1);
+
+    // Budget used up: no third hold this round
+    expect(engine.handleHold(room, ownerSocket)).toBe(false);
+  });
+
+  it("gives every round a fresh hold budget", () => {
+    toScores();
+    expect(engine.handleHold(room, ownerSocket)).toBe(true);
+    vi.advanceTimersByTime(HOLD_SAFETY_TIMEOUT); // whole budget, force-released
+    expect(engine.handleHold(room, ownerSocket)).toBe(false);
+    vi.advanceTimersByTime(SCORE_DISPLAY_TIME);
+
+    expect(room.phase).toBe("waiting-photo");
+    engine.onPhotoReceived(room, PHOTO, room.currentPlayer!.username);
+    vi.advanceTimersByTime(ANSWER_TIME + REVEAL_TIME);
+    expect(room.phase).toBe("scores");
+    expect(engine.handleHold(room, room.currentPlayer!.socketId)).toBe(true);
+  });
 });
 
 // ── Offline players / skip cap (EXP-018) ───────────────

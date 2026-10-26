@@ -1,4 +1,4 @@
-import { randomBytes, timingSafeEqual } from "crypto";
+import { randomBytes, randomInt, timingSafeEqual } from "crypto";
 import { Player, PublicPlayer, Room, SafeRoom } from "../models/interfaces";
 import { uploadStore } from "../middlewares/uploadStore";
 
@@ -102,6 +102,12 @@ export class RoomManager {
     room.players.push(this.createPlayer(username, socketId, room.players.length === 0));
     if (room.players.length >= 2) room._hadGuests = true;
     return { success: true, room };
+  }
+
+  /** `username` is a player of room `gameCode` and `rejoinToken` is theirs (a join would be a rejoin). */
+  canRejoin(gameCode: string, username: string, rejoinToken: unknown): boolean {
+    const player = this.getPlayer(gameCode, username);
+    return !!player && this.tokenMatches(player.rejoinToken, rejoinToken);
   }
 
   getRoom(gameCode: string): Room | undefined {
@@ -270,7 +276,8 @@ export class RoomManager {
 
   private generateRoomCode(): string {
     let code: string;
-    do { code = Math.floor(100000 + Math.random() * 900000).toString(); } while (this.rooms.has(code));
+    // CSPRNG: codes must not be predictable from earlier ones (6 digits, as the app shows them)
+    do { code = randomInt(100000, 1000000).toString(); } while (this.rooms.has(code));
     return code;
   }
 

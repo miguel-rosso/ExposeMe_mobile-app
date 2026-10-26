@@ -14,7 +14,10 @@ const SCORE_DISPLAY_TIME = 5_000;
 const GAME_START_DELAY = 1_000;
 const READY_TIMEOUT = 10_000; // After game-started, start the first round with whoever sent im-ready
 const PHOTO_WAIT_TIMEOUT = 15_000;
-const HOLD_SAFETY_TIMEOUT = 30_000;
+// The photo owner may hold the scores screen at most MAX_HOLDS_PER_ROUND times per round, HOLD_BUDGET_PER_ROUND in
+// total (a hold that outlasts what is left of the budget is force-released)
+export const MAX_HOLDS_PER_ROUND = 3;
+export const HOLD_BUDGET_PER_ROUND = 30_000;
 const HOLD_MIN_REMAINING = 1_500; // Stop allowing hold when less than this remains
 const MAX_CONSECUTIVE_SKIPS = 3; // End the game after this many photo timeouts in a row
 export const PAUSE_TIMEOUT = 5 * 60_000; // Fewer than 2 connected: countdown of each pause before game over
@@ -48,6 +51,8 @@ interface PlantedWait {
 export class GameEngine {
   /** Pauses started in each room's current game, refunded or not (capped by MAX_TOTAL_PAUSES) */
   private totalPauses = new WeakMap<Room, number>();
+  /** Holds of the current round: round number, holds started, ms held so far, start of the active hold */
+  private holdUsage = new WeakMap<Room, { round: number; count: number; usedMs: number; since: number | null }>();
   /**
    * Id of each room's current photo request (your-turn `attempt`): one per owner pick, never reused, so a
    * photo-unavailable for an earlier pick (same round number after a skip) can't skip the current one
@@ -137,6 +142,7 @@ export class GameEngine {
     room.round = 0;
     room.currentPlayer = null; // Picked by startRound; a stale owner from a previous game can't send a photo
     this.plantedWaits.delete(room);
+    this.holdUsage.delete(room); // a new game: round numbers start over
     this.assignPlantedSlots(room);
     console.log(`[${room.gameCode}] All ready, planted slots: [${[...room.plantedSlots].join(",")}]`);
     this.setTimer(room, GAME_START_DELAY, () => this.startRound(room));
@@ -225,20 +231,31 @@ export class GameEngine {
     const remaining = room._timerDuration - elapsed;
     if (remaining < HOLD_MIN_REMAINING) return false;
 
+    // Hold limits of this round
+    let usage = this.holdUsage.get(room);
+    if (!usage || usage.round !== room.round) {
+      usage = { round: room.round, count: 0, usedMs: 0, since: null };
+      this.holdUsage.set(room, usage);
+    }
+    const budgetLeft = HOLD_BUDGET_PER_ROUND - usage.usedMs;
+    if (usage.count >= MAX_HOLDS_PER_ROUND || budgetLeft < HOLD_MIN_REMAINING) return false;
+    usage.count++;
+    usage.since = Date.now();
+
     // Pause: clear the phase timer, save remaining time
     room.held = true;
     this.pauseTimer(room);
 
     console.log(`[${room.gameCode}] HOLD — paused "${room.phase}", ${this.getTimerRemaining(room)}ms left`);
 
-    // Safety timeout
+    // Safety timeout: what is left of this round's hold budget
     room._holdSafetyTimer = setTimeout(() => {
       room._holdSafetyTimer = null;
       if (room.held) {
-        console.log(`[${room.gameCode}] HOLD safety timeout — force release`);
+        console.log(`[${room.gameCode}] HOLD budget used up — force release`);
         this.forceRelease(room);
       }
-    }, HOLD_SAFETY_TIMEOUT);
+    }, budgetLeft);
 
     return true;
   }
@@ -380,6 +397,7 @@ export class GameEngine {
     }
     if (room.held) {
       // The hold already froze the phase timer; the pause replaces it
+      this.chargeHold(room);
       room.held = false;
       if (room._holdSafetyTimer) { clearTimeout(room._holdSafetyTimer); room._holdSafetyTimer = null; }
       this.io.to(room.gameCode).emit("hold-end");
@@ -719,7 +737,16 @@ export class GameEngine {
     return room._timerDuration;
   }
 
+  /** The active hold ends: its time counts against the round's hold budget. */
+  private chargeHold(room: Room): void {
+    const usage = this.holdUsage.get(room);
+    if (usage?.since == null) return;
+    usage.usedMs += Date.now() - usage.since;
+    usage.since = null;
+  }
+
   private doRelease(room: Room): void {
+    this.chargeHold(room);
     room.held = false;
     if (room._holdSafetyTimer) {
       clearTimeout(room._holdSafetyTimer);

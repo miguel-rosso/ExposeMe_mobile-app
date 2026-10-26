@@ -1,5 +1,7 @@
 import { GameStateSnapshot } from "../app/models/interfaces";
-import { gameStateFollowUps, initialRoundView, isRevealedOwner, roundReducer, RoundView } from "../app/utils/roundState";
+import {
+  gameStateFollowUps, initialRoundView, isRevealedOwner, phaseElapsed, roundReducer, RoundView,
+} from "../app/utils/roundState";
 
 // Ported from the applyRoundStart / applyWaitingPhoto / applyGameState setter tests (EXP-215): same expectations,
 // now on the round reducer's next state.
@@ -21,7 +23,7 @@ describe("round-start (EXP-001)", () => {
   it("sets the new round photo/phase and resets per-round answer state", () => {
     const prev = view({ phaseKey: 4, correctAnswer: "alice", scores: [], mySelection: "bob", sentGuess: "bob" });
     expect(start(prev)).toEqual({
-      photo: "http://srv/temp/a.jpg", round: 3, phase: "answering", phaseDuration: 10000, phaseKey: 5,
+      photo: "http://srv/temp/a.jpg", round: 3, phase: "answering", phaseDuration: 10000, phaseTotal: 10000, phaseKey: 5,
       correctAnswer: "", scores: null, mySelection: "", sentGuess: "", gameHeld: false, pressing: false,
     });
   });
@@ -215,7 +217,76 @@ describe("reveal, scores, hold and pause", () => {
     });
     // Same phase resumed: only the remaining time changes
     expect(roundReducer(answering, { type: "game-resumed", data: { phase: "answering", duration: 4_000 } })).toEqual({
-      ...answering, phaseDuration: 4_000, phaseKey: 8,
+      ...answering, phaseDuration: 4_000, phaseTotal: 4_000, phaseKey: 8,
     });
+  });
+});
+
+// ── Progress bar after a resume or reconnect (EXP-080 / EXP-099) ──
+
+describe("phaseElapsed: where the progress bar of a resumed phase starts", () => {
+  const roundStart = (duration = 8_000) => roundReducer(view({ phaseKey: 3 }), {
+    type: "round-start", data: { photo: "/temp/1-a.jpg", round: 3, duration }, serverUrl: "http://srv",
+  });
+
+  it("is 0 for a phase seen from its start", () => {
+    expect(phaseElapsed(initialRoundView)).toBe(0);
+    expect(phaseElapsed(roundStart())).toBe(0);
+    expect(phaseElapsed(roundReducer(view(), { type: "waiting-photo", data: { round: 4, duration: 15_000 } }))).toBe(0);
+  });
+
+  it("a resumed pause continues from the fraction already gone, against the phase's full duration", () => {
+    const paused = roundReducer(roundStart(), { type: "game-paused" });
+    const resumed = roundReducer(paused, { type: "game-resumed", data: { phase: "answering", duration: 2_000 } });
+    expect(resumed).toMatchObject({ phaseDuration: 2_000, phaseTotal: 8_000, phaseKey: 5 });
+    expect(phaseElapsed(resumed)).toBe(0.75);
+    // A second pause in the same phase still measures against the full duration
+    const again = roundReducer(roundReducer(resumed, { type: "game-paused" }), {
+      type: "game-resumed", data: { phase: "answering", duration: 1_000 },
+    });
+    expect(phaseElapsed(again)).toBe(0.875);
+  });
+
+  it("a resume with more time than was left (the server's minimum) starts the bar further back, never before empty", () => {
+    const resumed = roundReducer(roundStart(), { type: "game-resumed", data: { phase: "answering", duration: 9_000 } });
+    expect(resumed.phaseTotal).toBe(9_000);
+    expect(phaseElapsed(resumed)).toBe(0);
+  });
+
+  it("a hold released in scores continues the scores bar", () => {
+    const scores = roundReducer(roundStart(), {
+      type: "round-scores", data: { scores: [], round: 3, totalRounds: 10, duration: 6_000 },
+    });
+    const held = roundReducer(scores, { type: "hold-start" });
+    const resumed = roundReducer(held, { type: "hold-resume", data: { phase: "scores", duration: 1_500 } });
+    expect(phaseElapsed(resumed)).toBe(0.75);
+  });
+
+  it("a pause between rounds resumes a new photo wait: its bar starts empty", () => {
+    const scores = roundReducer(roundStart(), {
+      type: "round-scores", data: { scores: [], round: 3, totalRounds: 10, duration: 6_000 },
+    });
+    const resumed = roundReducer(scores, { type: "game-resumed", data: { phase: "waiting-photo", duration: 15_000 } });
+    expect(resumed.phase).toBe("waiting-photo");
+    expect(phaseElapsed(resumed)).toBe(0);
+  });
+
+  it("a snapshot of the phase on screen continues its bar; one of another phase or round starts it empty", () => {
+    const answering = roundStart();
+    const same = applyGameState(snapshot({ duration: 6_000 }), "http://srv", answering).state;
+    expect(phaseElapsed(same)).toBe(0.25);
+    const reveal = applyGameState(snapshot({ phase: "reveal", correctAnswer: "alice", duration: 1_000 }), "http://srv", answering);
+    expect(phaseElapsed(reveal.state)).toBe(0);
+    const otherRound = applyGameState(snapshot({ round: 4, photo: "/temp/2-b.jpg", duration: 6_000 }), "http://srv", answering);
+    expect(phaseElapsed(otherRound.state)).toBe(0);
+  });
+
+  it("a snapshot of the same photo wait continues its bar; a wait for another round starts it empty", () => {
+    const waiting = roundReducer(view(), { type: "waiting-photo", data: { round: 4, duration: 15_000 } });
+    const same = applyGameState(snapshot({ phase: "waiting-photo", photo: null, round: 3, duration: 5_000 }), "", waiting);
+    expect(same.state).toMatchObject({ phase: "waiting-photo", round: 4, phaseDuration: 5_000, phaseTotal: 15_000 });
+    expect(phaseElapsed(same.state)).toBeCloseTo(2 / 3);
+    const next = applyGameState(snapshot({ phase: "waiting-photo", photo: null, round: 4, duration: 5_000 }), "", waiting);
+    expect(phaseElapsed(next.state)).toBe(0);
   });
 });

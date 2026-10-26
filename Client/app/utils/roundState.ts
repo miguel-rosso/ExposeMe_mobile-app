@@ -9,8 +9,10 @@ export interface RoundView {
   photo: string | null;
   round: number;
   phase: ServerPhase | null;
-  /** The server's duration for the current phase, in ms */
+  /** The server's duration for the current phase, in ms: what is left of it when it was resumed */
   phaseDuration: number;
+  /** The current phase's full duration, in ms, as first received: a resume or snapshot only sends what is left */
+  phaseTotal: number;
   /** Changes with every phase/resume: restarts the progress bar */
   phaseKey: number;
   /** Whose photo it was: "" until round-reveal (nobody, the owner included, is told earlier: EXP-252) */
@@ -26,7 +28,7 @@ export interface RoundView {
 }
 
 export const initialRoundView: RoundView = {
-  photo: null, round: 0, phase: null, phaseDuration: 0, phaseKey: 0, correctAnswer: "", scores: null,
+  photo: null, round: 0, phase: null, phaseDuration: 0, phaseTotal: 0, phaseKey: 0, correctAnswer: "", scores: null,
   mySelection: "", sentGuess: "", gameHeld: false, pressing: false,
 };
 
@@ -53,10 +55,26 @@ export type RoundAction =
   | { type: "game-resumed"; data: GameResumedData }
   | { type: "game-state"; snap: GameStateSnapshot; serverUrl: string };
 
-/** A new server phase (or the same one resumed) with its duration: restarts the progress bar */
+/**
+ * A server phase with its duration: remounts the progress bar (phaseKey), empty unless continuedPhase keeps the
+ * phase's full duration (the same phase resumed)
+ */
 const startPhase = (state: RoundView, phase: ServerPhase | null, duration: number): RoundView => ({
-  ...state, phase, phaseDuration: duration, phaseKey: state.phaseKey + 1,
+  ...state, phase, phaseDuration: duration, phaseTotal: duration, phaseKey: state.phaseKey + 1,
 });
+
+/**
+ * `next` goes on with the phase `previous` showed (a resume, a hold released, a snapshot of the same phase): it keeps
+ * the phase's full duration, so its progress bar continues from where it was (see phaseElapsed). A resume may get
+ * more time than was left (the server's minimum), never more than a whole phase.
+ */
+const continuedPhase = (previous: RoundView, next: RoundView): RoundView => ({
+  ...next, phaseTotal: Math.max(previous.phaseTotal, next.phaseDuration),
+});
+
+/** Fraction of the current phase already gone, where its progress bar starts: 0 for a phase seen from its start */
+export const phaseElapsed = ({ phaseDuration, phaseTotal }: Pick<RoundView, "phaseDuration" | "phaseTotal">): number =>
+  phaseTotal > 0 ? 1 - phaseDuration / phaseTotal : 0;
 
 /** Leaves the previous round: no answer, scores, pick or hold left over */
 const PER_ROUND_RESET = {
@@ -94,17 +112,21 @@ const applySnapshot = (state: RoundView, snap: GameStateSnapshot, serverUrl: str
   if (showsRound(snap)) {
     const photo = `${serverUrl}${snap.photo}`;
     const sameRound = snap.round === state.round && photo === state.photo;
-    return {
+    const next: RoundView = {
       ...startPhase(held, snap.phase, snap.duration),
       photo, round: snap.round, correctAnswer: snap.correctAnswer ?? "",
       scores: snap.phase === "scores" ? snap.scores : null,
       mySelection: snapshotSelection(state, snap, sameRound),
       sentGuess: sameRound ? state.sentGuess : "",
     };
+    return sameRound && snap.phase === state.phase ? continuedPhase(state, next) : next;
   }
 
   // Waiting for the next photo: same screen as `waiting-photo` (snapshot round is the last played one)
-  if (snap.phase === "waiting-photo") return waitForPhoto(held, { round: snap.round + 1, duration: snap.duration });
+  if (snap.phase === "waiting-photo") {
+    const next = waitForPhoto(held, { round: snap.round + 1, duration: snap.duration });
+    return state.phase === "waiting-photo" && state.round === next.round ? continuedPhase(state, next) : next;
+  }
 
   // Ready phase: back to the "are you ready" screen until the first round
   return {
@@ -146,14 +168,17 @@ export const roundReducer = (state: RoundView, action: RoundAction): RoundView =
       return { ...state, gameHeld: false, pressing: false };
     // The held phase continues with the remaining time
     case "hold-resume":
-      return { ...startPhase(state, state.phase, action.data.duration), gameHeld: false, pressing: false };
+      return continuedPhase(state, {
+        ...startPhase(state, state.phase, action.data.duration), gameHeld: false, pressing: false,
+      });
     case "game-resumed": {
-      // Paused between rounds (after scores): the next round's photo is awaited now
+      // Paused between rounds (after scores): the next round's photo is awaited now, a new phase
       const nextRoundPhoto = action.data.phase === "waiting-photo" && state.phase !== "waiting-photo";
-      const resumed = nextRoundPhoto
-        ? { ...state, photo: null, scores: null, phase: "waiting-photo" as const, round: state.round + 1 }
-        : state;
-      return startPhase(resumed, resumed.phase, action.data.duration);
+      if (nextRoundPhoto) {
+        const nextRound = { ...state, photo: null, scores: null, round: state.round + 1 };
+        return startPhase(nextRound, "waiting-photo", action.data.duration);
+      }
+      return continuedPhase(state, startPhase(state, state.phase, action.data.duration));
     }
     case "game-state":
       return applySnapshot(state, action.snap, action.serverUrl);

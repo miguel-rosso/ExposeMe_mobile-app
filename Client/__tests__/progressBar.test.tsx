@@ -61,6 +61,31 @@ describe("ProgressBar", () => {
     act(() => r.unmount());
   });
 
+  // EXP-080 / EXP-099: a resumed phase starts at the fraction already gone and fills in what is left
+  it("starts at the elapsed fraction and fills the rest in the server's remaining duration", () => {
+    const timing = jest.spyOn(Animated, "timing");
+    const onEnd = jest.fn();
+    let r!: TestRenderer.ReactTestRenderer;
+    act(() => { r = TestRenderer.create(<ProgressBar duration={2_000} elapsed={0.75} onEnd={onEnd} />); });
+    expect(StyleSheet.flatten(fill(r).props.style).transform).toEqual([{ scaleX: 0.75 }]);
+    expect(timing).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ toValue: 1, duration: 2_000 }));
+    act(() => jest.advanceTimersByTime(1_900));
+    expect(onEnd).not.toHaveBeenCalled();
+    act(() => jest.advanceTimersByTime(200));
+    expect(onEnd).toHaveBeenCalledTimes(1);
+    act(() => r.unmount());
+  });
+
+  it("keeps the elapsed fraction inside the bar", () => {
+    let r!: TestRenderer.ReactTestRenderer;
+    act(() => { r = TestRenderer.create(<ProgressBar duration={1_000} elapsed={-0.5} />); });
+    expect(StyleSheet.flatten(fill(r).props.style).transform).toEqual([{ scaleX: 0 }]);
+    act(() => r.unmount());
+    act(() => { r = TestRenderer.create(<ProgressBar duration={1_000} elapsed={3} />); });
+    expect(StyleSheet.flatten(fill(r).props.style).transform).toEqual([{ scaleX: 1 }]);
+    act(() => r.unmount());
+  });
+
   it("does not call onEnd when unmounted before it fills", () => {
     const onEnd = jest.fn();
     let r!: TestRenderer.ReactTestRenderer;

@@ -30,7 +30,10 @@ import { photoAuthHeaders, resolvePhotoAuth } from "@/app/utils/photoAuth";
 import { prefetchImage } from "@/app/utils/image";
 import { TURN_UPLOAD_RETRY, uploadWithRetry } from "../utils/uploadRetry";
 import { SkipNotice, skipNoticeFor, skipNoticeText } from "../utils/waitingPhoto";
-import { gameStateFollowUps, initialRoundView, isRevealedOwner, RoundAction, roundReducer, RoundView } from "../utils/roundState";
+import {
+  gameStateFollowUps, initialRoundView, isRevealedOwner, phaseElapsed, RoundAction, roundReducer, RoundView,
+} from "../utils/roundState";
+import { emitWhileConnected } from "../utils/socketEmit";
 import { useGameConnection } from "../hooks/useGameConnection";
 import { useTurnRequest } from "../hooks/useTurnRequest";
 import { withHost, withoutPlayer } from "../utils/roomPlayers";
@@ -100,7 +103,7 @@ const GameScreen = () => {
   // Rapid taps are coalesced: at most one send per PICK_SEND_INTERVAL, then a trailing send of the latest pick, so the
   // server's per-socket rate limit never drops the pick that counts. When the answer bar ends, a pick still waiting
   // goes at once (within the server's 300 ms grace) and later taps are ignored.
-  // Only a pick emitted while connected is recorded as sent (one made offline is lost: the rejoin drops it).
+  // A pick is only emitted (and recorded as sent) while connected: one made offline goes from the rejoin's snapshot.
   const lastPickSentAt = useRef(0);
   const pickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sendPick = () => {
@@ -108,8 +111,7 @@ const GameScreen = () => {
     pickTimer.current = null;
     lastPickSentAt.current = Date.now();
     const guess = roundRef.current.mySelection;
-    socket?.emit("submit-answer", { guess });
-    if (socket?.connected) dispatchRound({ type: "pick-sent", guess });
+    if (emitWhileConnected(socket, "submit-answer", { guess })) dispatchRound({ type: "pick-sent", guess });
   };
   const pickGuess = (val: string) => {
     dispatchRound({ type: "pick", guess: val });
@@ -167,6 +169,8 @@ const GameScreen = () => {
   const holdButtonMounted = phase === "scores" && isRevealedOwner(correctAnswer, safeUsername);
   // The scoreboard covers the photo in scores: the answer options are not drawn under it
   const showAnswers = phase !== "scores";
+  // A resumed phase's bar starts where it was, not empty (EXP-080)
+  const phaseBarElapsed = phaseElapsed(roundView);
 
   // ── Photo access (room members only: room code + rejoin token) ─
   const uploadImage = async (uri: string): Promise<string> =>
@@ -191,16 +195,17 @@ const GameScreen = () => {
   }, []));
 
   // ── Hold handlers ────────────────────────────────────
+  // Offline, a press is not sent: the rejoin's snapshot releases it (game-state clears `pressing`)
   const onHoldPress = () => {
     if (!holdButtonMounted || !socket || pressing) return;
     dispatchRound({ type: "pressing", pressing: true });
-    socket.emit("hold-start");
+    emitWhileConnected(socket, "hold-start");
   };
 
   const onHoldRelease = () => {
     if (!pressing || !socket) return;
     dispatchRound({ type: "pressing", pressing: false });
-    socket.emit("hold-end");
+    emitWhileConnected(socket, "hold-end");
   };
 
   // ── Connection: stay in the game, rejoin on reconnect ─
@@ -237,9 +242,9 @@ const GameScreen = () => {
         "game-started": joinNextGame,
         "game-state": (snap: GameStateSnapshot) => { if (snap?.started) joinNextGame(); },
         // Until then, if the next game picks me, say at once there is no photo so nobody waits the 15 s photo timeout
-        // (the photo is never picked from here)
+        // (the photo is never picked from here; offline, the rejoin asks again with a new your-turn)
         "your-turn": (turn: YourTurnData) => {
-          socket.emit("photo-unavailable", { round: turn?.round, attempt: turn?.attempt });
+          emitWhileConnected(socket, "photo-unavailable", { round: turn?.round, attempt: turn?.attempt });
         },
       });
     }
@@ -406,11 +411,12 @@ const GameScreen = () => {
   }, [socket]);
 
   // Signal ready at once (whether a player is still uploading must not show). The planted photo was sent from the
-  // lobby; only if that upload failed, retry it now (the server accepts it until round 1 is played)
+  // lobby; only if that upload failed, retry it now (the server accepts it until round 1 is played). Offline, the
+  // rejoin's snapshot of the ready phase sends im-ready instead
   useEffect(() => {
     if (!isReady || !socket) return;
-    console.log("Emitting im-ready");
-    socket.emit("im-ready", { gameCode: safeGameCode, username: safeUsername });
+    const sent = emitWhileConnected(socket, "im-ready", { gameCode: safeGameCode, username: safeUsername });
+    console.log(sent ? "Emitting im-ready" : "im-ready deferred to the rejoin snapshot");
     if (plantedPhotoUri && !plantedPhotoSent) plantPhoto();
   }, [isReady]);
 
@@ -497,7 +503,7 @@ const GameScreen = () => {
             </Text>
             {phaseDuration > 0 && pauseEndsAt === null && (
               <View style={tw`w-full max-w-[500px]`}>
-                <ProgressBar key={phaseKey} duration={phaseDuration} />
+                <ProgressBar key={phaseKey} duration={phaseDuration} elapsed={phaseBarElapsed} />
               </View>
             )}
             {skipNotice && (
@@ -530,6 +536,7 @@ const GameScreen = () => {
                       <ProgressBar
                         key={phaseKey}
                         duration={phaseDuration}
+                        elapsed={phaseBarElapsed}
                         onEnd={phase === "answering" ? closeAnswers : undefined}
                       />
                     </View>

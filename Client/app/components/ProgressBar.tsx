@@ -3,7 +3,10 @@ import { View, Animated } from "react-native";
 import tw from "twrnc";
 
 interface ProgressBarProps {
+  /** What is left of the phase, in ms: the bar fills up in exactly that time */
   duration: number;
+  /** Fraction of the phase already gone when the bar mounts (a resumed phase): it starts that full. 0 by default */
+  elapsed?: number;
   /** Called once when the bar fills up (not when it is unmounted or restarted first) */
   onEnd?: () => void;
 }
@@ -12,8 +15,10 @@ interface ProgressBarProps {
 // costs no JS work (nor commits) per frame while the round's phases render (EXP-175, EXP-225)
 const FILL_FROM_LEFT = { transformOrigin: "left" } as const;
 
-const ProgressBar: React.FC<ProgressBarProps> = ({ duration, onEnd }) => {
-  const progress = useRef(new Animated.Value(0)).current;
+const clampFraction = (fraction: number) => Math.min(1, Math.max(0, fraction));
+
+const ProgressBar: React.FC<ProgressBarProps> = ({ duration, elapsed = 0, onEnd }) => {
+  const progress = useRef(new Animated.Value(clampFraction(elapsed))).current;
   const onEndRef = useRef(onEnd);
   onEndRef.current = onEnd;
 

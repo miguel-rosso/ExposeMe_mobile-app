@@ -538,7 +538,6 @@
         set(folded);
         saved[box.id.replace(/-block$/, '')] = folded;
         try { localStorage.setItem("qa-folded", JSON.stringify(saved)); } catch (e) { /* private mode: fold just for now */ }
-        if (!folded) window.dispatchEvent(new Event("resize"));
       };
       h2.addEventListener("click", toggle);
       h2.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); toggle(ev); } });
@@ -821,7 +820,9 @@ dash.calc("by_type", {
     const W = box.clientWidth || 400, barH = 26, gap = 12, fs = "15px";
     const svg = d3.select(box).append("svg").attr("width", "100%");
     const probe = svg.append("g").attr("font-size", fs).attr("font-weight", 600);
-    const labelW = d3.max(rows, (d) => probe.append("text").text(d.type).node().getComputedTextLength()) + 14;
+    // getComputedTextLength is 0 while the card is hidden: fall back to an estimate so labels never sit under the bars
+    const measured = d3.max(rows, (d) => probe.append("text").text(d.type).node().getComputedTextLength());
+    const labelW = (measured > 0 ? measured : d3.max(rows, (d) => d.type.length) * 9.5) + 14;
     probe.remove();
     const H = rows.length * (barH + gap) + 26;
     svg.attr("viewBox", `0 0 ${W} ${H}`);
@@ -921,6 +922,19 @@ dash.calc("by_type", {
     // Dashed line: 24 h average, the reference for "is the pace dropping?"
     g.append("line").attr("x1", m.l).attr("x2", W - m.r).attr("y1", y(avg)).attr("y2", y(avg)).attr("stroke", "var(--color-fg-muted)").attr("stroke-dasharray", "4 4");
     legend(lg, KINDS.map(([, label, color]) => [label, color]).concat([["media 24 h (línea)", "var(--color-fg-muted)"]]));
+  }
+
+  // Charts measure text and box width, so a chart drawn while folded or hidden comes out squashed:
+  // redraw a chart whenever its box changes width (unfolding, window resize)
+  if (window.ResizeObserver) {
+    const widths = new Map();
+    const ro = new ResizeObserver((entries) => entries.forEach((e) => {
+      const w = Math.round(e.contentRect.width);
+      if (!w || widths.get(e.target) === w) return;
+      widths.set(e.target, w);
+      try { (e.target.id === "chart-types" ? drawTypes : drawPace)(); } catch (err) { console.error("chart redraw failed", err); }
+    }));
+    ["chart-types", "chart-pace"].forEach((id) => { const n = document.getElementById(id); if (n) ro.observe(n); });
   }
 
   function drawIssues() {

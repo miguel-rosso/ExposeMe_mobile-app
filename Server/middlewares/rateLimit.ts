@@ -68,9 +68,12 @@ export function createRateLimiter({
 }
 
 /**
- * Per-IP limit on *rejected* requests only (missing or wrong credentials): `reject` answers 429 instead of 401/403
- * once an IP has had `max` rejections in the window. Authenticated members never touch it, so other devices on the
- * same Wi-Fi (one public IP at a party) can neither block nor observe a room's uploads through it.
+ * Per-IP limit on *rejected* requests only (missing or wrong credentials): every rejection counts, and once an IP has
+ * had `max` in the window its missing/malformed ones (401) get 429 instead. Well-formed but wrong credentials always
+ * get 403, so a client whose session expired re-joins instead of waiting out a Retry-After. A 429 there would not
+ * slow a token guesser: credentials are checked before this limiter (a member on a throttled IP still gets in), so a
+ * hit is told apart either way, and rejoin tokens are 144 random bits. Authenticated members never touch it, so other
+ * devices on the same Wi-Fi (one public IP at a party) can neither block nor observe a room's uploads through it.
  */
 export function createRejectionLimiter({ max, windowMs }: { max: number; windowMs: number }) {
   const window = createSlidingWindow({ max, windowMs });
@@ -78,8 +81,9 @@ export function createRejectionLimiter({ max, windowMs }: { max: number; windowM
     reject(req: Request, res: Response, status: 401 | 403) {
       const ip = clientIp(req);
       const wait = window.retryAfter(ip);
-      if (wait) return tooMany(res, wait);
-      window.hit(ip);
+      if (wait && status === 401) return tooMany(res, wait);
+      // Requests over the limit are not counted (as in createRateLimiter)
+      if (!wait) window.hit(ip);
       res.status(status).json({ error: status === 401 ? "Unauthorized" : "Forbidden" });
     },
     trackedIps: window.tracked,

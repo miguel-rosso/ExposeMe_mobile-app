@@ -68,4 +68,25 @@ describe("sanitize queue sized from the in-flight caps", () => {
     await busy;
     expect(limit.stats()).toEqual({ running: 0, queued: 0 });
   });
+
+  // EXP-194: the connection closed before the controller ran, so "close" already fired and won't fire again
+  it("a client already gone when the controller runs is never queued (nothing answered)", async () => {
+    const img = await sharp({ create: { width: 64, height: 64, channels: 3, background: "#345" } }).jpeg().toBuffer();
+    let finishBusy!: () => void;
+    const busy = limit(() => new Promise<void>((r) => { finishBusy = r; })); // holds the only slot until resolved
+    const res = Object.assign(new EventEmitter(), {
+      headersSent: false,
+      writableFinished: false,
+      status: vi.fn(),
+      json: vi.fn(),
+      setHeader: vi.fn(),
+    });
+    const req = { file: { buffer: img }, socket: { destroyed: true } };
+    const handled = UploadRouter(req as unknown as Request, res as unknown as Response);
+    expect(limit.stats()).toEqual({ running: 1, queued: 0 });
+    await handled;
+    expect(res.status).not.toHaveBeenCalled();
+    finishBusy();
+    await busy;
+  });
 });

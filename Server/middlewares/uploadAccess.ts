@@ -58,7 +58,10 @@ export function requireRoomMember(req: Request, res: Response, next: NextFunctio
   next();
 }
 
-/** requireRoomMember for POST /upload: rejections are rate limited per IP (429 instead of 401/403), members aren't. */
+/**
+ * requireRoomMember for POST /upload: rejections are rate limited per IP (429 instead of 401 once over the limit;
+ * wrong credentials always get 403, see createRejectionLimiter), members aren't.
+ */
 export function requireUploadMember(req: Request, res: Response, next: NextFunction) {
   const member = authenticateRequest(req);
   if (member === 401 || member === 403) return uploadRejectionLimit.reject(req, res, member);

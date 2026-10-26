@@ -84,10 +84,13 @@ describe("POST /upload rate limits", () => {
     for (let i = 0; i < UPLOAD_REJECTED_MAX; i++) {
       expect((await upload(i % 2 ? wrong : {})).status).toBe(i % 2 ? 403 : 401);
     }
-    const limited = await upload(wrong);
+    const limited = await upload({});
     expect(limited.status).toBe(429);
     expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
-    expect((await upload({})).status).toBe(429);
+    // EXP-154: a well-formed but wrong/expired credential is still told to re-authenticate, not to wait
+    const expired = await upload(wrong);
+    expect(expired.status).toBe(403);
+    expect(expired.headers.get("retry-after")).toBeNull();
 
     expect((await upload(kim.headers)).status).toBe(200);
   });

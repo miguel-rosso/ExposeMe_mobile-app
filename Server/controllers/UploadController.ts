@@ -18,6 +18,8 @@ export const UploadRouter = async (req: Request, res: Response) => {
   const gone = new AbortController();
   const onClose = () => { if (!res.writableFinished) gone.abort(); };
   res.once("close", onClose);
+  // Already gone before we got here (e.g. while multer read the body): "close" won't fire again, don't queue the job
+  if (req.socket.destroyed) gone.abort();
   let image: Awaited<ReturnType<typeof sanitizeImage>>;
   try {
     image = await sanitizeImage(req.file.buffer, gone.signal);

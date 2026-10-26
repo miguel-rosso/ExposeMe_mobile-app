@@ -1,4 +1,3 @@
-import cors from "cors";
 import express from "express";
 import { Server } from "socket.io";
 import { createServer } from "http";
@@ -19,7 +18,8 @@ const trustProxyHops = parseTrustProxy(process.env.TRUST_PROXY, Boolean(process.
 if (trustProxyHops > 0) app.set("trust proxy", trustProxyHops);
 
 app.use(securityHeaders);
-app.use(cors());
+// No CORS: the only clients are the native app and Node bots, which don't enforce it, and the /join invite page is a
+// top-level navigation. Without Access-Control-* headers no other website can read these responses from a browser.
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -66,11 +66,8 @@ export const HTTP_HEADERS_TIMEOUT_MS = Math.min(envMs("HTTP_HEADERS_TIMEOUT_MS",
 const server = createServer({ connectionsCheckingInterval: Math.min(5_000, HTTP_HEADERS_TIMEOUT_MS) }, app);
 server.requestTimeout = HTTP_REQUEST_TIMEOUT_MS;
 server.headersTimeout = HTTP_HEADERS_TIMEOUT_MS;
+// No `cors` option either (see app.use above): other websites can't use the long-polling transport from a browser
 const io = new Server(server, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"],
-  },
   pingInterval: PING_INTERVAL,
   pingTimeout: PING_TIMEOUT,
 });

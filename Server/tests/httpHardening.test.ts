@@ -75,6 +75,34 @@ describe("security headers", () => {
   });
 });
 
+// ── No CORS (EXP-125) ──
+// Only the native app and Node bots talk to the server: no website may read its responses from a browser.
+describe("CORS", () => {
+  const origin = "https://evil.example";
+
+  it.each(["/", "/health", "/upload", "/temp/whatever", "/join/K7MQ4X"])("GET %s sends no Access-Control headers", async (p) => {
+    const res = await fetch(`${url}${p}`, { headers: { Origin: origin } });
+    expect(res.headers.get("access-control-allow-origin")).toBeNull();
+    expect(res.headers.get("access-control-allow-credentials")).toBeNull();
+  });
+
+  it("a preflight for POST /upload is not granted", async () => {
+    const res = await fetch(`${url}/upload`, {
+      method: "OPTIONS",
+      headers: { Origin: origin, "Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "authorization,x-game-code" },
+    });
+    expect(res.headers.get("access-control-allow-origin")).toBeNull();
+    expect(res.headers.get("access-control-allow-methods")).toBeNull();
+    expect(res.headers.get("access-control-allow-headers")).toBeNull();
+  });
+
+  it("the socket.io polling transport sends no Access-Control headers either", async () => {
+    const res = await fetch(`${url}/socket.io/?EIO=4&transport=polling`, { headers: { Origin: origin } });
+    expect(res.status).toBe(200); // the handshake itself still works for non-browser clients
+    expect(res.headers.get("access-control-allow-origin")).toBeNull();
+  });
+});
+
 // ── JSON 404 ──
 describe("unknown routes", () => {
   it.each([

@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createRateLimiter, envInt, parseTrustProxy } from "../middlewares/rateLimit";
+import { createRateLimiter, createRejectionLimiter, envInt, parseTrustProxy } from "../middlewares/rateLimit";
 
 function call(limiter: ReturnType<typeof createRateLimiter>, ip: string) {
   const res = { statusCode: 200, headers: {} as Record<string, string>, body: undefined as unknown };
@@ -59,6 +59,47 @@ describe("createRateLimiter", () => {
     expect(limiter.trackedIps()).toBe(1);
     vi.advanceTimersByTime(10_000); // sweep at 20s: 2.2.2.2 idle for 11s
     expect(limiter.trackedIps()).toBe(0);
+  });
+});
+
+// EXP-154: a client whose session expired must be told to re-authenticate (403), not to wait (429)
+describe("createRejectionLimiter", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  function reject(limiter: ReturnType<typeof createRejectionLimiter>, status: 401 | 403) {
+    const res = { statusCode: 0, headers: {} as Record<string, string> };
+    const fake = {
+      setHeader: (k: string, v: string) => { res.headers[k] = v; },
+      status: (code: number) => { res.statusCode = code; return fake; },
+      json: () => fake,
+    };
+    limiter.reject({ ip: "1.1.1.1", socket: {} } as unknown as Request, fake as unknown as Response, status);
+    return res;
+  }
+
+  it("once an IP is over the limit, malformed credentials get 429 but well-formed wrong ones still get 403", () => {
+    const limiter = createRejectionLimiter({ max: 2, windowMs: 10_000 });
+    expect(reject(limiter, 403).statusCode).toBe(403);
+    expect(reject(limiter, 401).statusCode).toBe(401);
+    const throttled = reject(limiter, 401);
+    expect(throttled.statusCode).toBe(429);
+    expect(throttled.headers["Retry-After"]).toBe("10");
+    const expired = reject(limiter, 403);
+    expect(expired.statusCode).toBe(403);
+    expect(expired.headers["Retry-After"]).toBeUndefined();
+  });
+
+  it("rejections over the limit don't extend the block", () => {
+    const limiter = createRejectionLimiter({ max: 1, windowMs: 10_000 });
+    reject(limiter, 403);
+    for (let i = 0; i < 9; i++) {
+      vi.advanceTimersByTime(1_000);
+      expect(reject(limiter, 403).statusCode).toBe(403);
+      expect(reject(limiter, 401).statusCode).toBe(429);
+    }
+    vi.advanceTimersByTime(1_000);
+    expect(reject(limiter, 401).statusCode).toBe(401);
   });
 });
 

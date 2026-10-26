@@ -23,6 +23,10 @@ appId: com.socketNull.ExposeMe
     when:
       visible: "Development servers"
     commands:
+      # the server entry is discovered after the header renders (slow emulators)
+      - extendedWaitUntil:
+          visible: "http://.*:8081"
+          timeout: 30000
       - tapOn: "http://.*:8081"
 # The launcher can also show up only after the check above (seen on Android): wait for it too, then pick the server
 - extendedWaitUntil:
@@ -32,6 +36,10 @@ appId: com.socketNull.ExposeMe
     when:
       visible: "Development servers|DEVELOPMENT SERVERS"
     commands:
+      # the server entry is discovered after the header renders (slow emulators)
+      - extendedWaitUntil:
+          visible: "http://.*:8081"
+          timeout: 30000
       - tapOn: "http://.*:8081"
 - extendedWaitUntil:
     visible: "This is the developer menu.*|Join Game|Unirse a Partida|Tap to proceed after setting permissions|Pulsa para continuar tras configurar los permisos"

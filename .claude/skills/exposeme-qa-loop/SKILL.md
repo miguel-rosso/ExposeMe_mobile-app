@@ -45,6 +45,7 @@ Applies to every severity. A clean backlog makes picking and grouping honest. Fo
 Triage itself is cheap: you can check most items with grep/tests; for a large set, split it among up to 3 read-only `qa-auditor` runs (one per conflict zone) that return a verdict + proof per issue, and apply the verdicts yourself.
 
 ### 2. Pick (a batch of 1-3 disjoint issues, or of up to 4 low packs)
+**Keep the slots full (throughput rule).** Batches are not lock-step: every time any agent finishes (fixer, reviewer, device tester), before anything else count the fixers still running and immediately start new work units for the free slots (3, or 4 with low packs) from disjoint files. A long cross-zone issue only blocks the files it touches, not whole zones; decide overlap by the files each issue will actually edit. During a device run (regression game or smoke) keep fixing in worktrees; only the merges into `qa/loop` wait for the run to end.
 Priority order: highest severity first; on ties prefer `sync` > `bug` > `security` > `perf` > `ux` > `test` > `infra` > `cleanup`, and anything that unblocks testing early. Take the top issue, then add up to 2 more **only if they cannot touch the same files**. Estimate each issue's file set from its `evidence`/`summary` and these conflict zones — at most ONE issue per zone in a batch:
 - `server-core`: `Server/routes/socketRoutes.ts`, `Server/managers/*`, `Server/models/*`, `Server/GAME_FLOW.md`
 - `server-http`: `Server/app.ts`, `Server/routes/uploadRoutes.ts`, `Server/middlewares/*`, `Server/controllers/*`

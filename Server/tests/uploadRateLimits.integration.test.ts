@@ -33,14 +33,20 @@ function once<T = unknown>(socket: ClientSocket, event: string, timeoutMs = 4_00
   });
 }
 
-async function join(gameCode: string | null, username: string) {
+/** Joins `gameCode` (null: creates a room) as `username` on a new socket; with `rejoinToken`, rejoins that player. */
+async function join(gameCode: string | null, username: string, rejoinToken?: string) {
   const socket = connect(url, { transports: ["websocket"], forceNew: true, reconnection: false });
   clients.push(socket);
   await once(socket, "connect");
   const res = once<{ room: { gameCode: string }; rejoinToken: string }>(socket, "room-of-game");
-  socket.emit("join-create-game", { gameCode, username });
-  const { room, rejoinToken } = await res;
-  return { gameCode: room.gameCode, headers: { Authorization: `Bearer ${rejoinToken}`, "X-Game-Code": room.gameCode } };
+  socket.emit("join-create-game", { gameCode, username, rejoinToken });
+  const { room, rejoinToken: token } = await res;
+  return {
+    socket,
+    gameCode: room.gameCode,
+    token,
+    headers: { Authorization: `Bearer ${token}`, "X-Game-Code": room.gameCode },
+  };
 }
 
 function upload(headers: Record<string, string>) {
@@ -76,6 +82,22 @@ describe("POST /upload rate limits", () => {
     // hal keeps hammering while limited: none of it is charged to the IP, ida's budget is untouched
     for (let i = 0; i < 3 * UPLOAD_REJECTED_MAX; i++) expect((await upload(hal.headers)).status).toBe(429);
     for (let i = 0; i < UPLOAD_PLAYER_RATE_MAX; i++) expect((await upload(ida.headers)).status).toBe(200);
+  });
+
+  it("EXP-153: a member who rejoins (same name and token, new socket) keeps the quota they used up", async () => {
+    const lee = await join(null, "lee");
+    const max = await join(lee.gameCode, "max");
+    const started = once(lee.socket, "game-started");
+    lee.socket.emit("start-game");
+    await started;
+
+    for (let i = 0; i < UPLOAD_PLAYER_RATE_MAX; i++) expect((await upload(max.headers)).status).toBe(200);
+    expect((await upload(max.headers)).status).toBe(429);
+
+    max.socket.disconnect();
+    const back = await join(max.gameCode, "max", max.token);
+    expect(back.token).toBe(max.token); // the same player, not a new seat
+    expect((await upload(back.headers)).status).toBe(429);
   });
 
   it("per IP, rejected requests only: a non-member hammering gets 429, members on the same IP don't", async () => {

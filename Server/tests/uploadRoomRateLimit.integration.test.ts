@@ -16,7 +16,7 @@ const UPLOAD_DIR = vi.hoisted(() => {
   process.env.UPLOAD_DIR = dir;
   for (const name of ["UPLOAD_RATE_WINDOW_MS", "UPLOAD_REJECTED_MAX"]) delete process.env[name];
   process.env.UPLOAD_ROOM_RATE_MAX = "3";
-  process.env.UPLOAD_PLAYER_RATE_MAX = "2";
+  process.env.UPLOAD_PLAYER_RATE_MAX = "3";
   return dir;
 });
 
@@ -31,14 +31,21 @@ function once<T = unknown>(socket: ClientSocket, event: string, timeoutMs = 8_00
   });
 }
 
-async function join(gameCode: string | null, username: string) {
-  const socket = connect(url, { transports: ["websocket"], forceNew: true, reconnection: false });
-  clients.push(socket);
-  await once(socket, "connect");
+/** Joins `gameCode` (null: creates a room) as `username`, on a new socket or on `socket` (switching its name). */
+async function join(gameCode: string | null, username: string, socket?: ClientSocket) {
+  if (!socket) {
+    socket = connect(url, { transports: ["websocket"], forceNew: true, reconnection: false });
+    clients.push(socket);
+    await once(socket, "connect");
+  }
   const res = once<{ room: { gameCode: string }; rejoinToken: string }>(socket, "room-of-game");
   socket.emit("join-create-game", { gameCode, username });
   const { room, rejoinToken } = await res;
-  return { gameCode: room.gameCode, headers: { Authorization: `Bearer ${rejoinToken}`, "X-Game-Code": room.gameCode } };
+  return {
+    socket,
+    gameCode: room.gameCode,
+    headers: { Authorization: `Bearer ${rejoinToken}`, "X-Game-Code": room.gameCode },
+  };
 }
 
 function upload(headers: Record<string, string>) {
@@ -65,19 +72,32 @@ afterAll(async () => {
 });
 
 describe("POST /upload per-room limit", () => {
-  it("the room's uploads beyond its budget get 429 even under each member's own limit; another room still uploads", async () => {
-    expect([UPLOAD_ROOM_RATE_MAX, UPLOAD_PLAYER_RATE_MAX]).toEqual([3, 2]); // the env above took effect
+  it("in a started game the room's uploads beyond its budget get 429 even under each member's own limit; another room still uploads", async () => {
+    expect([UPLOAD_ROOM_RATE_MAX, UPLOAD_PLAYER_RATE_MAX]).toEqual([3, 3]); // the env above took effect
 
     const ann = await join(null, "ann");
     const ben = await join(ann.gameCode, "ben");
     const cat = await join(null, "cat"); // a different room
     expect(cat.gameCode).not.toBe(ann.gameCode);
 
+    // EXP-153: in the lobby, one person switching names gets a fresh member quota each time, so the room budget
+    // doesn't apply there (else they could use it up for everyone)
+    const alias1 = await join(ann.gameCode, "alias1");
+    for (let i = 0; i < UPLOAD_PLAYER_RATE_MAX; i++) expect((await upload(alias1.headers)).status).toBe(200);
+    const alias2 = await join(ann.gameCode, "alias2", alias1.socket);
+    for (let i = 0; i < UPLOAD_PLAYER_RATE_MAX; i++) expect((await upload(alias2.headers)).status).toBe(200);
+    expect((await upload(ann.headers)).status).toBe(200);
+    expect((await upload(ben.headers)).status).toBe(200);
+
+    // Once started nobody new can join, and only uploads from then on count against the room
+    const started = once(ann.socket, "game-started");
+    ann.socket.emit("start-game");
+    await started;
     expect((await upload(ann.headers)).status).toBe(200);
     expect((await upload(ann.headers)).status).toBe(200);
     expect((await upload(ben.headers)).status).toBe(200);
 
-    // ben has used 1 of his 2, but it's the room's 4th
+    // ben has used 2 of his 3, but it's the room's 4th since the start
     const limited = await upload(ben.headers);
     expect(limited.status).toBe(429);
     expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);

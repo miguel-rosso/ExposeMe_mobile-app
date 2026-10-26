@@ -1,5 +1,5 @@
 import { NextFunction, Request, Response } from "express";
-import { clientIp, envInt } from "./rateLimit";
+import { clientIp, envInt, memberKey, UploadMemberLocals } from "./rateLimit";
 import { MAX_FILE_SIZE } from "./upload";
 
 // ── Concurrency caps for POST /upload ──
@@ -38,8 +38,6 @@ export function uploadDeclaredSize(req: Request, res: Response, next: NextFuncti
   next();
 }
 
-interface MemberLocals { room: { gameCode: string }; player: { username: string } }
-
 /** Counters per key that drop the key at zero, so idle keys never accumulate. */
 function createCounter() {
   const counts = new Map<string, number>();
@@ -74,12 +72,13 @@ export function createInFlightLimiter(opts: {
   };
 
   const middleware = (req: Request, res: Response, next: NextFunction) => {
-    const { room, player } = res.locals.member as MemberLocals;
+    const member = res.locals.member as UploadMemberLocals;
+    const { room } = member;
     const ip = clientIp(req);
-    const memberKey = `${room.gameCode}\n${player.username}`;
+    const seat = memberKey(member);
 
     // Most specific first: the response names the knob that refused it
-    if (perMember.get(memberKey) >= opts.perMemberMax) return refuse(res, 429, "member");
+    if (perMember.get(seat) >= opts.perMemberMax) return refuse(res, 429, "member");
     if (perRoom.get(room.gameCode) >= opts.perRoomMax) return refuse(res, 429, "room");
     if (perIp.get(ip) >= opts.perIpMax) return refuse(res, 429, "ip");
     if (total >= opts.max) return refuse(res, 503, "server");
@@ -87,7 +86,7 @@ export function createInFlightLimiter(opts: {
     total++;
     perIp.inc(ip);
     perRoom.inc(room.gameCode);
-    perMember.inc(memberKey);
+    perMember.inc(seat);
 
     // The whole body must arrive within timeoutMs; then the slot is freed by closing the connection. Only reception
     // is timed: once the body is complete, processing (sanitizeImage queue) runs to its own limits.
@@ -111,7 +110,7 @@ export function createInFlightLimiter(opts: {
       total--;
       perIp.dec(ip);
       perRoom.dec(room.gameCode);
-      perMember.dec(memberKey);
+      perMember.dec(seat);
     };
     // "close" fires after the response is sent and also when the client aborts mid-upload
     res.once("finish", release);

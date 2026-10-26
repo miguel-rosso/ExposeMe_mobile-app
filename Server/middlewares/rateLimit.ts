@@ -44,18 +44,22 @@ function tooMany(res: Response, retryAfterS: number) {
 /**
  * Sliding-window rate limit middleware keyed by client IP (clientIp: normalized req.ip), or by `key`.
  * At most `max` requests per key in any `windowMs`; extra requests get 429 and are not counted.
+ * Requests for which `appliesTo` is false pass through without being limited or counted.
  */
 export function createRateLimiter({
   max,
   windowMs,
   key = clientIp,
+  appliesTo,
 }: {
   max: number;
   windowMs: number;
   key?: (req: Request, res: Response) => string;
+  appliesTo?: (req: Request, res: Response) => boolean;
 }) {
   const window = createSlidingWindow({ max, windowMs });
   const middleware = (req: Request, res: Response, next: NextFunction) => {
+    if (appliesTo && !appliesTo(req, res)) return next();
     const k = key(req, res);
     const wait = window.retryAfter(k);
     if (wait) return tooMany(res, wait);
@@ -121,25 +125,45 @@ export function parseTrustProxy(raw: string | undefined, onRender: boolean): num
 // public IP). Members are limited per member and per room, never by IP: neither a stranger on the Wi-Fi nor a
 // member who hit their own limit can make another member's upload fail. ~1 upload per round per room plus a few
 // lobby re-picks per player is far below these. Overridable for load tests (qa/lab/lab.sh server raises them).
+// The member limit counts per seat (player object), not per name, so a newcomer never inherits the quota a departed
+// player spent under the same name. The room limit only counts once the game has started: in the lobby anyone can
+// leave and rejoin under a new name with a fresh member quota, so a room budget there could be drained by one person.
 export const UPLOAD_RATE_WINDOW_MS = envInt("UPLOAD_RATE_WINDOW_MS", 60_000, 1_000, 3_600_000);
 export const UPLOAD_REJECTED_MAX = envInt("UPLOAD_REJECTED_MAX", 30, 1, 100_000);
 export const UPLOAD_PLAYER_RATE_MAX = envInt("UPLOAD_PLAYER_RATE_MAX", 20, 1, 100_000);
 /** Defaults to a full room (12 players) at the member limit, so one member can never use it up. */
 export const UPLOAD_ROOM_RATE_MAX = envInt("UPLOAD_ROOM_RATE_MAX", 12 * UPLOAD_PLAYER_RATE_MAX, 1, 1_000_000);
 
-interface MemberLocals { room: { gameCode: string }; player: { username: string } }
-const member = (res: Response) => res.locals.member as MemberLocals;
+/** What the upload limits read from res.locals.member (set by requireUploadMember). */
+export interface UploadMemberLocals { room: { gameCode: string; started: boolean }; player: object }
+const member = (res: Response) => res.locals.member as UploadMemberLocals;
+
+/** Id of a player's seat: the same across rejoins (same Player object), a new one for every new join. */
+const seatIds = new WeakMap<object, number>();
+let lastSeatId = 0;
+function seatId(player: object): number {
+  let id = seatIds.get(player);
+  if (id === undefined) seatIds.set(player, (id = ++lastSeatId));
+  return id;
+}
+
+/**
+ * Key of a member for every per-member upload limit: their seat in the room, not their name, so someone joining
+ * under a departed player's name never inherits what that player used up.
+ */
+export const memberKey = ({ room, player }: UploadMemberLocals) => `${room.gameCode}\n${seatId(player)}`;
 
 export const uploadRejectionLimit = createRejectionLimiter({ max: UPLOAD_REJECTED_MAX, windowMs: UPLOAD_RATE_WINDOW_MS });
 
 export const uploadPlayerRateLimit = createRateLimiter({
   max: UPLOAD_PLAYER_RATE_MAX,
   windowMs: UPLOAD_RATE_WINDOW_MS,
-  key: (_req, res) => `${member(res).room.gameCode}\n${member(res).player.username}`,
+  key: (_req, res) => memberKey(member(res)),
 });
 
 export const uploadRoomRateLimit = createRateLimiter({
   max: UPLOAD_ROOM_RATE_MAX,
   windowMs: UPLOAD_RATE_WINDOW_MS,
   key: (_req, res) => member(res).room.gameCode,
+  appliesTo: (_req, res) => member(res).room.started,
 });

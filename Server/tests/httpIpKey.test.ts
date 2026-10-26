@@ -130,3 +130,32 @@ describe("upload in-flight per-IP cap", () => {
     expect(mw.inFlight().ips).toBe(1);
   });
 });
+
+// EXP-188: IPv6 ranges that embed a whole IPv4 address in their low 32 bits key by that IPv4, like IPv4-mapped does,
+// instead of lumping every embedded IPv4 into one /64.
+describe("ipKey for IPv6 ranges with an embedded IPv4", () => {
+  it("NAT64 well-known prefix (64:ff9b::/96) keys by the embedded IPv4", () => {
+    expect(ipKey("64:ff9b::198.51.100.4")).toBe("198.51.100.4");
+    expect(ipKey("64:ff9b::c633:6405")).toBe("198.51.100.5");
+    expect(ipKey("0064:FF9B:0000:0000:0000:0000:c633:6405")).toBe("198.51.100.5");
+    expect(ipKey("[64:ff9b::198.51.100.4]:443")).toBe("198.51.100.4");
+    // Same key as the plain IPv4 and the IPv4-mapped form, for every per-IP limit
+    expect(clientIp(req("64:ff9b::203.0.113.7"))).toBe(clientIp(req("::ffff:203.0.113.7")));
+  });
+
+  it("IPv4-compatible addresses (::a.b.c.d) key by the embedded IPv4", () => {
+    expect(ipKey("::198.51.100.4")).toBe("198.51.100.4");
+    expect(ipKey("::c633:6405")).toBe("198.51.100.5");
+  });
+
+  it("the unspecified and loopback addresses are not read as IPv4", () => {
+    expect(ipKey("::1")).toBe("0:0:0:0::/64");
+    expect(ipKey("::")).toBe("0:0:0:0::/64");
+  });
+
+  it("other addresses under those prefixes still group by /64", () => {
+    // Local-use NAT64 (64:ff9b:1::/48) has no fixed IPv4 position
+    expect(ipKey("64:ff9b:1::c633:6404")).toBe("64:ff9b:1:0::/64");
+    expect(ipKey("64:ff9b:0:0:1::c633:6404")).toBe("64:ff9b:0:0::/64");
+  });
+});

@@ -7,6 +7,9 @@ export default {
   enterGameCode: "Código de sala",
   searchRoom: "Buscar Sala",
   photoExplorer: "Explorar Fotos",
+  // Home banner while only part of the gallery is shared (iOS limited, Android 14+ selected photos)
+  limitedAccessBanner: "Solo algunas fotos",
+  addMorePhotos: "Añadir más",
 
   // WaitingRoom
   gameCode: "Código de Sala",

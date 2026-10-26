@@ -39,6 +39,13 @@ appId: com.socketNull.ExposeMe
     visible:
       id: "join-game-button"
     timeout: 60000
+# EXP-270: home tells the player they only share some photos, with "Add more" (system picker)
+- extendedWaitUntil:
+    visible:
+      id: "home-limited-banner"
+    timeout: 10000
+- assertVisible:
+    id: "home-limited-add-more"
 - runFlow: join-room.yaml
 - assertNotVisible:
     id: "gallery-access-modal"

@@ -191,6 +191,8 @@ export interface PhotoContextProps {
   pickGamePhoto: () => Promise<GamePhotoResult>;
   /** Gate to play: permission (full or limited) and at least one visible photo; `ask` shows the system prompt if it can */
   checkGalleryAccess: (options: { ask: boolean }) => Promise<GalleryAccess>;
+  /** Only part of the gallery is shared (iOS limited, Android 14+ selected photos); permission read only */
+  isLimitedAccess: () => Promise<boolean>;
   /** Limited access: system picker to share more photos (iOS 14+, Android 14+) */
   selectMorePhotos: () => Promise<void>;
   /** Subscribes to gallery / limited selection changes; returns the unsubscribe function */

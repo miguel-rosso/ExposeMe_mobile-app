@@ -7,6 +7,9 @@ export default {
   enterGameCode: "Enter game code",
   searchRoom: "Search Room",
   photoExplorer: "Photo Explorer",
+  // Home banner while only part of the gallery is shared (iOS limited, Android 14+ selected photos)
+  limitedAccessBanner: "Only some photos shared",
+  addMorePhotos: "Add more",
 
   // WaitingRoom
   gameCode: "Game Code",

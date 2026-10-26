@@ -59,6 +59,7 @@ jest.mock("@/app/components/ImageBlur/ImageBlur", () => () => null);
 jest.mock("@/app/components/ImageBlur", () => ({ ImageBlurView: () => null }));
 jest.mock("@/app/screens/InitialScreen", () => () => null);
 jest.mock("../app/components/LanguageToggle", () => () => null);
+jest.mock("../app/components/LimitedAccessBanner", () => () => null);
 jest.mock("@/app/components/modals/GalleryAccessModal", () => () => null);
 jest.mock("@/app/hooks/useGalleryAccessGuard", () => ({
   useGalleryAccessGuard: () => ({ blocked: null, check: jest.fn(), selectMore: jest.fn(), dismiss: jest.fn() }),

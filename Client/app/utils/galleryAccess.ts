@@ -42,6 +42,10 @@ const withTimeout = <T,>(promise: Promise<T>, ms: number, fallback: T): Promise<
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 };
 
+/** Only part of the gallery is shared (iOS "Limit access", Android 14+ "Select photos") */
+export const isLimitedPermission = (perm: GalleryPermission): boolean =>
+  perm.status === "granted" && perm.accessPrivileges === "limited";
+
 /**
  * Current gallery access. With `ask`, the system prompt is shown (once) if it still can be, instead of reporting
  * "denied" straight away.
@@ -49,7 +53,7 @@ const withTimeout = <T,>(promise: Promise<T>, ms: number, fallback: T): Promise<
 export const checkGalleryAccess = async (deps: GalleryAccessDeps, { ask }: { ask: boolean }): Promise<GalleryAccess> => {
   let perm = await deps.getPermissions();
   if (perm.status !== "granted" && perm.canAskAgain && ask) perm = await deps.requestPermissions();
-  const limited = perm.status === "granted" && perm.accessPrivileges === "limited";
+  const limited = isLimitedPermission(perm);
   if (perm.status !== "granted") return { status: "denied", limited: false, canAskAgain: perm.canAskAgain };
   const photos = await withTimeout<boolean | null>(deps.hasPhotos(), PHOTO_QUERY_TIMEOUT_MS, null);
   const status = photos === null ? "unavailable" : photos ? "ok" : "no-photos";

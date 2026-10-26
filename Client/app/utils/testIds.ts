@@ -13,6 +13,8 @@ export const TEST_IDS = {
   gameCodeInput: "game-code-input",
   searchRoomButton: "search-room-button",
   ownPhotosButton: "own-photos-button",
+  homeLimitedBanner: "home-limited-banner", // only part of the gallery is shared
+  homeLimitedAddMore: "home-limited-add-more",
   // ── Waiting room ──
   closeButton: "close-button",
   lobbyGameCode: "lobby-game-code",

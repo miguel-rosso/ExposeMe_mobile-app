@@ -26,6 +26,7 @@ jest.mock("@/app/screens/InitialScreen", () => () => null);
 jest.mock("@/app/components/modals/GalleryAccessModal", () => () => null);
 jest.mock("@/app/hooks/useGalleryAccessGuard", () => ({ useGalleryAccessGuard: () => ({ check: jest.fn() }) }));
 jest.mock("../app/components/LanguageToggle", () => () => null);
+jest.mock("../app/components/LimitedAccessBanner", () => () => null);
 jest.mock("../app/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: 1 }) }));
 let mockLang: "es" | "en" = "es";
 jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require(`../app/i18n/${mockLang}`).default }) }));

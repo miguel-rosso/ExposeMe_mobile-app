@@ -34,6 +34,7 @@ import GalleryAccessModal from "@/app/components/modals/GalleryAccessModal";
 import { Ionicons } from "@expo/vector-icons";
 import { useI18n } from "./i18n";
 import LanguageToggle from "./components/LanguageToggle";
+import LimitedAccessBanner from "./components/LimitedAccessBanner";
 import { TEST_IDS } from "./utils/testIds";
 import { handleHomeBackPress } from "./utils/homeBackPress";
 import { isRoomCode, sanitizeRoomCodeInput } from "./utils/roomCode";
@@ -347,6 +348,10 @@ const Index = () => {
         {/* Language toggle */}
         <View style={tw`absolute top-12 left-4 z-20`}>
           <LanguageToggle />
+        </View>
+        {/* Only part of the gallery shared: same row as the language toggle, clear of the form and Photo Explorer */}
+        <View style={tw`absolute top-12 left-20 right-4 z-20 min-h-10 justify-center items-end`} pointerEvents="box-none">
+          <LimitedAccessBanner />
         </View>
 
         {/* Logo en la parte superior */}

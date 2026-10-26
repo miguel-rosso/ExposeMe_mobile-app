@@ -2,8 +2,12 @@ import type { TextStyle } from "react-native";
 
 // ── Brand tokens (the look of the home screen, app/index.tsx) ──
 
+/** The brand's bright red */
+export const BRAND_RED = "#e9042e";
+const BRAND_RED_DARK = "#9d0420";
+
 /** Primary buttons: dark red at the edges, bright red in the middle (horizontal LinearGradient) */
-export const BRAND_GRADIENT = ["#9d0420", "#e9042e", "#9d0420"] as const;
+export const BRAND_GRADIENT = [BRAND_RED_DARK, BRAND_RED, BRAND_RED_DARK] as const;
 
 /** The game's mascot */
 export const BRAND_MASCOT_EMOJI = "😳";

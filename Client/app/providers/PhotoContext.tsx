@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useMemo, useEffect, useRef } from "react";
 import * as MediaLibrary from "expo-media-library";
 import { GamePhotoResult, PhotoContextProps, PhotoProviderProps } from "@/app/models/interfaces";
-import { checkGalleryAccess as checkAccess, GalleryAccess } from "@/app/utils/galleryAccess";
+import { checkGalleryAccess as checkAccess, GalleryAccess, isLimitedPermission } from "@/app/utils/galleryAccess";
 import { createRandomPhotoPicker } from "@/app/utils/randomGalleryPhoto";
 
 /** Id of the visible image at `offset`: a one-row query, never a full gallery read (EXP-174) */
@@ -48,6 +48,12 @@ export const PhotoProvider: React.FC<PhotoProviderProps> = ({ children }) => {
         { ask }
       ),
     [hasVisiblePhotos]
+  );
+
+  /** Only part of the gallery is shared. Reads the permission only: no prompt, no photo query. */
+  const isLimitedAccess = useCallback(
+    async (): Promise<boolean> => isLimitedPermission(await MediaLibrary.getPermissionsAsync()),
+    []
   );
 
   /** Limited access: lets the user share more photos (iOS 14+, Android 14+); does nothing elsewhere. */
@@ -168,13 +174,25 @@ export const PhotoProvider: React.FC<PhotoProviderProps> = ({ children }) => {
       getRandomPhoto,
       pickGamePhoto,
       checkGalleryAccess,
+      isLimitedAccess,
       selectMorePhotos,
       onGalleryChange,
       setPhotoUri,
       handleContinue,
       resetUsedPhotos,
     }),
-    [photoUri, requestGalleryPermission, getRandomPhoto, pickGamePhoto, checkGalleryAccess, selectMorePhotos, onGalleryChange, handleContinue, resetUsedPhotos]
+    [
+      photoUri,
+      requestGalleryPermission,
+      getRandomPhoto,
+      pickGamePhoto,
+      checkGalleryAccess,
+      isLimitedAccess,
+      selectMorePhotos,
+      onGalleryChange,
+      handleContinue,
+      resetUsedPhotos,
+    ]
   );
 
   return <PhotoContext.Provider value={contextValue}>{children}</PhotoContext.Provider>;

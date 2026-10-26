@@ -84,6 +84,10 @@ describe("E2E testIDs (EXP-008)", () => {
       // EXP-157 lobby-host-drop flow: the bot host's row
       lobbyPlayerId("bot1"),
       lobbyPlayerOfflineId("bot1"),
+      // EXP-172 play-again-linger flow: nobody may show as offline, and a deliberate wait on an absent id
+      lobbyPlayerOfflineId("bot2"),
+      lobbyPlayerOfflineId("${USERNAME}"),
+      "never-shown-linger-wait",
       roundsOptionId(0).replace("0", ".*"),
       // EXP-085 tie flow: the device user and a bot
       ...["${USERNAME}", "bot1"].flatMap((u) => [winnerNameId(u), finalWinnerId(u), finalRankId(u)]),

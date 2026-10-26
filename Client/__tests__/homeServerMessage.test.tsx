@@ -3,6 +3,7 @@ import TestRenderer, { act } from "react-test-renderer";
 
 // EXP-180 / EXP-036: the home screen shows the server's reason for sending us back (`message` param) in the
 // user's language, never the raw English protocol text.
+// EXP-221: the notice's title and button are translated too (no system "Alert" / "OK" around a Spanish message).
 
 jest.mock("@react-native-async-storage/async-storage", () => {
   const mock = require("@react-native-async-storage/async-storage/jest/async-storage-mock");
@@ -26,27 +27,34 @@ jest.mock("@/app/components/modals/GalleryAccessModal", () => () => null);
 jest.mock("@/app/hooks/useGalleryAccessGuard", () => ({ useGalleryAccessGuard: () => ({ check: jest.fn() }) }));
 jest.mock("../app/components/LanguageToggle", () => () => null);
 jest.mock("../app/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: 1 }) }));
-jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/es").default }) }));
+let mockLang: "es" | "en" = "es";
+jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require(`../app/i18n/${mockLang}`).default }) }));
 jest.mock("../app/providers/GameContext", () => ({
   useGameContext: () => ({
     username: "ana", setUsername: jest.fn(), gameCode: null, setGameCode: jest.fn(), socket: null, endSocket: jest.fn(),
   }),
 }));
 
+import { Alert } from "react-native";
 import Index from "../app/index";
 import es from "../app/i18n/es";
+import en from "../app/i18n/en";
 import { KICKED_BY_HOST_MESSAGE } from "../app/utils/serverMessage";
 
-const mockAlert = jest.fn();
+let mockAlert: jest.SpyInstance;
 beforeAll(() => {
   jest.spyOn(console, "log").mockImplementation(() => {});
-  (global as unknown as { alert: typeof mockAlert }).alert = mockAlert;
+  mockAlert = jest.spyOn(Alert, "alert").mockImplementation(() => {});
 });
 afterAll(() => jest.restoreAllMocks());
 beforeEach(() => {
   jest.useFakeTimers();
   mockAlert.mockClear();
+  mockLang = "es";
 });
+
+/** The notice's message text (second argument of Alert.alert). */
+const shownMessage = () => mockAlert.mock.calls[0]?.[1];
 afterEach(() => {
   jest.clearAllTimers();
   jest.useRealTimers();
@@ -62,18 +70,29 @@ const mountWithMessage = async (message?: string) => {
 describe("Home screen: server message after being sent back (EXP-180)", () => {
   it("shows 'Too many attempts' in Spanish for a Spanish UI", async () => {
     await mountWithMessage("Too many attempts");
-    expect(mockAlert).toHaveBeenCalledWith(es.serverErrorTooManyAttempts);
-    expect(mockAlert).not.toHaveBeenCalledWith("Too many attempts");
+    expect(mockAlert).toHaveBeenCalledTimes(1);
+    expect(shownMessage()).toBe(es.serverErrorTooManyAttempts);
   });
 
   it("shows a generic Spanish message for unknown server text", async () => {
     await mountWithMessage("Some new server error");
-    expect(mockAlert).toHaveBeenCalledWith(es.serverErrorUnknown);
+    expect(shownMessage()).toBe(es.serverErrorUnknown);
   });
 
   it("tells a player removed by the host why they are back, in Spanish (EXP-045)", async () => {
     await mountWithMessage(KICKED_BY_HOST_MESSAGE);
-    expect(mockAlert).toHaveBeenCalledWith("El anfitrión te ha sacado de la sala.");
+    expect(shownMessage()).toBe("El anfitrión te ha sacado de la sala.");
+  });
+
+  it("titles the notice and labels its button in Spanish (EXP-221)", async () => {
+    await mountWithMessage(KICKED_BY_HOST_MESSAGE);
+    expect(mockAlert).toHaveBeenCalledWith("Aviso", es.kickedByHost, [{ text: "Aceptar" }]);
+  });
+
+  it("titles the notice and labels its button in English (EXP-221)", async () => {
+    mockLang = "en";
+    await mountWithMessage("Game not found");
+    expect(mockAlert).toHaveBeenCalledWith("Notice", en.serverErrorGameNotFound, [{ text: "OK" }]);
   });
 
   it("shows nothing without a message", async () => {

@@ -1,10 +1,12 @@
 import React from "react";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
+import { Text } from "react-native";
 import { TEST_IDS } from "../app/utils/testIds";
 
 // EXP-243: opening the photo explorer animates every home element out and then pushes it. Home stays mounted
 // underneath, so when it is focused again (back) its elements must animate back in; otherwise the menu is left
 // with only the background and the language flag. Double taps while leaving push only once.
+// EXP-240: the "Photo Explorer" label under the dice button opens the explorer too, with the same exit.
 
 jest.mock("@react-native-async-storage/async-storage", () => {
   const mock = require("@react-native-async-storage/async-storage/jest/async-storage-mock");
@@ -70,6 +72,7 @@ jest.mock("../app/providers/GameContext", () => ({
 }));
 
 import Index from "../app/index";
+import en from "../app/i18n/en";
 import { SCREEN_EXIT_ANIMATION_MS } from "../app/hooks/useExitAnimationNavigation";
 
 const HOME_ANIMATED_ELEMENTS = 6; // logo, username, create, join, explorer button and its label
@@ -90,6 +93,14 @@ afterEach(() => {
 const flush = () => act(async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); });
 const pressOwnPhotos = (root: ReactTestInstance) =>
   act(() => { root.find((n) => n.props.testID === TEST_IDS.ownPhotosButton && typeof n.props.onPress === "function").props.onPress(); });
+/** Taps the "Photo Explorer" label: the closest pressable around its text. */
+const pressPhotoExplorerLabel = (root: ReactTestInstance) => {
+  const label = root.find((n) => n.type === Text && n.props.children === en.photoExplorer);
+  let pressable: ReactTestInstance | null = label;
+  while (pressable && typeof pressable.props.onPress !== "function") pressable = pressable.parent;
+  if (!pressable) throw new Error("The Photo Explorer label is not pressable");
+  act(() => { pressable!.props.onPress(); });
+};
 const hiddenCount = () => [...mockAnimated.values()].filter((v) => v === "hidden").length;
 const setFocused = (focused: boolean) => act(() => { mockFocusListeners.forEach((onChange) => onChange(focused)); });
 const refocus = () => { setFocused(false); setFocused(true); };
@@ -152,6 +163,22 @@ describe("Home after returning from the photo explorer (EXP-243)", () => {
     pressOwnPhotos(r.root);
     act(() => { jest.advanceTimersByTime(SCREEN_EXIT_ANIMATION_MS); });
     expect(mockPush).toHaveBeenCalledTimes(1);
+    act(() => r.unmount());
+  });
+
+  it("tapping the Photo Explorer label opens the explorer with the same exit (EXP-240)", async () => {
+    const r = await mount();
+    pressPhotoExplorerLabel(r.root);
+    expect(hiddenCount()).toBe(HOME_ANIMATED_ELEMENTS);
+    act(() => { jest.advanceTimersByTime(SCREEN_EXIT_ANIMATION_MS); });
+    expect(mockPush).toHaveBeenCalledWith("/screens/OwnPhotos");
+
+    // Label and dice button share the double-tap guard
+    refocus();
+    pressPhotoExplorerLabel(r.root);
+    pressOwnPhotos(r.root);
+    act(() => { jest.advanceTimersByTime(SCREEN_EXIT_ANIMATION_MS); });
+    expect(mockPush).toHaveBeenCalledTimes(2);
     act(() => r.unmount());
   });
 

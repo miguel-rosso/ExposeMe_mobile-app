@@ -63,8 +63,11 @@ appId: com.socketNull.ExposeMe
     visible: "No se ha encontrado la partida.*"
     timeout: 30000
 - assertNotVisible: "Game not found"
+# EXP-221: Spanish title and button too
+- assertVisible: "Aviso"
+- assertNotVisible: "Alert"
 - takeScreenshot: unknown-room-es-${USERNAME}
-- tapOn: "OK|Aceptar"
+- tapOn: "Aceptar"
 - extendedWaitUntil:
     visible:
       id: "join-game-button"

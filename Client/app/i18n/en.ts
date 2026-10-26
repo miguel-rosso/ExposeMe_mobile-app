@@ -53,6 +53,8 @@ export default {
   serverErrorServerBusy: "The server is busy. Try again in a moment.",
   serverErrorUnknown: "Something went wrong. Try again.",
   kickedByHost: "The host removed you from the room.",
+  serverNoticeTitle: "Notice",
+  ok: "OK",
 
   // GameScreen
   areYouReady: "ARE YOU READY?",

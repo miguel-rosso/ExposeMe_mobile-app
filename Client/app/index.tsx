@@ -9,6 +9,7 @@ import {
   TouchableWithoutFeedback,
   Keyboard,
   Dimensions,
+  Alert,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import tw from "twrnc";
@@ -218,10 +219,10 @@ const Index = () => {
     checkInitialScreen();
     loadUsername();
 
-    // The server's reason for sending us home (room-of-game refusal, connection refused), in our language
+    // The server's reason for sending us home (room-of-game refusal, connection refused, kicked), in our language
     const serverMessage = Array.isArray(message) ? message[0] : message;
     if (serverMessage) {
-      alert(translateServerMessage(serverMessage, t));
+      Alert.alert(t.serverNoticeTitle, translateServerMessage(serverMessage, t), [{ text: t.ok }]);
     }
   }, []);
 
@@ -304,6 +305,8 @@ const Index = () => {
     { ref: JoingameButtonRef, exit: "fadeOut", enter: "fadeIn" },
     { ref: topLogoRef, exit: "slideOutUpFar", enter: "slideInDownFar" },
   ]);
+  // Both the dice button and its "Photo Explorer" label open it
+  const openPhotoExplorer = () => navigateWithExit("/screens/OwnPhotos");
 
   // Manejar la acción de cancelar unirse a un juego
   const handleCancelJoinGame = () => {
@@ -507,12 +510,14 @@ const Index = () => {
         </View>
         {/* Botón para navegar a la pantalla de fotos propias */}
         <Animatable.View ref={buttonRef} animation="slideInUp" duration={600} style={tw`absolute bottom-22 items-center`}>
-          <TouchableOpacity testID={TEST_IDS.ownPhotosButton} style={tw`bg-white/50 p-3  rounded-3xl`} onPress={() => navigateWithExit("/screens/OwnPhotos")}>
+          <TouchableOpacity testID={TEST_IDS.ownPhotosButton} style={tw`bg-white/50 p-3  rounded-3xl`} onPress={openPhotoExplorer}>
             <Ionicons name="dice" size={44} color="white" />
           </TouchableOpacity>
         </Animatable.View>
         <Animatable.View ref={textRef} animation="slideInUp" duration={600} style={tw`absolute bottom-15`}>
-          <Text style={tw`text-white font-bold`}>{t.photoExplorer}</Text>
+          <TouchableOpacity accessibilityRole="button" onPress={openPhotoExplorer}>
+            <Text style={tw`text-white font-bold`}>{t.photoExplorer}</Text>
+          </TouchableOpacity>
         </Animatable.View>
       </View>
       <GalleryAccessModal

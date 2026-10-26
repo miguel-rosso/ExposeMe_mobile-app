@@ -15,6 +15,9 @@ appId: com.socketNull.ExposeMe
     visible: "(The host removed you from the room|El anfitrión te ha sacado de la sala).*"
     timeout: 30000
 - assertNotVisible: "Removed by host"
+# EXP-221: title and button in the UI language too, not the system "Alert"
+- assertVisible: "Notice|Aviso"
+- assertNotVisible: "Alert"
 - takeScreenshot: kicked-notice-${USERNAME}
 - tapOn: "OK|Aceptar"
 - extendedWaitUntil:

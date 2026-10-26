@@ -18,6 +18,8 @@ export interface RoundView {
   correctAnswer: string;
   scores: ScoreRound[] | null;
   mySelection: string;
+  /** My last pick emitted while connected this round: the only one the server can have recorded */
+  sentGuess: string;
   /** The server says the game is held */
   gameHeld: boolean;
   /** My finger is on the hold button */
@@ -26,7 +28,7 @@ export interface RoundView {
 
 export const initialRoundView: RoundView = {
   photo: null, isOwner: false, round: 0, phase: null, phaseDuration: 0, phaseKey: 0, correctAnswer: "", scores: null,
-  mySelection: "", gameHeld: false, pressing: false,
+  mySelection: "", sentGuess: "", gameHeld: false, pressing: false,
 };
 
 export type RoundAction =
@@ -34,16 +36,18 @@ export type RoundAction =
   | { type: "your-turn"; round: number }
   | { type: "round-start"; data: RoundStartData; serverUrl: string }
   | { type: "round-reveal"; data: RoundRevealData }
-  | { type: "round-scores"; data: RoundScoresData }
+  /** `username`: me, to show the guess the server recorded for me */
+  | { type: "round-scores"; data: RoundScoresData; username: string }
   | { type: "pick"; guess: string }
+  | { type: "pick-sent"; guess: string }
   | { type: "pressing"; pressing: boolean }
   | { type: "hold-start" }
   | { type: "hold-end" }
   | { type: "hold-resume"; data: HoldResumeData }
   | { type: "game-paused" }
   | { type: "game-resumed"; data: GameResumedData }
-  /** `pickSent: false` means the current pick was made while disconnected */
-  | { type: "game-state"; snap: GameStateSnapshot; serverUrl: string; pickSent: boolean };
+  /** `username`: me, to show the guess the server recorded for me in a `scores` snapshot */
+  | { type: "game-state"; snap: GameStateSnapshot; serverUrl: string; username: string };
 
 /** A new server phase (or the same one resumed) with its duration: restarts the progress bar */
 const startPhase = (state: RoundView, phase: ServerPhase | null, duration: number): RoundView => ({
@@ -51,7 +55,13 @@ const startPhase = (state: RoundView, phase: ServerPhase | null, duration: numbe
 });
 
 /** Leaves the previous round: no answer, scores, pick or hold left over */
-const PER_ROUND_RESET = { correctAnswer: "", scores: null, mySelection: "", gameHeld: false, pressing: false } as const;
+const PER_ROUND_RESET = {
+  correctAnswer: "", scores: null, mySelection: "", sentGuess: "", gameHeld: false, pressing: false,
+} as const;
+
+/** The guess the server recorded for me (`lastGuess`, "" for none), or `fallback` if I'm not in the scores */
+const recordedGuess = (scores: ScoreRound[], username: string, fallback: string) =>
+  scores.find((s) => s.username === username)?.lastGuess ?? fallback;
 
 const inRoundPhase = (phase: ServerPhase | null) => phase === "answering" || phase === "reveal" || phase === "scores";
 
@@ -67,21 +77,31 @@ const waitForPhoto = (state: RoundView, data: WaitingPhotoData): RoundView => ({
 });
 
 /**
- * Renders the `game-state` snapshot a rejoining player receives. The guess is kept only if it is still the same
- * round and photo; past answering (answers frozen) a pick made while disconnected never counted, so it is cleared.
+ * The pick to show in a snapshot of a round in play, as the live events would: while answering the current pick of the
+ * same round (the screen re-sends it); in reveal the last one sent (a pick made while disconnected never counted); in
+ * scores the guess the server recorded for me.
  */
-const applySnapshot = (state: RoundView, snap: GameStateSnapshot, serverUrl: string, pickSent: boolean): RoundView => {
+const snapshotSelection = (state: RoundView, snap: GameStateSnapshot, sameRound: boolean, username: string) => {
+  const sentGuess = sameRound ? state.sentGuess : "";
+  if (snap.phase === "answering") return sameRound ? state.mySelection : "";
+  if (snap.phase === "scores") return recordedGuess(snap.scores, username, sentGuess);
+  return sentGuess;
+};
+
+/** Renders the `game-state` snapshot a rejoining player receives (the pick shown: see snapshotSelection) */
+const applySnapshot = (state: RoundView, snap: GameStateSnapshot, serverUrl: string, username: string): RoundView => {
   if (!snap.started) return { ...state, pressing: false, gameHeld: false };
   const held = { ...state, pressing: false, gameHeld: snap.held };
 
   if (showsRound(snap)) {
     const photo = `${serverUrl}${snap.photo}`;
     const sameRound = snap.round === state.round && photo === state.photo;
-    const keepPick = sameRound && (snap.phase === "answering" || pickSent);
     return {
       ...startPhase(held, snap.phase, snap.duration),
       photo, isOwner: snap.isOwner === true, round: snap.round, correctAnswer: snap.correctAnswer ?? "",
-      scores: snap.phase === "scores" ? snap.scores : null, mySelection: keepPick ? state.mySelection : "",
+      scores: snap.phase === "scores" ? snap.scores : null,
+      mySelection: snapshotSelection(state, snap, sameRound, username),
+      sentGuess: sameRound ? state.sentGuess : "",
     };
   }
 
@@ -89,7 +109,9 @@ const applySnapshot = (state: RoundView, snap: GameStateSnapshot, serverUrl: str
   if (snap.phase === "waiting-photo") return waitForPhoto(held, { round: snap.round + 1, duration: snap.duration });
 
   // Ready phase: back to the "are you ready" screen until the first round
-  return { ...held, photo: null, isOwner: false, phase: null, correctAnswer: "", scores: null, mySelection: "" };
+  return {
+    ...held, photo: null, isOwner: false, phase: null, correctAnswer: "", scores: null, mySelection: "", sentGuess: "",
+  };
 };
 
 export const roundReducer = (state: RoundView, action: RoundAction): RoundView => {
@@ -104,12 +126,22 @@ export const roundReducer = (state: RoundView, action: RoundAction): RoundView =
         ...startPhase(state, "answering", action.data.duration), ...PER_ROUND_RESET,
         photo: `${action.serverUrl}${action.data.photo}`, isOwner: action.data.isOwner === true, round: action.data.round,
       };
+    // Answers are frozen: a pick not sent by now never counted, so the reveal colours the last one sent
     case "round-reveal":
-      return { ...startPhase(state, "reveal", action.data.duration), correctAnswer: action.data.correctAnswer };
+      return {
+        ...startPhase(state, "reveal", action.data.duration), correctAnswer: action.data.correctAnswer,
+        mySelection: state.sentGuess,
+      };
+    // The scores carry the guess the server actually recorded for me (a sent pick can still arrive too late)
     case "round-scores":
-      return { ...startPhase(state, "scores", action.data.duration), scores: action.data.scores, round: action.data.round };
+      return {
+        ...startPhase(state, "scores", action.data.duration), scores: action.data.scores, round: action.data.round,
+        mySelection: recordedGuess(action.data.scores, action.username, state.mySelection),
+      };
     case "pick":
       return { ...state, mySelection: action.guess };
+    case "pick-sent":
+      return { ...state, sentGuess: action.guess };
     case "pressing":
       return { ...state, pressing: action.pressing };
     case "hold-start":
@@ -129,7 +161,7 @@ export const roundReducer = (state: RoundView, action: RoundAction): RoundView =
       return startPhase(resumed, resumed.phase, action.data.duration);
     }
     case "game-state":
-      return applySnapshot(state, action.snap, action.serverUrl, action.pickSent);
+      return applySnapshot(state, action.snap, action.serverUrl, action.username);
   }
 };
 

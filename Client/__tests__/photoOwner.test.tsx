@@ -184,6 +184,51 @@ describe("GameScreen: whose photo it is (EXP-128)", () => {
     expect(answers()).toEqual([{ guess: "alice" }]);
   });
 
+  // EXP-227: a pick waiting for its throttle slot must not leave after the bar (the server drops it in reveal)
+  it("sends a pick still waiting for its throttle slot as soon as the answer bar ends", () => {
+    act(() => mockSocket.fire("round-start", { ...START, isOwner: false }));
+    press(r.root, "carol");
+    act(() => { jest.advanceTimersByTime(50); });
+    press(r.root, "alice");
+    expect(answers()).toEqual([{ guess: "carol" }]);
+    act(() => mockBar.onEnd!());
+    expect(answers()).toEqual([{ guess: "carol" }, { guess: "alice" }]);
+    act(() => { jest.advanceTimersByTime(1_000); });
+    expect(answers()).toHaveLength(2); // no trailing duplicate
+    press(r.root, "bob"); // after the close: ignored
+    expect(answers()).toHaveLength(2);
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "alice", duration: 3_000 }));
+    expect(bgOf(r.root, "alice")).toBe(GREEN);
+  });
+
+  // EXP-227: the reveal and scores colour the pick the server can have counted, not a later local tap
+  it("the reveal colours the last pick sent, not one still waiting when answering ended", () => {
+    act(() => mockSocket.fire("round-start", { ...START, isOwner: false }));
+    press(r.root, "carol");
+    press(r.root, "alice"); // waits for its throttle slot; the reveal arrives first
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "alice", duration: 3_000 }));
+    expect(bgOf(r.root, "carol")).toBe(RED);
+    expect(bgOf(r.root, "alice")).not.toBe(GREEN);
+    act(() => { jest.advanceTimersByTime(1_000); });
+    expect(answers()).toEqual([{ guess: "carol" }]); // too late: never sent in reveal
+  });
+
+  it("the scores colour the guess the server recorded for me", () => {
+    act(() => mockSocket.fire("round-start", { ...START, isOwner: false }));
+    press(r.root, "carol");
+    act(() => { jest.advanceTimersByTime(250); });
+    press(r.root, "alice"); // sent, but it reached the server after the close
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "alice", duration: 3_000 }));
+    expect(bgOf(r.root, "alice")).toBe(GREEN);
+    const score = (username: string, lastGuess: string) =>
+      ({ username, points: 0, isHost: false, lastAnswerCorrect: false, lastGuess });
+    act(() => mockSocket.fire("round-scores", {
+      scores: [score("alice", "bob"), score("bob", "carol"), score("carol", "")], round: 1, totalRounds: 10, duration: 5_000,
+    }));
+    expect(bgOf(r.root, "carol")).toBe(RED);
+    expect(bgOf(r.root, "alice")).not.toBe(GREEN);
+  });
+
   it("a wrong guess turns red at the reveal", () => {
     act(() => mockSocket.fire("round-start", { ...START, isOwner: false }));
     press(r.root, "carol");

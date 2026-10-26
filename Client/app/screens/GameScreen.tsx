@@ -80,28 +80,29 @@ const GameScreen = () => {
   // QA builds only: tells the server when this device rendered each phase (lab render-skew metrics)
   useQaRenderAck(socket, phase, round, phaseKey);
   // My pick goes to the server as soon as it changes: answers are only taken while answering (EXP-148), the last counts.
-  // Rapid taps are coalesced: at most one send per PICK_SEND_INTERVAL, then a trailing send of the latest pick (within
-  // the server's 300 ms grace), so its per-socket rate limit never drops the pick that counts.
-  // pickSentRef: the current pick was emitted while connected (one made offline is lost: the rejoin drops it)
-  const pickSentRef = useRef(true);
+  // Rapid taps are coalesced: at most one send per PICK_SEND_INTERVAL, then a trailing send of the latest pick, so the
+  // server's per-socket rate limit never drops the pick that counts. When the answer bar ends, a pick still waiting
+  // goes at once (within the server's 300 ms grace) and later taps are ignored.
+  // Only a pick emitted while connected is recorded as sent (one made offline is lost: the rejoin drops it).
   const lastPickSentAt = useRef(0);
   const pickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sendPick = () => {
+    if (pickTimer.current) clearTimeout(pickTimer.current);
     pickTimer.current = null;
     lastPickSentAt.current = Date.now();
-    pickSentRef.current = !!socket?.connected;
-    socket?.emit("submit-answer", { guess: roundRef.current.mySelection });
+    const guess = roundRef.current.mySelection;
+    socket?.emit("submit-answer", { guess });
+    if (socket?.connected) dispatchRound({ type: "pick-sent", guess });
   };
   const pickGuess = (val: string) => {
     dispatchRound({ type: "pick", guess: val });
-    pickSentRef.current = false;
     if (pickTimer.current) return; // the pending trailing send takes the latest pick
     const wait = lastPickSentAt.current + PICK_SEND_INTERVAL - Date.now();
     if (wait <= 0) { sendPick(); return; }
     const pickRound = roundRef.current.round;
     pickTimer.current = setTimeout(() => {
-      // A new round (or its photo wait) started meanwhile: that pick belonged to the previous one
-      if (roundRef.current.round === pickRound && roundRef.current.phase !== "waiting-photo") sendPick();
+      // Answering is over meanwhile (reveal, or a new round / photo wait): too late, that pick can't count
+      if (roundRef.current.round === pickRound && roundRef.current.phase === "answering") sendPick();
       else pickTimer.current = null;
     }, wait);
   };
@@ -109,6 +110,10 @@ const GameScreen = () => {
   // The answer bar (server duration) has run out: no more picks this phase (phaseKey changes with every phase/resume)
   const [answersClosedKey, setAnswersClosedKey] = useState(-1);
   const answersClosed = phase === "answering" && answersClosedKey === phaseKey;
+  const closeAnswers = () => {
+    if (pickTimer.current) sendPick(); // flush the pick waiting for its throttle slot: it must leave before the close
+    setAnswersClosedKey(phaseKey);
+  };
   // Latest players list for the room-membership handlers; updated on write too, so back-to-back events
   // (new-host + player-left arrive together) build on each other
   const playersRef = useRef<Player[]>(playersProvider);
@@ -287,16 +292,16 @@ const GameScreen = () => {
       dispatchRound({ type: "round-start", data, serverUrl: SERVER_URL });
     });
 
-    // Atomic: answer revealed (my pick was already sent when tapped; the server froze answers before this)
+    // Atomic: answer revealed (the server froze answers before this: only a pick already sent can have counted)
     socket.on("round-reveal", (data: RoundRevealData) => {
-      console.log(`[GAME] round-reveal: ${data.correctAnswer}, my guess: ${roundRef.current.mySelection}`);
+      console.log(`[GAME] round-reveal: ${data.correctAnswer}, my guess: ${roundRef.current.sentGuess}`);
       dispatchRound({ type: "round-reveal", data });
     });
 
     // Atomic: scores displayed
     socket.on("round-scores", (data: RoundScoresData) => {
       console.log(`[GAME] round-scores: round ${data.round}/${data.totalRounds}`);
-      dispatchRound({ type: "round-scores", data });
+      dispatchRound({ type: "round-scores", data, username: safeUsername });
     });
 
     // Hold: everyone pauses
@@ -350,15 +355,12 @@ const GameScreen = () => {
       currentTurnRef.current = null;
       setTurnUploading(false);
       if (snap.phase !== "waiting-photo") setSkipNotice(null);
-      dispatchRound({ type: "game-state", snap, serverUrl: SERVER_URL, pickSent: pickSentRef.current });
+      dispatchRound({ type: "game-state", snap, serverUrl: SERVER_URL, username: safeUsername });
       const result = gameStateFollowUps(snap);
       setPause(result.pause);
       if (result.gameOver) showGameOver(snap.scores);
       if (result.sendReady) socket.emit("im-ready");
-      if (result.resendGuess && roundRef.current.mySelection) {
-        socket.emit("submit-answer", { guess: roundRef.current.mySelection });
-        pickSentRef.current = true;
-      }
+      if (result.resendGuess && roundRef.current.mySelection) sendPick();
     });
 
     socket.on("game-over", (data: { finalScore: ScoreRound[] }) => {
@@ -514,7 +516,7 @@ const GameScreen = () => {
                       <ProgressBar
                         key={phaseKey}
                         duration={phaseDuration}
-                        onEnd={phase === "answering" ? () => setAnswersClosedKey(phaseKey) : undefined}
+                        onEnd={phase === "answering" ? closeAnswers : undefined}
                       />
                     </View>
                   </View>

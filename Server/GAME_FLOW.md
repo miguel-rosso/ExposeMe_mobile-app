@@ -86,11 +86,12 @@ After last round: game-over
   unknown name is ignored and the previous pick stays.
 - Rate limit: per socket, a token bucket of **10** `submit-answer`, refilled at **5 per second**; excess events are
   dropped silently. The bucket lives and dies with the socket. The app coalesces rapid taps (at most one send per
-  200 ms, then a trailing send of the latest pick, still within the grace), so the limit never drops the pick that
-  counts.
+  200 ms, with a trailing send of the latest pick), so the limit never drops the pick that counts. When the answer
+  bar ends, a pick still waiting is sent at once (within ANSWER_GRACE) and later taps are ignored.
 - A rejoining client in `answering` re-sends its current pick of that round (one sent while offline was lost).
-  In a same-round `reveal`/`scores` snapshot, a pick made while disconnected and never sent is cleared, so the
-  colours match what the server recorded.
+  As with the live events, a `reveal` snapshot colours the last pick sent in that round (one made while
+  disconnected and never sent is cleared) and a `scores` snapshot the player's `lastGuess`, so the colours match
+  what the server recorded.
 - There are no other answer events (the legacy `correct-answer` / `incorrect-answer` aliases were removed).
 
 ## Join, rejoin and session

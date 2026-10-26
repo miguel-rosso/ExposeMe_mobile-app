@@ -7,9 +7,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.hoisted(() => {
   delete process.env.UPLOAD_STORED_MAX;
   delete process.env.UPLOAD_LOBBY_PER_IP_MAX;
+  delete process.env.UPLOAD_PLANT_CLAIM_MS;
 });
 
-import { UPLOAD_LOBBY_PER_IP_MAX, UPLOAD_STORED_MAX, UploadStore } from "../middlewares/uploadStore";
+import { UPLOAD_LOBBY_PER_IP_MAX, UPLOAD_PLANT_CLAIM_MS, UPLOAD_STORED_MAX, UploadStore } from "../middlewares/uploadStore";
 import { acceptsPlantedPhoto } from "../middlewares/uploadAccess";
 import { UPLOAD_TTL_MS } from "../middlewares/uploadSweeper";
 import type { Room } from "../models/interfaces";
@@ -171,6 +172,71 @@ describe("UploadStore", () => {
   });
 });
 
+// EXP-130: a planted-kind upload nobody plants (e.g. a turn upload retried after background that arrives once the
+// game is over, back in the lobby) is deleted after the claim window instead of being kept until the 30-min TTL
+describe("UploadStore unclaimed planted uploads", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    store.clear();
+    vi.useRealTimers();
+  });
+
+  const registerAs = (name: string, kind: "turn" | "planted", username = "ann") =>
+    store.register(name, { gameCode: "111111", username, file: put(name), round: 0, kind }, store.epoch("111111"));
+
+  it("defaults to a 2-minute claim window, well within the TTL", () => {
+    expect(UPLOAD_PLANT_CLAIM_MS).toBe(2 * 60_000);
+    expect(UPLOAD_PLANT_CLAIM_MS).toBeLessThan(UPLOAD_TTL_MS);
+  });
+
+  it("deletes a planted-kind upload that plant-photo doesn't claim within the window (record and file)", async () => {
+    registerAs(NAME_A, "planted");
+    vi.advanceTimersByTime(UPLOAD_PLANT_CLAIM_MS - 1);
+    expect(store.get(NAME_A)).toBeDefined();
+    vi.advanceTimersByTime(1);
+    expect(store.get(NAME_A)).toBeUndefined();
+    expect(store.countFor("111111")).toBe(0);
+    vi.useRealTimers();
+    await settled(() => !fs.existsSync(path.join(dir, NAME_A)));
+  });
+
+  it("keeps a planted upload claimed in time, and its re-plant replacement, until the room is released", () => {
+    registerAs(NAME_A, "planted");
+    store.replacePlanted(undefined, `/temp/${NAME_A}`);
+    vi.advanceTimersByTime(UPLOAD_PLANT_CLAIM_MS);
+    expect(store.get(NAME_A)?.planted).toBe(true);
+
+    // Re-plant: a new upload replaces it, and is kept once claimed
+    registerAs(NAME_B, "planted");
+    store.replacePlanted(`/temp/${NAME_A}`, `/temp/${NAME_B}`);
+    expect(store.get(NAME_A)).toBeUndefined();
+    vi.advanceTimersByTime(10 * UPLOAD_PLANT_CLAIM_MS);
+    expect(store.get(NAME_B)?.planted).toBe(true);
+  });
+
+  it("never expires a turn upload early (photo-sent may still take it while its photo is awaited)", () => {
+    registerAs(NAME_A, "turn");
+    vi.advanceTimersByTime(10 * UPLOAD_PLANT_CLAIM_MS);
+    expect(store.get(NAME_A)).toBeDefined();
+  });
+
+  it("clears the claim timer when the record goes away earlier", () => {
+    const clear = vi.spyOn(globalThis, "clearTimeout");
+    registerAs(NAME_A, "planted");
+    const { claimTimer } = store.get(NAME_A)!;
+    store.releaseRoom("111111");
+    expect(clear).toHaveBeenCalledWith(claimTimer);
+    clear.mockRestore();
+  });
+
+  it("uses the window it is given", () => {
+    store = new UploadStore({ plantClaimMs: 500 });
+    registerAs(NAME_A, "planted");
+    vi.advanceTimersByTime(500);
+    expect(store.get(NAME_A)).toBeUndefined();
+  });
+});
+
 describe("acceptsPlantedPhoto (POST /upload and plant-photo share it)", () => {
   const room = (phase: Room["phase"], round: number) => ({ phase, round }) as Room;
   it("accepts planted photos until the first round has been played", () => {
@@ -187,10 +253,14 @@ describe("UploadStore.storageRefusal", () => {
   const TTL_S = UPLOAD_TTL_MS / 1000;
   let limited: UploadStore;
   let count = 0;
-  /** Registers a photo (no file written) and returns its name. */
-  const add = (ip: string, kind: "turn" | "planted", gameCode = "111111") => {
+  /**
+   * Registers a photo (no file written) and returns its name. A planted one is claimed by plant-photo (kept until the
+   * TTL) unless `unclaimed`.
+   */
+  const add = (ip: string, kind: "turn" | "planted", gameCode = "111111", { unclaimed = false } = {}) => {
     const name = (++count).toString(16).padStart(32, "0") + ".jpg";
     limited.register(name, { gameCode, username: `u${count}`, file: path.join(dir, name), kind, ip }, limited.epoch(gameCode));
+    if (kind === "planted" && !unclaimed) limited.replacePlanted(undefined, name);
     return name;
   };
 
@@ -238,5 +308,28 @@ describe("UploadStore.storageRefusal", () => {
     expect(limited.storageRefusal("planted", "2.2.2.2")).toBeNull();
     limited.forget(first);
     expect(limited.storageRefusal("planted", "1.1.1.1")).toBeNull();
+  });
+
+  // EXP-130: an unclaimed planted upload is deleted at its claim deadline, long before its TTL
+  it("Retry-After is the earliest deletion: an unclaimed upload's claim deadline beats an older photo's TTL", () => {
+    const claimLeftS = (UPLOAD_PLANT_CLAIM_MS - 30_000) / 1000;
+    limited = new UploadStore({ storedMax: 3, lobbyPerIpMax: 2 });
+    add("1.1.1.1", "planted"); // claimed: goes at its TTL
+    vi.advanceTimersByTime(60_000);
+    add("1.1.1.1", "planted", "111111", { unclaimed: true });
+    vi.advanceTimersByTime(30_000);
+    expect(limited.storageRefusal("planted", "1.1.1.1")).toEqual({ status: 429, scope: "lobby-ip", retryAfterS: claimLeftS });
+    add("2.2.2.2", "turn");
+    expect(limited.storageRefusal("planted", "3.3.3.3")).toEqual({ status: 503, scope: "storage", retryAfterS: claimLeftS });
+  });
+
+  it("Retry-After goes back to the TTL once the upload is claimed", () => {
+    limited = new UploadStore({ storedMax: 100, lobbyPerIpMax: 1 });
+    const pending = add("1.1.1.1", "planted", "111111", { unclaimed: true });
+    expect(limited.storageRefusal("planted", "1.1.1.1")?.retryAfterS).toBe(UPLOAD_PLANT_CLAIM_MS / 1000);
+    limited.replacePlanted(undefined, pending);
+    expect(limited.storageRefusal("planted", "1.1.1.1")?.retryAfterS).toBe(TTL_S);
+    vi.advanceTimersByTime(UPLOAD_PLANT_CLAIM_MS);
+    expect(limited.get(pending)).toBeDefined();
   });
 });

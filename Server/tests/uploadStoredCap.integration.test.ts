@@ -5,14 +5,13 @@ import { io as connect, Socket as ClientSocket } from "socket.io-client";
 import sharp from "sharp";
 import { io, server } from "../app";
 import { roomManager } from "../routes/socketRoutes";
-import { UPLOAD_LOBBY_PER_IP_MAX, UPLOAD_STORED_MAX, uploadStore } from "../middlewares/uploadStore";
-import { UPLOAD_TTL_MS } from "../middlewares/uploadSweeper";
+import { UPLOAD_LOBBY_PER_IP_MAX, UPLOAD_PLANT_CLAIM_MS, UPLOAD_STORED_MAX, uploadStore } from "../middlewares/uploadStore";
 import { limit } from "../controllers/sanitizeImage";
 
 // EXP-195: the per-room cap (100 photos) doesn't bound the disk when many rooms fill up. Lobby photos (lobby picks and
 // planted photos) are shed first: none is stored while the server holds UPLOAD_STORED_MAX photos (503, scope
 // "storage") nor past UPLOAD_LOBBY_PER_IP_MAX per uploader IP (429, scope "lobby-ip"), with Retry-After = when the
-// oldest counted photo expires. The awaited owner's turn photo of a started game is never refused by these limits.
+// first counted photo goes (TTL, or the claim deadline of an unplanted lobby upload). The awaited owner's turn photo of a started game is never refused by these limits.
 
 const UPLOAD_DIR = vi.hoisted(() => {
   const tmp = (process.env.TMPDIR || "/tmp").replace(/\/$/, "");
@@ -33,7 +32,7 @@ let url: string;
 let jpeg: Buffer;
 const clients: ClientSocket[] = [];
 const roomCodes = new Set<string>();
-const TTL_S = UPLOAD_TTL_MS / 1000;
+const CLAIM_S = UPLOAD_PLANT_CLAIM_MS / 1000;
 
 function once<T = unknown>(socket: ClientSocket, event: string, timeoutMs = 4_000): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -76,13 +75,16 @@ async function expectStored(m: Member) {
   expect(res.status).toBe(200);
 }
 
-/** Refused with `status`/`scope`, and a Retry-After that is the oldest counted photo's expiry (stored just now). */
+/**
+ * Refused with `status`/`scope`, and a Retry-After that is the first counted photo's deletion: the counted lobby
+ * photos were stored just now and nobody planted them, so they go at their claim deadline (EXP-130).
+ */
 async function expectRefused(res: Response, status: number, scope: string) {
   expect(res.status).toBe(status);
   expect(await res.json()).toMatchObject({ scope });
   const retryAfter = Number(res.headers.get("retry-after"));
-  expect(retryAfter).toBeGreaterThan(TTL_S - 60);
-  expect(retryAfter).toBeLessThanOrEqual(TTL_S);
+  expect(retryAfter).toBeGreaterThan(CLAIM_S - 60);
+  expect(retryAfter).toBeLessThanOrEqual(CLAIM_S);
 }
 
 const filesOnDisk = () => fs.readdirSync(UPLOAD_DIR).length;

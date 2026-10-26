@@ -59,6 +59,7 @@ export function registerTurnUpload(gameCode: string, username: string, photo: st
  */
 export function plantPhoto(gameCode: string, player: Player, photo: string): void {
   registerUpload(gameCode, player.username, photo);
+  uploadStore.replacePlanted(player.plantedPhoto, photo); // claimed: not dropped as an unclaimed upload
   player.plantedPhoto = photo;
   player.hasPlantedPhoto = true;
 }

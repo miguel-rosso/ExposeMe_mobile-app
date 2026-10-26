@@ -13,6 +13,8 @@ import PhotoOwnerCard from "@/app/components/PhotoOwnerCard";
 export const HOLD_BUTTON_CLEARANCE = 176;
 // From this many players on the rows get tighter so more fit before scrolling
 const COMPACT_FROM = 7;
+// The rows sit on a near-opaque dark panel: the photo (a big caption, busy detail) doesn't show between them (EXP-271)
+export const SCORE_LIST_BACKING = "rgba(0,0,0,0.85)";
 
 interface ScoreModalProps {
   visible: boolean;
@@ -61,8 +63,8 @@ const ScoreModal: React.FC<ScoreModalProps> = ({
       {/* Shrinks to the space left (never grows past its rows) and scrolls: 12 players don't fit small phones */}
       <ScrollView
         testID={TEST_IDS.scoreList}
-        style={tw`w-full flex-grow-0`}
-        contentContainerStyle={tw`items-center`}
+        style={[tw`w-11/12 max-w-[500px] flex-grow-0 rounded-3xl`, { backgroundColor: SCORE_LIST_BACKING }]}
+        contentContainerStyle={tw`p-1.5 ${compact ? "gap-1" : "gap-2"}`}
         showsVerticalScrollIndicator={false}
       >
         {ranked.map((player) => {
@@ -74,18 +76,24 @@ const ScoreModal: React.FC<ScoreModalProps> = ({
           return (
             <View
               key={player.username}
-              style={tw`w-11/12 max-w-[500px] bg-white ${compact ? "mb-1 mx-1" : "mb-2 m-1"} rounded-3xl`}
+              style={tw`bg-white rounded-3xl`}
             >
               <View style={tw`flex-row ${compact ? "h-11" : "h-12"}`}>
                 <View style={tw`flex items-center w-[12%] min-w-[40px] justify-center rounded-l-full bg-[#e63a35]`}>
                   <Text testID={scoreRankId(player.username)} style={tw`text-lg text-white font-bold`}>{player.rank}</Text>
                 </View>
                 <View style={tw`flex-row px-2 pr-4 items-center flex-1 justify-between`}>
-                  <View>
-                    <Text style={tw`text-lg font-bold`}>{player.username}</Text>
+                  {/* Shrinks before the points do: long names (up to 20 characters) stay on one line in the fixed-height row */}
+                  <View style={tw`flex-shrink mr-2`}>
+                    <Text style={tw`text-lg font-bold`} numberOfLines={1} ellipsizeMode="tail">{player.username}</Text>
                     <View style={tw`flex-row items-center`}>
                       <Icon style={tw`px-2`} name={icon} size={12} color={color} />
-                      <Text testID={scoreGuessId(player.username)} style={tw`text-xs ${textColor}`}>
+                      <Text
+                        testID={scoreGuessId(player.username)}
+                        style={tw`text-xs flex-shrink ${textColor}`}
+                        numberOfLines={1}
+                        ellipsizeMode="tail"
+                      >
                         {label}
                       </Text>
                     </View>

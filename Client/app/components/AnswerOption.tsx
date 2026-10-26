@@ -9,10 +9,16 @@ import { PLAYER_COLOR_INK, playerInitial } from "@/app/utils/playerColors";
 // ── Look ──
 // Dark translucent cards (the photo still shows behind them), each with the player's colour and initial. Compact ones
 // keep a 44 dp touch target (py-3 + a text-sm line) for crowded rooms. Their names are cut in the middle: the end
-// stays, so names sharing a long prefix ("Maria_01" / "Maria_02") still differ
+// stays, so names sharing a long prefix ("Maria_01" / "Maria_02") still differ. The state badge sticks half out of the
+// avatar's corner, so the name keeps a wider gap (`nameGap`) than half a badge
 const OPTION_CARD = {
-  regular: { cell: "mb-2", card: "p-3", text: "text-base", initial: "text-sm", avatar: 28, badge: 15, ellipsize: "tail" },
-  compact: { cell: "mb-1.5", card: "py-3 px-2", text: "text-sm", initial: "text-xs", avatar: 20, badge: 13, ellipsize: "middle" },
+  regular: {
+    cell: "mb-2", card: "p-3", text: "text-base", initial: "text-sm", avatar: 28, badge: 15, nameGap: "ml-3", ellipsize: "tail",
+  },
+  compact: {
+    cell: "mb-1.5", card: "py-3 px-2", text: "text-sm", initial: "text-xs", avatar: 20, badge: 13, nameGap: "ml-2.5",
+    ellipsize: "middle",
+  },
 } as const;
 // Every card has the same width: an odd one out in the last row is centred by the row, not stretched
 const OPTION_BASIS = { 2: "flex-basis-[48%]", 3: "flex-basis-[30%]" } as const;
@@ -143,6 +149,8 @@ const AnswerOption = ({
   };
 
   const mark = STATE_MARK[state];
+  // The badge's centre sits on the avatar's square corner, mostly outside the circle: the initial stays readable (EXP-272)
+  const badgeOverhang = -size.badge / 2;
   return (
     <Animated.View style={[tw`${size.cell} ${OPTION_BASIS[columns]}`, OPTION_CELL_MARGIN, cellMotion]}>
       <TouchableOpacity
@@ -167,12 +175,16 @@ const AnswerOption = ({
               { width: size.avatar, height: size.avatar, backgroundColor: color },
             ]}
           >
-            <Text style={[tw`${size.initial} font-bold`, { color: PLAYER_COLOR_INK }]}>{initial}</Text>
+            {/* No Android font padding: the glyph sits in the avatar's centre instead of drifting down towards the badge */}
+            <Text style={[tw`${size.initial} font-bold`, { color: PLAYER_COLOR_INK, includeFontPadding: false }]}>{initial}</Text>
             {mark && (
               <View
                 style={[
-                  tw`absolute -bottom-1 -right-1 items-center justify-center rounded-full border border-black`,
-                  { width: size.badge, height: size.badge, backgroundColor: ANSWER_STATE_BORDER[state] },
+                  tw`absolute items-center justify-center rounded-full border border-black`,
+                  {
+                    width: size.badge, height: size.badge, right: badgeOverhang, bottom: badgeOverhang,
+                    backgroundColor: ANSWER_STATE_BORDER[state],
+                  },
                 ]}
               >
                 <Text style={[tw`text-white font-bold`, { fontSize: size.badge - 5, lineHeight: size.badge - 2 }]}>{mark}</Text>
@@ -180,7 +192,7 @@ const AnswerOption = ({
             )}
           </View>
           <Text
-            style={tw`text-white ${size.text} flex-1 ml-2 ${isMe ? "font-bold" : ""}`}
+            style={tw`text-white ${size.text} flex-1 ${size.nameGap} ${isMe ? "font-bold" : ""}`}
             numberOfLines={1}
             ellipsizeMode={size.ellipsize}
           >

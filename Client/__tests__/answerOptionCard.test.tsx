@@ -281,6 +281,36 @@ describe("AnswerOption (EXP-253)", () => {
     expect(onPick).toHaveBeenCalledWith("alice");
   });
 
+  // EXP-272: the ✓/✕ badge sat on the avatar's edge and covered part of the initial
+  describe.each([[false], [true]])("state badge placement (compact: %s)", (compact) => {
+    // The initial's glyph body: a circle of half its font size around the avatar's centre, plus a visible margin
+    const GLYPH_RADIUS_EM = 0.5;
+    const MIN_CLEARANCE_DP = 1.5;
+    // Space left between the badge and the name next to the avatar
+    const MIN_NAME_GAP_DP = 3;
+
+    it.each(["selected", "correct", "wrong"] as const)("a %s badge leaves the initial and the name readable", (state) => {
+      render({ state, compact });
+      const avatar = r.root.find((n) => typeof n.type === "string" && style(n)?.backgroundColor === PLAYER_PALETTE[0]);
+      const badge = avatar.find((n) => typeof n.type === "string" && style(n)?.position === "absolute");
+      const initial = avatar.find((n) => (n.type as unknown) === "Text" && n.props.children === "A");
+      const name = r.root.find((n) => (n.type as unknown) === "Text" && n.props.children === "alice");
+      const { width: avatarSize } = style(avatar);
+      const { width: badgeSize, right, bottom } = style(badge);
+      const { fontSize, includeFontPadding } = style(initial);
+      expect(right).toBe(bottom);
+
+      // Badge centre, per axis, from the avatar's centre; its nearest point lies on the diagonal towards that centre
+      const centreOffset = avatarSize / 2 - right - badgeSize / 2;
+      const nearestPoint = Math.SQRT2 * centreOffset - badgeSize / 2;
+      expect(nearestPoint).toBeGreaterThanOrEqual(GLYPH_RADIUS_EM * fontSize + MIN_CLEARANCE_DP);
+      // Android's font padding would push the glyph down towards the badge
+      expect(includeFontPadding).toBe(false);
+      // The badge sticks out of the avatar by -right: the name starts past it
+      expect(style(name).marginLeft).toBeGreaterThanOrEqual(-right + MIN_NAME_GAP_DP);
+    });
+  });
+
   it("with reduce motion: shown at once, and state changes don't move", () => {
     const timing = jest.spyOn(Animated, "timing");
     const spring = jest.spyOn(Animated, "spring");

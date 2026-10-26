@@ -2,8 +2,8 @@ import React from "react";
 import { StyleSheet } from "react-native";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import { ScoreRound } from "../app/models/interfaces";
-import { TEST_IDS, finalRankId, scoreRankId } from "../app/utils/testIds";
-import ScoreModal, { HOLD_BUTTON_CLEARANCE } from "../app/components/modals/ScoreModal";
+import { TEST_IDS, finalRankId, scoreGuessId, scoreRankId } from "../app/utils/testIds";
+import ScoreModal, { HOLD_BUTTON_CLEARANCE, SCORE_LIST_BACKING } from "../app/components/modals/ScoreModal";
 import FinalScoreModal from "../app/components/modals/FinalScoreModal";
 
 // EXP-043: with up to 12 players the round scoreboard needs ~670 dp. The list must scroll inside the space left
@@ -70,6 +70,57 @@ describe("ScoreModal with 12 players (EXP-043)", () => {
 
   it("keeps the usual bottom margin when there is no hold button", () => {
     expect(bottomPadding(false)).toBe(64);
+  });
+});
+
+describe("ScoreModal rows over the photo (EXP-271)", () => {
+  const alphaOf = (rgba: string) => Number(/rgba\(.*,\s*([\d.]+)\)/.exec(rgba)?.[1]);
+
+  it.each([[4], [12]])("with %i players, the photo doesn't show between rows: they sit on a dark panel", (count) => {
+    const r = render(
+      <ScoreModal visible scoreRound={scores.slice(0, count)} rounds={{ round: 3, roundsOfGame: 10 }} correctAnswer="player1" />
+    );
+    const list = byId(r.root, TEST_IDS.scoreList);
+    const panel = StyleSheet.flatten(list.props.style);
+    expect(SCORE_LIST_BACKING).toBe(panel.backgroundColor);
+    expect(alphaOf(SCORE_LIST_BACKING)).toBeGreaterThanOrEqual(0.8);
+    // The rows are spaced inside the panel (padding + gap), never with margins that would open holes onto the photo
+    const content = StyleSheet.flatten(list.props.contentContainerStyle);
+    expect(content.gap).toBeGreaterThan(0);
+    for (const side of ["paddingTop", "paddingBottom", "paddingLeft", "paddingRight"] as const) {
+      expect(content[side]).toBeGreaterThan(0);
+    }
+    const rows = list.findAll((n) => typeof n.type === "string" && StyleSheet.flatten(n.props.style)?.backgroundColor === "#fff");
+    expect(rows).toHaveLength(count);
+    for (const row of rows) {
+      const s = StyleSheet.flatten(row.props.style);
+      expect(Object.keys(s).filter((k) => k.startsWith("margin"))).toEqual([]);
+    }
+    act(() => r.unmount());
+  });
+});
+
+describe("ScoreModal with a 20-character name", () => {
+  const LONG_NAME = "Maximiliano_Gonzalez";
+
+  it("keeps the name and the guess on one line, shrinking before the points", () => {
+    const longScores: ScoreRound[] = [
+      { username: LONG_NAME, points: 100, isHost: true, lastAnswerCorrect: false, lastGuess: LONG_NAME },
+      ...scores.slice(1, 3),
+    ];
+    const r = render(<ScoreModal visible scoreRound={longScores} rounds={{ round: 1, roundsOfGame: 10 }} correctAnswer="" />);
+    const texts = r.root.findAll((n) => (n.type as unknown) === "Text" && n.props.children === LONG_NAME);
+    expect(texts).toHaveLength(2); // the name and the guess
+    for (const text of texts) {
+      expect(text.props.numberOfLines).toBe(1);
+      expect(text.props.ellipsizeMode).toBe("tail");
+    }
+    expect(texts[0].props.testID).toBeUndefined();
+    let nameColumn = texts[0].parent!;
+    while ((nameColumn.type as unknown) !== "View") nameColumn = nameColumn.parent!;
+    expect(StyleSheet.flatten(nameColumn.props.style).flexShrink).toBe(1);
+    expect(StyleSheet.flatten(byId(r.root, scoreGuessId(LONG_NAME)).props.style).flexShrink).toBe(1);
+    act(() => r.unmount());
   });
 });
 

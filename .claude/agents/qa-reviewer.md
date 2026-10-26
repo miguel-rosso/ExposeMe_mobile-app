@@ -15,6 +15,7 @@ Check, in this order:
 4. Protocol parity: server emits ↔ client listeners ↔ `GAME_FLOW.md` ↔ `qa/lab/bots.mjs`.
 5. Tests: would they fail without the fix? Are they deterministic (fake timers, no sleeps)? Every layer the diff touches (`Server/` → vitest, `Client/app/` → jest, protocol → both + bots scenario, user-visible flow → Maestro flow) must have a new or extended test; a touched layer without one is a **major** finding unless the fixer's `notes` justify it convincingly.
 6. Scope: unrelated changes, style mismatches, dead code, leftover console noise.
+7. Maintainability of the new/changed code: unclear names, duplicated logic that should reuse an existing helper, functions doing several things, magic numbers, logic added to an already oversized file when an obvious home exists, hacks without a follow-up. Report as **minor**, or **major** when it would make the next change in that area clearly harder or bug-prone. Don't ask for refactors of untouched code (suggest a «Limpieza:» follow-up instead).
 
 Only report problems you can point to with a file:line and a concrete failure scenario.
 

@@ -19,8 +19,14 @@
 //                           pause N of maxPauses (3 counted per game, each with a full 5 min countdown; a 4th ends the
 //                           game). A pause resumed within 10 s is refunded (the next pause repeats its number); at most
 //                           10 pauses in all per game.
+//            --drop-rounds R1,R2,...  like --drop-round, one drop at each listed round (EXP-096). With --bots 2 every
+//                           drop must pause and resume the game until the pauses are used up; the drop that would need a
+//                           4th counted pause or an 11th in all must end the game at once (game-over, no game-paused).
+//                           Pick S well away from the 10 s grace (refunded: S <= 5, counted: S >= 15).
 //   node qa/lab/bots.mjs --bots 3 --host --drop-round 2 --drop-secs 3     # drop mid-round, game goes on
 //   node qa/lab/bots.mjs --bots 2 --host --drop-round 2 --drop-secs 8     # 2 players: pause → resume
+//   node qa/lab/bots.mjs --bots 2 --host --rounds 15 --drop-rounds 1,2,3,4,5,6,7,8,9,10,11 --drop-secs 3
+//                           # 10 refunded pauses (pause 1 of 3 every time), the 11th drop ends the game
 //            --drop-on-turn the planned drop happens instead on the first your-turn from round R on, by whichever bot
 //                           gets it (--drop-bot is ignored): the photo owner drops during waiting-photo before sending
 //                           its photo and returns S seconds later. Its photo must still be played (EXP-226): it sends
@@ -97,13 +103,14 @@
 import { io } from "socket.io-client";
 import fs from "node:fs";
 import path from "node:path";
+import { percentile } from "./stats.mjs";
 
 // ── Command line ──
 // Parsed and validated before anything touches the network (EXP-197): --help and bad arguments never connect
 const BOOL_FLAGS = new Set(["host", "no-answer", "app-resync", "lobby-host-drop", "drop-on-turn", "help"]);
 const VALUE_FLAGS = new Set([
   "server", "bots", "rooms", "rounds", "wait-players", "code", "code-file", "photos", "out", "chaos", "upload-fail",
-  "timeout", "no-ready", "drop-round", "drop-secs", "drop-bot", "photo-unavailable", "plant", "play-again-linger",
+  "timeout", "no-ready", "drop-round", "drop-rounds", "drop-secs", "drop-bot", "photo-unavailable", "plant", "play-again-linger",
   "play-again-linger-bot", "start-next-game",
 ]);
 const USAGE = `usage: node qa/lab/bots.mjs [options]
@@ -116,13 +123,14 @@ Headless ExposeMe players (see the header of qa/lab/bots.mjs for every scenario)
   --host                     the first bot creates the room and starts the game
   --code CODE                join an existing room instead (6 characters, any case)
   --rooms N                  parallel rooms (load test, default 1)
-  --rounds R                 3 (QA servers only), 10, 15 or 20 (default 10)
+  --rounds R                 3 (QA servers only), 10, 15 or 20 (default 10; anything else exits 2)
   --wait-players N           host starts once N players are in (default --bots)
   --code-file FILE           write the created room code here
   --photos DIR  --out FILE   photos to upload (*.jpg) / write the summary + events as JSON
   --timeout S                give up after S seconds (default 900)
   --chaos P  --upload-fail P  --photo-unavailable P  --no-ready K  --no-answer  --plant K
-  --drop-round R --drop-secs S [--drop-bot K | --drop-on-turn]  --app-resync  --lobby-host-drop
+  --drop-round R | --drop-rounds R1,R2,...  --drop-secs S [--drop-bot K | --drop-on-turn (--drop-round only)]
+  --app-resync  --lobby-host-drop
   --play-again-linger S [--play-again-linger-bot K] [--start-next-game D]
   --help, -h                 print this help and exit (no network)
 
@@ -146,9 +154,19 @@ function parseCli(argv) {
   return { args };
 }
 
+/** "2, 5,7" -> [2, 5, 7] (ascending, no repeats), or null unless every item is a round number (integer >= 1). */
+function parseRoundList(value) {
+  const items = value.split(",").map((s) => s.trim());
+  if (!items.every((s) => /^[1-9][0-9]*$/.test(s))) return null;
+  return [...new Set(items.map(Number))].sort((a, b) => a - b);
+}
+
+/** Bad command line: say why and exit 2, before any network activity. */
+const exitUsage = (message) => { console.error(`bots.mjs: ${message} (see --help)`); process.exit(2); };
+
 const cli = parseCli(process.argv.slice(2));
 if (cli.help) { console.log(USAGE); process.exit(0); }
-if (cli.error) { console.error(`bots.mjs: ${cli.error} (see --help)`); process.exit(2); }
+if (cli.error) exitUsage(cli.error);
 const args = cli.args;
 // Room codes: 6 characters of the server's alphabet (Server/managers/roomCode.ts), typed in any case like in the app
 // (ASCII-only normalization: toUpperCase would turn "ß" into "SS", so non-ASCII input stays malformed)
@@ -156,14 +174,33 @@ const ROOM_CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
 const ROOM_CODE_RE = new RegExp(`^[${ROOM_CODE_ALPHABET}]{6}$`);
 const normalizeRoomCode = (code) => code.replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, "").replace(/[a-z]/g, (c) => c.toUpperCase());
 const FIXED_CODE = args.code ? normalizeRoomCode(args.code) : null;
-if (FIXED_CODE && !ROOM_CODE_RE.test(FIXED_CODE)) {
-  console.error(`bots.mjs: --code "${args.code}" is not a room code (6 characters, e.g. K7MQ4X; see --help)`);
-  process.exit(2);
+if (FIXED_CODE && !ROOM_CODE_RE.test(FIXED_CODE)) exitUsage(`--code "${args.code}" is not a room code (6 characters, e.g. K7MQ4X)`);
+// Round counts set-rounds accepts, as in Server/managers/RoomManager.ts (ROUND_OPTIONS, and QA_ROUNDS only with
+// ALLOW_QA_ROUNDS=1 on the server); qa/lab/tests/bots-cli.test.sh checks the copies match (EXP-203)
+const ROUND_OPTIONS = [10, 15, 20];
+const QA_ROUNDS = 3;
+const DEFAULT_ROUNDS = 10;
+if (args.rounds !== undefined && ![QA_ROUNDS, ...ROUND_OPTIONS].includes(Number(args.rounds))) {
+  exitUsage(`--rounds "${args.rounds}" is not a round count the server accepts (${QA_ROUNDS} on QA servers, ${ROUND_OPTIONS.join(", ")})`);
 }
+/** Rounds with a planned drop (EXP-096): --drop-round R is a single drop, --drop-rounds R1,R2,... one per listed round. */
+function plannedDropRounds() {
+  const single = args["drop-round"], list = args["drop-rounds"];
+  if (single !== undefined && list !== undefined) exitUsage("use --drop-round or --drop-rounds, not both");
+  if (list !== undefined) {
+    if (args["drop-on-turn"]) exitUsage("--drop-on-turn takes a single --drop-round");
+    return parseRoundList(list) ?? exitUsage(`--drop-rounds "${list}" is not a list of round numbers (e.g. 2,4,6)`);
+  }
+  if (single === undefined) return [];
+  const rounds = parseRoundList(single);
+  if (rounds?.length !== 1) exitUsage(`--drop-round "${single}" is not a round number (several drops: --drop-rounds)`);
+  return rounds;
+}
+const DROP_ROUNDS = plannedDropRounds();
 const SERVER = args.server || process.env.SERVER_URL || "http://localhost:3000";
 const N_BOTS = Number(args.bots || 3);
 const N_ROOMS = Number(args.rooms || 1);
-const ROUNDS = Number(args.rounds || 10);
+const ROUNDS = Number(args.rounds || DEFAULT_ROUNDS);
 const WAIT_PLAYERS = Number(args["wait-players"] || N_BOTS);
 const CHAOS = Number(args.chaos || 0);
 const UPLOAD_FAIL = Number(args["upload-fail"] || 0);
@@ -180,7 +217,7 @@ const pickGuess = (bot) => {
   return others[Math.floor(Math.random() * others.length)] || "";
 };
 const TIMEOUT_S = Number(args.timeout || 900);
-const DROP_ROUND = Number(args["drop-round"] || 0);
+const DROP_ROUND = DROP_ROUNDS[0] ?? 0; // --drop-on-turn: the first round whose turn triggers the drop
 const DROP_SECS = Number(args["drop-secs"] || 5);
 const DROP_BOT = Number(args["drop-bot"] || N_BOTS) - 1;
 const DROP_ON_TURN = !!args["drop-on-turn"];
@@ -197,11 +234,14 @@ const START_NEXT_GAME_S = Number(args["start-next-game"] || 0); // K = 0: the bo
 // A second game whose players all sent im-ready starts its first round ~1 s after game-started; the ready timeout is 10 s
 const NEXT_GAME_READY_MAX_MS = 8_000;
 const DISCONNECT_GRACE_MS = 15_000; // server: a player disconnected this long is gone (lobby shows it, host hands over)
+// Pause limits, as in Server/managers/GameEngine.ts (GAME_FLOW.md "Pause limit"; bots-cli.test.sh checks the copies)
+const MAX_PAUSES = 3; // counted pauses per game
+const MAX_TOTAL_PAUSES = 10; // pauses per game, counted or refunded
+const PAUSE_GRACE_MS = 10_000; // a pause resumed sooner is refunded (not counted)
 const PHOTOS = args.photos ? fs.readdirSync(args.photos).filter((f) => f.endsWith(".jpg")).map((f) => path.join(args.photos, f)) : [];
 
 const now = () => performance.timeOrigin + performance.now();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const pct = (xs, p) => (xs.length ? [...xs].sort((a, b) => a - b)[Math.min(xs.length - 1, Math.floor((p / 100) * xs.length))] : null);
 
 // /upload and /temp only answer members of the photo's room: room code + the bot's rejoin token (never logged)
 const photoAuth = (code, token) => ({ Authorization: `Bearer ${token}`, "X-Game-Code": code });
@@ -327,7 +367,7 @@ function runRoom(roomIdx, fixedCode) {
       const name = `${prefix}bot${i + 1}`;
       const isHost = !!args.host && i === 0;
       const socket = io(SERVER, { transports: ["websocket"], reconnection: true });
-      const bot = { name, socket, isHost, players: [], guess: "", round: 0, token: null, isOwner: false, plants: i < PLANT };
+      const bot = { name, socket, isHost, players: [], guess: "", round: 0, token: null, isOwner: false, plants: i < PLANT, droppedRounds: new Set() };
       bots.push(bot);
       // Second game (--play-again-linger-bot): recorded apart so the first game's checks only see the first game
       const rec = (ev, round, payload) =>
@@ -399,7 +439,7 @@ function runRoom(roomIdx, fixedCode) {
           if (args["code-file"]) fs.writeFileSync(args["code-file"], code);
           console.log(`[room ${roomIdx}] code ${code}`);
           // 3 is QA-only: the server accepts it only with ALLOW_QA_ROUNDS=1 (qa/lab/lab.sh server sets it)
-          if ([3, 10, 15, 20].includes(ROUNDS)) socket.emit("set-rounds", { gameCode: code, rounds: ROUNDS });
+          socket.emit("set-rounds", { gameCode: code, rounds: ROUNDS });
           bots.filter((b) => !b.isHost).forEach((b) => b.socket.connected && b.join());
         }
         // Like the app picking a photo to plant in the lobby: uploaded and planted at once
@@ -510,8 +550,8 @@ function runRoom(roomIdx, fixedCode) {
         // Photo access: a non-owner loads the photo like the app's <Image> (with credentials), and checks that it is
         // refused without them. Nobody knows who the owner is, so the first two bots check when it isn't theirs
         if (!bot.isOwner && i < 2) checkPhotoAccess(name, d.photo, photoAuth(code, bot.token), d.round);
-        if (DROP_ROUND && !DROP_ON_TURN && i === DROP_BOT && d.round === DROP_ROUND && !bot.dropped) {
-          bot.dropped = true;
+        if (!DROP_ON_TURN && i === DROP_BOT && DROP_ROUNDS.includes(d.round) && !bot.droppedRounds.has(d.round)) {
+          bot.droppedRounds.add(d.round);
           dropFor(DROP_SECS, d.round);
           return;
         }
@@ -636,13 +676,41 @@ function runRoom(roomIdx, fixedCode) {
   });
 }
 
+/**
+ * 2 players, planned drops in time order: each one pauses the game for the other bot and the return resumes it, until
+ * the pauses are used up (GAME_FLOW.md "Pause limit"): the drop that would need a 4th counted pause or an 11th in all
+ * ends the game at once (game-over, no game-paused). A pause shorter than PAUSE_GRACE_MS is refunded (not counted).
+ */
+function twoPlayerDropErrors(r, drops) {
+  const out = [];
+  let counted = 0, total = 0;
+  for (const [n, d] of drops.entries()) {
+    const other = r.players.find((p) => p !== d.bot);
+    const nextDropAt = drops[n + 1]?.t ?? Infinity;
+    const otherGot = (ev) => r.events.find((e) => e.bot === other && e.ev === ev && e.t > d.t && e.t < nextDropAt);
+    const paused = otherGot("game-paused");
+    if (counted >= MAX_PAUSES || total >= MAX_TOTAL_PAUSES) {
+      const used = `pauses used up (${counted}/${MAX_PAUSES} counted, ${total}/${MAX_TOTAL_PAUSES} in all)`;
+      if (paused) out.push(`round ${d.round} drop: ${used} but ${other} got game-paused ${paused.payload.pause}/${paused.payload.maxPauses}`);
+      if (!otherGot("game-over")) out.push(`round ${d.round} drop: ${used} but the game did not end for ${other}`);
+      break; // the game is over: no later drop can happen
+    }
+    if (!paused) { out.push(`2 players: ${other} never got game-paused`); continue; }
+    const resumed = otherGot("game-resumed");
+    if (!resumed) { out.push(`2 players: ${other} never got game-resumed`); continue; }
+    total++;
+    if (resumed.t - paused.t >= PAUSE_GRACE_MS) counted++;
+  }
+  return out;
+}
+
 /** Times the busiest player received `ev` (a room-wide event counted once). */
 const perBotMax = (r, ev) => Math.max(0, ...r.players.map((n) => r.events.filter((e) => e.bot === n && e.ev === ev).length));
 
 function analyse(r) {
   const consistency = [];
   // The hosted game must use the requested --rounds (a server without ALLOW_QA_ROUNDS=1 ignores set-rounds 3)
-  if (args.host && [3, 10, 15, 20].includes(ROUNDS)) {
+  if (args.host) {
     const gs = r.events.find((e) => e.ev === "game-started");
     if (gs && gs.payload?.rounds !== ROUNDS) consistency.push(`game-started with ${gs.payload?.rounds} rounds, asked for ${ROUNDS}${ROUNDS === 3 ? " (3 needs ALLOW_QA_ROUNDS=1 on the server)" : ""}`);
   }
@@ -747,11 +815,6 @@ function analyse(r) {
   const drops = r.events.filter((e) => e.ev === "planned-disconnect");
   for (const d of drops) {
     if (!r.events.some((e) => e.bot === d.bot && e.ev === "game-state" && e.t > d.t)) consistency.push(`${d.bot} rejoined without a game-state snapshot`);
-    if (r.players.length === 2) {
-      const other = r.players.find((n) => n !== d.bot);
-      if (!r.events.some((e) => e.bot === other && e.ev === "game-paused" && e.t > d.t)) consistency.push(`2 players: ${other} never got game-paused`);
-      if (!r.events.some((e) => e.bot === other && e.ev === "game-resumed" && e.t > d.t)) consistency.push(`2 players: ${other} never got game-resumed`);
-    }
     // --drop-on-turn (EXP-226): the returning owner still sends the awaited photo, and its round is not timed out
     if (d.payload?.onTurn) {
       const after = (ev) => r.events.filter((e) => e.ev === ev && e.round === d.round && e.t > d.t);
@@ -760,6 +823,7 @@ function analyse(r) {
       if (after("round-skipped").some((e) => e.payload?.reason === "timeout")) consistency.push(`round ${d.round} skipped by timeout after its owner ${d.bot} returned`);
     }
   }
+  if (r.players.length === 2) consistency.push(...twoPlayerDropErrors(r, drops));
   // Dropped turns: a connected bot drops a turn only because its request ended; the server must then ask again for
   // that round (a later your-turn) or skip it for a reason other than the 15 s timeout, or the photo was lost
   for (const e of r.events.filter((x) => x.ev === "turn-dropped" && x.payload?.connected)) {
@@ -772,7 +836,7 @@ function analyse(r) {
   // Pause N of M: every game-paused says which pause it is (the would-be number), never beyond the cap.
   // Re-sends within one pause keep the number; the next pause repeats it if the last one was refunded
   // (resumed within PAUSE_GRACE = 10 s) and is one more if it counted. Never going back.
-  const PAUSE_GRACE_MS = 10_000, GRACE_SLACK_MS = 500; // near the boundary, network latency decides: accept both
+  const GRACE_SLACK_MS = 500; // near PAUSE_GRACE_MS, network latency decides: accept both
   const lastPause = {};
   const pauseState = {}; // bot -> { number, startedAt, resumedAt }
   for (const e of r.events.filter((x) => x.ev === "game-paused" || x.ev === "game-resumed")) {
@@ -879,9 +943,9 @@ function analyse(r) {
     planted_sent: r.events.filter((e) => e.ev === "planted").length,
     planted_rounds: plantedRounds,
     skipped_unavailable: r.events.filter((e) => e.ev === "photo-unavailable-sent").length,
-    unavailable_skip_ms: { p50: pct(unavailableSkipMs, 50)?.toFixed(1), max: unavailableSkipMs.length ? Math.max(...unavailableSkipMs).toFixed(1) : null },
+    unavailable_skip_ms: { p50: percentile(unavailableSkipMs, 50)?.toFixed(1), max: unavailableSkipMs.length ? Math.max(...unavailableSkipMs).toFixed(1) : null },
     waiting_photo: perBotMax(r, "waiting-photo"),
-    waiting_photo_skew_ms: { p50: pct(waitSkews, 50)?.toFixed(1), max: waitSkews.length ? Math.max(...waitSkews).toFixed(1) : null },
+    waiting_photo_skew_ms: { p50: percentile(waitSkews, 50)?.toFixed(1), max: waitSkews.length ? Math.max(...waitSkews).toFixed(1) : null },
     disconnects: r.events.filter((e) => e.ev === "chaos-disconnect" || e.ev === "planned-disconnect").length,
     resyncs: r.events.filter((e) => e.ev === "game-state").length,
     pauses: perBotMax(r, "game-paused"),
@@ -895,9 +959,9 @@ function analyse(r) {
       const w = g2s && r.events.find((e) => e.bot === g2s.bot && e.ev === "g2-waiting-photo");
       return w ? Math.round(w.t - g2s.t) : null;
     })(),
-    skew_ms: { p50: pct(skews, 50)?.toFixed(1), p95: pct(skews, 95)?.toFixed(1), max: skews.length ? Math.max(...skews).toFixed(1) : null },
-    answer_phase_overrun_ms: { p50: pct(phaseGaps, 50)?.toFixed(1), max: phaseGaps.length ? Math.max(...phaseGaps).toFixed(1) : null },
-    upload_ms: { p50: pct(r.uploads, 50)?.toFixed(0), max: r.uploads.length ? Math.max(...r.uploads).toFixed(0) : null },
+    skew_ms: { p50: percentile(skews, 50)?.toFixed(1), p95: percentile(skews, 95)?.toFixed(1), max: skews.length ? Math.max(...skews).toFixed(1) : null },
+    answer_phase_overrun_ms: { p50: percentile(phaseGaps, 50)?.toFixed(1), max: phaseGaps.length ? Math.max(...phaseGaps).toFixed(1) : null },
+    upload_ms: { p50: percentile(r.uploads, 50)?.toFixed(0), max: r.uploads.length ? Math.max(...r.uploads).toFixed(0) : null },
     uploads_rate_limited: r.rateLimited,
     missed_events: missed, // phase events a player never received while offline (game-state resyncs them)
     consistency_errors: consistency,

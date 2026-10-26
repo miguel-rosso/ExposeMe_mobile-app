@@ -6,13 +6,9 @@
 //
 // Usage: node qa/lab/render-skew.mjs <telemetry.jsonl> <gameCode>
 import { readFileSync } from "node:fs";
+import { percentile } from "./stats.mjs";
 
 const PHASES = ["waiting-photo", "answering", "reveal", "scores"];
-
-/** Nearest-rank percentile of ascending `sorted` (p in 0..100). */
-function percentile(sorted, p) {
-  return sorted[Math.max(0, Math.ceil((p / 100) * sorted.length) - 1)];
-}
 
 /** Acks of `gameCode` from JSON lines; blank, malformed and other games' lines are skipped. */
 function parseAcks(text, gameCode) {

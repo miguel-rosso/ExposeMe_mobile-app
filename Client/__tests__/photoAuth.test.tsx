@@ -60,7 +60,7 @@ describe("PhotoComponent", () => {
     for (const s of sources(r).filter(Boolean)) expect(s).toEqual({ uri: "file:///DCIM/a.jpg" });
   });
 
-  describe("on Android (ImageBlur backdrop + blur shapes)", () => {
+  describe("on Android (blurred backdrop image)", () => {
     const originalOS = Platform.OS;
     beforeAll(() => Object.defineProperty(Platform, "OS", { configurable: true, get: () => "android" }));
     afterAll(() => Object.defineProperty(Platform, "OS", { configurable: true, get: () => originalOS }));
@@ -68,15 +68,10 @@ describe("PhotoComponent", () => {
     it("every Image of a server photo carries the auth headers", async () => {
       let r!: TestRenderer.ReactTestRenderer;
       await act(async () => { r = TestRenderer.create(<PhotoComponent photoUrl="http://s/temp/a.jpg" headers={HEADERS} />); });
-      // ImageBlur renders its blur shapes once its container has a size
-      const withLayout = r.root.findAll((n) => typeof n.type === "string" && typeof n.props.onLayout === "function");
-      expect(withLayout.length).toBeGreaterThan(0);
-      await act(async () => {
-        withLayout.forEach((c) => c.props.onLayout({ nativeEvent: { layout: { x: 0, y: 0, width: 300, height: 600 } } }));
-      });
       const images = r.root.findAll((n) => n.type === Image);
-      // Backdrop, blur shape and main photo
-      expect(images.length).toBeGreaterThanOrEqual(3);
+      // Blurred backdrop and main photo, both drawn on mount (EXP-225: no layout round trip)
+      expect(images).toHaveLength(2);
+      expect(images.filter((img) => img.props.blurRadius > 0)).toHaveLength(1);
       for (const img of images) expect(img.props.source).toEqual({ uri: "http://s/temp/a.jpg", headers: HEADERS });
       const animated = r.root.findAll((n) => n.props.source && typeof n.type !== "string" && n.type !== Image);
       for (const n of animated) expect(n.props.source).toEqual({ uri: "http://s/temp/a.jpg", headers: HEADERS });

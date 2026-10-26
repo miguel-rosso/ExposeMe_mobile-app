@@ -8,6 +8,10 @@ interface ProgressBarProps {
   onEnd?: () => void;
 }
 
+// The fill is full width, scaled horizontally from its left edge: a transform runs on the native driver, so the bar
+// costs no JS work (nor commits) per frame while the round's phases render (EXP-175, EXP-225)
+const FILL_FROM_LEFT = { transformOrigin: "left" } as const;
+
 const ProgressBar: React.FC<ProgressBarProps> = ({ duration, onEnd }) => {
   const progress = useRef(new Animated.Value(0)).current;
   const onEndRef = useRef(onEnd);
@@ -17,23 +21,13 @@ const ProgressBar: React.FC<ProgressBarProps> = ({ duration, onEnd }) => {
     Animated.timing(progress, {
       toValue: 1,
       duration: duration,
-      useNativeDriver: false,
+      useNativeDriver: true,
     }).start(({ finished }) => { if (finished) onEndRef.current?.(); });
   }, [duration]);
 
   return (
     <View style={tw`h-2 bg-gray-300 rounded-full overflow-hidden`}>
-      <Animated.View
-        style={[
-          tw`h-full bg-green-500`,
-          {
-            width: progress.interpolate({
-              inputRange: [0, 1],
-              outputRange: ["0%", "100%"],
-            }),
-          },
-        ]}
-      />
+      <Animated.View style={[tw`h-full w-full bg-green-500`, FILL_FROM_LEFT, { transform: [{ scaleX: progress }] }]} />
     </View>
   );
 };

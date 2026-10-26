@@ -67,7 +67,7 @@ describe("E2E testIDs (EXP-008)", () => {
       .join("\n");
     const unused = Object.keys(TEST_IDS).filter((k) => !sources.includes(`TEST_IDS.${k}`));
     expect(unused).toEqual([]);
-    expect(sources).toContain("playerOptionId(item.username)");
+    expect(sources).toContain("playerOptionId(username)");
     expect(sources).toContain("emojiButtonId(index)");
     expect(sources).toContain("lobbyPlayerId(item.username)");
     expect(sources).toContain("lobbyPlayerOfflineId(item.username)");

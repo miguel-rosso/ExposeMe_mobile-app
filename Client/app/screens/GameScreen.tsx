@@ -1,5 +1,8 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
-import { View, Text, TouchableOpacity, StatusBar, FlatList, BackHandler, useWindowDimensions } from "react-native";
+import {
+  View, Text, TouchableOpacity, StatusBar, FlatList, BackHandler, LayoutChangeEvent, ListRenderItemInfo,
+  useWindowDimensions,
+} from "react-native";
 import { useFocusEffect } from "expo-router";
 import tw from "twrnc";
 import { useGameContext } from "../providers/GameContext";
@@ -12,13 +15,15 @@ import { useRouter } from "expo-router";
 import getEnvVars from "@/config";
 import PhotoComponent from "@/app/components/PhotoComponent";
 import ScoreModal from "@/app/components/modals/ScoreModal";
-import { TEST_IDS, playerOptionId } from "@/app/utils/testIds";
+import { TEST_IDS } from "@/app/utils/testIds";
 import ProgressBar from "@/app/components/ProgressBar";
 import FinalScoreModal from "@/app/components/modals/FinalScoreModal";
 import WinnerModal from "@/app/components/modals/WinnerModal";
 import { getWinners } from "@/app/utils/ranking";
 import EmojiReactionLane, { EmojiReactionData } from "@/app/components/IngameComunication/EmojiReactionLane";
 import EmojisButton from "@/app/components/IngameComunication/EmojisButtons";
+import AnswerOption, { answerOptionState } from "@/app/components/AnswerOption";
+import DeferredMount from "@/app/components/DeferredMount";
 import { useI18n } from "../i18n";
 import { uploadPhoto } from "@/app/utils/uploadPhoto";
 import { photoAuthHeaders, resolvePhotoAuth } from "@/app/utils/photoAuth";
@@ -42,13 +47,8 @@ const PICK_SEND_INTERVAL = 200; // ms between submit-answer sends (server: 10 pe
 // Round progress bar strip at the top of the photo (bar plus its padding); emoji reactions start right below it
 const PROGRESS_BAR_AREA = { top: 60, height: 40 } as const;
 const REACTION_LANE_TOP = PROGRESS_BAR_AREA.top + PROGRESS_BAR_AREA.height;
-// Answer option cards: compact ones keep a 44 dp touch target (py-3 + a text-sm line) for crowded rooms. Their names
-// are cut in the middle: the end stays, so names sharing a long prefix ("Maria_01" / "Maria_02") still differ
-const OPTION_CARD = {
-  regular: { card: "p-3 mb-2", text: "text-base", ellipsize: "tail" },
-  compact: { card: "py-3 px-2 mb-1.5", text: "text-sm", ellipsize: "middle" },
-} as const;
-const OPTION_BASIS = { 2: "flex-basis-[48%]", 3: "flex-basis-[30%]" } as const;
+const answerOptionKey = (player: Player) => player.username;
+const NO_REACTIONS: EmojiReactionData[] = [];
 
 const GameScreen = () => {
   const { t } = useI18n();
@@ -74,8 +74,12 @@ const GameScreen = () => {
   const roundRef = useRef<RoundView>(initialRoundView);
   const [roundView, setRoundView] = useState<RoundView>(initialRoundView);
   const dispatchRound = (action: RoundAction) => {
+    const previousPhoto = roundRef.current.photo;
     roundRef.current = roundReducer(roundRef.current, action);
     setRoundView(roundRef.current);
+    // Reactions belong to the photo they were sent on: dropped in the same render that changes it (waiting-photo,
+    // resume, snapshot), not in an extra one after it
+    if (roundRef.current.photo !== previousPhoto) setEmojiReactions(NO_REACTIONS);
   };
   const {
     photo, round, phase, phaseDuration, phaseKey, correctAnswer, scores, mySelection, gameHeld, pressing,
@@ -145,7 +149,7 @@ const GameScreen = () => {
   const gameOverRef = useRef(false);
 
   // ── Other ────────────────────────────────────────────
-  const [emojiReactions, setEmojiReactions] = useState<EmojiReactionData[]>([]);
+  const [emojiReactions, setEmojiReactions] = useState<EmojiReactionData[]>(NO_REACTIONS);
   const [isReady, setIsReady] = useState(false);
 
   // ── Derived ──────────────────────────────────────────
@@ -395,15 +399,13 @@ const GameScreen = () => {
   }, [isReady]);
 
   const handleWinnerEnd = () => { setShowWinner(false); setShowFinalScore(true); };
-  // Reactions belong to the photo they were sent on: drop them whenever it changes (waiting-photo, resume, snapshot)
-  useEffect(() => { setEmojiReactions([]); }, [photo]);
   const removeEmoji = (id: string) => setEmojiReactions((c) => c.filter((r) => r.id !== id));
   // Top edge of the answer buttons (measured): the reaction lane ends above it
   const [answersTop, setAnswersTop] = useState<number | null>(null);
+  const onAnswersLayout = useCallback((e: LayoutChangeEvent) => setAnswersTop(e.nativeEvent.layout.y), []);
   // Denser options in crowded rooms, in a bounded area that scrolls: the photo and the timer stay visible (EXP-250)
   const { height: windowHeight } = useWindowDimensions();
   const answersLayout = answerOptionsLayout(playersProvider.length, windowHeight);
-  const optionCard = answersLayout.compact ? OPTION_CARD.compact : OPTION_CARD.regular;
   const answersListRef = useRef<FlatList<Player>>(null);
   // iOS only draws the scroll indicator while scrolling: flash it when some options are out of view
   const hintMoreAnswers = (_width: number, contentHeight: number) => {
@@ -414,38 +416,26 @@ const GameScreen = () => {
   // The options are drawn while answering and in the reveal (not in scores: the scoreboard covers the photo)
   const isReveal = phase === "reveal";
 
-  const renderPlayer = ({ item }: { item: Player }) => {
-    // The answer is only known from round-reveal on (correctAnswer); before that nobody is told whose photo it is
-    const isAnswer = item.username === correctAnswer;
-    const isSelected = item.username === mySelection;
-    const isMe = item.username === safeUsername;
-
-    // Only color YOUR selection: blue while answering, then green if correct, red if wrong
-    let bg = "bg-gray-700";
-    if (isReveal && isSelected) {
-      bg = isAnswer ? "bg-green-500" : "bg-red-500";
-    } else if (isSelected) {
-      bg = "bg-blue-500";
-    }
-
-    return (
-      <TouchableOpacity
-        testID={playerOptionId(item.username)}
-        style={tw`${optionCard.card} rounded-lg mx-1 flex-grow ${OPTION_BASIS[answersLayout.columns]} ${bg}`}
-        onPress={() => phase === "answering" && !answersClosed && item.username !== mySelection && pickGuess(item.username)}
-        disabled={isReveal || answersClosed}
-      >
-        <View style={tw`flex-row items-center justify-between`}>
-          <Text style={tw`text-white ${optionCard.text} flex-1 ${isMe ? "font-bold" : ""}`} numberOfLines={1} ellipsizeMode={optionCard.ellipsize}>
-            {item.username}
-          </Text>
-          <View style={tw`flex-row items-center`}>
-            {isMe && <Text style={tw`text-white text-xs bg-gray-600 px-1 py-0.5 rounded-full ml-1`}>{t.you}</Text>}
-          </View>
-        </View>
-      </TouchableOpacity>
-    );
+  // The options are memoised and get a stable pick handler that reads the latest state: a re-render of the screen (or
+  // a pick) only re-renders the options whose look changed (EXP-225)
+  const pickOptionRef = useRef<(username: string) => void>(() => {});
+  pickOptionRef.current = (username) => {
+    if (phase === "answering" && !answersClosed && username !== mySelection) pickGuess(username);
   };
+  const onPickOption = useCallback((username: string) => pickOptionRef.current(username), []);
+
+  const renderAnswerOption = useCallback(({ item }: ListRenderItemInfo<Player>) => (
+    <AnswerOption
+      username={item.username}
+      state={answerOptionState(item.username, { mySelection, correctAnswer, isReveal })}
+      isMe={item.username === safeUsername}
+      youLabel={t.you}
+      columns={answersLayout.columns}
+      compact={answersLayout.compact}
+      disabled={isReveal || answersClosed}
+      onPick={onPickOption}
+    />
+  ), [mySelection, correctAnswer, isReveal, safeUsername, t.you, answersLayout.columns, answersLayout.compact, answersClosed, onPickOption]);
 
   // ── Main render ──────────────────────────────────────
   return (
@@ -525,7 +515,7 @@ const GameScreen = () => {
                 {showAnswers && (
                   <View
                     style={tw`absolute z-40 bottom-22 left-0 right-0 p-2 flex-row justify-center`}
-                    onLayout={(e) => setAnswersTop(e.nativeEvent.layout.y)}
+                    onLayout={onAnswersLayout}
                   >
                     <FlatList
                       // numColumns can't change on a mounted list (players may leave mid-game): remount instead
@@ -533,8 +523,8 @@ const GameScreen = () => {
                       ref={answersListRef}
                       testID={TEST_IDS.answerOptions}
                       data={playersProvider}
-                      renderItem={renderPlayer}
-                      keyExtractor={(item) => item.username}
+                      renderItem={renderAnswerOption}
+                      keyExtractor={answerOptionKey}
                       numColumns={answersLayout.columns}
                       columnWrapperStyle={tw`justify-between`}
                       style={[tw`w-full max-w-[500px] px-2`, { maxHeight: answersLayout.maxHeight }]}
@@ -574,7 +564,10 @@ const GameScreen = () => {
               </View>
             )}
 
-            <EmojisButton />
+            {/* Not needed for the photo's first frame: mounted right after it */}
+            <DeferredMount>
+              <EmojisButton />
+            </DeferredMount>
           </>
         ) : (
           <View testID={TEST_IDS.gameWaitingReady} style={tw`flex-1 justify-center items-center`}>

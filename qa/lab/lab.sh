@@ -14,7 +14,7 @@
 #   photos [N] [--reset]        Seed N labelled photos per device gallery (default 12); idempotent: replaces the
 #                               lab's own photos, never stacks copies (--reset: wipe lab photos / iOS photo library first)
 #   build [ios|android|all]     Build dev-client binaries (slow, only when native deps change)
-#   install                     Install the last built binaries on every lab device
+#   install                     Install the last built binaries on every lab device (non-zero if any install failed)
 #   open                        Open the app on every device, pointed at local Metro
 #   shot <label>                Screenshot every device into qa/runs/<RUN_ID>/shots/<label>-<device>.png
 #   play [--bots N] [--rounds R] [--devices all|pair|ios|android|none|<label,label>] [--flow play-game] [--bot-args "..."]
@@ -23,6 +23,8 @@
 #                               (--bot-args: extra bots.mjs flags, e.g. --flow tie-game --bot-args --no-answer)
 #        [--second-room "<bots.mjs args>"]  also start a 2nd bots room; its code reaches the flows as NEW_CODE
 #        [--maestro-env KEY=VALUE]          extra Maestro variable for every device (repeatable)
+#        [--server http://localhost:P | --port P]  bots and render telemetry use that lab server (e.g. a worktree's
+#                                           own: server --port P); devices and Metro always stay on :3000
 #   bots [args]                 Run qa/lab/bots.mjs directly (headless players / load / sync metrics)
 set -euo pipefail
 
@@ -50,6 +52,7 @@ mkdir -p "$STATE"
 adbs() { "$ADB" -s "$@" </dev/null; }
 log() { printf '\033[1;36m[lab]\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31m[lab] %s\033[0m\n' "$*" >&2; exit 1; }
+warn() { printf '\033[1;33m[lab] %s\033[0m\n' "$*" >&2; }
 run_id() { echo "${RUN_ID:-$(date +%Y%m%d-%H%M%S)}"; }
 # ── Toolchain checks (sourceable: qa/lab/tests/lab-functions.test.sh) ──
 # Client commands (Metro, native builds) must run on the Node major pinned in Client/.nvmrc.
@@ -290,11 +293,13 @@ lab_photos_from() { # dir, first index: the generated photos numbered >= first i
 }
 
 # ── Android ──
-android_seed_photos() { # serial, dir, reset (0|1)
-  local serial=$1 dir=$2 reset=$3
+android_seed_photos() { # serial, dir, reset (0|1), [label for the log, default the serial]
+  local serial=$1 dir=$2 reset=$3 label=${4:-$1}
   # The folder is lab-only, so every *.jpg in it is a lab photo (also those named before the
   # exposeme-lab- prefix). adb runs the command through the device shell: the quoted * expands there
-  if [ "$reset" = 1 ]; then adbs "$serial" shell rm -rf "$ANDROID_PHOTO_DIR"
+  if [ "$reset" = 1 ]; then
+    adbs "$serial" shell rm -rf "$ANDROID_PHOTO_DIR"
+    log "$label: --reset: deleted the lab folder $ANDROID_PHOTO_DIR"
   else adbs "$serial" shell rm -f "$ANDROID_PHOTO_DIR/*.jpg"; fi
   adbs "$serial" shell mkdir -p "$ANDROID_PHOTO_DIR"
   adbs "$serial" push "$dir"/. "$ANDROID_PHOTO_DIR/" >/dev/null
@@ -321,21 +326,24 @@ check_sim_dir() { # udid
   [ -f "$SIM_DEVICES_DIR/$1/device.plist" ] || { echo "no simulator at $SIM_DEVICES_DIR/$1"; return 1; }
 }
 # These run inside $(...) where errexit is off: every step checks its own status and they print
-# the reason on failure so cmd_photos can report it
-ios_reset_photos() { # udid: wipes the simulator's whole photo library (shutdown -> delete -> boot)
-  local media
-  check_sim_dir "$1" || return 1
-  media="$(ios_media_dir "$1")"
-  xcrun simctl shutdown "$1" 2>/dev/null || true
+# the reason on failure so cmd_photos can report it (progress lines go to stderr, outside the captured reason)
+ios_reset_photos() { # udid, [label for the log, default the udid]: wipes the simulator's whole photo library (shutdown -> delete -> boot)
+  local udid=$1 label=${2:-$1} media
+  check_sim_dir "$udid" || return 1
+  media="$(ios_media_dir "$udid")"
+  log "$label: --reset: shutting down the simulator to delete its whole photo library" >&2
+  xcrun simctl shutdown "$udid" 2>/dev/null || true
   rm -rf "$media/DCIM" "$media/PhotoData" "$media/$IOS_PHOTO_MARKER" || { echo "could not delete the photo library in $media"; return 1; }
-  xcrun simctl boot "$1" || { echo "simctl boot failed after the reset"; return 1; }
-  xcrun simctl bootstatus "$1" -b >/dev/null || { echo "simulator did not finish booting after the reset"; return 1; }
+  log "$label: --reset: photo library deleted, rebooting the simulator" >&2
+  xcrun simctl boot "$udid" || { echo "simctl boot failed after the reset"; return 1; }
+  xcrun simctl bootstatus "$udid" -b >/dev/null || { echo "simulator did not finish booting after the reset"; return 1; }
+  log "$label: --reset: simulator rebooted with an empty photo library" >&2
 }
 ios_seed_photos() { # udid, dir, label, count, reset (0|1); prints what it did, or why it failed (non-zero)
   local udid=$1 dir=$2 label=$3 n=$4 reset=$5 marker seeded_label="" seeded_n=0 plan first f files=()
   check_sim_dir "$udid" || return 1
   marker="$(ios_media_dir "$udid")/$IOS_PHOTO_MARKER"
-  if [ "$reset" = 1 ]; then ios_reset_photos "$udid" || return 1; fi
+  if [ "$reset" = 1 ]; then ios_reset_photos "$udid" "$label" || return 1; fi
   [ -f "$marker" ] && read -r seeded_label seeded_n <"$marker"
   plan="$(ios_photo_plan "$seeded_label" "${seeded_n:-0}" "$label" "$n")"
   [ "${plan%% *}" = skip ] && { echo "${plan#skip }"; return 0; }
@@ -360,7 +368,7 @@ cmd_photos() {
       log "$label: $out"
     else
       generate_lab_photos "$dir" "$label" "$n" >/dev/null
-      android_seed_photos "$id" "$dir" "$reset"
+      android_seed_photos "$id" "$dir" "$reset" "$label"
       log "$label: $n photos (previous lab photos replaced)"
     fi
   done || exit 1   # a device that failed (die in the pipeline's subshell) stops the command
@@ -393,18 +401,30 @@ cmd_build() {
   return $rc
 }
 
-cmd_install() {
-  local app apk; app="$(cat "$STATE/ios-app-path" 2>/dev/null || true)"; apk="$(cat "$STATE/android-apk-path" 2>/dev/null || true)"
-  devices | while read -r d; do
-    local id; id="$(jq -r .id <<<"$d")"
-    if [ "$(jq -r .platform <<<"$d")" = ios ]; then
-      [ -d "$app" ] && xcrun simctl install "$id" "$app" && xcrun simctl privacy "$id" grant photos "$APP_ID" || true
-    else
-      [ -f "$apk" ] && adbs "$id" install -r -g "$apk" >/dev/null || true
-    fi
-    log "installed on $(jq -r .label <<<"$d")"
-  done
+# ── Install (sourceable: qa/lab/tests/lab-functions.test.sh) ──
+# One device: 0 installed, or skipped because its platform has no build yet; 1 the install command failed
+install_on_device() { # device json, iOS .app path, Android .apk path
+  local d=$1 app=$2 apk=$3 id label
+  id="$(jq -r .id <<<"$d")"; label="$(jq -r .label <<<"$d")"
+  if [ "$(jq -r .platform <<<"$d")" = ios ]; then
+    [ -n "$app" ] && [ -d "$app" ] || { warn "$label: skipped, no iOS build (run: lab.sh build ios)"; return 0; }
+    xcrun simctl install "$id" "$app" || { warn "$label: simctl install FAILED"; return 1; }
+    xcrun simctl privacy "$id" grant photos "$APP_ID" 2>/dev/null || true
+  else
+    [ -n "$apk" ] && [ -f "$apk" ] || { warn "$label: skipped, no Android build (run: lab.sh build android)"; return 0; }
+    adbs "$id" install -r -g "$apk" >/dev/null || { warn "$label: adb install FAILED"; return 1; }
+  fi
+  log "installed on $label"
+}
+
+cmd_install() { # tries every device, then exits non-zero naming those whose install failed
+  local app apk d failed=()
+  app="$(cat "$STATE/ios-app-path" 2>/dev/null || true)"; apk="$(cat "$STATE/android-apk-path" 2>/dev/null || true)"
+  while read -r d; do
+    install_on_device "$d" "$app" "$apk" || failed+=("$(jq -r .label <<<"$d")")
+  done < <(devices)
   grant_android_perms
+  [ ${#failed[@]} = 0 ] || die "install failed on: ${failed[*]}"
 }
 
 cmd_open() {
@@ -436,8 +456,8 @@ rotate_telemetry() { # file: keep only the previous server session's telemetry (
   return 0
 }
 
-print_render_skew() { # dir, room code: per-phase device render skew of that room (QA builds only) -> dir/render-skew.json
-  local file; file="$(telemetry_file)"
+print_render_skew() { # dir, room code, [server port]: per-phase render skew of that room (QA builds only) -> dir/render-skew.json
+  local file; file="$(telemetry_file "${3:-$SERVER_PORT}")"
   [ -s "$file" ] || return 0
   log "device render skew (ms, spread of qa-ack receipt across devices):"
   node "$QA/lab/render-skew.mjs" "$file" "$2" | tee "$1/render-skew.json" || true
@@ -446,6 +466,11 @@ print_render_skew() { # dir, room code: per-phase device render skew of that roo
 # ── play helpers (sourceable: qa/lab/tests/lab-play.test.sh) ──
 ROOM_CODE_TIMEOUT_S=30          # how long a bots room may take to publish its code (override: LAB_ROOM_CODE_TIMEOUT)
 MAESTRO_ENV_RE='^[A-Za-z_][A-Za-z0-9_]*='
+PORT_RE='^[1-9][0-9]{0,4}$'
+MAX_PORT=65535
+LAB_SERVER_URL_RE='^http://(localhost|127\.0\.0\.1):([1-9][0-9]{0,4})/?$'
+# A server picked inside the free-form bots.mjs flags would win over play's own (bots.mjs keeps the last --server)
+BOTS_SERVER_OVERRIDE_RE='(^|[[:space:]])--server([[:space:]=]|$)|SERVER_URL='
 PLAY_BG_PIDS=()                 # bots.mjs processes started by the current play, stopped on exit
 
 stop_play_bots() { # a bots room that already exited is fine (kill fails, set -e must not abort)
@@ -457,11 +482,28 @@ forget_bots_pid() { # pid: drop a reaped bots process so a reused PID is never s
   PLAY_BG_PIDS=(${kept[@]+"${kept[@]}"})
 }
 
-start_bots_room() { # dir, bots.mjs args...: runs bots.mjs in the background → dir/{code,bots.json,bots.log}; sets BOTS_PID
-  local dir=$1; shift; mkdir -p "$dir"
-  node "$QA/lab/bots.mjs" --photos "$RUNS/photos/bots" --out "$dir/bots.json" --code-file "$dir/code" "$@" \
+start_bots_room() { # dir, server url, bots.mjs args...: runs bots.mjs in the background → dir/{code,bots.json,bots.log}; sets BOTS_PID
+  local dir=$1 server=$2; shift 2; mkdir -p "$dir"
+  node "$QA/lab/bots.mjs" --server "$server" --photos "$RUNS/photos/bots" --out "$dir/bots.json" --code-file "$dir/code" "$@" \
     >"$dir/bots.log" 2>&1 &
   BOTS_PID=$!; PLAY_BG_PIDS+=("$BOTS_PID")
+}
+
+# play only drives local lab servers (lab.sh server [--port P]): their telemetry file is known, and QA traffic
+# never reaches production
+lab_server_port() { # --server URL | --port P: prints the port of that local lab server; returns 1 for anything else
+  local port
+  case $1 in
+    --server) [[ ${2:-} =~ $LAB_SERVER_URL_RE ]] || return 1; port=${BASH_REMATCH[2]};;
+    --port) [[ ${2:-} =~ $PORT_RE ]] || return 1; port=$2;;
+    *) return 1;;
+  esac
+  [ "$port" -le "$MAX_PORT" ] && echo "$port"
+}
+
+reject_bots_server_override() { # play option, its bots.mjs flags: dies if they pick a server themselves
+  [[ ! $2 =~ $BOTS_SERVER_OVERRIDE_RE ]] \
+    || die "$1 can't choose the bots' server (got '$2'): use play's own --server http://localhost:PORT or --port PORT"
 }
 
 wait_room_code() { # dir, label: prints the room code the bots wrote to dir/code, or dies
@@ -472,14 +514,19 @@ wait_room_code() { # dir, label: prints the room code the bots wrote to dir/code
 }
 
 cmd_play() {
-  local bots=3 rounds=10 which=all flow=play-game bot_args="" second_room="" maestro_env=()
+  local bots=3 rounds=10 which=all flow=play-game bot_args="" second_room="" maestro_env=() server_port=$SERVER_PORT
   while [ $# -gt 0 ]; do case $1 in
     --bots) bots=$2; shift 2;; --rounds) rounds=$2; shift 2;; --devices) which=$2; shift 2;; --flow) flow=$2; shift 2;;
     --bot-args) bot_args=$2; shift 2;;
     --second-room) [ $# -ge 2 ] || die "--second-room needs the bots.mjs args of the 2nd room"; second_room=$2; shift 2;;
     --maestro-env) [[ ${2:-} =~ $MAESTRO_ENV_RE ]] || die "--maestro-env needs KEY=VALUE (got '${2:-}')"
       maestro_env+=(-e "$2"); shift 2;;
+    --server|--port) server_port="$(lab_server_port "$1" "${2:-}")" \
+      || die "$1 needs a local lab server: --server http://localhost:PORT or --port PORT (got '${2:-}')"; shift 2;;
     *) die "bad arg $1";; esac; done
+  reject_bots_server_override --bot-args "$bot_args"
+  reject_bots_server_override --second-room "$second_room"
+  local server_url="http://localhost:$server_port"
   export RUN_ID; RUN_ID="$(run_id)"; local dir="$RUNS/$RUN_ID"; mkdir -p "$dir/maestro"
   local sel='.'; [ "$which" = ios ] && sel='select(.platform=="ios")'; [ "$which" = android ] && sel='select(.platform=="android")'
   [ "$which" = none ] && sel='select(false)'
@@ -492,18 +539,22 @@ cmd_play() {
   local n_dev; n_dev="$(devices | jq -c "$sel" | wc -l | tr -d ' ')"
   local total=$((bots + n_dev))
   [ "$total" -ge 2 ] || die "need at least 2 players"
-  log "RUN $RUN_ID: $bots bots + $n_dev devices, $rounds rounds"
+  log "RUN $RUN_ID: $bots bots + $n_dev devices, $rounds rounds, server $server_url"
+  if [ "$server_port" != "$SERVER_PORT" ] && [ "$n_dev" -gt 0 ]; then
+    warn "devices and Metro always use the shared server :$SERVER_PORT, so they can't join a room on :$server_port" \
+      "(their flows will fail); use --devices none to play bots only against your own server"
+  fi
   trap stop_play_bots EXIT
   # Optional 2nd room (e.g. the invite target of invite-link-after-game): its code reaches the flows as NEW_CODE.
   # It is auxiliary: it is stopped once the main run ends and its exit status does not count.
   if [ -n "$second_room" ]; then
     # shellcheck disable=SC2086 # second_room is a list of bots.mjs flags
-    start_bots_room "$dir/second-room" $second_room
+    start_bots_room "$dir/second-room" "$server_url" $second_room
     local new_code; new_code="$(wait_room_code "$dir/second-room" "second room")" || exit 1
     log "second room $new_code"; maestro_env+=(-e "NEW_CODE=$new_code")
   fi
   # shellcheck disable=SC2086 # bot_args is a list of bots.mjs flags
-  start_bots_room "$dir" --bots "$bots" --host --rounds "$rounds" --wait-players "$total" $bot_args
+  start_bots_room "$dir" "$server_url" --bots "$bots" --host --rounds "$rounds" --wait-players "$total" $bot_args
   local bots_pid=$BOTS_PID
   local code; code="$(wait_room_code "$dir" "bots")" || exit 1
   log "room $code"
@@ -523,7 +574,7 @@ cmd_play() {
   forget_bots_pid "$bots_pid"
   stop_play_bots
   node -e 'const r=require(process.argv[1]);console.log(JSON.stringify(r.summary,null,2))' "$dir/bots.json" 2>/dev/null || true
-  print_render_skew "$dir" "$code"
+  print_render_skew "$dir" "$code" "$server_port"
   [ $fail = 0 ] && log "RUN $RUN_ID PASS ($dir)" || { log "RUN $RUN_ID had failures ($dir)"; exit 1; }
 }
 

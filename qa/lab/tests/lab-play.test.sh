@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # `lab.sh play` argument parsing and Maestro env plumbing (EXP-212), with stub node/maestro and a fake devices.json:
-# no devices, servers or network. Covers --second-room (2nd bots room -> NEW_CODE) and --maestro-env KEY=VALUE.
+# no devices, servers or network. Covers --second-room (2nd bots room -> NEW_CODE), --maestro-env KEY=VALUE and
+# --server/--port (EXP-220: bots and render telemetry on a worktree's own lab server).
 # Run: qa/lab/tests/lab-play.test.sh
 set -uo pipefail
 
@@ -23,6 +24,7 @@ echo '[{"id":"FAKE-1","label":"ios-a","platform":"ios"}]' >"$DEVICES_JSON"
 cat >"$TMP/bin/node" <<'EOF'
 #!/usr/bin/env bash
 [ "$1" = -e ] && { echo "SUMMARY $(cat "$3")"; exit 0; }   # the summary print at the end of play
+[[ "$1" == *render-skew.mjs ]] && { echo "SKEW $2 $3"; exit 0; }   # print_render_skew: telemetry file, room code
 echo "$*" >>"$STUB_LOG/node.args"
 bots="" code_file="" out="" linger=0
 while [ $# -gt 0 ]; do case $1 in
@@ -98,6 +100,46 @@ for bad in "noequals" "=value" "1KEY=v" "BAD-KEY=v"; do
 done
 play r7 --bots 2 --devices ios-a --second-room; rc=$?
 [ $rc != 0 ] && ok "--second-room without a value is rejected" || ko "--second-room without a value is rejected"
+
+# ── --server / --port: bots and telemetry on another lab server (EXP-220) ──
+play r8 --bots 2 --devices ios-a
+grep -q -- "--server http://localhost:3000 " "$TMP/node.args" && ok "default: bots use the shared lab server" || ko "default: bots use :3000" "$(cat "$TMP/node.args")"
+grep -q "can't join" "$TMP/play.out" && ko "default: no devices warning" || ok "default: no devices warning"
+mkdir -p "$RUNS"; echo '{"shared":1}' >"$RUNS/telemetry.jsonl"; echo '{"own":1}' >"$RUNS/telemetry-3103.jsonl"
+play r9 --bots 2 --devices none --port 3103
+rc=$?
+[ $rc = 0 ] && completed r9 && grep -q -- "--server http://localhost:3103 " "$TMP/node.args" \
+  && ok "--port P: bots play on localhost:P" || ko "--port P: bots on localhost:P" "rc=$rc $(cat "$TMP/node.args" "$TMP/play.out")"
+grep -q "^SKEW $RUNS/telemetry-3103.jsonl ROOM2$" "$TMP/play.out" && ok "--port P: render skew read from that server's telemetry" \
+  || ko "--port P: telemetry of that server" "$(cat "$TMP/play.out")"
+grep -q "can't join" "$TMP/play.out" && ko "--devices none: no devices warning" || ok "--devices none: no devices warning"
+play r10 --bots 2 --devices ios-a --server http://localhost:3103/ --second-room "--bots 3 --host --wait-players 99"
+rc=$?
+[ $rc = 0 ] && [ "$(grep -c -- "--server http://localhost:3103 " "$TMP/node.args")" = 2 ] \
+  && ok "--server URL: main and second room on that server" || ko "--server URL: both rooms" "rc=$rc $(cat "$TMP/node.args")"
+grep -q "^SKEW $RUNS/telemetry-3103.jsonl" "$TMP/play.out" && ok "--server URL: render skew from that server's telemetry" || ko "--server URL: telemetry" "$(cat "$TMP/play.out")"
+grep -q "shared server :3000, so they can't join a room on :3103" "$TMP/play.out" \
+  && ok "--server with devices: warns that devices/Metro stay on :3000" || ko "--server with devices: warning" "$(cat "$TMP/play.out")"
+play r11 --bots 2 --devices none --server http://127.0.0.1:3104
+grep -q -- "--server http://localhost:3104 " "$TMP/node.args" && ok "--server http://127.0.0.1:P accepted" || ko "--server 127.0.0.1 accepted" "$(cat "$TMP/play.out")"
+for bad in "--server https://exposeme.onrender.com" "--server http://localhost" "--server http://10.0.0.2:3000" "--port abc" "--port 0" "--port 70000" "--server http://localhost:65536" "--port"; do
+  # shellcheck disable=SC2086 # bad is an option and its value
+  play r12 --bots 2 --devices none $bad; rc=$?
+  [ $rc != 0 ] && [ ! -s "$TMP/node.args" ] && grep -q "local lab server" "$TMP/play.out" \
+    && ok "'$bad' rejected before starting bots" || ko "'$bad' rejected" "rc=$rc $(cat "$TMP/play.out")"
+done
+play r13 --bots 2 --devices none --port 65535
+grep -q -- "--server http://localhost:65535 " "$TMP/node.args" && ok "--port 65535 accepted" || ko "--port 65535 accepted" "$(cat "$TMP/play.out")"
+# The bots.mjs flags of --bot-args / --second-room must not pick another server (bots.mjs keeps the last --server)
+for opt in --bot-args --second-room; do
+  for flags in "--no-answer --server https://exposeme.onrender.com" "--server=https://exposeme.onrender.com" "SERVER_URL=https://exposeme.onrender.com"; do
+    play r14 --bots 2 --devices none "$opt" "$flags"; rc=$?
+    [ $rc != 0 ] && [ ! -s "$TMP/node.args" ] && grep -q "use play's own --server" "$TMP/play.out" \
+      && ok "$opt '$flags' rejected before starting bots" || ko "$opt '$flags' rejected" "rc=$rc $(cat "$TMP/play.out" "$TMP/node.args" 2>/dev/null)"
+  done
+done
+play r15 --bots 2 --devices none --bot-args "--no-answer --play-again-linger-bot 0 --play-again-linger 1"
+[ $? = 0 ] && ok "--bot-args without a server still accepted" || ko "--bot-args without a server accepted" "$(cat "$TMP/play.out")"
 
 echo "# $pass passed, $fail failed"
 [ $fail = 0 ]

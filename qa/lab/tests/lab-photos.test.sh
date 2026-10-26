@@ -68,7 +68,7 @@ check "more requested -> add the missing ones" "$(ios_photo_plan ios-a 12 ios-a 
 [[ "$(ios_photo_plan ios-b 12 ios-a 12)" == "skip "*"--reset"* ]] && ok "other label -> skip, suggest --reset" || ko "other label -> skip"
 
 # ── android_seed_photos ──
-reset_log; android_seed_photos emulator-5554 "$dir" 0
+reset_log; : >"$TMP/lab.log"; android_seed_photos emulator-5554 "$dir" 0
 check "android: clears the lab folder's photos (also pre-prefix ones), before the push" "$(head -1 "$CMDS")" \
   "adb -s emulator-5554 shell rm -f /sdcard/Pictures/ExposeMeQA/*.jpg"
 check "android: pushes into the lab folder" "$(cmds_matching "push $dir/. /sdcard/Pictures/ExposeMeQA/")" "1"
@@ -76,8 +76,12 @@ check "android: media rescan last" "$(tail -1 "$CMDS")" \
   "adb -s emulator-5554 shell content call --method scan_volume --uri content://media --arg external_primary"
 check "android: no recursive delete without --reset" "$(cmds_matching 'rm -rf')" "0"
 check "android: deletes nothing outside the lab folder" "$(grep ' rm ' "$CMDS" | grep -vc '/sdcard/Pictures/ExposeMeQA')" "0"
-reset_log; android_seed_photos emulator-5554 "$dir" 1
+check "android: no --reset line without --reset" "$(grep -c -- '--reset' "$TMP/lab.log" 2>/dev/null || true)" "0"
+reset_log; android_seed_photos emulator-5554 "$dir" 1 android-a
 check "android --reset: wipes the lab folder only" "$(head -1 "$CMDS")" "adb -s emulator-5554 shell rm -rf /sdcard/Pictures/ExposeMeQA"
+# EXP-239: the deletion is reported per device
+check "android --reset: logs the deleted lab folder with the device label" "$(tail -1 "$TMP/lab.log")" \
+  "[lab] android-a: --reset: deleted the lab folder /sdcard/Pictures/ExposeMeQA"
 
 # ── udid guard ──
 udid=0A1B2C3D-0000-4000-8000-00000000000A; media="$SIM_DEVICES_DIR/$udid/data/Media"
@@ -106,13 +110,22 @@ check "ios N 12 -> 15: imports only #13-#15" "$(cat "$CMDS")" \
 check "ios N 12 -> 15: marker updated" "$(cat "$media/$IOS_PHOTO_MARKER")" "ios-a 15"
 check "ios: no simulator restart without --reset" "$(cmds_matching shutdown)" "0"
 
-reset_log; ios_seed_photos $udid "$TMP/p" ios-a 12 1 >/dev/null
+reset_log; : >"$TMP/lab.log"; ios_seed_photos $udid "$TMP/p" ios-a 12 1 >/dev/null
 check "ios --reset: shutdown, boot, wait, then import" "$(cut -d' ' -f1-3 "$CMDS" | tr '\n' ',')" \
   "xcrun simctl shutdown,xcrun simctl boot,xcrun simctl bootstatus,xcrun simctl addmedia,"
+# EXP-239: the wipe and the reboot are reported per device
+check "ios --reset: logs shutdown, deletion and reboot with the device label" "$(cat "$TMP/lab.log")" \
+"[lab] ios-a: --reset: shutting down the simulator to delete its whole photo library
+[lab] ios-a: --reset: photo library deleted, rebooting the simulator
+[lab] ios-a: --reset: simulator rebooted with an empty photo library"
 [ ! -e "$media/DCIM" ] && [ ! -e "$media/PhotoData" ] && ok "ios --reset: photo library deleted" || ko "ios --reset: photo library deleted"
 [ -e "$media/other-app-file" ] && ok "ios --reset: rest of Media kept" || ko "ios --reset: rest of Media kept"
 check "ios --reset: imports all 12 again" "$(grep -o 'exposeme-lab-ios-a-[0-9]*' "$CMDS" | wc -l | tr -d ' ')" "12"
 check "ios --reset: marker rewritten" "$(cat "$media/$IOS_PHOTO_MARKER")" "ios-a 12"
+# With lab.sh's own log (stdout) the progress lines must stay out of the captured result cmd_photos prints
+out="$( log() { printf '[lab] %s\n' "$*"; }; ios_seed_photos $udid "$TMP/p" ios-a 12 1 2>"$TMP/progress")"
+check "ios --reset: captured result is only the outcome" "$out" "added photos #1-#12"
+check "ios --reset: progress lines go to stderr" "$(grep -c -- '--reset' "$TMP/progress")" "3"
 
 # ── iOS failures: no marker, non-zero, reason printed ──
 fresh=0A1B2C3D-0000-4000-8000-00000000000B; new_sim "$fresh"; fmarker="$SIM_DEVICES_DIR/$fresh/data/Media/$IOS_PHOTO_MARKER"
@@ -121,9 +134,11 @@ XCRUN_FAIL=addmedia; out="$(ios_seed_photos $fresh "$TMP/p" ios-a 12 0)"; rc=$?
 XCRUN_FAIL=""; ios_seed_photos $fresh "$TMP/p" ios-a 12 0 >/dev/null
 check "after a failed import the next run imports everything" "$(cat "$fmarker")" "ios-a 12"
 for step in boot bootstatus; do
-  XCRUN_FAIL=$step; reset_log; out="$(ios_seed_photos $fresh "$TMP/p" ios-a 12 1)"; rc=$?
+  XCRUN_FAIL=$step; reset_log; : >"$TMP/lab.log"; out="$(ios_seed_photos $fresh "$TMP/p" ios-a 12 1)"; rc=$?
   [ $rc != 0 ] && [ ! -e "$fmarker" ] && [ "$(cmds_matching addmedia)" = 0 ] \
     && ok "--reset with failing $step -> non-zero, no import, no marker" || ko "--reset with failing $step" "rc=$rc out=$out"
+  grep -q "photo library deleted" "$TMP/lab.log" && ! grep -q "simulator rebooted" "$TMP/lab.log" \
+    && ok "--reset with failing $step: deletion logged, no reboot claimed" || ko "--reset with failing $step: log" "$(cat "$TMP/lab.log")"
 done
 XCRUN_FAIL=""
 
@@ -138,6 +153,9 @@ check "cmd_photos x2: Android clears the lab photos before each push" \
 check "cmd_photos: bot photos regenerated without leftovers" "$(ls "$RUNS/photos/bots" | tr '\n' ' ')" \
   "exposeme-lab-bot-01.jpg exposeme-lab-bot-02.jpg exposeme-lab-bot-03.jpg exposeme-lab-bot-04.jpg "
 (cmd_photos nope) 2>/dev/null && ko "cmd_photos: bad argument exits non-zero" || ok "cmd_photos: bad argument exits non-zero"
+: >"$TMP/lab.log"; (cmd_photos 4 --reset)
+grep -q "ios-b: --reset: simulator rebooted" "$TMP/lab.log" && grep -q "android-a: --reset: deleted the lab folder" "$TMP/lab.log" \
+  && ok "cmd_photos --reset: reports the wipe on every device" || ko "cmd_photos --reset: reports the wipe on every device" "$(cat "$TMP/lab.log")"
 sim3=0A1B2C3D-0000-4000-8000-00000000000D; new_sim "$sim3"
 echo "[{\"id\":\"$sim3\",\"label\":\"ios-c\",\"platform\":\"ios\"}]" >"$DEVICES_JSON"
 XCRUN_FAIL=addmedia; err="$( (cmd_photos 4) 2>&1 >/dev/null)"; rc=$?; XCRUN_FAIL=""

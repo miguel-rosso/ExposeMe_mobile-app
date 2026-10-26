@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Command line of qa/lab/bots.mjs (EXP-197): --help and bad arguments exit before any network activity (also bad
-# --rounds, EXP-203, and --drop-round/--drop-rounds, EXP-096), and the server constants it mirrors match the server.
+# --rounds, EXP-203, --drop-round/--drop-rounds, EXP-096, and --name-prefix, EXP-207), and the server constants it
+# mirrors match the server.
 # A local TCP listener stands in for the server and counts connections; nothing else is contacted.
 # Run: qa/lab/tests/bots-cli.test.sh
 set -uo pipefail
@@ -85,18 +86,53 @@ for good in "--drop-rounds 4,2,2" "--drop-rounds 7" "--drop-round 2"; do
 done
 
 # ── Server constants bots.mjs mirrors (the server is TypeScript, bots.mjs plain node) ──
-SERVER_SRC="$HERE/../../../Server/managers"
-mirrors() { # server file, bots.mjs const, server const: same initializer in both (digit separators ignored)
+SERVER_SRC="$HERE/../../../Server"
+mirrors() { # server file (from Server/), bots.mjs const, server const: same initializer in both (digit separators ignored)
   local theirs ours
-  theirs="$(sed -n "s/^export const $3 = \([^;]*\);.*/\1/p" "$SERVER_SRC/$1")"
+  theirs="$(sed -n "s/^\(export \)\{0,1\}const $3 = \([^;]*\);.*/\2/p" "$SERVER_SRC/$1")"
   ours="$(sed -n "s/^const $2 = \([^;]*\);.*/\1/p" "$BOTS")"
   [[ -n "$theirs" && "${ours//_/}" == "${theirs//_/}" ]] && ok "$2 matches the server's $3" || ko "$2 matches the server's $3" "bots=[$ours] server=[$theirs]"
 }
-mirrors RoomManager.ts ROUND_OPTIONS ROUND_OPTIONS
-mirrors RoomManager.ts QA_ROUNDS QA_ROUNDS
-mirrors GameEngine.ts MAX_PAUSES MAX_PAUSES
-mirrors GameEngine.ts MAX_TOTAL_PAUSES MAX_TOTAL_PAUSES
-mirrors GameEngine.ts PAUSE_GRACE_MS PAUSE_GRACE
+mirrors managers/RoomManager.ts ROUND_OPTIONS ROUND_OPTIONS
+mirrors managers/RoomManager.ts QA_ROUNDS QA_ROUNDS
+mirrors managers/GameEngine.ts MAX_PAUSES MAX_PAUSES
+mirrors managers/GameEngine.ts MAX_TOTAL_PAUSES MAX_TOTAL_PAUSES
+mirrors managers/GameEngine.ts PAUSE_GRACE_MS PAUSE_GRACE
+mirrors routes/socketRoutes.ts MAX_USERNAME_LENGTH MAX_USERNAME_LENGTH
+
+# ── Loopback servers only: QA traffic never leaves the machine (EXP-220) ──
+# Reserved/unresolvable hosts only, so a broken guard can't reach a real server (--timeout 1 as well)
+for bad in "http://192.0.2.1:3000" "https://example.invalid" "http://10.0.0.2:3000" "http://localhost.example.invalid:3000" \
+  "http://127.0.0.1.example.invalid:3000" "http://user@example.invalid:3000" "ftp://localhost:3000" "not-a-url"; do
+  run 2 "--server $bad exits 2" --bots 1 --host --server "$bad" --timeout 1
+  [[ "$err" == *"is not a local lab server"* ]] && ok "--server $bad is named" || ko "--server $bad is named" "$err"
+done
+out="$(SERVER_URL="http://192.0.2.1:3000" node "$BOTS" --bots 1 --host --timeout 1 2>&1 >/dev/null)"; rc=$?
+[ "$rc" = 2 ] && [[ "$out" == *'(from $SERVER_URL) is not a local lab server'* ]] && ok "non-loopback \$SERVER_URL exits 2" || ko "non-loopback \$SERVER_URL exits 2" "rc=$rc $out"
+for good in "http://localhost:$PORT" "http://127.0.0.1:$PORT/"; do
+  SERVER_URL="$URL" node "$BOTS" --bots 1 --host --server "$good" --timeout 1 >/dev/null 2>"$TMP/err"; rc=$?
+  [[ "$rc" != 2 ]] && ok "--server $good is accepted" || ko "--server $good is accepted" "$(cat "$TMP/err")"
+done
+
+# ── --name-prefix: two bots processes in one room without name clashes (EXP-207) ──
+# (--timeout 1 everywhere: a value wrongly accepted must not keep the test waiting for a game)
+for bad in "a b" "bot!" "é-" ""; do
+  run 2 "--name-prefix '$bad' exits 2" --bots 2 --code K7MQ4X --name-prefix "$bad" --timeout 1
+done
+[[ "$err" == *"--name-prefix"* ]] && ok "bad --name-prefix is named" || ko "bad --name-prefix is named" "$err"
+run 2 "--name-prefix that makes a name longer than the server's 20 exits 2" --bots 12 --code K7MQ4X --name-prefix abcdefghijklmnop --timeout 1
+[[ "$err" == *'"abcdefghijklmnopbot12" exceeds the server'* ]] && ok "too long --name-prefix names the longest bot" || ko "too long --name-prefix named" "$err"
+# 13 + "r10-" + "bot2" = 21 characters
+run 2 "--name-prefix length counts the room prefix of --rooms" --bots 2 --host --rooms 11 --name-prefix abcdefghijklm --timeout 1
+# The longest accepted: 15 + "bot12" and 12 + "r10-" + "bot2" = 20 characters
+for good in "--bots 12 --code K7MQ4X --name-prefix abcdefghijklmno" "--bots 2 --host --rooms 11 --name-prefix abcdefghijkl"; do
+  # shellcheck disable=SC2086
+  SERVER_URL="$URL" node "$BOTS" $good --timeout 1 >/dev/null 2>"$TMP/err"; rc=$?
+  [[ "$rc" != 2 ]] && ok "20-character names are accepted ($good)" || ko "20-character names accepted ($good)" "$(cat "$TMP/err")"
+done
+SERVER_URL="$URL" node "$BOTS" --bots 2 --code K7MQ4X --name-prefix b_2- --timeout 1 >/dev/null 2>"$TMP/err"; rc=$?
+[[ "$rc" != 2 ]] && ok "--name-prefix b_2- is accepted" || ko "--name-prefix b_2- is accepted" "$(cat "$TMP/err")"
+[[ "$(node "$BOTS" --help)" == *"--name-prefix P"* ]] && ok "--help lists --name-prefix" || ko "--help lists --name-prefix"
 
 # ── --drop-on-turn is a known flag (EXP-226) ──
 SERVER_URL="$URL" node "$BOTS" --bots 2 --host --drop-round 1 --drop-secs 3 --drop-on-turn --timeout 1 >/dev/null 2>"$TMP/err"; rc=$?

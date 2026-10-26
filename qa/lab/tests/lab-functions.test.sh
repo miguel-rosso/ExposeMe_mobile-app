@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Unit tests for the toolchain helpers in qa/lab/lab.sh (no devices, builds or network).
+# Unit tests for the toolchain helpers and `install` in qa/lab/lab.sh (no devices, builds or network).
 # Run: qa/lab/tests/lab-functions.test.sh
 set -uo pipefail
 
@@ -89,6 +89,38 @@ pods_stale "$ios" && ok "JS-only package.json bump -> stale" || ko "JS-only pack
 pods_mark_installed "$ios"
 pods_stale "$ios" && ko "after install stamp -> not stale" "re-runs pod install forever" || ok "after install stamp -> not stale"
 cmp -s "$ios/Podfile.lock" "$ios/Pods/Manifest.lock" && ok "stamp keeps Manifest.lock content" || ko "stamp keeps Manifest.lock content"
+
+# ── cmd_install: a failed install is reported and fails the command, the other devices still get it (EXP-098) ──
+STATE="$TMP/state"; DEVICES_JSON="$TMP/devices.json"; CMDS="$TMP/install-cmds.log"; mkdir -p "$STATE"
+FAIL_ON=""   # device ids whose install the stubs make fail
+xcrun() { echo "xcrun $*" >>"$CMDS"; ! { [ "$2" = install ] && [[ " $FAIL_ON " == *" $3 "* ]]; }; }
+adbs() { echo "adb -s $*" >>"$CMDS"; ! { [ "$2" = install ] && [[ " $FAIL_ON " == *" $1 "* ]]; }; }
+mkdir -p "$TMP/build/ExposeMe.app"; : >"$TMP/build/app-debug.apk"
+echo "$TMP/build/ExposeMe.app" >"$STATE/ios-app-path"; echo "$TMP/build/app-debug.apk" >"$STATE/android-apk-path"
+cat >"$DEVICES_JSON" <<'EOF'
+[{"id":"SIM-A","label":"ios-a","platform":"ios"},{"id":"SIM-B","label":"ios-b","platform":"ios"},
+ {"id":"emulator-5554","label":"android-a","platform":"android"},{"id":"emulator-5556","label":"android-b","platform":"android"}]
+EOF
+run_install() { : >"$CMDS"; out="$( (set -euo pipefail; cmd_install) 2>&1)"; rc=$?; } # sets out, rc
+
+run_install
+[ $rc = 0 ] && [ "$(grep -c "installed on" <<<"$out")" = 4 ] && ok "install: all succeed -> exit 0, every device reported" || ko "install: all succeed" "rc=$rc $out"
+
+FAIL_ON="SIM-B emulator-5554"; run_install
+[ $rc != 0 ] && ok "install: a failed install -> non-zero exit" || ko "install: a failed install -> non-zero exit" "rc=$rc"
+! grep -q "installed on ios-b" <<<"$out" && ! grep -q "installed on android-a" <<<"$out" \
+  && ok "install: failed devices are not reported as installed" || ko "install: failed devices not reported installed" "$out"
+grep -q "ios-b: simctl install FAILED" <<<"$out" && grep -q "android-a: adb install FAILED" <<<"$out" \
+  && ok "install: each failure is named per device" || ko "install: each failure named" "$out"
+grep -q "installed on ios-a" <<<"$out" && grep -q "installed on android-b" <<<"$out" \
+  && [ "$(grep -c ' install ' "$CMDS")" = 4 ] && ok "install: keeps going with the other devices" || ko "install: keeps going" "$out"
+[[ "$(tail -1 <<<"$out")" == *"install failed on: ios-b android-a"* ]] && ok "install: final line lists the failed devices" || ko "install: final summary" "$out"
+grep -q "pm grant" "$CMDS" && ok "install: Android permissions granted despite a failure" || ko "install: permissions granted despite a failure"
+grep -q "privacy SIM-B" "$CMDS" && ko "install: no photo grant on a failed iOS install" || ok "install: no photo grant on a failed iOS install"
+
+FAIL_ON=""; rm "$STATE/android-apk-path"; run_install
+[ $rc = 0 ] && grep -q "android-a: skipped, no Android build" <<<"$out" && ! grep -q "installed on android" <<<"$out" \
+  && [ "$(grep -c "adb -s .* install " "$CMDS")" = 0 ] && ok "install: no Android build -> skipped, not reported installed" || ko "install: no Android build -> skipped" "rc=$rc $out"
 
 echo "# $pass passed, $fail failed"
 [ $fail = 0 ]

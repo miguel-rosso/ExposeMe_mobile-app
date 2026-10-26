@@ -7,6 +7,7 @@
 //   node qa/lab/bots.mjs --bots 4 --host --rounds 10 --wait-players 6 --code-file /tmp/code
 //   node qa/lab/bots.mjs --bots 3 --code K7MQ4X          # join an existing room (code in any case)
 //   node qa/lab/bots.mjs --rooms 20 --bots 4 --host       # load: 20 parallel rooms
+//   node qa/lab/bots.mjs --bots 2 --code K7MQ4X --name-prefix b-   # 2nd process in a room: names b-bot1, b-bot2
 //            (all bots share one IP: use a server started by lab.sh, which lifts the per-IP socket limits)
 //   --help prints the options (no network); unknown options exit 2. The server in use is printed at start.
 //   options: --server URL  --photos DIR  --out FILE  --chaos 0.1  --upload-fail 0.2  --timeout 600
@@ -111,18 +112,21 @@ const BOOL_FLAGS = new Set(["host", "no-answer", "app-resync", "lobby-host-drop"
 const VALUE_FLAGS = new Set([
   "server", "bots", "rooms", "rounds", "wait-players", "code", "code-file", "photos", "out", "chaos", "upload-fail",
   "timeout", "no-ready", "drop-round", "drop-rounds", "drop-secs", "drop-bot", "photo-unavailable", "plant", "play-again-linger",
-  "play-again-linger-bot", "start-next-game",
+  "play-again-linger-bot", "start-next-game", "name-prefix",
 ]);
 const USAGE = `usage: node qa/lab/bots.mjs [options]
 
 Headless ExposeMe players (see the header of qa/lab/bots.mjs for every scenario).
 
   --server URL               server to play against (default: $SERVER_URL, else http://localhost:3000,
-                             the SHARED lab server: pass your own when you run your own server)
+                             the SHARED lab server: pass your own when you run your own server);
+                             loopback hosts only (localhost, 127.x, [::1]), anything else exits 2
   --bots N                   bots per room (default 3)
   --host                     the first bot creates the room and starts the game
   --code CODE                join an existing room instead (6 characters, any case)
   --rooms N                  parallel rooms (load test, default 1)
+  --name-prefix P            prepend P to every bot name (letters, digits, "-", "_"), so a second bots process can
+                             join the same room (--code) without name clashes, e.g. --name-prefix b-  ->  b-bot1
   --rounds R                 3 (QA servers only), 10, 15 or 20 (default 10; anything else exits 2)
   --wait-players N           host starts once N players are in (default --bots)
   --code-file FILE           write the created room code here
@@ -198,8 +202,34 @@ function plannedDropRounds() {
 }
 const DROP_ROUNDS = plannedDropRounds();
 const SERVER = args.server || process.env.SERVER_URL || "http://localhost:3000";
+// QA traffic never leaves this machine (no production, no other hosts): only loopback servers, like lab.sh server's
+const isLoopbackHost = (host) => host === "localhost" || host === "[::1]" || /^127(\.\d{1,3}){3}$/.test(host);
+const isLocalServerUrl = (url) => {
+  try {
+    const u = new URL(url);
+    return (u.protocol === "http:" || u.protocol === "https:") && isLoopbackHost(u.hostname);
+  } catch {
+    return false;
+  }
+};
+if (!isLocalServerUrl(SERVER)) {
+  exitUsage(`server "${SERVER}"${args.server ? "" : " (from $SERVER_URL)"} is not a local lab server: bots only play against localhost / 127.x / [::1]`);
+}
 const N_BOTS = Number(args.bots || 3);
 const N_ROOMS = Number(args.rooms || 1);
+// Bot names: [--name-prefix][r<room>- with --rooms > 1]bot<n>. The server refuses longer usernames
+// (Server/routes/socketRoutes.ts; qa/lab/tests/bots-cli.test.sh checks the copy matches)
+const MAX_USERNAME_LENGTH = 20;
+const NAME_PREFIX_RE = /^[A-Za-z0-9_-]+$/;
+const NAME_PREFIX = args["name-prefix"] ?? "";
+const botName = (roomIdx, i) => `${NAME_PREFIX}${N_ROOMS > 1 ? `r${roomIdx}-` : ""}bot${i + 1}`;
+if (args["name-prefix"] !== undefined) {
+  if (!NAME_PREFIX_RE.test(NAME_PREFIX)) exitUsage(`--name-prefix "${NAME_PREFIX}" may only use letters, digits, "-" and "_"`);
+  const longest = botName(N_ROOMS - 1, N_BOTS - 1);
+  if (longest.length > MAX_USERNAME_LENGTH) {
+    exitUsage(`--name-prefix "${NAME_PREFIX}" is too long: "${longest}" exceeds the server's ${MAX_USERNAME_LENGTH}-character usernames`);
+  }
+}
 const ROUNDS = Number(args.rounds || DEFAULT_ROUNDS);
 const WAIT_PLAYERS = Number(args["wait-players"] || N_BOTS);
 const CHAOS = Number(args.chaos || 0);
@@ -329,7 +359,6 @@ async function uploadPhoto(label, auth) {
 
 function runRoom(roomIdx, fixedCode) {
   return new Promise((resolve) => {
-    const prefix = N_ROOMS > 1 ? `r${roomIdx}-` : "";
     const events = []; // {bot, ev, round, t, payload}
     const errors = [];
     const uploads = [];
@@ -364,7 +393,7 @@ function runRoom(roomIdx, fixedCode) {
     };
 
     const makeBot = (i) => {
-      const name = `${prefix}bot${i + 1}`;
+      const name = botName(roomIdx, i);
       const isHost = !!args.host && i === 0;
       const socket = io(SERVER, { transports: ["websocket"], reconnection: true });
       const bot = { name, socket, isHost, players: [], guess: "", round: 0, token: null, isOwner: false, plants: i < PLANT, droppedRounds: new Set() };

@@ -130,8 +130,13 @@ After last round: game-over
 - Limits: at most **5 `join-create-game` per socket in any 10 s** (excess answered with
   `{ success: false, message: "Too many attempts" }`), and at most **5000 rooms** in memory (`MAX_ROOMS`;
   creating beyond it answers `"Server is busy"`, joining existing rooms still works).
-- **Room codes** are 6 digits drawn with `crypto.randomInt` (not predictable from earlier codes). A code that
-  matches no room (or a non-string code) answers `"Game not found"` and counts against the sender's **IP**: after
+- **Room codes** are 6 characters from the 31-symbol alphabet `23456789ABCDEFGHJKMNPQRSTUVWXYZ` (uppercase
+  alphanumerics without the look-alikes 0/O and 1/I/L, ≈ 8.9e8 codes; e.g. `K7MQ4X`), each drawn with
+  `crypto.randomInt` (not predictable from earlier codes) and unique among live rooms (`Server/managers/roomCode.ts`;
+  the app uses the same alphabet in `Client/app/utils/roomCode.ts`). An incoming code is trimmed and uppercased, ASCII
+  only (surrounding spaces/tabs/newlines, `a-z` → `A-Z`), so `" k7mq4x "` joins `K7MQ4X`; any non-ASCII character
+  (e.g. `ß`, `ſ`, full-width digits, which a Unicode uppercase would turn into code letters) leaves it malformed; `gameCode` null or `""` creates a room instead. A code that is malformed after that
+  (wrong length or a character outside the alphabet), matches no room, or is not a string answers `"Game not found"` and counts against the sender's **IP**: after
   **30 misses in any 60 s** (env `JOIN_MISS_MAX` / `JOIN_MISS_WINDOW_MS`) every join with a code from that IP answers
   `"Too many attempts"` whether the code exists or not, until the window clears. Exceptions: a rejoin with the
   matching `rejoinToken` (a reconnecting player is never locked out), and a join to a room that already has a
@@ -424,4 +429,7 @@ Every response carries security headers: `Content-Security-Policy: default-src '
 base-uri 'none'; form-action 'none'`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
 `Referrer-Policy: no-referrer`, `Cross-Origin-Resource-Policy: same-site` (browsers only; React Native image loads
 are unaffected), `Strict-Transport-Security: max-age=15552000`, and no `X-Powered-By`. The `/join/<code>` invite page
-overrides the CSP to allow its inline style and only its inline script, by a per-response nonce.
+(the link the app shares) accepts a code in any case, normalizes it like a join (trim, uppercase) and answers **400**
+`Invalid game code` when it is malformed; a valid one gets a page that opens
+`myapp://screens/WaitingRoom?code=<CODE>` (canonical uppercase code; the app normalizes the `code` parameter again
+and ignores a malformed one). It overrides the CSP to allow its inline style and only its inline script, by a per-response nonce.

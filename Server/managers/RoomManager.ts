@@ -1,6 +1,7 @@
-import { randomBytes, randomInt, timingSafeEqual } from "crypto";
+import { randomBytes, timingSafeEqual } from "crypto";
 import { Player, PublicPlayer, Room, SafeRoom } from "../models/interfaces";
 import { uploadStore } from "../middlewares/uploadStore";
+import { randomRoomCode } from "./roomCode";
 
 const ROOM_CLEANUP_DELAY = 30 * 60 * 1000;
 /** Cleanup delay for rooms that never had a second player (created and abandoned). */
@@ -276,8 +277,7 @@ export class RoomManager {
 
   private generateRoomCode(): string {
     let code: string;
-    // CSPRNG: codes must not be predictable from earlier ones (6 digits, as the app shows them)
-    do { code = randomInt(100000, 1000000).toString(); } while (this.rooms.has(code));
+    do { code = randomRoomCode(); } while (this.rooms.has(code)); // unique among live rooms
     return code;
   }
 

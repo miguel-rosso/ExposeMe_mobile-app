@@ -26,12 +26,12 @@ appId: com.socketNull.ExposeMe
 - tapOn:
     id: "join-game-button"
 # The field keeps the last code entered/created in this session (GameContext gameCode) and a tap puts the
-# cursor mid-text, so eraseText alone leaves digits after it: double tap selects the whole number first
+# cursor mid-text, so eraseText alone leaves characters after it: double tap selects the whole code first
 - runFlow:
     when:
       visible:
         id: "game-code-input"
-        text: "[0-9]+"
+        text: "[A-Z0-9]+"
     commands:
       - doubleTapOn:
           id: "game-code-input"
@@ -39,12 +39,9 @@ appId: com.socketNull.ExposeMe
 - tapOn:
     id: "game-code-input"
 - inputText: ${GAME_CODE}
-# number-pad: Enter submits/blurs on Android; on iOS the search button stays above the shorter number pad
-- runFlow:
-    when:
-      platform: Android
-    commands:
-      - pressKey: Enter
+# Codes are alphanumeric (letters keyboard, typed in any case): the full keyboard can cover the search button,
+# so submit to close it first (Enter blurs the field on both platforms; hideKeyboard is unsafe, see above)
+- pressKey: Enter
 - tapOn:
     id: "search-room-button"
 # Lobby (guest or host) or already in the game

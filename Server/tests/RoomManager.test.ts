@@ -16,9 +16,9 @@ afterEach(() => {
 });
 
 describe("createRoom", () => {
-  it("creates a lobby room with a 6-digit code and the creator as host", () => {
+  it("creates a lobby room with a 6-character code and the creator as host", () => {
     const room = rm.createRoom("alice", "sock-alice");
-    expect(room.gameCode).toMatch(/^\d{6}$/);
+    expect(room.gameCode).toMatch(/^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$/);
     expect(room).toMatchObject({ rounds: 10, started: false, round: 0, phase: null, held: false, currentPlayer: null });
     expect(room.players).toEqual([
       { username: "alice", socketId: "sock-alice", isHost: true, isReady: false, connected: true, points: 0, lastAnswerCorrect: false, lastGuess: "", rejoinToken: expect.any(String) },

@@ -47,6 +47,15 @@ run 2 "value swallowed by the next option exits 2" --server --host
 run 2 "stray positional exits 2" --host 3
 [[ "$err" == *'unexpected argument "3"'* ]] && ok "stray positional is named" || ko "stray positional is named" "$err"
 
+# ── --code: a room code (6 characters of the server's alphabet, any case) (EXP-198) ──
+run 2 "numeric --code exits 2" --bots 1 --code 123456
+[[ "$err" == *'--code "123456" is not a room code'* ]] && ok "malformed --code is named" || ko "malformed --code is named" "$err"
+run 2 "short --code exits 2" --bots 1 --code K7MQ4
+run 2 "non-ASCII --code exits 2 (no ß → SS alias)" --bots 1 --code "K7MQß"
+SERVER_URL="$URL" node "$BOTS" --bots 1 --code k7mq4x --timeout 1 >/dev/null 2>"$TMP/err"
+err="$(cat "$TMP/err")"
+[[ "$err" != *"not a room code"* ]] && ok "lowercase --code is accepted" || ko "lowercase --code is accepted" "$err"
+
 # ── A valid run says which server it uses before connecting ──
 SERVER_URL="$URL" node "$BOTS" --bots 1 --host --timeout 1 >/dev/null 2>"$TMP/err"
 err="$(cat "$TMP/err")"

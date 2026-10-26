@@ -5,7 +5,7 @@
 // the same phase event, and whether every player saw the same game.
 //
 //   node qa/lab/bots.mjs --bots 4 --host --rounds 10 --wait-players 6 --code-file /tmp/code
-//   node qa/lab/bots.mjs --bots 3 --code 123456          # join an existing room
+//   node qa/lab/bots.mjs --bots 3 --code K7MQ4X          # join an existing room (code in any case)
 //   node qa/lab/bots.mjs --rooms 20 --bots 4 --host       # load: 20 parallel rooms
 //            (all bots share one IP: use a server started by lab.sh, which lifts the per-IP socket limits)
 //   --help prints the options (no network); unknown options exit 2. The server in use is printed at start.
@@ -105,7 +105,7 @@ Headless ExposeMe players (see the header of qa/lab/bots.mjs for every scenario)
                              the SHARED lab server: pass your own when you run your own server)
   --bots N                   bots per room (default 3)
   --host                     the first bot creates the room and starts the game
-  --code CODE                join an existing room instead
+  --code CODE                join an existing room instead (6 characters, any case)
   --rooms N                  parallel rooms (load test, default 1)
   --rounds R                 3 (QA servers only), 10, 15 or 20 (default 10)
   --wait-players N           host starts once N players are in (default --bots)
@@ -141,6 +141,16 @@ const cli = parseCli(process.argv.slice(2));
 if (cli.help) { console.log(USAGE); process.exit(0); }
 if (cli.error) { console.error(`bots.mjs: ${cli.error} (see --help)`); process.exit(2); }
 const args = cli.args;
+// Room codes: 6 characters of the server's alphabet (Server/managers/roomCode.ts), typed in any case like in the app
+// (ASCII-only normalization: toUpperCase would turn "ß" into "SS", so non-ASCII input stays malformed)
+const ROOM_CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+const ROOM_CODE_RE = new RegExp(`^[${ROOM_CODE_ALPHABET}]{6}$`);
+const normalizeRoomCode = (code) => code.replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, "").replace(/[a-z]/g, (c) => c.toUpperCase());
+const FIXED_CODE = args.code ? normalizeRoomCode(args.code) : null;
+if (FIXED_CODE && !ROOM_CODE_RE.test(FIXED_CODE)) {
+  console.error(`bots.mjs: --code "${args.code}" is not a room code (6 characters, e.g. K7MQ4X; see --help)`);
+  process.exit(2);
+}
 const SERVER = args.server || process.env.SERVER_URL || "http://localhost:3000";
 const N_BOTS = Number(args.bots || 3);
 const N_ROOMS = Number(args.rooms || 1);
@@ -850,7 +860,7 @@ function analyse(r) {
 // Which server this run plays against (the default is the shared lab server: say so before connecting)
 console.error(`bots.mjs: server ${SERVER}${args.server ? "" : process.env.SERVER_URL ? " (from $SERVER_URL)" : " (default: the shared lab server; pass --server for your own)"}`);
 const t0 = Date.now();
-const results = await Promise.all(Array.from({ length: N_ROOMS }, (_, i) => runRoom(i, args.code || null)));
+const results = await Promise.all(Array.from({ length: N_ROOMS }, (_, i) => runRoom(i, FIXED_CODE)));
 const rooms = results.map(analyse);
 const summary = {
   server: SERVER,

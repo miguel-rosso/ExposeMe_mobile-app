@@ -55,6 +55,9 @@ function join(sock: ClientSocket, gameCode: string | null, username: string, rej
   return res;
 }
 
+/** A well-formed room code that is not `gameCode` (no other room exists in these tests). */
+const otherCode = (gameCode: string) => (gameCode === "ZZZZZZ" ? "YYYYYY" : "ZZZZZZ");
+
 /** `n` joins with an unknown code, one fresh socket each (a socket records one miss per few seconds). */
 async function missFrom(n: number, wrong: string): Promise<string[]> {
   const answers: string[] = [];
@@ -133,7 +136,7 @@ describe("per-IP socket limits (EXP-164)", () => {
     const alice = await newClient();
     const created = await join(alice, null, "alice");
     const gameCode = created.room!.gameCode;
-    const wrong = gameCode === "100000" ? "100001" : "100000";
+    const wrong = otherCode(gameCode);
     // alice is gone: her room has nobody connected on this IP, so no same-network exemption
     alice.disconnect();
     await sleep(100);
@@ -178,7 +181,7 @@ describe("join lock: same-network exemption limits (EXP-164)", () => {
     const alice = await newClient();
     const created = await join(alice, null, "alice");
     const gameCode = created.room!.gameCode;
-    const wrong = gameCode === "100000" ? "100001" : "100000";
+    const wrong = otherCode(gameCode);
     expect(await missFrom(6, wrong)).toEqual(Array(6).fill("Game not found"));
     return { gameCode, wrong, token: created.rejoinToken! };
   }
@@ -208,7 +211,7 @@ describe("join lock per IPv6 /48 (EXP-183)", () => {
     const alice = await newClient();
     const created = await join(alice, null, "alice");
     const gameCode = created.room!.gameCode;
-    const wrong = gameCode === "100000" ? "100001" : "100000";
+    const wrong = otherCode(gameCode);
 
     // 8 misses (JOIN_MISS_PREFIX_MAX), each from a different /64 of 2001:db8:100::/48: each /64 is far under its own
     // limit (6), the /48 is full
@@ -237,13 +240,18 @@ describe("no answered guess without a recorded miss (EXP-183)", () => {
     const gameCode = (await join(host, null, "host")).room!.gameCode;
     host.disconnect();
     await sleep(100);
+    // Well-formed codes of rooms that don't exist (only gameCode's room does)
+    const ALPHABET_DIGITS = "23456789";
+    const wrongCode = (s: number, j: number) => {
+      const code = `ZZZZ${ALPHABET_DIGITS[s]}${ALPHABET_DIGITS[j]}`;
+      return code === gameCode ? `YYYY${ALPHABET_DIGITS[s]}${ALPHABET_DIGITS[j]}` : code;
+    };
     let notFound = 0;
     for (let s = 0; s < 4; s++) {
       const sock = await newClient();
       for (let j = 0; j < 5; j++) {
-        // Wrong codes (never issued: codes are 100000-999999) around the real one: the cooldown answer must not
-        // depend on whether the code exists
-        const code = j === 2 ? gameCode : `0000${s}${j}`;
+        // Wrong codes around the real one: the cooldown answer must not depend on whether the code exists
+        const code = j === 2 ? gameCode : wrongCode(s, j);
         const res = await join(sock, code, `u${s}${j}`);
         if (res.message === "Game not found") notFound++;
         if (code === gameCode) expect(res).toEqual({ success: false, message: "Too many attempts" });
@@ -254,6 +262,35 @@ describe("no answered guess without a recorded miss (EXP-183)", () => {
     expect(notFound).toBe(4);
     expect(joinMisses.count("10.0.0.6")).toBe(notFound);
   });
+});
+
+describe("room code format (EXP-198)", () => {
+  let malformedIp = 0; // one IP per malformed code, so each starts with no misses
+  it("joins with the code typed in lowercase and with surrounding spaces", async () => {
+    clientIp = "10.0.0.7";
+    const host = await newClient();
+    const gameCode = (await join(host, null, "host")).room!.gameCode;
+    const lower = await join(await newClient(), gameCode.toLowerCase(), "bob");
+    expect(lower.success).toBe(true);
+    expect(lower.room!.gameCode).toBe(gameCode);
+    expect((await join(await newClient(), `  ${gameCode} `, "carl")).success).toBe(true);
+    expect(joinMisses.count("10.0.0.7")).toBe(0);
+  });
+
+  // Non-ASCII ones would alias real codes with String#toUpperCase ("ß" → "SS", "ſ" → "S", "ﬀ" → "FF")
+  it.each(["123456", "OOOOOO", "ABCDE", "ABCDEFG", "AB CDE", "   ", "K7MQß", "K7MQ4ſ", "K7MQﬀ", "Ｋ７ＭＱ４Ｘ"])(
+    "answers a malformed code %j with 'Game not found' and counts it as a miss, without looking it up", async (code) => {
+      clientIp = `10.0.1.${++malformedIp}`;
+      const lookups = vi.spyOn(roomManager, "getRoom");
+      try {
+        expect(await join(await newClient(), code, "mallory")).toEqual({ success: false, message: "Game not found" });
+        expect(lookups).not.toHaveBeenCalled();
+      } finally {
+        lookups.mockRestore();
+      }
+      expect(joinMisses.count(clientIp)).toBe(1);
+    },
+  );
 });
 
 describe("emoji-reaction (EXP-166)", () => {

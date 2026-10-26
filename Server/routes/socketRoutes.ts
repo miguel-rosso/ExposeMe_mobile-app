@@ -2,6 +2,7 @@ import { Socket } from "socket.io";
 import { io } from "../app";
 import { isAllowedRounds, RoomManager } from "../managers/RoomManager";
 import { GameEngine } from "../managers/GameEngine";
+import { isRoomCode, normalizeRoomCode } from "../managers/roomCode";
 import { acceptsPlantedPhoto, setUploadRooms } from "../middlewares/uploadAccess";
 import { uploadStore } from "../middlewares/uploadStore";
 import { createSlidingWindow } from "../middlewares/rateLimit";
@@ -176,18 +177,18 @@ io.on("connection", (socket: Socket) => {
       joinAttempts.push(now);
 
       const username = data?.username;
-      let gameCode = data?.gameCode;
+      const rawCode = data?.gameCode;
       if (typeof username !== "string" || !username.trim() || username.length > MAX_USERNAME_LENGTH) {
         socket.emit("room-of-game", { success: false, message: "Invalid username" });
         return;
       }
-      if (gameCode != null && typeof gameCode !== "string") {
+      if (rawCode != null && typeof rawCode !== "string") {
         recordMiss();
         socket.emit("room-of-game", { success: false, message: "Game not found" });
         return;
       }
-
-      if (gameCode) gameCode = gameCode.toUpperCase();
+      // No code (null/"") creates a room; any other string is a code to join, typed in any case
+      const gameCode = rawCode ? normalizeRoomCode(rawCode) : null;
 
       // One socket = one player in one room. The same live socket re-sending join for the room and username
       // it already owns (WaitingRoom effect re-run, duplicate join) is a no-op. Reconnects and "Play again"
@@ -210,12 +211,13 @@ io.on("connection", (socket: Socket) => {
         leaveBinding(socket, prevCode, prevUsername, current !== null);
       };
 
-      if (gameCode) {
+      if (gameCode !== null) {
         // This IP guessed too many unknown codes: no answer reveals whether this code exists, unless the sender
         // proves it is a player of that room (rejoin with its token) or a connected player of the room is on the
         // same IP (same network: they know the code anyway; see sameNetworkExempt). Misses still count.
         // Same answer on a socket in its miss cooldown, so every "Game not found" below is a recorded miss.
-        const target = roomManager.getRoom(gameCode);
+        // A malformed code matches no room: same "Game not found" answer, counted as a miss
+        const target = isRoomCode(gameCode) ? roomManager.getRoom(gameCode) : undefined;
         if ((missCooldown() || joinMisses.locked(ip)) && !roomManager.canRejoin(gameCode, username, data.rejoinToken) && !sameNetworkExempt(target)) {
           if (!target) recordMiss();
           socket.emit("room-of-game", { success: false, message: "Too many attempts" });

@@ -46,14 +46,16 @@ const mockCtx = {
   getRejoinToken: jest.fn(async (..._a: unknown[]) => "tok-123" as string | null), clearRejoinToken: jest.fn(),
 };
 const mockClose: { onPress?: () => void } = {};
+/** Context game code and route params (invite deep link), per test */
+const mockRoute: { gameCode: string | null; params: { code?: string | string[] } } = { gameCode: "K7MQ4X", params: {} };
 
 jest.mock("expo-router", () => ({
   useRouter: () => ({ replace: mockReplace }),
-  useLocalSearchParams: () => ({}),
+  useLocalSearchParams: () => mockRoute.params,
 }));
 jest.mock("../app/providers/GameContext", () => ({
   useGameContext: () => ({
-    ...mockCtx, gameCode: "ABC123", socket: mockSocket, username: "alice", roundsOfGame: 10, plantedPhotoUri: null,
+    ...mockCtx, gameCode: mockRoute.gameCode, socket: mockSocket, username: "alice", roundsOfGame: 10, plantedPhotoUri: null,
   }),
 }));
 jest.mock("../app/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: null }) }));
@@ -97,10 +99,12 @@ beforeEach(() => {
   mockSocket.connected = true;
   mockReplace.mockClear();
   Object.values(mockCtx).forEach((f) => f.mockClear());
+  mockRoute.gameCode = "K7MQ4X";
+  mockRoute.params = {};
 });
 
 const roomOfGame = (players: ReturnType<typeof player>[], extra: object = {}) =>
-  ({ success: true, room: { gameCode: "ABC123", players, rounds: 10, started: false }, rejoinToken: "tok-123", ...extra });
+  ({ success: true, room: { gameCode: "K7MQ4X", players, rounds: 10, started: false }, rejoinToken: "tok-123", ...extra });
 
 async function mount(players?: ReturnType<typeof player>[]) {
   let r!: TestRenderer.ReactTestRenderer;
@@ -118,12 +122,12 @@ describe("WaitingRoom: joining (EXP-063)", () => {
   it("starts the socket and joins with the stored rejoin token, then saves the room's token and rounds", async () => {
     const r = await mount();
     expect(mockCtx.startSocket).toHaveBeenCalledTimes(1);
-    expect(mockCtx.getRejoinToken).toHaveBeenCalledWith("ABC123", "alice");
-    expect(emitted("join-create-game")).toEqual([{ gameCode: "ABC123", username: "alice", rejoinToken: "tok-123" }]);
+    expect(mockCtx.getRejoinToken).toHaveBeenCalledWith("K7MQ4X", "alice");
+    expect(emitted("join-create-game")).toEqual([{ gameCode: "K7MQ4X", username: "alice", rejoinToken: "tok-123" }]);
 
-    act(() => mockSocket.fire("room-of-game", { ...roomOfGame([player("alice", true)]), room: { gameCode: "ABC123", players: [player("alice", true)], rounds: 15, started: false } }));
-    expect(mockCtx.saveRejoinToken).toHaveBeenCalledWith("ABC123", "alice", "tok-123");
-    expect(mockCtx.setGameCode).toHaveBeenCalledWith("ABC123");
+    act(() => mockSocket.fire("room-of-game", { ...roomOfGame([player("alice", true)]), room: { gameCode: "K7MQ4X", players: [player("alice", true)], rounds: 15, started: false } }));
+    expect(mockCtx.saveRejoinToken).toHaveBeenCalledWith("K7MQ4X", "alice", "tok-123");
+    expect(mockCtx.setGameCode).toHaveBeenCalledWith("K7MQ4X");
     expect(mockCtx.setRoundsOfGame).toHaveBeenCalledWith(15);
     expect(hasId(r, lobbyPlayerId("alice"))).toBe(true);
     act(() => r.unmount());
@@ -132,7 +136,7 @@ describe("WaitingRoom: joining (EXP-063)", () => {
   it("joins without a token field when none is stored for this room", async () => {
     mockCtx.getRejoinToken.mockResolvedValueOnce(null);
     const r = await mount();
-    expect(emitted("join-create-game")).toEqual([{ gameCode: "ABC123", username: "alice" }]);
+    expect(emitted("join-create-game")).toEqual([{ gameCode: "K7MQ4X", username: "alice" }]);
     act(() => r.unmount());
   });
 
@@ -184,11 +188,11 @@ describe("WaitingRoom: player list and host controls (EXP-063)", () => {
   it("the host starts the game and picks the rounds; rounds-updated from the server is applied", async () => {
     const r = await mount([player("alice", true), player("bob")]);
     pressId(r, roundsOptionId(20));
-    expect(emitted("set-rounds")).toEqual([{ gameCode: "ABC123", rounds: 20 }]);
+    expect(emitted("set-rounds")).toEqual([{ gameCode: "K7MQ4X", rounds: 20 }]);
     expect(mockCtx.setRoundsOfGame).toHaveBeenLastCalledWith(20);
 
     pressId(r, TEST_IDS.startGameButton);
-    expect(emitted("start-game")).toEqual([{ gameCode: "ABC123" }]);
+    expect(emitted("start-game")).toEqual([{ gameCode: "K7MQ4X" }]);
 
     act(() => mockSocket.fire("rounds-updated", 15));
     expect(mockCtx.setRoundsOfGame).toHaveBeenLastCalledWith(15);
@@ -241,5 +245,29 @@ describe("WaitingRoom: ways out (EXP-063)", () => {
     expect(mockSocket.handlers.size).toBeGreaterThan(0);
     act(() => r.unmount());
     expect(mockSocket.handlers.size).toBe(0);
+  });
+});
+
+describe("WaitingRoom: room code (EXP-198)", () => {
+  it("shows the room's alphanumeric code in the lobby", async () => {
+    const r = await mount([player("alice", true)]);
+    expect(r.root.find((n) => n.props.testID === TEST_IDS.lobbyGameCode && typeof n.type === "string").props.children).toBe("K7MQ4X");
+    act(() => r.unmount());
+  });
+
+  it("takes the invite deep link's code in any case", async () => {
+    mockRoute.gameCode = null;
+    mockRoute.params = { code: " k7mq4x " };
+    const r = await mount();
+    expect(mockCtx.setGameCode).toHaveBeenCalledWith("K7MQ4X");
+    act(() => r.unmount());
+  });
+
+  it("ignores a malformed deep link code", async () => {
+    mockRoute.gameCode = null;
+    mockRoute.params = { code: "12345O" };
+    const r = await mount();
+    expect(mockCtx.setGameCode).not.toHaveBeenCalled();
+    act(() => r.unmount());
   });
 });

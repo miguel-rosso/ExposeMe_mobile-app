@@ -38,6 +38,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useI18n } from "../i18n";
 import { TEST_IDS, lobbyPlayerId, lobbyPlayerOfflineId, roundsOptionId } from "../utils/testIds";
 import { isHostIn, withConnection, withHost } from "../utils/roomPlayers";
+import { parseRoomCodeParam } from "../utils/roomCode";
 
 // Define chat message interface
 interface ChatMessageType {
@@ -50,7 +51,7 @@ const WaitingRoom = ({}) => {
   const { t } = useI18n();
   const insets = useSafeAreaInsets();
   const navigation = useRouter();
-  const { code: deepLinkCode } = useLocalSearchParams<{ code?: string }>();
+  const { code: deepLinkCode } = useLocalSearchParams<{ code?: string | string[] }>();
   const {
     startSocket,
     endSocket,
@@ -218,11 +219,12 @@ const WaitingRoom = ({}) => {
     }
   };
 
-  // If opened via deep link, set the game code
+  // If opened via the invite deep link, join its room (a malformed code is ignored)
   useEffect(() => {
-    if (deepLinkCode && !gameCode) {
-      console.log("Deep link code:", deepLinkCode);
-      setGameCode(deepLinkCode);
+    const linkedCode = parseRoomCodeParam(deepLinkCode);
+    if (linkedCode && !gameCode) {
+      console.log("Deep link code:", linkedCode);
+      setGameCode(linkedCode);
     }
   }, [deepLinkCode]);
 
@@ -509,14 +511,17 @@ const WaitingRoom = ({}) => {
                 {t.gameCode}
               </Text>
 
-              <View style={tw`flex-row items-center mb-1`}>
+              <View style={tw`flex-row items-center mb-1 max-w-full`}>
                 <TouchableOpacity testID={TEST_IDS.copyCodeButton} onPress={copyGameCodeToClipboard} style={tw`p-2`}>
                   <Ionicons name="copy-outline" size={24} color="rgba(255,255,255,0.7)" />
                 </TouchableOpacity>
+                {/* Letters are wider than digits: shrink rather than wrap or clip on narrow screens */}
                 <Text
                   testID={TEST_IDS.lobbyGameCode}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
                   style={[
-                    tw`text-5xl text-white font-extrabold mx-1`,
+                    tw`text-5xl text-white font-extrabold mx-1 shrink`,
                     { lineHeight: 60, textShadowColor: "rgba(0, 0, 0, 0.5)", textShadowOffset: { width: 2, height: 2 }, textShadowRadius: 5 },
                   ]}
                 >

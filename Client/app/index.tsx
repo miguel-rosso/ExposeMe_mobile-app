@@ -34,6 +34,7 @@ import { useI18n } from "./i18n";
 import LanguageToggle from "./components/LanguageToggle";
 import { TEST_IDS } from "./utils/testIds";
 import { handleHomeBackPress } from "./utils/homeBackPress";
+import { isRoomCode, sanitizeRoomCodeInput } from "./utils/roomCode";
 
 SplashScreen.preventAutoHideAsync();
 // Animaciones personalizadas para React Native Animatable
@@ -280,7 +281,7 @@ const Index = () => {
 
   // Manejar la acción de buscar una sala
   const handleSearchRoom = async () => {
-    if (!gameCode) {
+    if (!isRoomCode(gameCode)) {
       (gameCodeAnimRef.current as any)?.shake?.(500);
       return;
     }
@@ -464,9 +465,12 @@ const Index = () => {
                     placeholder={t.enterGameCode}
                     placeholderTextColor="#3333"
                     value={gameCode || ""}
-                    onChange={(e) => setGameCode(e.nativeEvent.text)}
-                    keyboardType="number-pad"
-                    maxLength={6}
+                    onChangeText={(text) => setGameCode(sanitizeRoomCodeInput(text))}
+                    autoCapitalize="characters"
+                    autoCorrect={false}
+                    autoComplete="off"
+                    spellCheck={false}
+                    // No maxLength: it would cut a pasted " K7MQ4X" before sanitizing; sanitizing keeps 6 characters
                   />
                   {gameCode && gameCode.length > 0 && (
                     <View style={tw`absolute right-4 h-full flex justify-center items-center`}>

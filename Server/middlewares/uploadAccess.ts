@@ -2,6 +2,7 @@ import { NextFunction, Request, Response } from "express";
 import { Player, Room } from "../models/interfaces";
 import { uploadStore } from "./uploadStore";
 import { uploadRejectionLimit } from "./rateLimit";
+import { normalizeRoomCode } from "../managers/roomCode";
 
 // ── Room-member access to /upload and /temp ──
 // Both need the player's session credential from join-create-game: header `X-Game-Code: <room code>` plus
@@ -38,7 +39,7 @@ function readCredentials(req: Request): { gameCode: string; token: string } | nu
   if (!code || !auth || code.length > MAX_CREDENTIAL_LENGTH || auth.length > MAX_CREDENTIAL_LENGTH) return null;
   const m = BEARER_RE.exec(auth);
   if (!m) return null;
-  return { gameCode: code.trim().toUpperCase(), token: m[1] };
+  return { gameCode: normalizeRoomCode(code), token: m[1] };
 }
 
 /** The member these credentials belong to, or the status to refuse them with (401 missing/malformed, 403 wrong). */

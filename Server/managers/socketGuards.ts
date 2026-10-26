@@ -70,7 +70,7 @@ export function createConnectionCounter(max: number) {
  * device on a party Wi-Fi can't lock the others out). A socket records at most one miss per
  * JOIN_MISS_SOCKET_INTERVAL_MS, and within that interval after a miss its joins with a code get "Too many attempts"
  * without looking the code up (same exemptions), so every "Game not found" is a recorded miss.
- * Guessing 6-digit codes from one IP is then far too slow to find rooms; legit typos stay well under it.
+ * Guessing 6-character codes from one IP is then far too slow to find rooms; legit typos stay well under it.
  */
 export const JOIN_MISS_MAX = envInt("JOIN_MISS_MAX", 30, 1, 100_000);
 export const JOIN_MISS_WINDOW_MS = envInt("JOIN_MISS_WINDOW_MS", 60_000, 1_000, 3_600_000);

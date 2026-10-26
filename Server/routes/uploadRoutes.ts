@@ -6,12 +6,11 @@ import { uploadPlayerRateLimit, uploadRoomRateLimit } from "../middlewares/rateL
 import { uploadDeclaredSize, uploadInFlightLimit } from "../middlewares/uploadInFlight";
 import { requireUploadAllowed, requireUploadMember } from "../middlewares/uploadAccess";
 import { joinPageCsp } from "../middlewares/securityHeaders";
+import { isRoomCode, normalizeRoomCode } from "../managers/roomCode";
 
 const router = express.Router();
 
 // ── Invite page helpers ──
-const ROOM_CODE_RE = /^\d{6}$/;
-
 const escapeHtml = (value: string) =>
   value
     .replace(/&/g, "&amp;")
@@ -44,8 +43,8 @@ router.get("/", (_req, res) => {
 });
 
 router.get("/join/:code", (req, res) => {
-  const code = req.params.code;
-  if (!ROOM_CODE_RE.test(code)) {
+  const code = normalizeRoomCode(req.params.code);
+  if (!isRoomCode(code)) {
     res.status(400).type("text/plain").send("Invalid game code");
     return;
   }

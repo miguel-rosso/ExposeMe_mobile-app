@@ -51,7 +51,7 @@ describe("socket flow", () => {
     alice.emit("join-create-game", { gameCode: null, username: "alice" });
     const { room } = await created;
     const gameCode = room.gameCode;
-    expect(gameCode).toMatch(/^\d{6}$/);
+    expect(gameCode).toMatch(/^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$/);
 
     // Join
     for (const [name, sock] of [["bob", bob], ["carol", carol]] as const) {

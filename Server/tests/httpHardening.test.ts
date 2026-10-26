@@ -58,8 +58,8 @@ describe("security headers", () => {
   });
 
   it("the /join invite page only allows its own inline script (per-response nonce) and inline style", async () => {
-    const res1 = await fetch(`${url}/join/123456`);
-    const res2 = await fetch(`${url}/join/123456`);
+    const res1 = await fetch(`${url}/join/K7MQ4X`);
+    const res2 = await fetch(`${url}/join/K7MQ4X`);
     expect(res1.status).toBe(200);
     const csp = expectBaseHeaders(res1);
     const nonce = /script-src 'nonce-([A-Za-z0-9+/=_-]+)'/.exec(csp)?.[1];

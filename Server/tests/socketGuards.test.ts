@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ALLOWED_EMOJIS, createConnectionCounter, createTokenBucket, handshakeIp, ipKey } from "../managers/socketGuards";
 import { RoomManager } from "../managers/RoomManager";
+import { isRoomCode } from "../managers/roomCode";
 
 const req = (remoteAddress: string, xff?: string) => ({
   socket: { remoteAddress },
@@ -84,13 +85,13 @@ describe("ALLOWED_EMOJIS (EXP-166)", () => {
 });
 
 describe("room codes (EXP-164)", () => {
-  it("are 6 digits from crypto.randomInt, not Math.random", () => {
+  it("are 6 characters from crypto.randomInt, not Math.random", () => {
     const rm = new RoomManager();
     const original = Math.random;
     Math.random = () => { throw new Error("Math.random used for a room code"); };
     try {
       const codes = Array.from({ length: 200 }, (_, i) => rm.createRoom(`u${i}`, `s${i}`).gameCode);
-      codes.forEach((c) => expect(c).toMatch(/^[1-9]\d{5}$/));
+      codes.forEach((c) => expect(isRoomCode(c)).toBe(true));
       expect(new Set(codes).size).toBe(200);
     } finally {
       Math.random = original;

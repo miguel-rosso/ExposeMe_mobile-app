@@ -122,7 +122,7 @@ describe("Home Create/Join gallery gate (EXP-118)", () => {
   it("limited access with a selected photo: joins a room", async () => {
     mockPerm = { status: "granted", canAskAgain: true, accessPrivileges: "limited" };
     mockPhotos.push({ id: "p1", mediaType: "image" });
-    mockGameCode = "123456";
+    mockGameCode = "K7MQ4X";
     const r = await mount();
     await press(r.root, TEST_IDS.joinGameButton);
     await press(r.root, TEST_IDS.searchRoomButton);
@@ -199,6 +199,39 @@ describe("Home Create/Join gallery gate (EXP-118)", () => {
     expect(has(r.root, TEST_IDS.galleryRetryButton)).toBe(true);
     await press(r.root, TEST_IDS.galleryBackButton);
     expect(has(r.root, TEST_IDS.galleryAccessModal)).toBe(false);
+    act(() => r.unmount());
+  });
+});
+
+describe("Home join field: alphanumeric room codes (EXP-198)", () => {
+  const codeInput = (root: ReactTestInstance) =>
+    root.find((n) => n.props.testID === TEST_IDS.gameCodeInput && typeof n.props.onChangeText === "function");
+
+  it("uses a letters keyboard, uppercases as you type or paste and keeps at most 6 code characters", async () => {
+    const r = await mount();
+    await press(r.root, TEST_IDS.joinGameButton);
+    const input = codeInput(r.root);
+    expect(input.props.keyboardType ?? "default").toBe("default");
+    expect(input.props.autoCapitalize).toBe("characters");
+    // No native maxLength: it would cut a pasted " K7MQ4X" / "K7MQ-4X" to 5 code characters before sanitizing
+    expect(input.props.maxLength).toBeUndefined();
+    act(() => input.props.onChangeText("k7 mq-4x"));
+    expect(mockSetGameCode).toHaveBeenLastCalledWith("K7MQ4X");
+    act(() => input.props.onChangeText(" K7MQ4X"));
+    expect(mockSetGameCode).toHaveBeenLastCalledWith("K7MQ4X");
+    act(() => input.props.onChangeText("K7MQ4XZZZ"));
+    expect(mockSetGameCode).toHaveBeenLastCalledWith("K7MQ4X");
+    act(() => r.unmount());
+  });
+
+  it("an incomplete code does not search", async () => {
+    mockPerm = { status: "granted", canAskAgain: true, accessPrivileges: "all" };
+    mockPhotos.push({ id: "p1", mediaType: "image" });
+    mockGameCode = "K7MQ";
+    const r = await mount();
+    await press(r.root, TEST_IDS.joinGameButton);
+    await press(r.root, TEST_IDS.searchRoomButton);
+    expect(mockPush).not.toHaveBeenCalled();
     act(() => r.unmount());
   });
 });

@@ -87,7 +87,8 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
 
   const endSocket = () => {
     console.log("Ending socket");
-    // Game over, "Play again", leaving or being kicked all end the socket: a planted photo is for one game only
+    // Leaving the game flow (Exit, back home, kicked, room gone): a planted photo is for one game only. Game over
+    // keeps the socket open; "Play again" drops the planted photo itself.
     setPlantedPhotoUri(null);
     if (socketRef.current) {
       socketRef.current.removeAllListeners();

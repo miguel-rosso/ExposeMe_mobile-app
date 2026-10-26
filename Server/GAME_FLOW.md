@@ -173,6 +173,13 @@ After last round: game-over
   `game-over` resets `isReady`, `started` and `phase` and clears unused planted photos
   (`plantedPhoto`, `hasPlantedPhoto`) for every player; `start-game` resets `points`, `lastGuess` and
   `lastAnswerCorrect` ("Play again" in the same room starts from zero).
+  The app keeps its socket open through `game-over` and the winner / final screens (the player stays connected
+  and in the room, so lingering there never makes it "gone" nor hands the host role over): "Play again" re-sends
+  `join-create-game` on that same socket (the no-op rejoin above), "Exit" sends `leave-room` and closes it. The
+  finished game screen stops listening to game events, so a next game started meanwhile only reaches that player
+  once it is back in the lobby (`game-state` snapshot → game screen). Until then it answers any `your-turn` at once
+  with `photo-unavailable { round, attempt }` (it never picks a photo from there), so the room is not kept waiting
+  the 15 s photo timeout for it (interim behaviour; what a lingering player should do in the next game is DEC-018).
 - **Public player data.** Every player object sent to clients (`player-joined`, `game-started`, `new-host`,
   `player-removed`, `room-of-game.room.players`, `game-state.players`) is built by one allowlist
   (`RoomManager.publicPlayer`): `{ username, points, isHost, connected, lastGuess,

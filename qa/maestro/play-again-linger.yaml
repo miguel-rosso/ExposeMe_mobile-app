@@ -1,0 +1,43 @@
+# EXP-172: the app stays connected through game over. The device lingers on the final results for more than the
+# server's 15 s disconnect grace, then taps "Play again": it must land back in the same room's lobby (not home with
+# "Game already started"), with nobody shown "disconnected" and the host role still with the host (bot1), so this
+# device gets no Start button. Before the fix the device was offline the whole time it read the results.
+# Bots play again at once and stay in the lobby (no bot lingers: --play-again-linger-bot 0):
+#   qa/lab/lab.sh play --flow play-again-linger --bots 2 --rounds 3 --devices <label> \
+#     --bot-args "--play-again-linger 25 --play-again-linger-bot 0"
+# env: GAME_CODE, USERNAME, METRO_URL (url-encoded)
+# Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
+appId: com.socketNull.ExposeMe
+---
+- runFlow: open-app.yaml
+- runFlow: join-room.yaml
+- runFlow: play-rounds.yaml
+- extendedWaitUntil:
+    visible:
+      id: "play-again-button"
+    timeout: 20000
+# Read the results for 25 s (longer than the 15 s grace): a wait for something that never shows, allowed to time out
+- extendedWaitUntil:
+    visible:
+      id: "never-shown-linger-wait"
+    timeout: 25000
+    optional: true
+- assertVisible:
+    id: "final-score-modal"
+- takeScreenshot: linger-results-${USERNAME}
+- tapOn:
+    id: "play-again-button"
+- extendedWaitUntil:
+    visible:
+      id: "lobby-game-code"
+    timeout: 20000
+- assertVisible:
+    id: "lobby-player-bot1"
+- assertNotVisible:
+    id: "lobby-player-offline-bot1|lobby-player-offline-bot2|lobby-player-offline-${USERNAME}"
+# bot1 is still the host: this device never got the role while it lingered
+- assertVisible:
+    id: "lobby-waiting"
+- assertNotVisible:
+    id: "start-game-button"
+- takeScreenshot: linger-lobby-${USERNAME}

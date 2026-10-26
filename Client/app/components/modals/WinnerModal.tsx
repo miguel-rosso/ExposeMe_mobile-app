@@ -4,7 +4,6 @@ import tw from "twrnc";
 import LottieView from "lottie-react-native";
 import * as Animatable from "react-native-animatable";
 import { ScoreRound } from "@/app/models/interfaces";
-import { useGameContext } from "@/app/providers/GameContext";
 import { useI18n } from "../../i18n";
 import { TEST_IDS, winnerNameId } from "@/app/utils/testIds";
 
@@ -21,14 +20,13 @@ interface WinnerModalProps {
 const WinnerModal: React.FC<WinnerModalProps> = ({ visible, winners, onAnimationEnd }) => {
   const { t } = useI18n();
   const medalAnimation = useRef<LottieView>(null);
-  const { endSocket } = useGameContext();
   const confettiAnimation = useRef<LottieView>(null);
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const [animationComplete, setAnimationComplete] = useState(false);
 
   useEffect(() => {
     if (visible) {
-      endSocket();
+      // The socket stays open through game over: the player is still in the room (Play again rejoins it as is)
       // Play the animations
       if (medalAnimation.current) {
         medalAnimation.current.play();

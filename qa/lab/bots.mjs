@@ -41,6 +41,21 @@
 //                           With --bots 1 (one bot host + real devices, see qa/maestro/lobby-host-drop.yaml) no bot is
 //                           left: the run ends right after the drop (reason "lobby-host-drop") and the device checks it.
 //   node qa/lab/bots.mjs --bots 3 --host --lobby-host-drop
+//            --play-again-linger S  after game-over every bot stays connected on the final screens (EXP-172, like the
+//                           app): the others "Play again" at once (join-create-game on the same socket), the host lingers
+//                           S seconds (more than the 15 s grace to matter) before its own Play again. Nobody may see
+//                           player-connection { connected: false } or new-host after game-over, and every same-socket
+//                           join must succeed with the same rejoin token, the host still host ("consistency").
+//   node qa/lab/bots.mjs --bots 3 --host --rounds 3 --play-again-linger 20
+//            --play-again-linger-bot K  the bot that lingers (1-based, default 1 = the host). A non-host K: the host
+//                           starts a second game as soon as the others are back, while K is still on the final screens.
+//                           Like the app there, K sends no im-ready, ignores the game and answers every your-turn at once
+//                           with photo-unavailable (EXP-172), so no round of that game may be skipped by the 15 s
+//                           timeout ("consistency"). Second-game events are recorded as "g2-<event>" (kept apart from
+//                           the first game's checks); the run ends once K's own Play again is answered.
+//                           K = 0: no bot lingers (a device does, qa/maestro/play-again-linger.yaml): every bot plays
+//                           again at once and stays in the lobby for S + 15 s before ending.
+//   node qa/lab/bots.mjs --bots 2 --host --rounds 3 --play-again-linger 30 --play-again-linger-bot 2
 //   Every bot records waiting-photo { round, duration } (room-wide, owner secret): same payload for all, skew measured.
 //   Photos: uploads send the room code + the bot's rejoin token (X-Game-Code / Authorization: Bearer), like the app;
 //   on each round-start one non-owner bot GETs the photo with them (must be 200) and without (must be 401): "photo-access".
@@ -98,6 +113,8 @@ const DROP_BOT = Number(args["drop-bot"] || N_BOTS) - 1;
 // which answers with a fresh game-state (and your-turn for an awaited photo)
 const APP_RESYNC = !!args["app-resync"];
 const LOBBY_HOST_DROP = !!args["lobby-host-drop"];
+const PLAY_AGAIN_LINGER_S = Number(args["play-again-linger"] || 0);
+const LINGER_BOT = Number(args["play-again-linger-bot"] || 1) - 1;
 const DISCONNECT_GRACE_MS = 15_000; // server: a player disconnected this long is gone (lobby shows it, host hands over)
 const PHOTOS = args.photos ? fs.readdirSync(args.photos).filter((f) => f.endsWith(".jpg")).map((f) => path.join(args.photos, f)) : [];
 
@@ -230,7 +247,9 @@ function runRoom(roomIdx, fixedCode) {
       const socket = io(SERVER, { transports: ["websocket"], reconnection: true });
       const bot = { name, socket, isHost, players: [], guess: "", round: 0, token: null, isOwner: false, plants: i < PLANT };
       bots.push(bot);
-      const rec = (ev, round, payload) => events.push({ bot: name, ev, round, t: now(), payload });
+      // Second game (--play-again-linger-bot): recorded apart so the first game's checks only see the first game
+      const rec = (ev, round, payload) =>
+        events.push({ bot: name, ev: bot.game2 && ev !== "payload-leak" ? `g2-${ev}` : ev, round, t: now(), payload });
 
       // rejoinToken (from our own room-of-game) is required by the server to reconnect with the same username
       const join = () => socket.emit("join-create-game", { gameCode: isHost && !code ? null : code, username: name, ...(bot.token ? { rejoinToken: bot.token } : {}) });
@@ -262,6 +281,26 @@ function runRoom(roomIdx, fixedCode) {
       socket.on("connect_error", (e) => errors.push(`${name} connect_error ${e.message}`));
       socket.on("room-of-game", (d) => {
         if (!d.success) { errors.push(`${name} join failed: ${d.message}`); return; }
+        // Play again on the same socket after game-over (EXP-172): same token, still in the room, host kept
+        if (bot.playAgainPending) {
+          bot.playAgainPending = false;
+          const me = d.room.players.find((p) => p.username === name);
+          rec("play-again-joined", 0, {
+            sameToken: d.rejoinToken === bot.token, isHost: !!me?.isHost, started: d.room.started,
+            gone: d.room.players.filter((p) => p.connected === false).map((p) => p.username),
+          });
+          bot.playAgainDone = true;
+          const live = bots.filter((b) => !b.gone);
+          const lingerer = live.find((b) => b.lingers);
+          // --play-again-linger-bot 0: a device lingers instead, so the bots stay (connected, in the lobby) a while
+          // longer than it does, then end
+          if (live.every((b) => b.playAgainDone)) setTimeout(() => done("game-over"), LINGER_BOT < 0 ? PLAY_AGAIN_LINGER_S * 1000 + 15_000 : 500);
+          // A non-host still on the final screens: the host starts the next game once everyone else is back
+          else if (lingerer && !lingerer.isHost && live.every((b) => b.playAgainDone || b === lingerer)) {
+            const host = live.find((b) => b.isHost);
+            setTimeout(() => host?.socket.emit("start-game", { gameCode: code }), 300);
+          }
+        }
         if (d.rejoinToken) bot.token = d.rejoinToken;
         bot.players = d.room.players.map((p) => p.username);
         if (isHost && !code) {
@@ -302,6 +341,8 @@ function runRoom(roomIdx, fixedCode) {
         }
       };
       socket.on("game-started", (players, rounds) => {
+        if (PLAY_AGAIN_LINGER_S && bot.playAgainDone !== undefined) bot.game2 = true;
+        if (bot.lingering) { rec("game-started-while-lingering", 0); return; } // the app's game screen isn't there
         bot.inGame = true;
         bot.players = players.map((p) => p.username);
         rec("game-started", 0, { rounds });
@@ -309,6 +350,12 @@ function runRoom(roomIdx, fixedCode) {
         socket.emit("im-ready", { gameCode: code, username: name });
       });
       socket.on("your-turn", async (d) => {
+        // On the final screens the app answers at once that it has no photo (EXP-172), so nobody waits for it
+        if (bot.lingering) {
+          rec("linger-photo-unavailable", d.round, { attempt: d.attempt });
+          socket.emit("photo-unavailable", { round: d.round, attempt: d.attempt });
+          return;
+        }
         if (bot.resyncing) { rec("your-turn-missed-on-purpose", d.round); return; }
         rec("your-turn", d.round, { attempt: d.attempt });
         if (!Number.isInteger(d.attempt)) errors.push(`${name}: your-turn without an integer attempt`);
@@ -335,6 +382,7 @@ function runRoom(roomIdx, fixedCode) {
         bot.phase = "answering";
         // Recorded without isOwner (the only per-recipient field), so every bot must get the same payload
         rec("round-start", d.round, { photo: d.photo, duration: d.duration });
+        if (bot.lingering) return; // not playing: no guesses
         bot.round = d.round;
         bot.isOwner = d.isOwner === true;
         if (bot.isOwner) rec("owner-signal", d.round, { via: "round-start" });
@@ -410,6 +458,15 @@ function runRoom(roomIdx, fixedCode) {
       socket.on("hold-resume", (d) => rec("hold-resume", bot.round, d));
       socket.on("game-over", (d) => {
         rec("game-over", bot.round, { finalScore: d.finalScore });
+        if (PLAY_AGAIN_LINGER_S && !bot.gone) {
+          if (bot.game2 || bot.playAgainDone !== undefined) return; // only the first game ends the scenario
+          bot.playAgainDone = false;
+          // The socket stays open on the final screens; Play again re-joins on it (the lingering bot after S seconds)
+          bot.lingers = i === LINGER_BOT;
+          bot.lingering = bot.lingers;
+          setTimeout(() => { bot.lingering = false; bot.playAgainPending = true; join(); }, bot.lingers ? PLAY_AGAIN_LINGER_S * 1000 : 300);
+          return;
+        }
         if (++finished === bots.filter((b) => !b.gone).length) done("game-over");
       });
       return bot;
@@ -590,6 +647,32 @@ function analyse(r) {
     }
     if (r.events.some((e) => e.bot === hostDrop.bot && e.ev === "game-started")) consistency.push(`${hostDrop.bot}: dropped host got game-started`);
   }
+  // Play again after lingering (EXP-172): nobody went offline at game-over, so nobody is shown gone nor loses the host role
+  if (PLAY_AGAIN_LINGER_S) {
+    for (const n of r.players) {
+      const over = r.events.find((e) => e.bot === n && e.ev === "game-over");
+      if (!over) continue;
+      // Second-game events count too ("g2-" prefix)
+      const evName = (e) => e.ev.replace(/^g2-/, "");
+      for (const e of r.events.filter((x) => x.bot === n && x.t > over.t)) {
+        if (evName(e) === "player-connection" && e.payload.connected === false) consistency.push(`${n}: saw ${e.payload.username} gone after game-over`);
+        if (evName(e) === "new-host") consistency.push(`${n}: new-host ${e.payload.username} after game-over`);
+      }
+      const pa = r.events.find((e) => e.bot === n && evName(e) === "play-again-joined");
+      if (!pa) { consistency.push(`${n}: Play again join never answered`); continue; }
+      if (!pa.payload.sameToken) consistency.push(`${n}: Play again join changed the rejoin token`);
+      if (pa.payload.gone.length) consistency.push(`${n}: Play again lobby shows gone: ${pa.payload.gone.join(", ")}`);
+      if (n === r.players[0] && args.host && !pa.payload.isHost) consistency.push(`${n}: host lost the role after lingering`);
+    }
+    // A non-host lingering while the next game runs: its turns are skipped at once, never by the 15 s timeout
+    const lingerer = r.players[LINGER_BOT];
+    if (LINGER_BOT > 0 && lingerer) {
+      if (!r.events.some((e) => e.ev === "g2-game-started-while-lingering" && e.bot === lingerer)) consistency.push(`${lingerer}: the second game never started while it lingered`);
+      for (const e of r.events.filter((x) => x.ev === "g2-round-skipped" && x.payload?.reason === "timeout")) {
+        consistency.push(`${e.bot}: second game round ${e.round} skipped by timeout (lingering ${lingerer} kept it waiting)`);
+      }
+    }
+  }
   const roundsSeen = [...new Set(starts.map((s) => s.round))].sort((a, b) => a - b);
   roundsSeen.forEach((n, i) => { if (n !== i + 1) consistency.push(`round numbering gap: expected ${i + 1}, got ${n}`); });
   const phaseGaps = [];
@@ -614,6 +697,7 @@ function analyse(r) {
     pauses: perBotMax(r, "game-paused"),
     max_pause_number: Math.max(0, ...Object.values(lastPause)),
     resumes: perBotMax(r, "game-resumed"),
+    linger_turns_reported: r.events.filter((e) => e.ev === "g2-linger-photo-unavailable").length,
     skew_ms: { p50: pct(skews, 50)?.toFixed(1), p95: pct(skews, 95)?.toFixed(1), max: skews.length ? Math.max(...skews).toFixed(1) : null },
     answer_phase_overrun_ms: { p50: pct(phaseGaps, 50)?.toFixed(1), max: phaseGaps.length ? Math.max(...phaseGaps).toFixed(1) : null },
     upload_ms: { p50: pct(r.uploads, 50)?.toFixed(0), max: r.uploads.length ? Math.max(...r.uploads).toFixed(0) : null },

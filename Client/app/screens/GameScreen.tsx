@@ -36,13 +36,20 @@ import { appendCapped, isAllowedReaction, MAX_VISIBLE_REACTIONS } from "../utils
 const { SERVER_URL } = getEnvVars();
 const PICK_SEND_INTERVAL = 200; // ms between submit-answer sends (server: 10 per socket, refilled 5/s)
 
+// Game events detached at game over: the socket stays open on the final screens (still in the room), and a next game
+// started meanwhile must not drive this finished one (e.g. a your-turn picking and uploading a photo behind the modal)
+const GAME_EVENTS = [
+  "waiting-photo", "your-turn", "round-start", "round-reveal", "round-scores", "hold-start", "hold-end", "hold-resume",
+  "round-skipped", "game-paused", "game-resumed", "game-state", "emoji-reaction",
+];
+
 interface EmojiReactionData { id: string; username: string; emoji: string }
 type Phase = "waiting-photo" | "answering" | "reveal" | "scores" | null;
 
 const GameScreen = () => {
   const { t } = useI18n();
   const {
-    username, gameCode, endSocket, socket, playersProvider, setPlayersProvider, roundsOfGame, plantedPhotoUri,
+    username, gameCode, socket, playersProvider, setPlayersProvider, roundsOfGame, plantedPhotoUri,
     plantedPhotoSent, plantPhoto, getRejoinToken, saveRejoinToken,
   } = useGameContext();
   const safeUsername = username ?? "";
@@ -186,6 +193,12 @@ const GameScreen = () => {
   const showGameOver = (finalScore: ScoreRound[]) => {
     if (gameOverRef.current) return;
     gameOverRef.current = true;
+    GAME_EVENTS.forEach((ev) => socket?.off(ev));
+    // Still in the room on the final screens: if a next game picks me, say at once there is no photo so nobody waits
+    // the 15 s photo timeout for me (the photo is never picked from here). Removed with GAME_EVENTS on unmount.
+    socket?.on("your-turn", (turn: YourTurnData) => {
+      socket.emit("photo-unavailable", { round: turn?.round, attempt: turn?.attempt });
+    });
     setPauseEndsAt(null);
     setFinalScore(finalScore);
     if (finalScore?.length > 0) { setWinners(getWinners(finalScore)); setShowWinner(true); }
@@ -389,12 +402,10 @@ const GameScreen = () => {
     setIsReady(true);
 
     return () => {
-      socket.off("waiting-photo"); socket.off("your-turn"); socket.off("round-start"); socket.off("round-reveal");
-      socket.off("round-scores"); socket.off("hold-start"); socket.off("hold-end");
-      socket.off("hold-resume"); socket.off("round-skipped"); socket.off("game-over");
-      socket.off("emoji-reaction"); socket.off("game-paused"); socket.off("game-resumed"); socket.off("game-state");
-      socket.off("player-left"); socket.off("player-removed"); socket.off("new-host");
-      endSocket();
+      GAME_EVENTS.forEach((ev) => socket.off(ev));
+      socket.off("game-over"); socket.off("player-left"); socket.off("player-removed"); socket.off("new-host");
+      // The socket is not ended here: "Play again" reuses it (the lobby rejoins on the same socket); leaving for
+      // home ends it there (Exit, or the home screen on focus)
     };
   }, [socket]);
 

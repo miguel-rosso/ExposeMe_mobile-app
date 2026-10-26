@@ -28,7 +28,7 @@ const BRONZE = "#D97706";
 const FinalScoreModal: React.FC<FinalScoreModalProps> = ({ visible, finalScore }) => {
   const { t } = useI18n();
   const navigation = useRouter();
-  const { setRoundsOfGame, setPlayersProvider, endSocket, clearRejoinToken } = useGameContext();
+  const { socket, setRoundsOfGame, setPlayersProvider, endSocket, clearRejoinToken, setPlantedPhotoUri } = useGameContext();
   const slideAnim = useRef(new Animated.Value(300)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const confettiRef = useRef<LottieView>(null);
@@ -62,14 +62,19 @@ const FinalScoreModal: React.FC<FinalScoreModalProps> = ({ visible, finalScore }
     }
   }, [visible]);
 
+  // Exit leaves the room for good (the socket stayed open through game over, so the others see it at once)
   const onClose = () => {
+    socket?.emit("leave-room");
     clearRejoinToken(); // leaving for good; "play again" keeps it to rejoin the same room
+    endSocket();
     setRoundsOfGame(0);
     setPlayersProvider([]);
     navigation.replace("/");
   };
 
+  // Same socket, same room: the lobby rejoins it as a no-op. A planted photo was for the game that just ended.
   const playAgain = () => {
+    setPlantedPhotoUri(null);
     navigation.replace("/screens/WaitingRoom");
   };
 

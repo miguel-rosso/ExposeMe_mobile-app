@@ -2,14 +2,15 @@ import React from "react";
 import TestRenderer, { act } from "react-test-renderer";
 
 // EXP-035 / EXP-126: the photo picked to plant belongs to one game. plantPhoto uploads it and sends plant-photo at
-// once (from the lobby, so im-ready never waits for it); it is dropped whenever the game socket ends (game over /
-// "Play again", leaving, kicked), so the next game never re-plants it.
+// once (from the lobby, so im-ready never waits for it); it is dropped by "Play again" (which keeps the socket,
+// EXP-172) and whenever the game socket ends (exit, leaving, kicked), so the next game never re-plants it.
 
 jest.mock("@react-native-async-storage/async-storage", () =>
   require("@react-native-async-storage/async-storage/jest/async-storage-mock")
 );
 const mockSocket = { connected: true, connect: jest.fn(), disconnect: jest.fn(), removeAllListeners: jest.fn(), emit: jest.fn() };
-jest.mock("socket.io-client", () => ({ io: () => mockSocket }));
+const mockIo = jest.fn(() => mockSocket);
+jest.mock("socket.io-client", () => ({ io: () => mockIo() }));
 const UPLOADED = "/temp/" + "c".repeat(32) + ".jpg";
 const mockUpload = jest.fn(async (..._args: unknown[]) => UPLOADED);
 jest.mock("../app/utils/uploadPhoto", () => ({ uploadPhoto: (...args: unknown[]) => mockUpload(...args) }));
@@ -45,7 +46,22 @@ describe("GameContext planted photo", () => {
     act(() => r.unmount());
   });
 
-  it("is cleared when the game socket ends (game over, play again, leave)", async () => {
+  it("Play again (EXP-172): the lobby reuses the connected socket and the planted photo is dropped without it", () => {
+    const r = mount();
+    const first = ctx.socket;
+    const ioCalls = mockIo.mock.calls.length;
+    mockSocket.disconnect.mockClear();
+    act(() => ctx.setPlantedPhotoUri("file:///picked.jpg"));
+    act(() => ctx.setPlantedPhotoUri(null)); // FinalScoreModal's Play again
+    act(() => ctx.startSocket()); // WaitingRoom mount
+    expect(ctx.plantedPhotoUri).toBeNull();
+    expect(ctx.socket).toBe(first);
+    expect(mockIo.mock.calls.length).toBe(ioCalls);
+    expect(mockSocket.disconnect).not.toHaveBeenCalled();
+    act(() => r.unmount());
+  });
+
+  it("is cleared when the game socket ends (exit, leave, kicked)", async () => {
     const r = mount();
     act(() => ctx.setPlantedPhotoUri("file:///picked.jpg"));
     await act(async () => { await ctx.plantPhoto(); });

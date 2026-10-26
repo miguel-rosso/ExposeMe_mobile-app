@@ -9,6 +9,7 @@ appId: com.socketNull.ExposeMe
 ---
 - runFlow: open-app.yaml
 - runFlow: join-room.yaml
+- runFlow: wait-game-start.yaml
 # Answering is the only phase with the timer bar and the options together (reveal: options only; scores: timer only)
 - extendedWaitUntil:
     visible:

@@ -1,0 +1,10 @@
+# Wait in the lobby until the host starts the game (passes right away when the device is not in a lobby).
+# env: LOBBY_WAIT_MS (optional; `lab.sh play` passes it): the game only starts once every player joined, and one
+# device may still be on its retry after a stuck bundle download (EXP-256), so the wait covers that retry. The
+# default must match LOBBY_WAIT_MS in qa/lab/lab.sh, where the budget is explained.
+appId: com.socketNull.ExposeMe
+---
+- extendedWaitUntil:
+    notVisible:
+      id: "lobby-waiting|start-game-button"
+    timeout: ${LOBBY_WAIT_MS || 420000}

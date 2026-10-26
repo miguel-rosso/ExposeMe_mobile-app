@@ -25,23 +25,18 @@ appId: com.socketNull.ExposeMe
 - pressKey: Enter
 - tapOn:
     id: "join-game-button"
-# The field keeps the last code entered/created in this session (GameContext gameCode) and a tap puts the
-# cursor mid-text, so eraseText alone leaves characters after it: double tap selects the whole code first
+- runFlow: type-room-code.yaml
+# Like the name above, the typed code is sometimes lost with several simulators driven in parallel (EXP-256: the
+# search then does nothing and the device never joins): if the field does not hold the code, type it once more
 - runFlow:
     when:
-      visible:
+      notVisible:
         id: "game-code-input"
-        text: "[A-Z0-9]+"
-    commands:
-      - doubleTapOn:
-          id: "game-code-input"
-      - eraseText: 12
-- tapOn:
+        text: "${GAME_CODE}"
+    file: type-room-code.yaml
+- assertVisible:
     id: "game-code-input"
-- inputText: ${GAME_CODE}
-# Codes are alphanumeric (letters keyboard, typed in any case): the full keyboard can cover the search button,
-# so submit to close it first (Enter blurs the field on both platforms; hideKeyboard is unsafe, see above)
-- pressKey: Enter
+    text: "${GAME_CODE}"
 - tapOn:
     id: "search-room-button"
 # Lobby (guest or host) or already in the game

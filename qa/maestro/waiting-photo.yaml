@@ -12,6 +12,7 @@ appId: com.socketNull.ExposeMe
 ---
 - runFlow: open-app.yaml
 - runFlow: join-room.yaml
+- runFlow: wait-game-start.yaml
 # One wait (no separate assert): with fast uploads the waiting screen can be gone between two checks
 - extendedWaitUntil:
     visible:

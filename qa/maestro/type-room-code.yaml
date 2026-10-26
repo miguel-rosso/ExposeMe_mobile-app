@@ -1,0 +1,20 @@
+# Type ${GAME_CODE} into the home screen's room code field, replacing whatever it holds (used by join-room.yaml).
+appId: com.socketNull.ExposeMe
+---
+# The field keeps the last code entered/created in this session (GameContext gameCode) and a tap puts the
+# cursor mid-text, so eraseText alone leaves characters after it: double tap selects the whole code first
+- runFlow:
+    when:
+      visible:
+        id: "game-code-input"
+        text: "[A-Z0-9]+"
+    commands:
+      - doubleTapOn:
+          id: "game-code-input"
+      - eraseText: 12
+- tapOn:
+    id: "game-code-input"
+- inputText: ${GAME_CODE}
+# Codes are alphanumeric (letters keyboard, typed in any case): the full keyboard can cover the search button,
+# so submit to close it first (Enter blurs the field on both platforms; hideKeyboard is unsafe, see join-room.yaml)
+- pressKey: Enter

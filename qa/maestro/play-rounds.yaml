@@ -2,6 +2,7 @@
 # Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
 appId: com.socketNull.ExposeMe
 ---
+- runFlow: wait-game-start.yaml
 - extendedWaitUntil:
     visible:
       id: "game-waiting-ready|game-waiting-photo|player-option-.*|score-modal"

@@ -9,6 +9,7 @@ appId: com.socketNull.ExposeMe
 ---
 - runFlow: open-app.yaml
 - runFlow: join-room.yaml
+- runFlow: wait-game-start.yaml
 - extendedWaitUntil:
     visible:
       id: "game-waiting-ready|game-waiting-photo|player-option-.*|score-modal"

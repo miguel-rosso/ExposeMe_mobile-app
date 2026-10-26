@@ -122,5 +122,78 @@ FAIL_ON=""; rm "$STATE/android-apk-path"; run_install
 [ $rc = 0 ] && grep -q "android-a: skipped, no Android build" <<<"$out" && ! grep -q "installed on android" <<<"$out" \
   && [ "$(grep -c "adb -s .* install " "$CMDS")" = 0 ] && ok "install: no Android build -> skipped, not reported installed" || ko "install: no Android build -> skipped" "rc=$rc $out"
 
+# ── prebuild_stale / build --prebuild (EXP-255, EXP-086): app.json & co. only reach the binaries via expo prebuild ──
+ROOT="$TMP/prebuild-repo"; RUNS="$TMP/prebuild-runs"; STATE="$RUNS/.lab"; mkdir -p "$ROOT/Client" "$STATE"
+echo '{"expo":{"name":"ExposeMe"}}' >"$ROOT/Client/app.json"; echo '{"name":"client"}' >"$ROOT/Client/package.json"
+prebuild_stale ios && ok "never prebuilt by the lab -> stale" || ko "never prebuilt -> stale"
+prebuild_mark_done ios
+prebuild_stale ios && ko "just prebuilt -> not stale" || ok "just prebuilt -> not stale"
+prebuild_stale android && ok "prebuild of one platform doesn't cover the other" || ko "per-platform prebuild record"
+for change in "app.json:{\"expo\":{\"name\":\"ExposeMe\",\"version\":\"2\"}}" "package.json:{\"name\":\"client\",\"deps\":1}" \
+  "plugins/withFoo.js:module.exports = 1" "app.config.js:module.exports = {}"; do
+  f="$ROOT/Client/${change%%:*}"; mkdir -p "$(dirname "$f")"; echo "${change#*:}" >"$f"
+  prebuild_stale ios && ok "${change%%:*} changed/added -> stale" || ko "${change%%:*} changed -> stale"
+  prebuild_mark_done ios
+done
+echo "module.exports = 2" >"$ROOT/Client/plugins/withFoo.js"
+prebuild_stale ios && ok "config plugin file edited -> stale" || ko "config plugin edited -> stale"
+prebuild_mark_done ios; touch "$ROOT/Client/app.json"
+prebuild_stale ios && ko "only the mtime changed -> not stale" || ok "only the mtime changed -> not stale"
+# Icons and splash images that app.json points to are copied into the native projects by prebuild
+mkdir -p "$ROOT/Client/assets/images"
+echo icon-v1 >"$ROOT/Client/assets/images/icon.png"; echo splash-v1 >"$ROOT/Client/assets/images/splash-icon.png"
+echo unused-v1 >"$ROOT/Client/assets/images/unused.png"
+echo '{"expo":{"icon":"./assets/images/icon.png","plugins":[["expo-splash-screen",{"image":"./assets/images/splash-icon.png"}]],"android":{"adaptiveIcon":{"foregroundImage":"./assets/images/missing.png"}}}}' \
+  >"$ROOT/Client/app.json"
+[ "$(app_json_files | sed "s|$ROOT/Client/||" | tr '\n' ' ')" = "assets/images/icon.png assets/images/splash-icon.png " ] \
+  && ok "app_json_files: the existing ./ paths app.json points to" || ko "app_json_files" "$(app_json_files)"
+prebuild_mark_done ios
+echo splash-v2 >"$ROOT/Client/assets/images/splash-icon.png"
+prebuild_stale ios && ok "splash image app.json points to changed -> stale" || ko "splash image changed -> stale"
+prebuild_mark_done ios; echo icon-v2 >"$ROOT/Client/assets/images/icon.png"
+prebuild_stale ios && ok "icon app.json points to changed -> stale" || ko "icon changed -> stale"
+prebuild_mark_done ios; echo unused-v2 >"$ROOT/Client/assets/images/unused.png"
+prebuild_stale ios && ko "image app.json doesn't use changed -> not stale" || ok "image app.json doesn't use changed -> not stale"
+
+# cmd_build with stub npx and stubbed native builds: arguments, prebuild with the Client's Node, warnings
+fake_node "$TMP/node24" 24.18.0
+printf '#!/bin/sh\necho "$(pwd) CI=$CI node=$(node) $*" >>"%s"\nexit "${STUB_NPX_RC:-0}"\n' "$TMP/npx.log" >"$TMP/node24/npx"; chmod +x "$TMP/node24/npx"
+client_path() { echo "$TMP/node24:$REAL_PATH"; }
+build_ios() { echo "build_ios" >>"$TMP/builds.log"; }
+build_android() { echo "build_android" >>"$TMP/builds.log"; }
+cmd_install() { echo "install" >>"$TMP/builds.log"; }
+run_build() { rm -f "$TMP/npx.log" "$TMP/builds.log"; out="$( (set -euo pipefail; cmd_build "$@") 2>&1)"; rc=$?; } # sets out, rc
+rm -f "$STATE"/prebuild-hash-*; mkdir -p "$ROOT/Client/ios" "$ROOT/Client/android"
+
+run_build android
+[ $rc = 0 ] && [ ! -e "$TMP/npx.log" ] && grep -q "Client/android may be out of date.*lab.sh build android --prebuild" <<<"$out" \
+  && [ "$(cat "$TMP/builds.log")" = "$(printf 'build_android\ninstall')" ] \
+  && ok "build android without a lab prebuild -> warns with the command, still builds" || ko "build: unknown prebuild warns" "rc=$rc $out"
+run_build android --prebuild
+[ $rc = 0 ] && [ "$(cat "$TMP/npx.log")" = "$ROOT/Client CI=1 node=24 expo prebuild --no-install --platform android" ] \
+  && [ "$(cat "$TMP/builds.log")" = "$(printf 'build_android\ninstall')" ] \
+  && ok "build android --prebuild -> CI=1 expo prebuild --no-install on the Client's Node, then builds" || ko "build --prebuild runs prebuild" "rc=$rc $out $(cat "$TMP/npx.log" 2>/dev/null)"
+run_build android
+[ $rc = 0 ] && ! grep -q "out of date" <<<"$out" && [ ! -e "$TMP/npx.log" ] && ok "after the prebuild -> no warning, no prebuild" || ko "after prebuild no warning" "$out"
+echo '{"expo":{"name":"ExposeMe","version":"3"}}' >"$ROOT/Client/app.json"
+run_build android
+grep -q "Client/android may be out of date" <<<"$out" && ok "app.json changed after the prebuild -> warns" || ko "app.json changed -> warns" "$out"
+run_build --prebuild
+[ "$(cat "$TMP/npx.log" 2>/dev/null)" = "$ROOT/Client CI=1 node=24 expo prebuild --no-install --platform all" ] \
+  && ! prebuild_stale ios && ! prebuild_stale android && [ "$(cat "$TMP/builds.log")" = "$(printf 'build_ios\nbuild_android\ninstall')" ] \
+  && ok "build --prebuild (all) -> one prebuild for both platforms, both recorded" || ko "build --prebuild all" "$out"
+rm -rf "$ROOT/Client/ios"
+run_build ios
+grep -q "Client/ios does not exist yet: running expo prebuild first" <<<"$out" && grep -q -- "--platform ios" "$TMP/npx.log" \
+  && ok "no native project yet -> prebuilds it automatically" || ko "missing native dir -> auto prebuild" "$out"
+STUB_NPX_RC=1; export STUB_NPX_RC; run_build ios --prebuild; unset STUB_NPX_RC
+[ $rc != 0 ] && grep -q "expo prebuild FAILED" <<<"$out" && [ ! -e "$TMP/builds.log" ] \
+  && ok "prebuild fails -> non-zero, nothing built or installed" || ko "prebuild failure stops the build" "rc=$rc $out"
+run_build tvos
+[ $rc != 0 ] && grep -q "usage: build" <<<"$out" && [ ! -e "$TMP/builds.log" ] && ok "build: bad argument rejected" || ko "build: bad argument" "rc=$rc $out"
+build_android() { echo "build_android" >>"$TMP/builds.log"; return 1; }
+run_build
+[ $rc != 0 ] && grep -q install "$TMP/builds.log" && ok "build: a failed platform build -> non-zero, still installs the rest" || ko "build: failed platform" "rc=$rc"
+
 echo "# $pass passed, $fail failed"
 [ $fail = 0 ]

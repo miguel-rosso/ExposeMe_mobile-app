@@ -6,8 +6,9 @@ import { DISCONNECT_GRACE, RoomManager } from "../managers/RoomManager";
 import { Room, YourTurnData } from "../models/interfaces";
 import { CapturedEmit, createFakeIo } from "./helpers";
 
-// EXP-016 / EXP-021 / EXP-014: keeps Server/GAME_FLOW.md honest. The event tables must list exactly the events the
-// server emits and handles, and the `{ ... }` payloads documented for GameEngine events must match what it emits.
+// EXP-016 / EXP-021 / EXP-014 / EXP-210: keeps Server/GAME_FLOW.md honest. The event tables must list exactly the
+// events the server emits and handles, the `{ ... }` payloads documented for GameEngine events must match what it
+// emits, and those of socketRoutes must match the payloads it emits and the fields its handlers read.
 
 const SERVER_DIR = join(__dirname, "..");
 const DOC = readFileSync(join(SERVER_DIR, "GAME_FLOW.md"), "utf8");
@@ -38,7 +39,7 @@ interface DocKeys { required: string[]; optional: string[] }
 
 /** Top-level keys of a documented payload like `` `{ round, reason: "a" \| "b", message? }` ``; null if not an object. */
 function payloadKeys(data: string): DocKeys | null {
-  const match = data.match(/^`\{(.*)\}`/s);
+  const match = data.match(/^`\{(.*?)\}`/s);
   if (!match) return null;
   const keys: DocKeys = { required: [], optional: [] };
   for (const part of match[1].split(",")) {
@@ -46,6 +47,15 @@ function payloadKeys(data: string): DocKeys | null {
     if (key) (key[2] ? keys.optional : keys.required).push(key[1]);
   }
   return keys;
+}
+
+// A Data cell for an event without payload: `-`, maybe followed by a note like `- (with an ack callback)`
+const NO_PAYLOAD = /^-(\s|$)/;
+
+/** `keys` of an `event` payload include every required key of `doc` and nothing undocumented. */
+function expectDocumentedKeys(event: string, keys: string[], doc: DocKeys): void {
+  expect(keys, `${event} has every documented key`).toEqual(expect.arrayContaining(doc.required));
+  expect([...doc.required, ...doc.optional], `${event} has no undocumented key`).toEqual(expect.arrayContaining(keys));
 }
 
 // ── Source scanning ──────────────────────────────────
@@ -89,6 +99,88 @@ function eventNames(source: string, call: RegExp): Set<string> {
 }
 
 const sorted = (names: Iterable<string>) => [...names].sort();
+
+// ── Call arguments ───────────────────────────────────
+
+const QUOTES = "\"'`";
+const OPENING_BRACKETS = "([{";
+const CLOSING_BRACKETS = ")]}";
+
+/**
+ * Index of the quote that closes the string literal opened at `start`. As in STRING_OR_COMMENT, a `'` or `"` string
+ * ends on its line: a quote left open there is not a string (e.g. inside a regex literal like `/[']/`), so `start`.
+ */
+function endOfString(text: string, start: number): number {
+  const quote = text[start];
+  for (let i = start + 1; i < text.length; i++) {
+    if (text[i] === "\\") i++;
+    else if (text[i] === quote) return i;
+    else if (text[i] === "\n" && quote !== "`") return start;
+  }
+  return quote === "`" ? text.length : start;
+}
+
+/**
+ * The comma-separated top-level items of `text` from `start`, up to an unmatched closing bracket (the end of a call's
+ * argument list) or the end of `text`. Nested brackets and string literals stay whole.
+ */
+function topLevelItems(text: string, start = 0): string[] {
+  const items: string[] = [];
+  let depth = 0;
+  let from = start;
+  let i = start;
+  for (; i < text.length; i++) {
+    const char = text[i];
+    if (QUOTES.includes(char)) i = endOfString(text, i);
+    else if (OPENING_BRACKETS.includes(char)) depth++;
+    else if (CLOSING_BRACKETS.includes(char) && depth-- === 0) break;
+    else if (char === "," && depth === 0) {
+      items.push(text.slice(from, i));
+      from = i + 1;
+    }
+  }
+  items.push(text.slice(from, i));
+  return items.map((item) => item.trim()).filter(Boolean);
+}
+
+interface Call { event: string; args: string[] }
+
+/** Every `call` in `source` with its event name and the source text of its other arguments. */
+function calls(source: string, call: RegExp): Call[] {
+  return [...source.matchAll(call)].map((match) => {
+    const [name, ...args] = topLevelItems(source, match.index! + match[0].length);
+    const event = name?.match(EVENT_NAME_LITERAL)?.[2];
+    expect(event, `${match[0]} with a non-literal event name: ${name}`).toBeDefined();
+    return { event: event!, args };
+  });
+}
+
+/** Keys of an object literal like `{ a: x, b }`; null if `text` is not one. Fails on keys it can't read (spreads). */
+function objectLiteralKeys(text: string): string[] | null {
+  if (!text.startsWith("{") || !text.endsWith("}")) return null;
+  return topLevelItems(text.slice(1, -1)).map((property) => {
+    const key = property.match(/^(\w+)\s*(?::|$)/)?.[1];
+    expect(key, `object literal with a key that can't be checked against the doc: ${property}`).toBeDefined();
+    return key!;
+  });
+}
+
+/**
+ * Payload fields a `socket.on` handler reads from its first parameter, written as `data.x`, `data?.x` or
+ * `{ x } = data` (passing `data` to a helper is not followed).
+ */
+function fieldsRead(handler: string): string[] {
+  // `(data: T)` or `data`, then an optional return type: `(data: T): void =>`
+  const signature = handler.match(/^(?:async\s*)?(?:\(\s*(\w*)[^)]*\)|(\w+))\s*(?::[^=]+)?=>/);
+  expect(signature, `socket.on handler is not an inline arrow function: ${handler.split("\n")[0]}`).not.toBeNull();
+  const param = signature![1] || signature![2];
+  if (!param) return [];
+  const fields = new Set([...handler.matchAll(new RegExp(String.raw`\b${param}\??\.(\w+)`, "g"))].map((m) => m[1]));
+  for (const [, destructured] of handler.matchAll(new RegExp(String.raw`\{([^{}]*)\}\s*=\s*${param}\b`, "g"))) {
+    topLevelItems(destructured).forEach((field) => fields.add(field.match(/^\w+/)![0]));
+  }
+  return sorted(fields);
+}
 
 // ── Event names ──────────────────────────────────────
 
@@ -227,9 +319,74 @@ describe("GAME_FLOW.md payloads", () => {
     for (const { event, args } of emits) {
       const doc = docs.get(event);
       if (!doc) continue; // not an object payload in the doc (e.g. public player, username)
-      const keys = Object.keys(args[0] as object);
-      expect(keys, `${event} has every documented key`).toEqual(expect.arrayContaining(doc.required));
-      expect([...doc.required, ...doc.optional], `${event} has no undocumented key`).toEqual(expect.arrayContaining(keys));
+      expectDocumentedKeys(event, Object.keys(args[0] as object), doc);
     }
+  });
+});
+
+describe("GAME_FLOW.md socketRoutes payloads", () => {
+  const routes = sourceFile("routes/socketRoutes.ts");
+
+  it("match what socketRoutes emits", () => {
+    const docs = documentedEvents(SERVER_TO_CLIENT_HEADING, 2);
+    for (const { event, args } of calls(routes, EMIT_CALL)) {
+      const data = docs.get(event)!; // documented: checked by the event table tests
+      const [payload, ...extra] = args;
+      expect(extra, `${event} is emitted with at most one payload`).toEqual([]);
+      const doc = payloadKeys(data);
+      if (NO_PAYLOAD.test(data)) {
+        expect(payload, `${event} is documented without data`).toBeUndefined();
+      } else if (doc) {
+        const keys = objectLiteralKeys(payload ?? "");
+        expect(keys, `${event} payload must be an object literal to check it against the doc: ${payload}`).not.toBeNull();
+        expectDocumentedKeys(event, keys!, doc);
+      } else {
+        expect(payload, `${event} is documented with data (${data})`).toBeDefined();
+        expect(objectLiteralKeys(payload!), `${event} is documented as ${data}, not as an object`).toBeNull();
+      }
+    }
+  });
+
+  it("match the fields socketRoutes handlers read", () => {
+    const docs = documentedEvents(CLIENT_TO_SERVER_HEADING, 1);
+    for (const { event, args } of calls(routes, HANDLER_CALL)) {
+      if (BUILT_IN_EVENTS.has(event)) continue;
+      const data = docs.get(event)!; // documented: checked by the event table tests
+      const doc = payloadKeys(data);
+      expect(doc !== null || NO_PAYLOAD.test(data), `${event} data must be documented as \`{ ... }\` or -`).toBe(true);
+      const documented = doc ? sorted([...doc.required, ...doc.optional]) : [];
+      expect(fieldsRead(args[0]), `${event} handler reads exactly the documented fields (as data.x, data?.x or { x } = data; passing data to a helper is not followed)`).toEqual(documented);
+    }
+  });
+
+  it("read payload keys and handler fields from source", () => {
+    const source = withoutComments([
+      "io.emit(\"a\", { ok: true, room: f(x, { y }), message: \"a, b}\", nested: { c: 1 }, short });",
+      "socket.emit('b', player(p, room)); io.to(code).emit(`c`);",
+      "socket.on(\"d\", (data: { x: number }) => { if (data?.x) g(data.y, { z: data?.x }); const { w, v: alias } = data; });",
+      "socket.on(\"e\", () => {}); socket.on(\"f\", (ack?: unknown) => { if (typeof ack === \"function\") ack(); });",
+      "socket.on(\"g\", (data: unknown) => { try { const { p, q } = data; } catch {} });",
+      "socket.on(\"h\", (data: { m: string }): void => { if (/[']/.test(data.m)) return; });",
+      "socket.on(\"i\", (data) => { g(data.n, 'a, b) {'); });",
+    ].join("\n"));
+
+    const emitted = calls(source, EMIT_CALL);
+    expect(emitted.map((e) => e.event)).toEqual(["a", "b", "c"]);
+    expect(objectLiteralKeys(emitted[0].args[0])).toEqual(["ok", "room", "message", "nested", "short"]);
+    expect(emitted[1].args).toEqual(["player(p, room)"]);
+    expect(objectLiteralKeys(emitted[1].args[0])).toBeNull();
+    expect(emitted[2].args).toEqual([]);
+
+    const handlers = calls(source, HANDLER_CALL);
+    expect(handlers.map((h) => [h.event, fieldsRead(h.args[0])])).toEqual([
+      ["d", ["v", "w", "x", "y"]], ["e", []], ["f", []], ["g", ["p", "q"]], ["h", ["m"]], ["i", ["n"]],
+    ]);
+  });
+
+  it("fail on payloads and handlers they can't check", () => {
+    expect(() => objectLiteralKeys("{ ...rest, a }")).toThrow(/can't be checked/);
+    expect(() => objectLiteralKeys("{ [key]: 1 }")).toThrow(/can't be checked/);
+    expect(() => fieldsRead("onJoin")).toThrow(/not an inline arrow function/);
+    expect(() => calls("io.emit(EVENT, x)", EMIT_CALL)).toThrow(/non-literal event name/);
   });
 });

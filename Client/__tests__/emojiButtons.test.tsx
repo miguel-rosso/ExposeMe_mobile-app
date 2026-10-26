@@ -7,7 +7,7 @@ import { emojiButtonId } from "../app/utils/testIds";
 
 // EXP-204: every button of the in-game emoji bar has a stable ASCII testID, so Maestro flows can send reactions
 
-const mockSocket = { emit: jest.fn() };
+const mockSocket = { connected: true, emit: jest.fn() };
 jest.mock("../app/providers/GameContext", () => ({ useGameContext: () => ({ socket: mockSocket }) }));
 
 const button = (root: ReactTestInstance, index: number) =>
@@ -17,6 +17,7 @@ describe("EmojisButton testIDs (EXP-204)", () => {
   let r: TestRenderer.ReactTestRenderer;
   beforeEach(() => {
     mockSocket.emit.mockClear();
+    mockSocket.connected = true;
     act(() => { r = TestRenderer.create(<EmojisButton />); });
   });
   afterEach(() => act(() => r.unmount()));
@@ -34,5 +35,15 @@ describe("EmojisButton testIDs (EXP-204)", () => {
   it("pressing a button by its testID sends that emoji", () => {
     act(() => button(r.root, 4).props.onPress());
     expect(mockSocket.emit).toHaveBeenCalledWith("emoji-reaction", { emoji: REACTION_EMOJIS[4] });
+  });
+
+  // EXP-274: socket.io would buffer it and flush it on the new socket before the rejoin, where the server drops it
+  it("offline, a press sends nothing and spends no cooldown", () => {
+    mockSocket.connected = false;
+    act(() => button(r.root, 1).props.onPress());
+    expect(mockSocket.emit).not.toHaveBeenCalled();
+    mockSocket.connected = true;
+    act(() => button(r.root, 1).props.onPress());
+    expect(mockSocket.emit).toHaveBeenCalledWith("emoji-reaction", { emoji: REACTION_EMOJIS[1] });
   });
 });

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { Socket } from "socket.io-client";
 import type { ServerPhase } from "../models/interfaces";
+import { emitWhileConnected } from "../utils/socketEmit";
 
 /**
  * QA builds only: development bundles served by a Metro started with EXPO_PUBLIC_QA=1 (as qa/lab/lab.sh does). A release
@@ -35,7 +36,8 @@ export function useQaRenderAck(
     lastAckedKey.current = phaseKey;
     const handledAt = handled.current?.phase === phase ? handled.current.at : undefined;
     handled.current = null; // one ack per handled event: a later restart of the phase has none
-    socket.emit("qa-ack", { phase, round, at: Date.now(), ...(handledAt !== undefined && { handledAt }) });
+    // A phase rendered offline is not acked (a late ack would be dropped before the rejoin, and measure nothing)
+    emitWhileConnected(socket, "qa-ack", { phase, round, at: Date.now(), ...(handledAt !== undefined && { handledAt }) });
   }, [socket, phase, round, phaseKey]);
 
   return markHandled;

@@ -215,6 +215,7 @@ const GameScreen = () => {
       console.log("[GAME] Can't rejoin the game — returning to menu");
       router.replace(message ? { pathname: "/", params: { message } } : "/");
     },
+    planted: { uri: plantedPhotoUri, sent: plantedPhotoSent, plant: plantPhoto },
   });
 
   // Removers of this screen's own socket listeners (never socket.off(event): the socket is shared, see socketHandlers).

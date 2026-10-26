@@ -129,6 +129,23 @@ describe("WaitingRoom: lobby chat (EXP-186)", () => {
     act(() => r.unmount());
   });
 
+  // EXP-274: socket.io would buffer it and flush it on the new socket before the rejoin, where the server drops it
+  it("offline, a message is not sent nor shown, and stays in the input to send once back", async () => {
+    const r = await mount();
+    await typeChat(r, "hola");
+    mockSocket.connected = false;
+    await sendChat(r);
+    expect(mockSocket.emittedPayloads("chat-message")).toEqual([]);
+    expect(chatShown(r)).toEqual([]);
+    expect(byId(r, TEST_IDS.chatInput).props.value).toBe("hola");
+
+    mockSocket.connected = true;
+    await sendChat(r); // no cooldown spent by the message that didn't go
+    expect(mockSocket.emittedPayloads("chat-message").map((m) => m.message)).toEqual(["hola"]);
+    expect(chatShown(r).map((m) => m.message)).toEqual(["hola"]);
+    act(() => r.unmount());
+  });
+
   it("a second message within the cooldown is held back with a warning, and goes once the cooldown is over", async () => {
     const r = await mount();
     await typeChat(r, "uno");

@@ -9,7 +9,7 @@ import { TURN_ENDING_EVENTS, useTurnRequest } from "../app/hooks/useTurnRequest"
 beforeAll(() => { jest.spyOn(console, "log").mockImplementation(() => {}); });
 afterAll(() => jest.restoreAllMocks());
 
-const makeSocket = () => ({ emit: jest.fn() });
+const makeSocket = () => ({ connected: true, emit: jest.fn() });
 type TurnRequest = ReturnType<typeof useTurnRequest>;
 
 // Renders the hook in a probe component; returns a getter for its latest value
@@ -122,6 +122,31 @@ describe("useTurnRequest", () => {
     expect(needsUpload).toBe(false);
     expect(socket.emit).toHaveBeenCalledWith("photo-sent", { photo: "/temp/a.jpg" });
     expect(tr().isSuspended(turn1)).toBe(false);
+  });
+
+  // EXP-274: socket.io would buffer them and flush them on the new socket before the rejoin, where the server drops them
+  it("offline, the photo is not sent; the rejoin's your-turn re-sends it without a new upload", () => {
+    const socket = makeSocket();
+    const tr = mount(socket);
+    act(() => { tr().start(turn1); });
+    socket.connected = false;
+    tr().sendPhoto(turn1, "/temp/a.jpg");
+    expect(socket.emit).not.toHaveBeenCalled();
+    socket.connected = true;
+    let needsUpload = true;
+    act(() => { needsUpload = tr().start(turn1); });
+    expect(needsUpload).toBe(false);
+    expect(socket.emit).toHaveBeenCalledWith("photo-sent", { photo: "/temp/a.jpg" });
+  });
+
+  it("offline, photo-unavailable is not sent and no report of mine is kept", () => {
+    const socket = makeSocket();
+    const tr = mount(socket);
+    act(() => { tr().start(turn1); });
+    socket.connected = false;
+    act(() => tr().reportUnavailable("upload", turn1));
+    expect(socket.emit).not.toHaveBeenCalled();
+    expect(tr().takeReportedReason()).toBeNull();
   });
 
   it("a plain endTurn (waiting-photo, round-start, round-skipped, game-over) cuts a suspended request", () => {

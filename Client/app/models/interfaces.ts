@@ -32,6 +32,10 @@ export interface Room {
   players: Player[];
   rounds: number;
   started?: boolean;
+  /** Rounds played so far (0 until round 1's photo is shown). */
+  round?: number;
+  /** Phase in play, null in the lobby and the ready phase. */
+  phase?: ServerPhase | null;
 }
 
 export interface RandomPhotoResponse {

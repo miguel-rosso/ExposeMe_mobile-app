@@ -7,6 +7,7 @@ import getEnvVars from "@/config";
 import { uploadPhoto } from "@/app/utils/uploadPhoto";
 import { PLANT_UPLOAD_RETRY, uploadWithRetry } from "@/app/utils/uploadRetry";
 import { leaveAndClose } from "@/app/utils/leaveRoom";
+import { emitWhileConnected } from "@/app/utils/socketEmit";
 
 const { SERVER_URL } = getEnvVars();
 const REJOIN_TOKEN_KEY = "rejoinToken";
@@ -139,7 +140,9 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   /**
    * Upload the picked planted photo and send plant-photo, right away from the lobby (so im-ready never waits for
    * it), retrying while the server is busy. Returns true once the server has it (plantedPhotoSent: the lobby shows
-   * it planted only then). A photo replaced or dropped while uploading is not sent nor retried.
+   * it planted only then). A photo replaced or dropped while uploading is not sent nor retried. Offline it is not sent
+   * (socket.io would only flush it before the rejoin, where the server drops it): the rejoin's room-of-game plants it
+   * again.
    */
   const plantPhoto = async (): Promise<boolean> => {
     const uri = plantedUriRef.current;
@@ -158,8 +161,14 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
         PLANT_UPLOAD_RETRY,
         stillPicked,
       );
-      if (!stillPicked() || !socketRef.current) return false;
-      socketRef.current.emit("plant-photo", { photoUrl: url });
+      if (!stillPicked()) return false;
+      if (!emitWhileConnected(socketRef.current, "plant-photo", { photoUrl: url })) {
+        // Offline: not planted. The rejoin's room-of-game plants it again when the server lacks it (the lobby's
+        // handler in WaitingRoom, the game's in useGameConnection)
+        console.log("Planted photo uploaded while offline: it is sent again after the rejoin");
+        setPlantUpload("idle");
+        return false;
+      }
       setPlantedPhotoSent(true);
       setPlantUpload("idle");
       return true;

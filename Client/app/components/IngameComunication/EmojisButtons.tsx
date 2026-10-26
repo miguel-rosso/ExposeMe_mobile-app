@@ -4,6 +4,7 @@ import { useGameContext } from "../../providers/GameContext";
 import { memo, useRef } from "react";
 import { REACTION_EMOJIS } from "../../utils/reactions";
 import { emojiButtonId } from "../../utils/testIds";
+import { emitWhileConnected } from "../../utils/socketEmit";
 
 function EmojisButton() {
   const { socket } = useGameContext();
@@ -13,9 +14,9 @@ function EmojisButton() {
   // The server takes the sender and room from the socket's session
   const sendEmojiReaction = (emoji: string) => {
     const currentTime = Date.now();
-    if (currentTime - lastSentRef.current < COOLDOWN_TIME || !socket) return;
-    socket.emit("emoji-reaction", { emoji });
-    lastSentRef.current = currentTime;
+    if (currentTime - lastSentRef.current < COOLDOWN_TIME) return;
+    // Offline it is dropped, not buffered: the server would drop it before the rejoin anyway
+    if (emitWhileConnected(socket, "emoji-reaction", { emoji })) lastSentRef.current = currentTime;
   };
 
   return (

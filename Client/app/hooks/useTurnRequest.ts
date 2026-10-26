@@ -2,6 +2,7 @@ import { useMemo, useRef } from "react";
 import type { Socket } from "socket.io-client";
 import { PhotoUnavailableReason, YourTurnData } from "../models/interfaces";
 import { TurnUpload, turnUploadAction } from "../utils/gameState";
+import { emitWhileConnected } from "../utils/socketEmit";
 
 /**
  * Events that end my photo request in force (see Server/GAME_FLOW.md, "photo-unavailable", and TURN_ENDING_EVENTS in
@@ -56,25 +57,34 @@ export function useTurnRequest(socket: Socket | null | undefined) {
       suspendedRef.current = null;
       reportedRef.current = null;
       const action = turnUploadAction(uploadRef.current, turn.attempt);
-      if (action === "resend") { socket?.emit("photo-sent", { photo: uploadRef.current!.url }); return false; }
+      if (action === "resend") { emitWhileConnected(socket, "photo-sent", { photo: uploadRef.current!.url }); return false; }
       if (action === "wait") return false; // the upload in flight sends it
       uploadRef.current = { attempt: turn.attempt };
       return true;
     };
 
-    /** The photo for `turn` is uploaded: kept for a re-sent your-turn, sent if its request is still in force. */
+    /**
+     * The photo for `turn` is uploaded: kept for a re-sent your-turn, sent if its request is still in force. Offline
+     * it is not sent: the rejoin's your-turn (same attempt) re-sends it.
+     */
     const sendPhoto = (turn: YourTurnData, url: string) => {
       if (uploadRef.current?.attempt === turn.attempt) uploadRef.current = { attempt: turn.attempt, url };
-      if (isCurrent(turn)) socket?.emit("photo-sent", { photo: url });
+      if (isCurrent(turn)) emitWhileConnected(socket, "photo-sent", { photo: url });
     };
 
-    /** No photo to send for `turn`: tell the server so it skips now instead of making everyone wait. */
+    /**
+     * No photo to send for `turn`: tell the server so it skips now instead of making everyone wait. Offline nothing is
+     * reported (the rejoin's your-turn asks again), so there is no report of mine to answer.
+     */
     const reportUnavailable = (reason: PhotoUnavailableReason, turn: YourTurnData) => {
       if (uploadRef.current?.attempt === turn.attempt) uploadRef.current = null;
       if (!isCurrent(turn)) { console.log(`[GAME] stale turn ${turn.attempt} ended without a photo (${reason})`); return; }
+      if (!emitWhileConnected(socket, "photo-unavailable", { round: turn.round, attempt: turn.attempt })) {
+        console.log(`[GAME] photo-unavailable (${reason}) not sent: offline`);
+        return;
+      }
       console.log(`[GAME] photo-unavailable (${reason})`);
       reportedRef.current = reason;
-      socket?.emit("photo-unavailable", { round: turn.round, attempt: turn.attempt });
     };
 
     /** A TURN_ENDING_EVENT arrived: no request of mine is in force; a pause only suspends it (`suspended`). */

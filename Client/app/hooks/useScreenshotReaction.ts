@@ -3,6 +3,7 @@ import { Platform } from "react-native";
 import * as ScreenCapture from "expo-screen-capture";
 import type { Socket } from "socket.io-client";
 import { SCREENSHOT_EMOJI } from "../utils/reactions";
+import { emitWhileConnected } from "../utils/socketEmit";
 
 const COOLDOWN_MS = 250;
 
@@ -16,8 +17,8 @@ export function useScreenshotReaction(socket: Socket | null | undefined) {
     const subscription = ScreenCapture.addScreenshotListener(() => {
       const now = Date.now();
       if (now - lastSentRef.current < COOLDOWN_MS) return;
-      lastSentRef.current = now;
-      socket.emit("emoji-reaction", { emoji: SCREENSHOT_EMOJI });
+      // Offline it is dropped, not buffered: the server would drop it before the rejoin anyway
+      if (emitWhileConnected(socket, "emoji-reaction", { emoji: SCREENSHOT_EMOJI })) lastSentRef.current = now;
     });
     return () => subscription.remove();
   }, [socket]);

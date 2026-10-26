@@ -9,7 +9,7 @@ import type { ServerPhase } from "../app/models/interfaces";
 
 interface Props { phase: ServerPhase | null; round: number; phaseKey: number }
 
-const socket = { emit: jest.fn() };
+const socket = { connected: true, emit: jest.fn() };
 const Probe = ({ phase, round, phaseKey }: Props) => {
   useQaRenderAck(socket as unknown as Socket, phase, round, phaseKey);
   return null;
@@ -37,7 +37,7 @@ const PHASES: Props[] = [
 
 describe("useQaRenderAck", () => {
   const original = process.env.EXPO_PUBLIC_QA;
-  beforeEach(() => socket.emit.mockClear());
+  beforeEach(() => { socket.emit.mockClear(); socket.connected = true; });
   afterEach(() => {
     if (original === undefined) delete process.env.EXPO_PUBLIC_QA;
     else process.env.EXPO_PUBLIC_QA = original;
@@ -106,5 +106,20 @@ describe("useQaRenderAck", () => {
       (global as { __DEV__?: boolean }).__DEV__ = dev;
     }
     expect(socket.emit).not.toHaveBeenCalled();
+  });
+
+  // EXP-274: socket.io would buffer it and flush it on the new socket before the rejoin, where the server drops it
+  it("offline, a phase start is not acked, nor acked late once back", () => {
+    process.env.EXPO_PUBLIC_QA = "1";
+    socket.connected = false;
+    let r!: TestRenderer.ReactTestRenderer;
+    act(() => { r = TestRenderer.create(<Probe phase="answering" round={1} phaseKey={1} />); });
+    expect(socket.emit).not.toHaveBeenCalled();
+    socket.connected = true;
+    act(() => r.update(<Probe phase="answering" round={1} phaseKey={1} />));
+    expect(acks()).toEqual([]);
+    act(() => r.update(<Probe phase="reveal" round={1} phaseKey={2} />));
+    expect(acks()).toEqual([expect.objectContaining({ phase: "reveal" })]);
+    act(() => r.unmount());
   });
 });

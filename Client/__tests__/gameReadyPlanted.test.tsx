@@ -80,6 +80,56 @@ describe("GameScreen: im-ready never waits for a planted photo", () => {
     act(() => r.unmount());
   });
 
+  // EXP-277: the planted photo sent offline (or before the rejoin bound the new socket) is planted again on the rejoin
+  describe("after an in-game rejoin", () => {
+    const rejoin = (room: { phase: string | null; round: number; started?: boolean }, hasPlantedPhoto: boolean) =>
+      act(() => mockSocket.fire("room-of-game", {
+        success: true, rejoinToken: "tok-123", hasPlantedPhoto,
+        room: { gameCode: "123456", rounds: 10, started: true, players: mockPlayers, ...room },
+      }));
+
+    it("the server lacks it (not sent): plants it again", async () => {
+      Object.assign(mockPlanted, { uri: "file:///picked.jpg", sent: false });
+      const r = await mount();
+      mockPlantPhoto.mockClear(); // the retry after im-ready
+      rejoin({ phase: null, round: 0 }, false);
+      expect(mockPlantPhoto).toHaveBeenCalledTimes(1);
+      act(() => r.unmount());
+    });
+
+    it("the server already has it: nothing", async () => {
+      Object.assign(mockPlanted, { uri: "file:///picked.jpg", sent: false });
+      const r = await mount();
+      mockPlantPhoto.mockClear();
+      rejoin({ phase: null, round: 0 }, true);
+      expect(mockPlantPhoto).not.toHaveBeenCalled();
+      act(() => r.unmount());
+    });
+
+    // Review of EXP-277: game over clears every mark and leaves no phase; the final screens keep this listener
+    it("on the final screens after game over: nothing (this game's photo is not the next one's)", async () => {
+      Object.assign(mockPlanted, { uri: "file:///picked.jpg", sent: true });
+      const r = await mount();
+      act(() => mockSocket.fire("game-over", { finalScore: [] }));
+      mockPlantPhoto.mockClear();
+      rejoin({ phase: null, round: 0, started: false }, false);
+      expect(mockPlantPhoto).not.toHaveBeenCalled();
+      Object.assign(mockPlanted, { sent: false });
+      rejoin({ phase: null, round: 0, started: false }, false);
+      expect(mockPlantPhoto).not.toHaveBeenCalled();
+      act(() => r.unmount());
+    });
+
+    it("round 1 already played: nothing", async () => {
+      Object.assign(mockPlanted, { uri: "file:///picked.jpg", sent: false });
+      const r = await mount();
+      mockPlantPhoto.mockClear();
+      rejoin({ phase: "answering", round: 0 }, false);
+      expect(mockPlantPhoto).not.toHaveBeenCalled();
+      act(() => r.unmount());
+    });
+  });
+
   it("nothing planted: im-ready only", async () => {
     Object.assign(mockPlanted, { uri: null, sent: false });
     const r = await mount();

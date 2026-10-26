@@ -23,7 +23,7 @@ const Probe = () => { ctx = useGameContext(); return null; };
 
 beforeAll(() => { jest.spyOn(console, "log").mockImplementation(() => {}); });
 afterAll(() => { jest.restoreAllMocks(); });
-beforeEach(() => { mockUpload.mockClear(); mockSocket.emit.mockClear(); });
+beforeEach(() => { mockUpload.mockClear(); mockSocket.emit.mockClear(); mockSocket.connected = true; });
 
 const mount = () => {
   let r!: TestRenderer.ReactTestRenderer;
@@ -74,6 +74,31 @@ describe("GameContext planted photo", () => {
     await act(async () => { ok = await ctx.plantPhoto(); });
     expect(ok).toBe(false);
     expect(mockUpload).toHaveBeenCalledTimes(1);
+    act(() => r.unmount());
+  });
+
+  // EXP-274: socket.io would buffer plant-photo and flush it on the new socket before the rejoin, where the server
+  // drops it: the photo must stay not sent, so the rejoin (lobby room-of-game, or the game's im-ready) plants it again
+  it("offline once uploaded: plant-photo is not sent nor marked sent, and the retry once back sends it", async () => {
+    const r = mount();
+    act(() => ctx.setPlantedPhotoUri("file:///picked.jpg"));
+    let release!: (url: string) => void;
+    mockUpload.mockImplementationOnce(() => new Promise<string>((res) => { release = res; }));
+    let first!: Promise<boolean>;
+    act(() => { first = ctx.plantPhoto(); });
+    mockSocket.connected = false; // the connection drops while it uploads
+    await act(async () => { release(UPLOADED); expect(await first).toBe(false); });
+    expect(mockSocket.emit).not.toHaveBeenCalledWith("plant-photo", expect.anything());
+    expect(ctx.plantedPhotoSent).toBe(false);
+    expect(ctx.plantUpload).toBe("idle"); // not a failed upload: nothing to report, the rejoin retries it
+    expect(ctx.plantedPhotoUri).toBe("file:///picked.jpg");
+
+    mockSocket.connected = true; // rejoined
+    let ok = false;
+    await act(async () => { ok = await ctx.plantPhoto(); });
+    expect(ok).toBe(true);
+    expect(mockSocket.emit).toHaveBeenCalledWith("plant-photo", { photoUrl: UPLOADED });
+    expect(ctx.plantedPhotoSent).toBe(true);
     act(() => r.unmount());
   });
 

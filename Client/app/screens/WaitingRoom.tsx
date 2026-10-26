@@ -41,6 +41,7 @@ import { useI18n } from "../i18n";
 import { TEST_IDS, lobbyPlayerId, lobbyPlayerOfflineId, roundsOptionId } from "../utils/testIds";
 import { isHostIn, withConnection, withHost } from "../utils/roomPlayers";
 import { attachHandlers, SocketHandlers } from "../utils/socketHandlers";
+import { emitWhileConnected } from "../utils/socketEmit";
 import { parseRoomCodeParam } from "../utils/roomCode";
 import { KICKED_BY_HOST_MESSAGE } from "../utils/serverMessage";
 import { dismissKeyboardOnBackPress } from "../utils/keyboardBackPress";
@@ -156,13 +157,13 @@ const WaitingRoom = ({}) => {
 
     // Check cooldown
     if (currentTime - lastSentTime >= COOLDOWN_TIME) {
-      if (socket && gameCode) {
-        socket.emit("chat-message", {
-          gameCode,
-          username,
-          message: chatMessage.trim(),
-        });
-
+      // Offline it is not sent (nor shown): the text stays in the input to send once back
+      const sent = !!gameCode && emitWhileConnected(socket, "chat-message", {
+        gameCode,
+        username,
+        message: chatMessage.trim(),
+      });
+      if (sent) {
         // Add message locally for the sender
         const messageId = `${Date.now()}-${Math.random()}`;
         setChatMessages((prev) =>

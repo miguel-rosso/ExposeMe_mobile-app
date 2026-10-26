@@ -16,7 +16,7 @@ appId: com.socketNull.ExposeMe
 - runFlow: join-room.yaml
 - extendedWaitUntil:
     visible:
-      id: "game-waiting-ready|game-waiting-photo|player-option-.*|own-photo-hint|score-modal"
+      id: "game-waiting-ready|game-waiting-photo|player-option-.*|score-modal"
     timeout: 60000
 - repeat:
     while:
@@ -40,7 +40,7 @@ appId: com.socketNull.ExposeMe
 - takeScreenshot: auto-join-transition-${USERNAME}
 - extendedWaitUntil:
     visible:
-      id: "game-waiting-ready|game-waiting-photo|player-option-.*|own-photo-hint"
+      id: "game-waiting-ready|game-waiting-photo|player-option-.*"
     timeout: 20000
 - takeScreenshot: auto-join-next-game-${USERNAME}
 # The second game is played to the end like any other

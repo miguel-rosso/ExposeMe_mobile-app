@@ -30,7 +30,6 @@ export const TEST_IDS = {
   waitingPhotoText: "waiting-photo-text",
   roundSkippedNotice: "round-skipped-notice",
   holdButton: "hold-button",
-  ownPhotoHint: "own-photo-hint",
   photoView: "photo-view", // PhotoComponent: the game photo (also the own-photos viewer)
   roundProgress: "round-progress",
   answerOptions: "answer-options",
@@ -55,7 +54,8 @@ export const TEST_IDS = {
   scoreModal: "score-modal",
   scoreList: "score-list",
   scoreRoundTitle: "score-round-title",
-  scoreAnswerPill: "score-answer-pill",
+  scoreAnswerCard: "score-answer-card", // whose photo it was
+  scoreAnswerName: "score-answer-name", // its large text: the name, or "It was your photo!" for the owner
   winnerModal: "winner-modal",
   winnerContinue: "winner-continue",
   winnerTitle: "winner-title",

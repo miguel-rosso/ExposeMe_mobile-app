@@ -4,7 +4,7 @@ appId: com.socketNull.ExposeMe
 ---
 - extendedWaitUntil:
     visible:
-      id: "game-waiting-ready|game-waiting-photo|player-option-.*|own-photo-hint|score-modal"
+      id: "game-waiting-ready|game-waiting-photo|player-option-.*|score-modal"
     timeout: 180000
 - repeat:
     while:
@@ -19,7 +19,8 @@ appId: com.socketNull.ExposeMe
           waitToSettleTimeoutMs: 500
       - evalScript: ${output.shot = (output.shot || 0) + 1}
       - takeScreenshot: round-${USERNAME}-${output.shot}
-      # EXP-141: the scoreboard is drawn alone, with no answer options under it
+      # EXP-141: the scoreboard is drawn alone, with no answer options under it.
+      # EXP-252: it opens with the card saying whose photo it was ("It was your photo!" on the owner's phone)
       - runFlow:
           when:
             visible:
@@ -27,6 +28,8 @@ appId: com.socketNull.ExposeMe
           commands:
             - assertNotVisible:
                 id: "player-option-.*"
+            - assertVisible:
+                id: "score-answer-card"
       - waitForAnimationToEnd:
           timeout: 4000
 - takeScreenshot: final-${USERNAME}

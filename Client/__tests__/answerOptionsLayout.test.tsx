@@ -101,7 +101,7 @@ const renderAnswering = async (names: string[]) => {
   mockSocket.emitted = [];
   let r!: TestRenderer.ReactTestRenderer;
   await act(async () => { r = TestRenderer.create(<GameScreen />); });
-  act(() => mockSocket.fire("round-start", { photo: "/temp/x.jpg", round: 1, duration: 8_000, isOwner: false }));
+  act(() => mockSocket.fire("round-start", { photo: "/temp/x.jpg", round: 1, duration: 8_000 }));
   return r;
 };
 

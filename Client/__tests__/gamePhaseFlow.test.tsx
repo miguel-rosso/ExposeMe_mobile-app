@@ -88,7 +88,7 @@ const bar = (root: ReactTestInstance) => {
 const scoreModal = (root: ReactTestInstance) => byId(root, "score-modal-probe")[0]?.props;
 const emitted = (ev: string) => mockSocket.emitted.filter(([e]) => e === ev);
 
-const START = { photo: "/temp/x.jpg", round: 1, duration: 7_700, isOwner: false };
+const START = { photo: "/temp/x.jpg", round: 1, duration: 7_700 };
 const SCORES = [
   { username: "alice", points: 1, lastAnswerCorrect: true, lastGuess: "carol" },
   { username: "bob", points: 0, lastAnswerCorrect: false, lastGuess: "alice" },
@@ -174,7 +174,7 @@ describe("GameScreen: server phases drawn with the received duration (EXP-063)",
   });
 
   it("the owner's hold button sends hold-start on press and hold-end on release, only in scores", () => {
-    act(() => mockSocket.fire("round-start", { ...START, isOwner: true }));
+    act(() => mockSocket.fire("round-start", START));
     expect(has(r.root, TEST_IDS.holdButton)).toBe(false); // not while answering
     act(() => mockSocket.fire("round-reveal", { correctAnswer: "bob", duration: 3_000 }));
     expect(has(r.root, TEST_IDS.holdButton)).toBe(false);
@@ -205,7 +205,8 @@ describe("GameScreen: server phases drawn with the received duration (EXP-063)",
   });
 
   it("the next round drops a hold still pressed (the button goes), and the owner can hold again later", () => {
-    act(() => mockSocket.fire("round-start", { ...START, isOwner: true }));
+    act(() => mockSocket.fire("round-start", START));
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "bob", duration: 3_000 }));
     act(() => mockSocket.fire("round-scores", { scores: SCORES, round: 1, totalRounds: 10, duration: 5_000 }));
     const button = () => r.root.find((n) => n.props.testID === TEST_IDS.holdButton && typeof n.props.onPressIn === "function");
     act(() => button().props.onPressIn());
@@ -213,22 +214,24 @@ describe("GameScreen: server phases drawn with the received duration (EXP-063)",
 
     // The server moved on (it ends the hold itself): every phase change resets the press, so the button unmounts
     // and a new press is not ignored
-    act(() => mockSocket.fire("round-start", { ...START, photo: "/temp/y.jpg", round: 2, isOwner: true }));
+    act(() => mockSocket.fire("round-start", { ...START, photo: "/temp/y.jpg", round: 2 }));
     expect(has(r.root, TEST_IDS.holdButton)).toBe(false);
 
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "bob", duration: 3_000 }));
     act(() => mockSocket.fire("round-scores", { scores: SCORES, round: 2, totalRounds: 10, duration: 5_000 }));
     act(() => button().props.onPressIn());
     expect(emitted("hold-start")).toHaveLength(2);
   });
 
-  // EXP-189: the hold button exists only for the photo owner and only in scores (no press keeps it in another phase)
+  // EXP-189: the hold button exists only for the photo owner and only in scores (no press keeps it in another phase).
+  // EXP-252: the owner is only known from the reveal (correctAnswer names me, bob)
   it("the hold button is mounted only in scores, only for the owner, also while pressed", () => {
-    const holdPhases = (isOwner: boolean) => {
+    const holdPhases = (mine: boolean) => {
       const seen: string[] = [];
       const check = (phase: string) => { if (has(r.root, TEST_IDS.holdButton)) seen.push(phase); };
-      act(() => mockSocket.fire("round-start", { ...START, isOwner }));
+      act(() => mockSocket.fire("round-start", START));
       check("answering");
-      act(() => mockSocket.fire("round-reveal", { correctAnswer: isOwner ? "bob" : "carol", duration: 3_000 }));
+      act(() => mockSocket.fire("round-reveal", { correctAnswer: mine ? "bob" : "carol", duration: 3_000 }));
       check("reveal");
       act(() => mockSocket.fire("round-scores", { scores: SCORES, round: 1, totalRounds: 10, duration: 5_000 }));
       check("scores");
@@ -257,7 +260,7 @@ describe("GameScreen: server phases drawn with the received duration (EXP-063)",
 
     // A rejoin snapshot in scores draws the same screen
     act(() => mockSocket.fire("game-state", {
-      started: true, phase: "scores", round: 1, totalRounds: 10, isOwner: false, photo: "/temp/x.jpg",
+      started: true, phase: "scores", round: 1, totalRounds: 10, photo: "/temp/x.jpg",
       correctAnswer: "carol", duration: 4_000, held: false, pause: null, scores: SCORES, players: mockPlayers,
     }));
     expect(has(r.root, playerOptionId("alice"))).toBe(false);
@@ -266,11 +269,11 @@ describe("GameScreen: server phases drawn with the received duration (EXP-063)",
     expect(has(r.root, playerOptionId("alice"))).toBe(true);
   });
 
-  it("the owner's scoreboard keeps room for the hold button and the hint is gone in scores", () => {
-    act(() => mockSocket.fire("round-start", { ...START, isOwner: true }));
-    expect(has(r.root, TEST_IDS.ownPhotoHint)).toBe(true);
+  it("the owner answers like everyone, and their scoreboard keeps room for the hold button", () => {
+    act(() => mockSocket.fire("round-start", START));
+    expect(has(r.root, playerOptionId("bob"))).toBe(true); // my own name too: I'm not told it's my photo
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "bob", duration: 3_000 }));
     act(() => mockSocket.fire("round-scores", { scores: SCORES, round: 1, totalRounds: 10, duration: 5_000 }));
-    expect(has(r.root, TEST_IDS.ownPhotoHint)).toBe(false);
     expect(has(r.root, playerOptionId("alice"))).toBe(false);
     expect(scoreModal(r.root).reserveHoldButton).toBe(true);
     expect(has(r.root, TEST_IDS.holdButton)).toBe(true);

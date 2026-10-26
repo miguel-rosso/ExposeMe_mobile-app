@@ -24,7 +24,7 @@ import { uploadPhoto } from "@/app/utils/uploadPhoto";
 import { photoAuthHeaders, resolvePhotoAuth } from "@/app/utils/photoAuth";
 import { uploadWithRetry } from "../utils/uploadRetry";
 import { SkipNotice, skipNoticeFor, skipNoticeText } from "../utils/waitingPhoto";
-import { gameStateFollowUps, initialRoundView, RoundAction, roundReducer, RoundView } from "../utils/roundState";
+import { gameStateFollowUps, initialRoundView, isRevealedOwner, RoundAction, roundReducer, RoundView } from "../utils/roundState";
 import { useGameConnection } from "../hooks/useGameConnection";
 import { useTurnRequest } from "../hooks/useTurnRequest";
 import { withHost, withoutPlayer } from "../utils/roomPlayers";
@@ -78,7 +78,7 @@ const GameScreen = () => {
     setRoundView(roundRef.current);
   };
   const {
-    photo, isOwner, round, phase, phaseDuration, phaseKey, correctAnswer, scores, mySelection, gameHeld, pressing,
+    photo, round, phase, phaseDuration, phaseKey, correctAnswer, scores, mySelection, gameHeld, pressing,
   } = roundView;
   // QA builds only: tells the server when this device rendered each phase (lab render-skew metrics); the phase
   // handlers below call markPhaseHandled first, so the ack also says when their event arrived
@@ -149,9 +149,10 @@ const GameScreen = () => {
   const [isReady, setIsReady] = useState(false);
 
   // ── Derived ──────────────────────────────────────────
-  // Hold button: the photo owner's, during scores only (every event that ends scores also clears the press)
-  const holdButtonMounted = isOwner && phase === "scores";
-  // The scoreboard covers the photo in scores: the answer options (or the owner's hint) are not drawn under it
+  // Hold button: the photo owner's, during scores only (every event that ends scores also clears the press). Like
+  // everyone, the owner only learns the photo was theirs from the reveal (EXP-252)
+  const holdButtonMounted = phase === "scores" && isRevealedOwner(correctAnswer, safeUsername);
+  // The scoreboard covers the photo in scores: the answer options are not drawn under it
   const showAnswers = phase !== "scores";
 
   // ── Photo access (room members only: room code + rejoin token) ─
@@ -174,8 +175,7 @@ const GameScreen = () => {
 
   // ── Hold handlers ────────────────────────────────────
   const onHoldPress = () => {
-    if (!isOwner || !socket || pressing) return;
-    if (phase !== "scores") return;
+    if (!holdButtonMounted || !socket || pressing) return;
     dispatchRound({ type: "pressing", pressing: true });
     socket.emit("hold-start");
   };
@@ -248,7 +248,8 @@ const GameScreen = () => {
         dispatchRound({ type: "waiting-photo", data });
       },
 
-      // My turn: pick photo → upload → send (or report photo-unavailable)
+      // My turn: pick photo → upload → send (or report photo-unavailable), all in the background: nothing on screen
+      // changes, so I can't tell the next photo is mine and guess like everyone (EXP-252)
       "your-turn": async (data: YourTurnData) => {
         const needsUpload = turnRequest.start(data); // a re-sent request re-sends or awaits its photo
         dispatchRound({ type: "your-turn", round: data.round });
@@ -262,14 +263,14 @@ const GameScreen = () => {
           setPhotoUri(null);
           turnRequest.sendPhoto(data, url);
           return;
-        } catch (e) { console.error("your-turn error:", e); }
+        } catch (e) { console.log("your-turn error:", e); } // never a device toast: my turn must not show (EXP-252)
         turnRequest.reportUnavailable("failed", data);
       },
 
       // Atomic: new round — photo + answer timer
       "round-start": (data: RoundStartData) => {
         markPhaseHandled("answering");
-        console.log(`[GAME] round-start: round=${data.round}, mine=${data.isOwner}`);
+        console.log(`[GAME] round-start: round=${data.round}`);
         turnRequest.endTurn();
         setSkipNotice(null);
         dispatchRound({ type: "round-start", data, serverUrl: SERVER_URL });
@@ -321,7 +322,7 @@ const GameScreen = () => {
         dispatchRound({ type: "game-paused" });
         // The server ignores photos while paused and sends your-turn again on resume (an upload that finishes
         // meanwhile is kept and re-sent then)
-        turnRequest.endTurn({ keepUploading: true });
+        turnRequest.endTurn();
       },
 
       "game-resumed": (data: GameResumedData) => {
@@ -363,7 +364,7 @@ const GameScreen = () => {
     const roomHandlers: SocketHandlers = {
       "game-over": (data: { finalScore: ScoreRound[] }) => {
         console.log("[GAME] game-over");
-        turnRequest.endTurn({ keepUploading: true });
+        turnRequest.endTurn();
         showGameOver(data.finalScore);
       },
       "player-left": (name: string) => { console.log(`[GAME] player-left: ${name}`); dropPlayer(name); },
@@ -431,8 +432,8 @@ const GameScreen = () => {
       <TouchableOpacity
         testID={playerOptionId(item.username)}
         style={tw`${optionCard.card} rounded-lg mx-1 flex-grow ${OPTION_BASIS[answersLayout.columns]} ${bg}`}
-        onPress={() => phase === "answering" && !answersClosed && !isOwner && item.username !== mySelection && pickGuess(item.username)}
-        disabled={isReveal || isOwner || answersClosed}
+        onPress={() => phase === "answering" && !answersClosed && item.username !== mySelection && pickGuess(item.username)}
+        disabled={isReveal || answersClosed}
       >
         <View style={tw`flex-row items-center justify-between`}>
           <Text style={tw`text-white ${optionCard.text} flex-1 ${isMe ? "font-bold" : ""}`} numberOfLines={1} ellipsizeMode={optionCard.ellipsize}>
@@ -477,7 +478,7 @@ const GameScreen = () => {
               </Text>
             )}
             <Text testID={TEST_IDS.waitingPhotoText} style={tw`text-xl text-white font-bold text-center mb-6`}>
-              {turnRequest.uploading ? t.uploadingYourPhoto : t.someoneChoosingPhoto}
+              {t.someoneChoosingPhoto}
             </Text>
             {phaseDuration > 0 && pauseEndsAt === null && (
               <View style={tw`w-full max-w-[500px]`}>
@@ -520,38 +521,29 @@ const GameScreen = () => {
                   </View>
                 )}
 
-                {/* Player selection buttons (my own photo: I can't vote, so a hint instead while the others answer) */}
+                {/* Player selection buttons: everyone's, the photo owner's too (they aren't told it's theirs) */}
                 {showAnswers && (
                   <View
                     style={tw`absolute z-40 bottom-22 left-0 right-0 p-2 flex-row justify-center`}
                     onLayout={(e) => setAnswersTop(e.nativeEvent.layout.y)}
                   >
-                    {isOwner && phase === "answering" ? (
-                      <Text
-                        testID={TEST_IDS.ownPhotoHint}
-                        style={tw`text-white text-lg font-bold text-center bg-gray-800 bg-opacity-80 px-4 py-3 rounded-xl max-w-[500px]`}
-                      >
-                        {t.ownPhotoHint}
-                      </Text>
-                    ) : (
-                      <FlatList
-                        // numColumns can't change on a mounted list (players may leave mid-game): remount instead
-                        key={`answers-${answersLayout.columns}`}
-                        ref={answersListRef}
-                        testID={TEST_IDS.answerOptions}
-                        data={playersProvider}
-                        renderItem={renderPlayer}
-                        keyExtractor={(item) => item.username}
-                        numColumns={answersLayout.columns}
-                        columnWrapperStyle={tw`justify-between`}
-                        style={[tw`w-full max-w-[500px] px-2`, { maxHeight: answersLayout.maxHeight }]}
-                        contentContainerStyle={tw`w-full`}
-                        showsVerticalScrollIndicator
-                        persistentScrollbar
-                        indicatorStyle="white"
-                        onContentSizeChange={hintMoreAnswers}
-                      />
-                    )}
+                    <FlatList
+                      // numColumns can't change on a mounted list (players may leave mid-game): remount instead
+                      key={`answers-${answersLayout.columns}`}
+                      ref={answersListRef}
+                      testID={TEST_IDS.answerOptions}
+                      data={playersProvider}
+                      renderItem={renderPlayer}
+                      keyExtractor={(item) => item.username}
+                      numColumns={answersLayout.columns}
+                      columnWrapperStyle={tw`justify-between`}
+                      style={[tw`w-full max-w-[500px] px-2`, { maxHeight: answersLayout.maxHeight }]}
+                      contentContainerStyle={tw`w-full`}
+                      showsVerticalScrollIndicator
+                      persistentScrollbar
+                      indicatorStyle="white"
+                      onContentSizeChange={hintMoreAnswers}
+                    />
                   </View>
                 )}
 

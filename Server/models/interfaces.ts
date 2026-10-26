@@ -159,14 +159,14 @@ export interface PauseInfo {
 }
 
 /**
- * `round-start`: the round's photo and answer timer. Sent per recipient: `isOwner` is true only to the photo owner
- * (uploader or planter), so nobody else learns whose photo it is before `round-reveal`.
+ * `round-start`: the round's photo and answer timer, the same for the whole room. The unmodified app never shows the
+ * photo owner (uploader or planter) anything before `round-reveal` and other players can't infer it; the owner's own
+ * client necessarily knows (it received `your-turn` and uploaded the photo).
  */
 export interface RoundStartData {
   photo: string;
   round: number;
   duration: number;
-  isOwner: boolean;
 }
 
 /**
@@ -178,11 +178,6 @@ export interface GameStateSnapshot {
   phase: RoundPhase | null;
   round: number;
   totalRounds: number;
-  /**
-   * This recipient is the photo owner of the round in play (answering/reveal/scores). Per recipient: the owner's
-   * name is never sent before the reveal (`correctAnswer`), only this flag to the owner themselves
-   */
-  isOwner: boolean;
   /** Photo path, only in answering/reveal/scores */
   photo: string | null;
   /** Only in reveal/scores */

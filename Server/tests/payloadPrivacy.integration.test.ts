@@ -132,7 +132,7 @@ describe("player data in socket payloads", () => {
         byName[n].emit("photo-sent", { photo: PHOTO });
       });
     }
-    const roundStart = once<{ isOwner: boolean }>(alice, "round-start", 6_000);
+    const roundStart = once<{ photo: string }>(alice, "round-start", 6_000);
     players.forEach((n) => byName[n].emit("im-ready"));
     await roundStart;
     const owner: string = turnOwner ?? "bob";

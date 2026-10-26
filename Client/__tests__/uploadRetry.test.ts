@@ -5,6 +5,7 @@ import { TURN_UPLOAD_RETRY, uploadWithRetry } from "../app/utils/uploadRetry";
 beforeAll(() => {
   jest.spyOn(console, "log").mockImplementation(() => {});
   jest.spyOn(console, "error").mockImplementation(() => {});
+  jest.spyOn(console, "warn").mockImplementation(() => {});
 });
 afterAll(() => jest.restoreAllMocks());
 beforeEach(() => jest.useFakeTimers());
@@ -53,6 +54,21 @@ describe("uploadWithRetry", () => {
     expect(upload).toHaveBeenCalledTimes(3);
     expect((await outcome).message).toBe("third");
     expect(jest.getTimerCount()).toBe(0);
+  });
+
+  // EXP-252: development builds show console.error/warn as a toast on the phone, which would tell the owner it's their
+  // turn (and so whose photo comes next): failed attempts are only logged
+  it("never logs an error or warning, even when every attempt fails", async () => {
+    (console.error as jest.Mock).mockClear();
+    (console.warn as jest.Mock).mockClear();
+    const upload = jest.fn().mockRejectedValue(new Error("500"));
+    const outcome = uploadWithRetry("file:///p.jpg", upload, { attempts: 2, backoffMs: 10 }).catch((e) => e);
+    await flush();
+    jest.advanceTimersByTime(10);
+    await flush();
+    expect((await outcome).message).toBe("500");
+    expect(console.error).not.toHaveBeenCalled();
+    expect(console.warn).not.toHaveBeenCalled();
   });
 
   it("honours custom options", async () => {

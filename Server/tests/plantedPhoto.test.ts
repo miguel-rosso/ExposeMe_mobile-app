@@ -80,7 +80,7 @@ describe("planted photos stay anonymous", () => {
     expect(rm.publicPlayer(player("bob"))).not.toHaveProperty("hasPlantedPhoto");
     const started = events("game-started")[0].args[0] as Record<string, unknown>[];
     for (const p of started) { expect(p).not.toHaveProperty("hasPlantedPhoto"); expect(p).not.toHaveProperty("isReady"); }
-    const snap = engine.snapshot(room, player("alice"));
+    const snap = engine.snapshot(room);
     for (const p of snap.players) { expect(p).not.toHaveProperty("hasPlantedPhoto"); expect(p).not.toHaveProperty("isReady"); }
   });
 
@@ -102,13 +102,10 @@ describe("planted photos stay anonymous", () => {
     vi.advanceTimersByTime(PLANTED_DELAY_MAX - PLANTED_DELAY_MIN + 1);
 
     const starts = events("round-start");
-    expect(starts).toHaveLength(2);
-    expect(starts.find((e) => e.target === room.gameCode)).toMatchObject({ except: "sock-bob" });
-    for (const e of starts) {
-      expect(Object.keys(e.args[0] as object).sort()).toEqual(["duration", "isOwner", "photo", "round"]);
-      expect(e.args[0]).toMatchObject({ photo: PLANTED, round: 1, duration: ANSWER_TIME - ANSWER_GRACE });
-    }
-    expect(starts.find((e) => e.target === "sock-bob")!.args[0]).toMatchObject({ isOwner: true });
+    // One room-wide round-start, the planter included: not even bob is told it is his photo (EXP-252)
+    expect(starts).toEqual([
+      { target: room.gameCode, event: "round-start", args: [{ photo: PLANTED, round: 1, duration: ANSWER_TIME - ANSWER_GRACE }] },
+    ]);
     expect(events("your-turn")).toHaveLength(0);
     expect(room.currentPlayer).toBe(player("bob"));
     expect(room.plantedPhotosShown).toBe(1);
@@ -141,7 +138,7 @@ describe("planted photos stay anonymous", () => {
     // Rejoin snapshot: a photo wait like any other (no photo, not the owner, a wait-sized countdown)
     rejoin("alice");
     const snap = emits.filter((e) => e.event === "game-state" && e.target === "sock-alice-2").pop()!.args[0] as GameStateSnapshot;
-    expect(snap).toMatchObject({ phase: "waiting-photo", round: 0, photo: null, isOwner: false, correctAnswer: null });
+    expect(snap).toMatchObject({ phase: "waiting-photo", round: 0, photo: null, correctAnswer: null });
     expect(snap.duration).toBeGreaterThan(PLANTED_DELAY_MAX);
     expect(snap.duration).toBeLessThanOrEqual(PHOTO_WAIT_TIMEOUT);
 
@@ -155,7 +152,7 @@ describe("planted photos stay anonymous", () => {
     expect(events("your-turn")).toHaveLength(0);
 
     vi.advanceTimersByTime(PLANTED_DELAY_MAX);
-    expect(events("round-start").map((e) => (e.args[0] as { photo: string }).photo)).toEqual([PLANTED, PLANTED]);
+    expect(events("round-start").map((e) => (e.args[0] as { photo: string }).photo)).toEqual([PLANTED]);
     expect(events("waiting-photo")).toHaveLength(1);
   });
 
@@ -233,7 +230,7 @@ describe("planted photos stay anonymous", () => {
     expect(events("game-over")).toHaveLength(1);
     vi.advanceTimersByTime(PHOTO_WAIT_TIMEOUT);
     expect(events("round-start")).toHaveLength(0);
-    expect(engine.snapshot(room, player("bob"))).toMatchObject({ started: false, phase: null, duration: 0 });
+    expect(engine.snapshot(room)).toMatchObject({ started: false, phase: null, duration: 0 });
   });
 
   it("a planted photo that arrives after the draw (app retry after im-ready) still gets a later round", () => {

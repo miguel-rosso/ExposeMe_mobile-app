@@ -1,5 +1,5 @@
 import { GameStateSnapshot } from "../app/models/interfaces";
-import { gameStateFollowUps, initialRoundView, roundReducer, RoundView } from "../app/utils/roundState";
+import { gameStateFollowUps, initialRoundView, isRevealedOwner, roundReducer, RoundView } from "../app/utils/roundState";
 
 // Ported from the applyRoundStart / applyWaitingPhoto / applyGameState setter tests (EXP-215): same expectations,
 // now on the round reducer's next state.
@@ -9,7 +9,7 @@ const view = (over: Partial<RoundView> = {}): RoundView => ({ ...initialRoundVie
 // ── round-start ──────────────────────────────────────────
 
 describe("round-start (EXP-001)", () => {
-  const data = { photo: "/temp/a.jpg", round: 3, duration: 10000, isOwner: false };
+  const data = { photo: "/temp/a.jpg", round: 3, duration: 10000 };
   const start = (state: RoundView, d = data) => roundReducer(state, { type: "round-start", data: d, serverUrl: "http://srv" });
 
   it("does not throw and clears hold state left over from the previous round", () => {
@@ -19,16 +19,39 @@ describe("round-start (EXP-001)", () => {
   });
 
   it("sets the new round photo/phase and resets per-round answer state", () => {
-    const prev = view({ phaseKey: 4, correctAnswer: "alice", scores: [], mySelection: "bob", sentGuess: "bob", isOwner: true });
+    const prev = view({ phaseKey: 4, correctAnswer: "alice", scores: [], mySelection: "bob", sentGuess: "bob" });
     expect(start(prev)).toEqual({
-      photo: "http://srv/temp/a.jpg", isOwner: false, round: 3, phase: "answering", phaseDuration: 10000, phaseKey: 5,
+      photo: "http://srv/temp/a.jpg", round: 3, phase: "answering", phaseDuration: 10000, phaseKey: 5,
       correctAnswer: "", scores: null, mySelection: "", sentGuess: "", gameHeld: false, pressing: false,
     });
   });
 
-  // EXP-128: round-start never names the owner; only the owner's own copy says the photo is theirs
-  it("marks the photo as mine only from my own isOwner copy", () => {
-    expect(start(view(), { ...data, isOwner: true }).isOwner).toBe(true);
+  // EXP-252: round-start tells nobody whose photo it is, the owner included: the round view has no owner field
+  it("keeps nothing about whose photo it is, even if a payload carried an owner flag", () => {
+    const next = start(view(), { ...data, isOwner: true } as typeof data);
+    expect(next).not.toHaveProperty("isOwner");
+    expect(isRevealedOwner(next.correctAnswer, "bob")).toBe(false);
+  });
+});
+
+// ── whose photo it was (EXP-252) ─────────────────────────
+
+describe("isRevealedOwner", () => {
+  it("is true only once the revealed answer is my own username", () => {
+    expect(isRevealedOwner("bob", "bob")).toBe(true);
+    expect(isRevealedOwner("alice", "bob")).toBe(false);
+    expect(isRevealedOwner("", "bob")).toBe(false); // not revealed yet
+    expect(isRevealedOwner("", "")).toBe(false); // no username known
+    expect(isRevealedOwner("bob", undefined)).toBe(false);
+  });
+
+  it("follows the round: true after the reveal of my photo, false again when the next round starts", () => {
+    let state = roundReducer(view(), { type: "round-start", data: { photo: "/temp/a.jpg", round: 1, duration: 7_700 }, serverUrl: "" });
+    expect(isRevealedOwner(state.correctAnswer, "bob")).toBe(false);
+    state = roundReducer(state, { type: "round-reveal", data: { correctAnswer: "bob", duration: 3_000 } });
+    expect(isRevealedOwner(state.correctAnswer, "bob")).toBe(true);
+    state = roundReducer(state, { type: "waiting-photo", data: { round: 2, duration: 15_000 } });
+    expect(isRevealedOwner(state.correctAnswer, "bob")).toBe(false);
   });
 });
 
@@ -51,7 +74,6 @@ const snapshot = (over: Partial<GameStateSnapshot> = {}): GameStateSnapshot => (
   phase: "answering",
   round: 3,
   totalRounds: 10,
-  isOwner: false,
   photo: "/temp/1-a.jpg",
   correctAnswer: null,
   duration: 4200,
@@ -73,18 +95,20 @@ const applyGameState = (snap: GameStateSnapshot, serverUrl: string, current: Rou
 
 describe("game-state", () => {
   it("renders the current answering phase with the remaining time and keeps the guess of the same round", () => {
-    const { state, result } = applyGameState(snapshot(), "http://srv", shown({ isOwner: true }));
+    const { state, result } = applyGameState(snapshot(), "http://srv", shown());
     expect(result).toEqual({ gameOver: false, sendReady: false, resendGuess: true, pause: null });
     expect(state).toMatchObject({
-      photo: "http://srv/temp/1-a.jpg", isOwner: false, phase: "answering", phaseDuration: 4200, mySelection: "carol",
+      photo: "http://srv/temp/1-a.jpg", phase: "answering", phaseDuration: 4200, mySelection: "carol",
     });
   });
 
-  // EXP-128: the snapshot never names the owner; only my own snapshot says the photo is mine
-  it("marks the photo as mine only when the snapshot says isOwner", () => {
-    expect(applyGameState(snapshot({ isOwner: true }), "http://srv", shown()).state.isOwner).toBe(true);
-    const waiting = applyGameState(snapshot({ phase: "waiting-photo", photo: null }), "", shown({ photo: null, isOwner: true }));
-    expect(waiting.state.isOwner).toBe(false);
+  // EXP-252: the snapshot names the owner only from the reveal on (correctAnswer), the same for everyone
+  it("knows the photo was mine only from a reveal/scores snapshot naming me", () => {
+    expect(isRevealedOwner(applyGameState(snapshot(), "http://srv", shown()).state.correctAnswer, "bob")).toBe(false);
+    const scores = applyGameState(snapshot({ phase: "scores", correctAnswer: "bob" }), "http://srv", shown());
+    expect(isRevealedOwner(scores.state.correctAnswer, "bob")).toBe(true);
+    const waiting = applyGameState(snapshot({ phase: "waiting-photo", photo: null }), "", scores.state);
+    expect(isRevealedOwner(waiting.state.correctAnswer, "bob")).toBe(false);
   });
 
   it("clears the guess when the round changed while away", () => {
@@ -187,7 +211,7 @@ describe("reveal, scores, hold and pause", () => {
   it("resuming a pause taken after scores waits for the next round's photo", () => {
     const scores = { ...answering, phase: "scores" as const, scores: [], correctAnswer: "alice" };
     expect(roundReducer(scores, { type: "game-resumed", data: { phase: "waiting-photo", duration: 1_500 } })).toMatchObject({
-      photo: null, isOwner: false, scores: null, phase: "waiting-photo", round: 3, phaseDuration: 1_500, phaseKey: 8,
+      photo: null, scores: null, phase: "waiting-photo", round: 3, phaseDuration: 1_500, phaseKey: 8,
     });
     // Same phase resumed: only the remaining time changes
     expect(roundReducer(answering, { type: "game-resumed", data: { phase: "answering", duration: 4_000 } })).toEqual({

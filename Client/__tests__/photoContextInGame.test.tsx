@@ -91,13 +91,15 @@ describe("pickGamePhoto (in-game, EXP-041)", () => {
     act(() => t.r.unmount());
   });
 
-  it("never decided: asks once in place, then uses the answer", async () => {
+  // EXP-252: a system prompt only on the owner's phone would tell them the next photo is theirs
+  it("never decided: reports permission without prompting (my turn must not show)", async () => {
     mockGetPermissions.mockResolvedValue(perm("undetermined", "none"));
-    mockRequestPermissions.mockResolvedValue(perm("denied", "none", false));
+    mockRequestPermissions.mockResolvedValue(perm("granted", "all"));
+    mockPhotos.push({ id: "p1", mediaType: "image" });
     const t = await setup();
     let result: unknown;
     await act(async () => { result = await t.ctx.pickGamePhoto(); });
-    expect(mockRequestPermissions).toHaveBeenCalledTimes(1);
+    expect(mockRequestPermissions).not.toHaveBeenCalled();
     expect(result).toEqual({ error: "permission" });
     expect(mockReplace).not.toHaveBeenCalled();
     act(() => t.r.unmount());

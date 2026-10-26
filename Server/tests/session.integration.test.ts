@@ -393,17 +393,17 @@ describe("photo-sent", () => {
     }
     expect(await quiet).toBe(true);
 
-    const start = once<{ isOwner: boolean; photo: string }>(alice, "round-start");
+    const start = once<{ photo: string }>(alice, "round-start");
     owner.emit("photo-sent", { photo: OWN });
-    expect(await start).toMatchObject({ isOwner: ownerName === "alice", photo: OWN });
+    expect(await start).toMatchObject({ photo: OWN });
 
-    // answer from the replaced socket is ignored; alice's counts (unless the photo is hers: the owner never votes)
+    // answer from the replaced socket is ignored; alice's counts (also if the photo is hers: the owner plays too)
     bob.emit("submit-answer", { guess: ownerName });
     alice.emit("submit-answer", { guess: ownerName });
     const scores = await once<{ scores: { username: string; lastGuess: string }[] }>(alice, "round-scores", 14_000);
     const byName = Object.fromEntries(scores.scores.map((s) => [s.username, s]));
     expect(byName.bob.lastGuess).toBe("");
-    expect(byName.alice.lastGuess).toBe(ownerName === "alice" ? "" : ownerName);
+    expect(byName.alice.lastGuess).toBe(ownerName);
     for (const c of [alice, bob2]) c.emit("leave-room");
   }, 20_000);
 });

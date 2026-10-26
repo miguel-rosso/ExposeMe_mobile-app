@@ -46,8 +46,8 @@ describe("ScoreModal with 12 players (EXP-043)", () => {
     for (const name of NAMES) expect(inside(list, scoreRankId(name))).toBe(true);
     // Round title and "it was X's photo" stay fixed above the list
     expect(inside(list, TEST_IDS.scoreRoundTitle)).toBe(false);
-    expect(inside(r.root, TEST_IDS.scoreRoundTitle) && inside(r.root, TEST_IDS.scoreAnswerPill)).toBe(true);
-    expect(inside(list, TEST_IDS.scoreAnswerPill)).toBe(false);
+    expect(inside(r.root, TEST_IDS.scoreRoundTitle) && inside(r.root, TEST_IDS.scoreAnswerCard)).toBe(true);
+    expect(inside(list, TEST_IDS.scoreAnswerCard)).toBe(false);
     // The list may only shrink (never grow past its content) so the header stays on screen
     expect(StyleSheet.flatten(list.props.style).flexGrow).toBe(0);
     act(() => r.unmount());

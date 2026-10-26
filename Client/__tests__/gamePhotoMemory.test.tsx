@@ -83,10 +83,10 @@ describe("GameScreen: photo memory per game (EXP-162)", () => {
     await act(async () => { r = TestRenderer.create(<GameScreen />); });
     expect(mockResetUsedPhotos).toHaveBeenCalledTimes(1);
 
-    act(() => mockSocket.fire("round-start", { photo: "/temp/a.jpg", round: 1, duration: 8_000, isOwner: false }));
-    act(() => mockSocket.fire("round-start", { photo: "/temp/b.jpg", round: 2, duration: 8_000, isOwner: false }));
+    act(() => mockSocket.fire("round-start", { photo: "/temp/a.jpg", round: 1, duration: 8_000 }));
+    act(() => mockSocket.fire("round-start", { photo: "/temp/b.jpg", round: 2, duration: 8_000 }));
     act(() => mockSocket.fire("game-state", {
-      started: true, phase: "answering", round: 2, totalRounds: 10, isOwner: false, photo: "/temp/b.jpg",
+      started: true, phase: "answering", round: 2, totalRounds: 10, photo: "/temp/b.jpg",
       correctAnswer: null, duration: 5_000, held: false, pause: null, scores: [], players: mockPlayers,
     }));
     await act(async () => { r.update(<GameScreen />); });

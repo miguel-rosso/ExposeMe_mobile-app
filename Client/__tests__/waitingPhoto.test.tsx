@@ -97,7 +97,6 @@ describe("waiting-photo helpers", () => {
     for (const t of [en, es]) {
       for (const n of notices) expect(skipNoticeText(t, n)).toEqual(expect.any(String));
       expect(t.someoneChoosingPhoto).toBeTruthy();
-      expect(t.uploadingYourPhoto).toBeTruthy();
     }
     expect(skipNoticeText(es, "timeout")).not.toBe(skipNoticeText(en, "timeout"));
   });
@@ -122,7 +121,7 @@ describe("GameScreen while a photo is awaited", () => {
   });
 
   it("everyone sees 'someone is choosing a photo' with the server's progress bar instead of the old scores", () => {
-    act(() => mockSocket.fire("round-start", { photo: "/temp/x.jpg", round: 1, duration: 8_000, isOwner: false }));
+    act(() => mockSocket.fire("round-start", { photo: "/temp/x.jpg", round: 1, duration: 8_000 }));
     act(() => mockSocket.fire("round-scores", { scores: [], round: 1, totalRounds: 10, duration: 5_000 }));
     act(() => mockSocket.fire("waiting-photo", { round: 2, duration: 15_000 }));
     expect(has(r.root, TEST_IDS.gameWaitingPhoto)).toBe(true);
@@ -131,7 +130,7 @@ describe("GameScreen while a photo is awaited", () => {
     expect(has(r.root, TEST_IDS.roundSkippedNotice)).toBe(false);
 
     // The photo arrives: the round is shown
-    act(() => mockSocket.fire("round-start", { photo: "/temp/y.jpg", round: 2, duration: 8_000, isOwner: false }));
+    act(() => mockSocket.fire("round-start", { photo: "/temp/y.jpg", round: 2, duration: 8_000 }));
     expect(has(r.root, TEST_IDS.gameWaitingPhoto)).toBe(false);
   });
 
@@ -142,7 +141,7 @@ describe("GameScreen while a photo is awaited", () => {
     expect(textOf(r.root, TEST_IDS.roundSkippedNotice)).toBe(en.roundSkippedTimeout);
     act(() => mockSocket.fire("round-skipped", { round: 1, reason: "unavailable" }));
     expect(textOf(r.root, TEST_IDS.roundSkippedNotice)).toBe(en.roundSkippedUnavailable);
-    act(() => mockSocket.fire("round-start", { photo: "/temp/y.jpg", round: 1, duration: 8_000, isOwner: false }));
+    act(() => mockSocket.fire("round-start", { photo: "/temp/y.jpg", round: 1, duration: 8_000 }));
     expect(has(r.root, TEST_IDS.roundSkippedNotice)).toBe(false);
   });
 
@@ -150,18 +149,22 @@ describe("GameScreen while a photo is awaited", () => {
   it("shows the round's photo only with the room credentials as image headers", async () => {
     await flush();
     mockPhotoProps.length = 0;
-    act(() => mockSocket.fire("round-start", { photo: "/temp/y.jpg", round: 1, duration: 8_000, isOwner: false }));
+    act(() => mockSocket.fire("round-start", { photo: "/temp/y.jpg", round: 1, duration: 8_000 }));
     expect(mockPhotoProps.length).toBeGreaterThan(0);
     for (const p of mockPhotoProps) expect(p.headers).toEqual({ Authorization: "Bearer tok-123", "X-Game-Code": "123456" });
   });
 
-  it("my turn shows 'uploading your photo' and sends the uploaded photo", async () => {
+  // EXP-252: my turn must stay invisible (I may then guess my own photo): same text as everyone's, upload in the background
+  it("my turn shows the same 'someone is choosing a photo' as everyone and sends the uploaded photo", async () => {
     mockPickGamePhoto.mockResolvedValue({ uri: "file:///p1.jpg" });
     mockUploadPhoto.mockResolvedValue("/temp/" + "a".repeat(32) + ".jpg");
     act(() => mockSocket.fire("waiting-photo", { round: 1, duration: 15_000 }));
+    const everyonesScreen = JSON.stringify(r.toJSON());
     act(() => mockSocket.fire("your-turn", { round: 1, attempt: 1 }));
-    expect(textOf(r.root, TEST_IDS.waitingPhotoText)).toBe(en.uploadingYourPhoto);
+    expect(textOf(r.root, TEST_IDS.waitingPhotoText)).toBe(en.someoneChoosingPhoto);
+    expect(JSON.stringify(r.toJSON())).toBe(everyonesScreen); // nothing on screen changes
     await flush();
+    expect(JSON.stringify(r.toJSON())).toBe(everyonesScreen);
     expect(mockSocket.emitted).toContainEqual(["photo-sent", { photo: "/temp/" + "a".repeat(32) + ".jpg" }]);
     expect(mockSocket.emitted.some(([ev]) => ev === "photo-unavailable")).toBe(false);
     // EXP-069: uploaded as this room member (room code + rejoin token)
@@ -234,7 +237,7 @@ describe("GameScreen while a photo is awaited", () => {
     expect(mockSocket.emitted).toContainEqual(["photo-unavailable", { round: 1, attempt: 1 }]);
     // Offline meanwhile: round-skipped (and the next waiting-photo) never arrived; the rejoin answers with a snapshot
     act(() => mockSocket.fire("game-state", {
-      started: true, phase: "waiting-photo", round: 1, totalRounds: 10, isOwner: false, photo: null, correctAnswer: null,
+      started: true, phase: "waiting-photo", round: 1, totalRounds: 10, photo: null, correctAnswer: null,
       duration: 9_000, held: false, pause: null, scores: [], players: [],
     }));
     act(() => mockSocket.fire("round-skipped", { round: 1, reason: "unavailable" })); // someone else's report
@@ -257,7 +260,7 @@ describe("GameScreen while a photo is awaited", () => {
     await act(async () => { rejectOld(new Error("gallery closed")); });
     await flush();
     expect(mockSocket.emitted.some(([ev]) => ev === "photo-unavailable")).toBe(false);
-    expect(textOf(r.root, TEST_IDS.waitingPhotoText)).toBe(en.uploadingYourPhoto);
+    expect(textOf(r.root, TEST_IDS.waitingPhotoText)).toBe(en.someoneChoosingPhoto);
 
     await act(async () => { resolveNew({ uri: "file:///p2.jpg" }); });
     await flush();
@@ -298,14 +301,14 @@ describe("GameScreen while a photo is awaited", () => {
   // EXP-232: every event that ends my photo request drops the result of an upload still in flight
   describe.each([
     ["waiting-photo", { round: 2, duration: 15_000 }],
-    ["round-start", { photo: "/temp/x.jpg", round: 1, duration: 8_000, isOwner: false }],
+    ["round-start", { photo: "/temp/x.jpg", round: 1, duration: 8_000 }],
     ["round-skipped", { round: 1, reason: "timeout" }],
     ["game-state", {
-      started: true, phase: "waiting-photo", round: 1, totalRounds: 10, isOwner: false, photo: null, correctAnswer: null,
+      started: true, phase: "waiting-photo", round: 1, totalRounds: 10, photo: null, correctAnswer: null,
       duration: 6_000, held: false, pause: null, scores: [], players: [],
     }],
   ])("my turn ended by %s", (event, payload) => {
-    it("an upload finishing afterwards sends no photo-sent and the screen stops saying 'uploading your photo'", async () => {
+    it("an upload finishing afterwards sends no photo-sent and the screen still says 'someone is choosing a photo'", async () => {
       let resolveUpload!: (url: string) => void;
       mockPickGamePhoto.mockResolvedValue({ uri: "file:///p1.jpg" });
       mockUploadPhoto.mockReturnValue(new Promise((res) => { resolveUpload = res; }));
@@ -323,14 +326,14 @@ describe("GameScreen while a photo is awaited", () => {
     });
   });
 
-  it("a pause keeps showing 'uploading your photo' while my upload goes on", async () => {
+  it("a pause while my upload goes on shows the same text as everyone's", async () => {
     mockPickGamePhoto.mockResolvedValue({ uri: "file:///p1.jpg" });
     mockUploadPhoto.mockReturnValue(new Promise(() => {}));
     act(() => mockSocket.fire("waiting-photo", { round: 1, duration: 15_000 }));
     act(() => mockSocket.fire("your-turn", { round: 1, attempt: 1 }));
     await flush();
     act(() => mockSocket.fire("game-paused", { duration: 300_000, waitingFor: ["carol"], pause: 1, maxPauses: 3 }));
-    expect(textOf(r.root, TEST_IDS.waitingPhotoText)).toBe(en.uploadingYourPhoto);
+    expect(textOf(r.root, TEST_IDS.waitingPhotoText)).toBe(en.someoneChoosingPhoto);
   });
 
   it("an upload failing for good during a pause reports nothing (the resume's your-turn asks again)", async () => {
@@ -350,7 +353,7 @@ describe("GameScreen while a photo is awaited", () => {
 
   it("a rejoin snapshot in waiting-photo shows the waiting screen with the remaining wait", () => {
     act(() => mockSocket.fire("game-state", {
-      started: true, phase: "waiting-photo", round: 2, totalRounds: 10, isOwner: false, photo: null, correctAnswer: null,
+      started: true, phase: "waiting-photo", round: 2, totalRounds: 10, photo: null, correctAnswer: null,
       duration: 6_000, held: false, pause: null, scores: [], players: [],
     }));
     expect(has(r.root, TEST_IDS.gameWaitingPhoto)).toBe(true);
@@ -358,7 +361,7 @@ describe("GameScreen while a photo is awaited", () => {
   });
 
   it("resuming a pause taken between rounds goes to the waiting screen", () => {
-    act(() => mockSocket.fire("round-start", { photo: "/temp/x.jpg", round: 1, duration: 8_000, isOwner: false }));
+    act(() => mockSocket.fire("round-start", { photo: "/temp/x.jpg", round: 1, duration: 8_000 }));
     act(() => mockSocket.fire("round-scores", { scores: [], round: 1, totalRounds: 10, duration: 5_000 }));
     act(() => mockSocket.fire("game-paused", { duration: 300_000, waitingFor: ["carol"], pause: 1, maxPauses: 3 }));
     act(() => mockSocket.fire("game-resumed", { phase: "waiting-photo", duration: 1_500 }));
@@ -367,7 +370,7 @@ describe("GameScreen while a photo is awaited", () => {
 
   // Back-to-back events in one render batch build on each other: the resume sees the scores phase just set
   it("round-scores and a waiting-photo resume in the same tick show the wait for the next round", () => {
-    act(() => mockSocket.fire("round-start", { photo: "/temp/x.jpg", round: 3, duration: 8_000, isOwner: false }));
+    act(() => mockSocket.fire("round-start", { photo: "/temp/x.jpg", round: 3, duration: 8_000 }));
     act(() => {
       mockSocket.fire("round-scores", { scores: [], round: 3, totalRounds: 10, duration: 5_000 });
       mockSocket.fire("game-resumed", { phase: "waiting-photo", duration: 1_500 });

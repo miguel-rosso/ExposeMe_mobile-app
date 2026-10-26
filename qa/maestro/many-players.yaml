@@ -14,25 +14,7 @@ appId: com.socketNull.ExposeMe
     visible:
       id: "round-progress"
     timeout: 180000
-# My own photo: answering shows a hint instead of the options. Let that round end (its scoreboard comes and goes)
-# and wait for the next answering phase
-- runFlow:
-    when:
-      visible:
-        id: "own-photo-hint"
-    commands:
-      - extendedWaitUntil:
-          visible:
-            id: "score-modal"
-          timeout: 60000
-      - extendedWaitUntil:
-          notVisible:
-            id: "score-modal"
-          timeout: 120000
-      - extendedWaitUntil:
-          visible:
-            id: "round-progress"
-          timeout: 60000
+# Every player gets the options, the photo owner too (EXP-252: nobody is told whose photo it is before the reveal)
 - extendedWaitUntil:
     visible:
       id: "answer-options"

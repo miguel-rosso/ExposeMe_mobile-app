@@ -255,9 +255,9 @@ describe("POST /upload", () => {
     const ownerAuth = { Authorization: `Bearer ${tokens[owner]}`, "X-Game-Code": gameCode };
     const { path: photo } = await fetchUploaded(await uploadFile(await gpsJpeg(), LEAKY_NAME, "image/jpeg", ownerAuth), ownerAuth);
 
-    const roundStart = once<{ photo: string; isOwner: boolean }>(alice, "round-start");
+    const roundStart = once<{ photo: string }>(alice, "round-start");
     byName[owner].emit("photo-sent", { photo, gameCode });
-    expect(await roundStart).toMatchObject({ photo, isOwner: owner === "alice" });
+    expect(await roundStart).toMatchObject({ photo });
 
     for (const c of [alice, bob, carol]) c.emit("leave-room");
   });

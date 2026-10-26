@@ -83,7 +83,7 @@ describe("GameScreen: own-name tag (EXP-044)", () => {
     jest.useFakeTimers();
     let r!: TestRenderer.ReactTestRenderer;
     await act(async () => { r = TestRenderer.create(<GameScreen />); });
-    act(() => mockSocket.fire("round-start", { photo: "/temp/x.jpg", round: 1, duration: 8_000, isOwner: false }));
+    act(() => mockSocket.fire("round-start", { photo: "/temp/x.jpg", round: 1, duration: 8_000 }));
     const all = texts(r);
     expect(all.filter((s) => s === "Tú")).toHaveLength(1);
     expect(all).not.toContain("You");

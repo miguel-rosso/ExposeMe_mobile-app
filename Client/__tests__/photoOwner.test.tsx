@@ -3,13 +3,12 @@ import { StyleSheet } from "react-native";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import tw from "twrnc";
 import { TEST_IDS, playerOptionId } from "../app/utils/testIds";
-import en from "../app/i18n/en";
-import es from "../app/i18n/es";
 // Loaded with the file (jest.mock calls below are hoisted above it): a cold transform must not hit the test timeout
 import GameScreen from "../app/screens/GameScreen";
 
-// EXP-128: round-start / game-state never name the photo owner before round-reveal. The game screen learns the photo
-// is mine only from `isOwner` (hold button, no voting); everyone sees the right answer from round-reveal on.
+// EXP-128 / EXP-252: round-start / game-state never tell anyone, the owner included, whose photo it is before
+// round-reveal: everyone votes the same way. From the reveal on (correctAnswer) the owner's screen knows the photo was
+// theirs and shows the hold button in scores.
 
 jest.mock("@react-native-async-storage/async-storage", () =>
   require("@react-native-async-storage/async-storage/jest/async-storage-mock")
@@ -79,7 +78,6 @@ beforeAll(() => {
 });
 afterAll(() => jest.restoreAllMocks());
 
-const textOf = (root: ReactTestInstance, id: string) => root.find((n) => n.props.testID === id && typeof n.type === "string").props.children;
 const has = (root: ReactTestInstance, id: string) => root.findAll((n) => n.props.testID === id, { deep: true }).length > 0;
 const option = (root: ReactTestInstance, name: string) =>
   root.findAll((n) => n.props.testID === playerOptionId(name) && typeof n.type === "string")[0];
@@ -112,10 +110,9 @@ describe("GameScreen: whose photo it is (EXP-128)", () => {
   };
 
   it("a non-owner votes, sees no hold button, and the reveal marks the right answer", () => {
-    act(() => mockSocket.fire("round-start", { ...START, isOwner: false }));
+    act(() => mockSocket.fire("round-start", START));
     // Nothing on screen tells whose photo it is: no option is highlighted
     for (const n of ["alice", "bob", "carol"]) expect(bgOf(r.root, n)).not.toBe(GREEN);
-    expect(has(r.root, TEST_IDS.ownPhotoHint)).toBe(false);
     press(r.root, "alice");
     expect(bgOf(r.root, "alice")).toBe(BLUE);
     // EXP-148: the pick is sent when tapped, during answering (the server ignores answers once the reveal is out)
@@ -131,7 +128,7 @@ describe("GameScreen: whose photo it is (EXP-128)", () => {
 
   // EXP-148: every tap sends the pick, so the last one before the answer time ends is the one that counts
   it("sends each new pick while answering, and nothing once the reveal arrives", () => {
-    act(() => mockSocket.fire("round-start", { ...START, isOwner: false }));
+    act(() => mockSocket.fire("round-start", START));
     press(r.root, "carol");
     act(() => { jest.advanceTimersByTime(250); });
     press(r.root, "alice");
@@ -145,7 +142,7 @@ describe("GameScreen: whose photo it is (EXP-128)", () => {
   // Rapid taps are coalesced (at most one send per 200 ms, then the latest pick), so the server's per-socket limit
   // never drops the pick that counts
   it("coalesces rapid picks: sends the first at once and the latest one 200 ms later", () => {
-    act(() => mockSocket.fire("round-start", { ...START, isOwner: false }));
+    act(() => mockSocket.fire("round-start", START));
     press(r.root, "carol");
     press(r.root, "bob");
     press(r.root, "alice");
@@ -160,7 +157,7 @@ describe("GameScreen: whose photo it is (EXP-128)", () => {
   });
 
   it("a pick still waiting to be sent is dropped when the next round starts", () => {
-    act(() => mockSocket.fire("round-start", { ...START, isOwner: false }));
+    act(() => mockSocket.fire("round-start", START));
     press(r.root, "carol");
     press(r.root, "alice");
     act(() => mockSocket.fire("waiting-photo", { round: 2, duration: 15_000 }));
@@ -170,7 +167,7 @@ describe("GameScreen: whose photo it is (EXP-128)", () => {
 
   // The bar is drawn with the server's duration (answer time minus a grace): once it ends, taps are no longer taken
   it("stops taking picks when the answer bar ends", () => {
-    act(() => mockSocket.fire("round-start", { ...START, isOwner: false }));
+    act(() => mockSocket.fire("round-start", START));
     expect(typeof mockBar.onEnd).toBe("function");
     act(() => mockBar.onEnd!());
     press(r.root, "alice");
@@ -179,14 +176,14 @@ describe("GameScreen: whose photo it is (EXP-128)", () => {
     expect(bgOf(r.root, "alice")).not.toBe(BLUE);
     expect(option(r.root, "alice").props.accessibilityState?.disabled ?? option(r.root, "alice").props.disabled).toBe(true);
     // A new round opens them again
-    act(() => mockSocket.fire("round-start", { ...START, round: 2, isOwner: false }));
+    act(() => mockSocket.fire("round-start", { ...START, round: 2 }));
     press(r.root, "alice");
     expect(answers()).toEqual([{ guess: "alice" }]);
   });
 
   // EXP-227: a pick waiting for its throttle slot must not leave after the bar (the server drops it in reveal)
   it("sends a pick still waiting for its throttle slot as soon as the answer bar ends", () => {
-    act(() => mockSocket.fire("round-start", { ...START, isOwner: false }));
+    act(() => mockSocket.fire("round-start", START));
     press(r.root, "carol");
     act(() => { jest.advanceTimersByTime(50); });
     press(r.root, "alice");
@@ -203,7 +200,7 @@ describe("GameScreen: whose photo it is (EXP-128)", () => {
 
   // EXP-227: the reveal and scores colour the pick the server can have counted, not a later local tap
   it("the reveal colours the last pick sent, not one still waiting when answering ended", () => {
-    act(() => mockSocket.fire("round-start", { ...START, isOwner: false }));
+    act(() => mockSocket.fire("round-start", START));
     press(r.root, "carol");
     press(r.root, "alice"); // waits for its throttle slot; the reveal arrives first
     act(() => mockSocket.fire("round-reveal", { correctAnswer: "alice", duration: 3_000 }));
@@ -215,7 +212,7 @@ describe("GameScreen: whose photo it is (EXP-128)", () => {
 
   // The scoreboard lists each player's recorded guess; no options are drawn under it (EXP-141), so none can show a stale pick
   it("the scores show no stale colour: the options are gone under the scoreboard", () => {
-    act(() => mockSocket.fire("round-start", { ...START, isOwner: false }));
+    act(() => mockSocket.fire("round-start", START));
     press(r.root, "carol");
     act(() => { jest.advanceTimersByTime(250); });
     press(r.root, "alice"); // sent, but it reached the server after the close
@@ -230,39 +227,44 @@ describe("GameScreen: whose photo it is (EXP-128)", () => {
   });
 
   it("a wrong guess turns red at the reveal", () => {
-    act(() => mockSocket.fire("round-start", { ...START, isOwner: false }));
+    act(() => mockSocket.fire("round-start", START));
     press(r.root, "carol");
     act(() => mockSocket.fire("round-reveal", { correctAnswer: "alice", duration: 3_000 }));
     expect(bgOf(r.root, "carol")).toBe(RED);
     expect(bgOf(r.root, "alice")).not.toBe(GREEN); // only my own selection is coloured
   });
 
-  it("the owner gets a hint instead of the options while answering, can't vote, and gets the hold button in scores", () => {
-    act(() => mockSocket.fire("round-start", { ...START, isOwner: true }));
-    expect(textOf(r.root, TEST_IDS.ownPhotoHint)).toBe(en.ownPhotoHint);
-    expect(option(r.root, "alice")).toBeUndefined();
+  // EXP-252: nobody is told whose photo it is before the reveal, the owner included (they may not recognise it)
+  it("the owner (bob, not told) plays like everyone: every option, his own name included, and his pick is sent", () => {
+    act(() => mockSocket.fire("round-start", START));
+    expect(has(r.root, "own-photo-hint")).toBe(false);
+    for (const n of ["alice", "bob", "carol"]) {
+      expect(option(r.root, n).props.accessibilityState?.disabled ?? option(r.root, n).props.disabled).toBeFalsy();
+    }
+    press(r.root, "bob");
+    expect(bgOf(r.root, "bob")).toBe(BLUE);
+    expect(answers()).toEqual([{ guess: "bob" }]);
+    expect(has(r.root, TEST_IDS.holdButton)).toBe(false);
+
     act(() => mockSocket.fire("round-reveal", { correctAnswer: "bob", duration: 3_000 }));
-    expect(has(r.root, TEST_IDS.ownPhotoHint)).toBe(false);
-    expect(option(r.root, "bob").props.accessibilityState?.disabled ?? option(r.root, "bob").props.disabled).toBe(true);
-    expect(bgOf(r.root, "bob")).not.toBe(BLUE);
+    expect(bgOf(r.root, "bob")).toBe(GREEN);
+    expect(has(r.root, TEST_IDS.holdButton)).toBe(false); // the server takes holds in scores only
     act(() => mockSocket.fire("round-scores", { scores: [], round: 1, totalRounds: 10, duration: 5_000 }));
-    expect(answers()).toEqual([]); // the owner never votes
     expect(has(r.root, TEST_IDS.holdButton)).toBe(true);
+    expect(answers()).toEqual([{ guess: "bob" }]);
   });
 
-  it("the own-photo hint is translated (en/es)", () => {
-    expect(en.ownPhotoHint).toBeTruthy();
-    expect(es.ownPhotoHint).toBeTruthy();
-    expect(es.ownPhotoHint).not.toBe(en.ownPhotoHint);
-  });
-
-  it("isOwner from a rejoin snapshot drives the same UI; the next round resets it", () => {
-    act(() => mockSocket.fire("game-state", {
-      started: true, phase: "scores", round: 1, totalRounds: 10, isOwner: true, photo: "/temp/x.jpg",
-      correctAnswer: "bob", duration: 4_000, held: false, pause: null, scores: [], players: mockPlayers,
-    }));
+  it("the hold button follows the revealed answer, also from a rejoin snapshot; the next round resets it", () => {
+    const snapshot = (phase: string, correctAnswer: string | null) => ({
+      started: true, phase, round: 1, totalRounds: 10, photo: "/temp/x.jpg",
+      correctAnswer, duration: 4_000, held: false, pause: null, scores: [], players: mockPlayers,
+    });
+    act(() => mockSocket.fire("game-state", snapshot("answering", null)));
+    expect(has(r.root, TEST_IDS.holdButton)).toBe(false);
+    act(() => mockSocket.fire("game-state", snapshot("scores", "bob")));
     expect(has(r.root, TEST_IDS.holdButton)).toBe(true);
-    act(() => mockSocket.fire("round-start", { ...START, round: 2, isOwner: false }));
+    act(() => mockSocket.fire("round-start", { ...START, round: 2 }));
+    expect(has(r.root, TEST_IDS.holdButton)).toBe(false);
     toScores("alice");
     expect(has(r.root, TEST_IDS.holdButton)).toBe(false);
   });

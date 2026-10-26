@@ -14,6 +14,8 @@ const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, 
 /**
  * Uploads the photo at `uri` with `upload`, retrying failures with a linear backoff.
  * Returns the uploaded photo's server path; throws the last error once every attempt has failed.
+ * Failures are only console.log'ged: development builds show errors/warnings as a toast on the phone, which would
+ * tell the photo owner it's their turn (EXP-252).
  */
 export const uploadWithRetry = async (
   uri: string,
@@ -28,11 +30,11 @@ export const uploadWithRetry = async (
       console.log("Photo uploaded");
       return url;
     } catch (e) {
-      console.error(`Attempt ${attempt} failed:`, e);
+      console.log(`Attempt ${attempt} failed:`, e);
       lastError = e;
       if (attempt < attempts) await wait(backoffMs * attempt);
     }
   }
-  console.error("All upload attempts failed");
+  console.log("All upload attempts failed");
   throw lastError;
 };

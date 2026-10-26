@@ -69,7 +69,6 @@ exits() { # scenario (left|kicked|kicked-device|lobby-kick), mutation (none|...)
       if (mutation === "game-stopped" && round === 3) break;
       all(room, "waiting-photo", round, { round, duration: 15000 });
       all(room, "round-start", round, { photo: `/temp/p${round}.jpg`, duration: 7700 });
-      at("bot1", "owner-signal", round, { via: "round-start" });
       if (round === 2 && !lobbyKick) {
         if (scenario === "left") { at("bot3", "left-room", 2); room = ["bot1", "bot2"]; }
         else {
@@ -85,7 +84,8 @@ exits() { # scenario (left|kicked|kicked-device|lobby-kick), mutation (none|...)
       all(room, "guess-sent", round, (n) => ({ guess: n === "bot1" ? "" : mutation === "guess-after-exit" && round === 3 ? out : "bot1" }));
       all(room, "round-reveal", round, { correctAnswer: answer });
       const rows = [...room, ...(mutation === "scores-after-exit" && round === 3 ? [out] : [])];
-      all(room, "round-scores", round, { round, scores: rows.map((u) => ({ username: u, points: 0, lastGuess: u === "bot1" ? "" : mutation === "guess-after-exit" && round === 3 ? out : "bot1" })) });
+      const guessOf = (u) => (u === "bot1" ? "" : mutation === "guess-after-exit" && round === 3 ? out : "bot1");
+      all(room, "round-scores", round, { round, scores: rows.map((u) => ({ username: u, points: 0, lastGuess: guessOf(u), lastAnswerCorrect: guessOf(u) === answer })) });
     }
     all(room, "game-over", 3, { finalScore: [] });
     // A phase event the leaver really missed while still in the room (before its exit) is still reported

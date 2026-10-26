@@ -57,14 +57,12 @@ export default {
   // GameScreen
   areYouReady: "ARE YOU READY?",
   holdPhoto: "Hold photo",
-  ownPhotoHint: "It's your photo — wait for the others to vote",
   reconnecting: "Reconnecting…",
   gamePaused: "Game paused",
   waitingPlayersReturn: "Waiting for players to come back…",
   pauseOf: "Pause {pause} of {max}",
   lastPauseWarning: "Last pause: if nobody comes back, the game will end.",
   someoneChoosingPhoto: "Someone is choosing a photo…",
-  uploadingYourPhoto: "Uploading your photo…",
   roundSkippedTimeout: "The photo didn't arrive in time. Round skipped.",
   roundSkippedUnavailable: "The chosen player had no photo to show. Round skipped.",
   ownPhotoNoPermission: "We can't access your photos, so your round was skipped. Allow photo access in Settings to play your turn.",
@@ -86,7 +84,9 @@ export default {
 
   // ScoreModal
   roundOf: "Round {round} of {total}",
-  itWasPhoto: "It was {name}'s photo",
+  // Whose photo it was (the owner only learns it here: they play like everyone, EXP-252)
+  photoWasFrom: "This photo was from",
+  itWasYourPhoto: "It was your photo!",
   noGuess: "No guess",
 
   // FinalScoreModal
@@ -142,9 +142,7 @@ export default {
   // LanguageToggle
   changeLanguage: "Change language",
 
-  // ScoreModal: the photo owner's row (they don't vote) / WinnerModal singular
-  yourPhoto: "Your photo",
-  theirPhoto: "Their photo",
+  // WinnerModal singular
   pointsOne: "{points} point",
 
   // WaitingRoom: player gone (disconnected past the server's grace)

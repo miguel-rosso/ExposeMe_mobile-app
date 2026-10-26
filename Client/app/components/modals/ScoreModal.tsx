@@ -6,6 +6,8 @@ import Icon from "react-native-vector-icons/FontAwesome";
 import { useI18n } from "../../i18n";
 import { TEST_IDS, scoreGuessId, scoreRankId } from "@/app/utils/testIds";
 import { rankScores } from "@/app/utils/ranking";
+import { isRevealedOwner } from "@/app/utils/roundState";
+import PhotoOwnerCard from "@/app/components/PhotoOwnerCard";
 
 // Space kept free under the list for the photo owner's hold button (GameScreen: bottom-24 + ~64 dp button)
 export const HOLD_BUTTON_CLEARANCE = 176;
@@ -17,7 +19,7 @@ interface ScoreModalProps {
   scoreRound: ScoreRound[];
   rounds: { round: number; roundsOfGame: number };
   correctAnswer: string;
-  /** This device's player: their own photo reads "Your photo" instead of "Their photo" */
+  /** This device's player: if the photo was theirs, the card says "It was your photo!" */
   myUsername?: string;
   /** The photo owner's hold button is on screen: keep the list clear of it */
   reserveHoldButton?: boolean;
@@ -53,10 +55,7 @@ const ScoreModal: React.FC<ScoreModalProps> = ({
       </Text>
 
       {correctAnswer !== "" && (
-        <View testID={TEST_IDS.scoreAnswerPill} style={tw`mb-3 flex-row items-center bg-green-600/80 px-4 py-2 rounded-full`}>
-          <Icon name="check-circle" size={16} color="white" style={tw`mr-2`} />
-          <Text style={tw`text-white font-bold`}>{t.itWasPhoto.replace("{name}", correctAnswer)}</Text>
-        </View>
+        <PhotoOwnerCard owner={correctAnswer} isMine={isRevealedOwner(correctAnswer, myUsername)} />
       )}
 
       {/* Shrinks to the space left (never grows past its rows) and scrolls: 12 players don't fit small phones */}
@@ -67,12 +66,11 @@ const ScoreModal: React.FC<ScoreModalProps> = ({
         showsVerticalScrollIndicator={false}
       >
         {ranked.map((player) => {
-          // The photo owner doesn't vote (the server ignores it): neutral row, not a wrong answer
-          const isOwner = correctAnswer !== "" && player.username === correctAnswer;
-          const icon = isOwner ? "camera" : player.lastAnswerCorrect ? "check-circle" : "times-circle";
-          const color = isOwner ? "gray" : player.lastAnswerCorrect ? "green" : "red";
-          const textColor = isOwner ? "text-gray-500" : player.lastAnswerCorrect ? "text-green-500" : "text-red-500";
-          const label = isOwner ? (player.username === myUsername ? t.yourPhoto : t.theirPhoto) : player.lastGuess || t.noGuess;
+          // Everyone's guess, the photo owner's too (they vote like everyone, EXP-252)
+          const icon = player.lastAnswerCorrect ? "check-circle" : "times-circle";
+          const color = player.lastAnswerCorrect ? "green" : "red";
+          const textColor = player.lastAnswerCorrect ? "text-green-500" : "text-red-500";
+          const label = player.lastGuess || t.noGuess;
           return (
             <View
               key={player.username}

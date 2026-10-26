@@ -183,22 +183,19 @@ export class GameEngine {
     room._consecutiveSkips = 0;
     console.log(`[${room.gameCode}] Round ${room.round}: photo from ${username}`);
 
-    this.emitRoundStart(room, room.currentPlayer, photo);
+    this.emitRoundStart(room, photo);
 
     this.setTimer(room, ANSWER_TIME, () => this.enterReveal(room));
   }
 
   /**
-   * Atomic round-start (photo + phase info). The owner's name is secret until round-reveal: everyone gets the same
-   * payload with `isOwner: false`, except the owner's socket, which gets `isOwner: true` (hold button, no self-vote).
+   * Atomic round-start (photo + phase info), the same for the whole room: whose photo it is stays secret until
+   * round-reveal, also to the owner, who may not recognise it and guesses like everyone else (EXP-252).
    */
-  private emitRoundStart(room: Room, owner: Player, photo: string): void {
-    const data: Omit<RoundStartData, "isOwner"> = { photo, round: room.round, duration: ANSWER_TIME - ANSWER_GRACE };
+  private emitRoundStart(room: Room, photo: string): void {
     this.markPhaseEmitted(room, room.round);
-    // Relies on a rejoin evicting/disconnecting the owner's replaced socket, so only owner.socketId is the owner's
-
-    this.io.to(room.gameCode).except(owner.socketId).emit("round-start", { ...data, isOwner: false } satisfies RoundStartData);
-    this.io.to(owner.socketId).emit("round-start", { ...data, isOwner: true } satisfies RoundStartData);
+    const data: RoundStartData = { photo, round: room.round, duration: ANSWER_TIME - ANSWER_GRACE };
+    this.io.to(room.gameCode).emit("round-start", data);
   }
 
   /** Remembers that the room's current phase of `round` is being broadcast now (see phaseEmittedAt). */
@@ -237,8 +234,6 @@ export class GameEngine {
     if (room.phase !== "answering") return;
     const player = room.players.find((p) => p.username === username);
     if (!player) return;
-    // The owner knows the answer: their vote is never recorded nor scored
-    if (player === room.currentPlayer) return;
     // Only players still in the room are options (a player who left, the owner included, can't be voted for)
     if (guess !== "" && !room.players.some((p) => p.username === guess)) return;
     // The app sends its pick on every tap: the last one replaces the previous (and its point)
@@ -368,7 +363,7 @@ export class GameEngine {
    */
   onPlayerRejoined(room: Room, player: Player): void {
     this.onConnectionChange(room, player);
-    this.io.to(player.socketId).emit("game-state", this.snapshot(room, player));
+    this.io.to(player.socketId).emit("game-state", this.snapshot(room));
     this.sendAwaitedTurn(room, player);
   }
 
@@ -378,7 +373,7 @@ export class GameEngine {
    */
   resendState(room: Room, player: Player): void {
     if (!room.started) return;
-    this.io.to(player.socketId).emit("game-state", this.snapshot(room, player));
+    this.io.to(player.socketId).emit("game-state", this.snapshot(room));
     this.sendAwaitedTurn(room, player);
   }
 
@@ -389,26 +384,21 @@ export class GameEngine {
     }
   }
 
-  /** `game-state` for `recipient`: only the owner's own snapshot says it is their photo (`isOwner`). */
-  snapshot(room: Room, recipient?: Player): GameStateSnapshot {
+  /** `game-state`, the same for every recipient: the owner is only named from the reveal on (`correctAnswer`). */
+  snapshot(room: Room): GameStateSnapshot {
     const inRound = room.phase === "answering" || room.phase === "reveal" || room.phase === "scores";
     const shown = room.phase === "reveal" || room.phase === "scores";
     // Running timer: what is left of it; paused/held timer: the frozen remaining time
     const duration = room._timer ? Math.max(0, room._timerDuration - (Date.now() - room._timerStartedAt)) : room._timerDuration;
-    // Guesses of the round in play are secret until round-scores (points already count a correct one)
-    const hideGuesses = this.roomManager.guessesHidden(room);
+    // Guesses of the round in play are secret until round-scores (points already count a correct one), also through
+    // the scores' order (see buildScores)
+    const scores = this.buildScores(room, this.roomManager.guessesHidden(room));
     const players = this.roomManager.publicPlayers(room);
-    const scores = this.buildScores(room).map((sc) => {
-      const p = room.players.find((x) => x.username === sc.username)!;
-      return hideGuesses ? { ...sc, ...this.roomManager.hiddenGuess(p) } : sc;
-    });
-    if (hideGuesses) scores.sort((a, b) => b.points - a.points);
     return {
       started: room.started,
       phase: room.phase,
       round: room.round,
       totalRounds: room.rounds,
-      isOwner: inRound && !!recipient && room.currentPlayer === recipient,
       photo: inRound ? room.currentPhoto : null,
       correctAnswer: shown ? room.currentPlayer?.username ?? null : null,
       duration: room.started ? this.clientDuration(room, duration) : 0,
@@ -608,7 +598,7 @@ export class GameEngine {
     room._consecutiveSkips = 0;
 
     console.log(`[${room.gameCode}] Round ${room.round}: planted photo from ${wait.planter.username}`);
-    this.emitRoundStart(room, wait.planter, wait.photo);
+    this.emitRoundStart(room, wait.photo);
     this.setTimer(room, ANSWER_TIME, () => this.enterReveal(room));
   }
 
@@ -825,9 +815,16 @@ export class GameEngine {
 
   // ── Private: Helpers ─────────────────────────────────
 
-  private buildScores(room: Room): ScoreRound[] {
+  /**
+   * Scores, highest first; ties keep room order (stable sort over room.players). With `hideGuesses` the round's
+   * answers are left out before sorting, so the order can't tell who guessed right (and so whose photo it is) either.
+   */
+  private buildScores(room: Room, hideGuesses = false): ScoreRound[] {
     return room.players
-      .map((p) => ({ username: p.username, points: p.points, isHost: p.isHost, lastAnswerCorrect: p.lastAnswerCorrect, lastGuess: p.lastGuess }))
+      .map((p) => {
+        const row = { username: p.username, points: p.points, isHost: p.isHost, lastAnswerCorrect: p.lastAnswerCorrect, lastGuess: p.lastGuess };
+        return hideGuesses ? { ...row, ...this.roomManager.hiddenGuess(p) } : row;
+      })
       .sort((a, b) => b.points - a.points);
   }
 

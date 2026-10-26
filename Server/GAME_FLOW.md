@@ -28,8 +28,9 @@ After last round: game-over
   (`room.round + 1`), `duration` the wait (`PHOTO_WAIT_TIMEOUT`, 15 s). `attempt` identifies this photo request: a
   new integer for every owner pick in the room (it changes even when the round number repeats after a skip, also if
   the same player is picked again); re-sends of the same request (rejoin, resume) carry the same `attempt`.
-  Clients show "someone is choosing a photo" with a progress bar of that `duration`; the owner shows "uploading your
-  photo" once `your-turn` arrives.
+  Every client shows "someone is choosing a photo" with a progress bar of that `duration`, **the owner's too**: the
+  app picks and uploads the photo for `your-turn` in the background, with no different text or timing on screen, so
+  the owner can't tell it's their turn (see "Whose photo it is").
 - If the owner can't provide a photo (no gallery access, no photos, upload failed after retries) the client sends
   **`photo-unavailable { round, attempt }`**, echoing the `your-turn` it answers. It is accepted only from the
   session player who is the awaited owner, in `waiting-photo`, not while paused, and only when both are integers
@@ -48,7 +49,7 @@ After last round: game-over
   one goes back only to that player (`room-of-game.hasPlantedPhoto`); there is no way to drop a planted photo.
 - **Planted rounds look like any other round** (nobody can tell one was planted, nor by whom): the server sends
   the same room-wide `waiting-photo { round, duration: 15 s }`, sends **no `your-turn`** (not even to the planter),
-  and after a hidden delay the usual per-recipient `round-start` (planter `isOwner: true`). The delay imitates the
+  and after a hidden delay the usual room-wide `round-start`. The delay imitates the
   room's real waits: a random past `waiting-photo` → accepted `photo-sent` time of this room (last 20) with ±15 %
   jitter, or 1–3 s when there is none yet. During that wait the phase is `waiting-photo` with no owner picked: the
   planter can't send a photo nor `photo-unavailable`. Clients see the countdown of a normal 15 s wait (rejoin
@@ -65,14 +66,20 @@ After last round: game-over
 
 ## Whose photo it is (secret until the reveal)
 
-- The photo owner (the uploader, or the planter for a planted photo) is never named to the others before
-  `round-reveal`. **`round-start { photo, round, duration, isOwner }`** is sent per recipient: the room minus the
-  owner's socket gets `isOwner: false`, the owner's socket the same payload with `isOwner: true`. The same rule
-  applies to the `game-state` snapshot (`isOwner` is per recipient, see "Pause and reconnect").
-- The owner's client uses `isOwner` for the hold button and to disable voting. The server also **ignores the
-  owner's `submit-answer`** (never recorded nor scored: their `lastGuess` stays `""`), whatever the client sends.
-- From `round-reveal { correctAnswer }` on, the answer is public as before (`round-scores`, snapshot
-  `correctAnswer` in `reveal`/`scores`).
+- The photo owner (the uploader, or the planter for a planted photo) is never named before `round-reveal`
+  (DEC-031: the owner may not recognise the photo, so they play too). **`round-start { photo, round, duration }`** is
+  one room-wide payload, the same for every player, owner included, and so is the `game-state` snapshot (no
+  per-recipient field; its scores' order doesn't move with this round's answers either, see "Pause and reconnect").
+  So the unmodified app never shows the owner anything before the reveal, and other players can't infer it. The
+  owner's own client necessarily knows: it receives `your-turn` and uploads the photo (the round's photo path is the
+  one its `/upload` returned), so this protects the game's fun, not against a modified owner client.
+- The owner plays like everyone: the same answer options (their own name included) and the same scoring. Their
+  `submit-answer` is recorded and scored like any other: **voting for yourself counts as a correct guess** (DEC-031).
+  The planter of a planted photo is treated the same (their self-vote counts too); whether it should is pending a
+  user decision (DEC-032).
+- From `round-reveal { correctAnswer }` on, the answer is public (`round-scores`, snapshot `correctAnswer` in
+  `reveal`/`scores`). That is also when the owner's app learns the photo was theirs (`correctAnswer` equals its own
+  username): it then shows "It was your photo!" on the scoreboard and the hold button (see "Hold").
 
 ## Answers (frozen when answering ends)
 
@@ -271,16 +278,18 @@ and, once the game screen listens, re-sends `join-create-game` on the **same** s
 fresh snapshot (and `your-turn` for an awaited photo), which the game screen renders like any reconnect. Events
 that reached the lobby screen in between are covered by that snapshot.
 
-- **`game-state`** = `{ started, phase, round, totalRounds, isOwner, photo, correctAnswer, duration, held, pause,
-  scores, players }`. `duration` is the remaining time of the current phase (frozen while paused/held). `photo` is
-  only set in `answering`/`reveal`/`scores`; `isOwner` is true only in the snapshot sent to the photo owner, in
-  those phases (the owner's name is never in it before the reveal: `correctAnswer` carries it from `reveal` on);
+- **`game-state`** = `{ started, phase, round, totalRounds, photo, correctAnswer, duration, held, pause,
+  scores, players }`, the same for every recipient. `duration` is the remaining time of the current phase (frozen
+  while paused/held). `photo` is only set in `answering`/`reveal`/`scores` (the owner's name is never in it before
+  the reveal: `correctAnswer` carries it from `reveal` on);
   in `waiting-photo`, `round` is the last played round (the awaited one is `round + 1`, as in `waiting-photo`) and
   `duration` what is left of the photo wait, so the client renders the same waiting screen as for `waiting-photo`;
   `correctAnswer` only in `reveal`/`scores`. `pause` is `{ duration, waitingFor, pause, maxPauses }` (same as `game-paused`) while paused, else `null`.
   `started: false` means the game ended while the player was away (`scores` are the final scores).
   Until `round-scores` (phases `waiting-photo`/`answering`/`reveal`), `scores` and `players` hide this round's
   answers: `lastGuess: ""`, `lastAnswerCorrect: false` and `points` without the point a correct answer earned.
+  `scores` is ordered by those shown points, highest first, ties in room order (as `round-scores`), so the order
+  can't tell who guessed right (and so whose photo it is) either.
   The client renders that phase; in `answering` it re-sends its current pick of that round, if any (never in
   `reveal`: answers are frozen by then); with `phase: null` (ready phase) it sends `im-ready` again.
 - The photo owner who rejoins while their photo is awaited gets `your-turn` again (same `round` and `attempt`);
@@ -319,7 +328,8 @@ that reached the lobby screen in between are covered by that snapshot.
 ## Hold (pause)
 
 - Available to the photo owner during the `scores` phase only (with at least 1.5 s of it left); `hold-start` in any
-  other phase (`waiting-photo`, `answering`, `reveal`), while paused or already held is ignored
+  other phase (`waiting-photo`, `answering`, `reveal`), while paused or already held is ignored. The app shows the
+  hold button in `scores` to the player whose username is the round's `correctAnswer` (nobody is told earlier)
 - Press: game pauses for everyone (server stops timer)
 - Release: game resumes from where it paused
 - An owner who goes away while holding (`leave-room`, removed by the host, connection lost) releases the hold at once:
@@ -346,9 +356,9 @@ All game events are **atomic** — each contains everything the client needs.
 | `game-started` | - | `players, rounds` | Navigate to game screen (public player data only, see "Public player data") |
 | `waiting-photo` | waiting-photo | `{ round, duration }` | Whole room: a photo is awaited (owner not revealed), show wait bar |
 | `your-turn` | waiting-photo | `{ round, attempt }` | Only the picked player: pick and upload a photo (or send `photo-unavailable`) |
-| `round-start` | answering | `{ photo, round, duration, isOwner }` | Show photo, start answer timer (`duration` = 7.7 s: 300 ms grace before answers freeze). Per recipient: `isOwner` true only to the photo owner (never names the owner) |
+| `round-start` | answering | `{ photo, round, duration }` | Show photo, start answer timer (`duration` = 7.7 s: 300 ms grace before answers freeze). Same payload for the whole room, owner included (never tells whose photo it is) |
 | `round-reveal` | reveal | `{ correctAnswer, duration }` | Show correct answer |
-| `round-scores` | scores | `{ scores, round, totalRounds, duration }` | Show scoreboard (`scores`: `{ username, points, isHost, lastAnswerCorrect, lastGuess }[]`, highest first) |
+| `round-scores` | scores | `{ scores, round, totalRounds, duration }` | Show scoreboard (`scores`: `{ username, points, isHost, lastAnswerCorrect, lastGuess }[]`, highest first, ties in room order) |
 | `hold-start` | scores | - | Pause everything visually |
 | `hold-end` | scores | - | The hold is over (released, force-released or ended by a pause); `hold-resume` carries the time |
 | `hold-resume` | scores | `{ phase, duration }` | Resume with remaining time |
@@ -374,7 +384,7 @@ All game events are **atomic** — each contains everything the client needs.
 | `im-ready` | - | Player ready to start (session player; payload ignored) |
 | `photo-sent` | `{ photo }` | Photo uploaded; only from the current owner, `photo` must be a path the owner got from `/upload` in this room (`/temp/<32 hex>.jpg\|png\|webp`) |
 | `photo-unavailable` | `{ round, attempt }` (from its `your-turn`) | The awaited owner has no photo to send (no access, no photos, upload failed): skip the round now |
-| `submit-answer` | `{ guess }` | Player's pick, sent on every tap (ignored from the photo owner). Only during `answering`, the last one counts (`""` withdraws it); ignored in `reveal`/`scores`, or if `guess` is not a player in the room; at most 10 per socket, refilled 5/s (excess dropped). No guess is stored and sent in scores as `lastGuess: ""` (the app shows its own translated "No guess") |
+| `submit-answer` | `{ guess }` | Player's pick, sent on every tap (the photo owner's too, scored like any other). Only during `answering`, the last one counts (`""` withdraws it); ignored in `reveal`/`scores`, or if `guess` is not a player in the room; at most 10 per socket, refilled 5/s (excess dropped). No guess is stored and sent in scores as `lastGuess: ""` (the app shows its own translated "No guess") |
 | `hold-start` | - | Photo owner pressed hold (scores only; per-round limits, see "Hold") |
 | `hold-end` | - | Photo owner released hold |
 | `chat-message` | `{ message }` (≤100 chars) | Broadcast as `{ username, message }` with the session username |

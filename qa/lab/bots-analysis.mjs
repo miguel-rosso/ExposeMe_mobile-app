@@ -146,21 +146,18 @@ function photoUnavailableSkips(r) {
 }
 
 /**
- * Owner-only signal (EXP-128): whoever was told isOwner for a round is the revealed answer, the owner was told, and
- * the owner's vote never counts in that round's scores.
+ * The photo owner plays like everyone (EXP-252): every round-scores row, the owner's included, is correct exactly
+ * when its guess is the revealed answer (voting for yourself counts). Nobody is told isOwner any more: payloadLeaks
+ * in bots.mjs reports such a key.
  */
-function checkOwnerSecrecy(r, ctx) {
+function checkScoredLikeEveryone(r, ctx) {
   const out = [];
-  for (const sig of r.events.filter((e) => e.ev === "owner-signal")) {
-    const answer = ctx.answerOf.get(sig.round);
-    if (answer !== undefined && answer !== sig.bot) out.push(`round ${sig.round}: ${sig.bot} was told isOwner (${sig.payload.via}) but the answer was ${answer}`);
-  }
   for (const [round, answer] of ctx.answerOf) {
-    if (!r.events.some((e) => e.ev === "owner-signal" && e.round === round && e.bot === answer) && r.players.includes(answer)
-      && ctx.starts.some((s) => s.bot === answer && s.round === round)) out.push(`round ${round}: owner ${answer} got round-start without isOwner`);
     const sc = r.events.find((e) => e.ev === "round-scores" && e.round === round);
-    const own = sc?.payload?.scores?.find((x) => x.username === answer);
-    if (own && (own.lastGuess || own.lastAnswerCorrect)) out.push(`round ${round}: the owner's vote counted (${own.lastGuess})`);
+    for (const row of sc?.payload?.scores ?? []) {
+      const correct = !!row.lastGuess && row.lastGuess === answer;
+      if (!!row.lastAnswerCorrect !== correct) out.push(`round ${round}: ${row.username}${row.username === answer ? " (owner)" : ""} guessed "${row.lastGuess ?? ""}" but was scored ${row.lastAnswerCorrect ? "correct" : "wrong"}`);
+    }
   }
   return out;
 }
@@ -385,14 +382,12 @@ function checkLingeringBot(r, opts) {
   const pa = r.events.find((e) => e.bot === lingerer && e.ev === "g2-play-again-joined");
   if (pa && !pa.payload.started) out.push(`${lingerer}: its join from the final screens did not land in the started game`);
   if (r.events.some((e) => e.bot === lingerer && e.ev === "g2-linger-photo-unavailable")) out.push(`${lingerer}: declined a turn from the final screens instead of joining the game`);
-  // Played every round of the second game like the others (it saw each round-start and guessed when not the owner)
+  // Played every round of the second game like the others (it saw each round-start and guessed, its own photos too)
   const g2Rounds = (n) => new Set(r.events.filter((e) => e.bot === n && e.ev === "g2-round-start").map((e) => e.round));
   const host = r.players.find((n) => n !== lingerer);
   const missed = [...g2Rounds(host)].filter((rd) => !g2Rounds(lingerer).has(rd));
   if (missed.length) out.push(`${lingerer}: missed second game rounds ${missed.join(", ")}`);
-  const owned = new Set(r.events.filter((e) => e.bot === lingerer && e.ev === "g2-owner-signal").map((e) => e.round));
-  const toAnswer = [...g2Rounds(lingerer)].filter((rd) => !owned.has(rd));
-  if (toAnswer.length && !r.events.some((e) => e.bot === lingerer && e.ev === "g2-guess-sent")) out.push(`${lingerer}: never answered in the second game`);
+  if (g2Rounds(lingerer).size && !r.events.some((e) => e.bot === lingerer && e.ev === "g2-guess-sent")) out.push(`${lingerer}: never answered in the second game`);
   return out;
 }
 
@@ -481,7 +476,7 @@ export function analyseRoom(r, opts) {
     ...checkWaitingPhotoPayloads(r),
     ...unavailable.errors,
     ...sync.errors,
-    ...checkOwnerSecrecy(r, ctx),
+    ...checkScoredLikeEveryone(r, ctx),
     ...checkFrozenAnswers(r, ctx),
     ...checkDuplicateRoundStarts(ctx),
     ...checkWaitBeforeRoundStart(r, ctx),

@@ -101,9 +101,6 @@
  "missed_events": {},
  "consistency_errors": [
   "game-started with undefined rounds, asked for 3 (3 needs ALLOW_QA_ROUNDS=1 on the server)",
-  "round 1: the owner's vote counted (bot1)",
-  "round 2: the owner's vote counted (bot1)",
-  "round 3: the owner's vote counted (bot1)",
   "round 1: bot2 scored with \"device1\" but its last pick while answering was \"\"",
   "round 1: bot1 scored with \"bot1\" but its last pick while answering was \"\"",
   "round 2: bot2 scored with \"bot2\" but its last pick while answering was \"\"",

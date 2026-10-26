@@ -7,14 +7,13 @@ import {
 
 export interface RoundView {
   photo: string | null;
-  /** This round's photo is mine (only the owner is told, EXP-128) */
-  isOwner: boolean;
   round: number;
   phase: ServerPhase | null;
   /** The server's duration for the current phase, in ms */
   phaseDuration: number;
   /** Changes with every phase/resume: restarts the progress bar */
   phaseKey: number;
+  /** Whose photo it was: "" until round-reveal (nobody, the owner included, is told earlier: EXP-252) */
   correctAnswer: string;
   scores: ScoreRound[] | null;
   mySelection: string;
@@ -27,9 +26,16 @@ export interface RoundView {
 }
 
 export const initialRoundView: RoundView = {
-  photo: null, isOwner: false, round: 0, phase: null, phaseDuration: 0, phaseKey: 0, correctAnswer: "", scores: null,
+  photo: null, round: 0, phase: null, phaseDuration: 0, phaseKey: 0, correctAnswer: "", scores: null,
   mySelection: "", sentGuess: "", gameHeld: false, pressing: false,
 };
+
+/**
+ * The revealed answer (`correctAnswer`) is me: the round's photo was mine. The only way the owner's screen learns it,
+ * from round-reveal on (hold button, "It was your photo!").
+ */
+export const isRevealedOwner = (correctAnswer: string, username: string | null | undefined): boolean =>
+  !!username && correctAnswer === username;
 
 export type RoundAction =
   | { type: "waiting-photo"; data: WaitingPhotoData }
@@ -67,7 +73,7 @@ const showsRound = (snap: GameStateSnapshot) => inRoundPhase(snap.phase) && !!sn
  * waiting screen for round `round`, with the server's `duration` for the progress bar.
  */
 const waitForPhoto = (state: RoundView, data: WaitingPhotoData): RoundView => ({
-  ...startPhase(state, "waiting-photo", data.duration), ...PER_ROUND_RESET, photo: null, isOwner: false, round: data.round,
+  ...startPhase(state, "waiting-photo", data.duration), ...PER_ROUND_RESET, photo: null, round: data.round,
 });
 
 /**
@@ -90,7 +96,7 @@ const applySnapshot = (state: RoundView, snap: GameStateSnapshot, serverUrl: str
     const sameRound = snap.round === state.round && photo === state.photo;
     return {
       ...startPhase(held, snap.phase, snap.duration),
-      photo, isOwner: snap.isOwner === true, round: snap.round, correctAnswer: snap.correctAnswer ?? "",
+      photo, round: snap.round, correctAnswer: snap.correctAnswer ?? "",
       scores: snap.phase === "scores" ? snap.scores : null,
       mySelection: snapshotSelection(state, snap, sameRound),
       sentGuess: sameRound ? state.sentGuess : "",
@@ -102,7 +108,7 @@ const applySnapshot = (state: RoundView, snap: GameStateSnapshot, serverUrl: str
 
   // Ready phase: back to the "are you ready" screen until the first round
   return {
-    ...held, photo: null, isOwner: false, phase: null, correctAnswer: "", scores: null, mySelection: "", sentGuess: "",
+    ...held, photo: null, phase: null, correctAnswer: "", scores: null, mySelection: "", sentGuess: "",
   };
 };
 
@@ -116,7 +122,7 @@ export const roundReducer = (state: RoundView, action: RoundAction): RoundView =
     case "round-start":
       return {
         ...startPhase(state, "answering", action.data.duration), ...PER_ROUND_RESET,
-        photo: `${action.serverUrl}${action.data.photo}`, isOwner: action.data.isOwner === true, round: action.data.round,
+        photo: `${action.serverUrl}${action.data.photo}`, round: action.data.round,
       };
     // Answers are frozen: a pick not sent by now never counted, so the reveal colours the last one sent
     case "round-reveal":
@@ -145,7 +151,7 @@ export const roundReducer = (state: RoundView, action: RoundAction): RoundView =
       // Paused between rounds (after scores): the next round's photo is awaited now
       const nextRoundPhoto = action.data.phase === "waiting-photo" && state.phase !== "waiting-photo";
       const resumed = nextRoundPhoto
-        ? { ...state, photo: null, isOwner: false, scores: null, phase: "waiting-photo" as const, round: state.round + 1 }
+        ? { ...state, photo: null, scores: null, phase: "waiting-photo" as const, round: state.round + 1 }
         : state;
       return startPhase(resumed, resumed.phase, action.data.duration);
     }

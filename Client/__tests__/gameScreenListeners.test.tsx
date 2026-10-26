@@ -101,7 +101,7 @@ describe("GameScreen socket listeners (EXP-248)", () => {
     const r = await mount();
     expectOwnCounts(GAME_SCREEN_EVENTS, 1);
     await act(async () => { r.update(<GameScreen />); });
-    act(() => mockSocket.fire("round-start", { photo: "/temp/x.jpg", round: 1, duration: 8_000, isOwner: false }));
+    act(() => mockSocket.fire("round-start", { photo: "/temp/x.jpg", round: 1, duration: 8_000 }));
     await flush();
     expectOwnCounts(GAME_SCREEN_EVENTS, 1);
     act(() => r.unmount());
@@ -133,7 +133,7 @@ describe("GameScreen socket listeners (EXP-248)", () => {
   it("a snapshot of a game that ended while I was away leaves other components' listeners alone", async () => {
     const r = await mount();
     act(() => mockSocket.fire("game-state", {
-      started: false, phase: null, round: 10, totalRounds: 10, isOwner: false, photo: null, correctAnswer: null,
+      started: false, phase: null, round: 10, totalRounds: 10, photo: null, correctAnswer: null,
       duration: 0, held: false, pause: null, scores: [{ username: "bob", points: 1 }], players: [],
     }));
     await flush();

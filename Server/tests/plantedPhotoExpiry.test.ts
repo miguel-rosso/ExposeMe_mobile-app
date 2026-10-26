@@ -106,7 +106,7 @@ describe("expired planted photos are not drawn", () => {
 
     expect(events("your-turn")).toHaveLength(0);
     vi.advanceTimersByTime(PLANTED_DELAY_MAX);
-    expect(roundStartPhotos()).toEqual([PLANTED, PLANTED]); // room-wide + the planter's own
+    expect(roundStartPhotos()).toEqual([PLANTED]); // one room-wide copy, the planter included
     expect(room.currentPlayer).toBe(player("bob"));
     expect(room.plantedPhotosShown).toBe(1);
   });
@@ -169,7 +169,7 @@ describe("expired planted photos are not drawn", () => {
 
     expect(player("bob").plantedPhoto).toBeUndefined();
     vi.advanceTimersByTime(PLANTED_DELAY_MAX);
-    expect(roundStartPhotos()).toEqual([OTHER_PLANTED, OTHER_PLANTED]);
+    expect(roundStartPhotos()).toEqual([OTHER_PLANTED]);
     expect(room.currentPlayer).toBe(player("carol"));
   });
 });

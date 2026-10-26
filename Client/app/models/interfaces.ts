@@ -82,14 +82,14 @@ export interface WaitingPhotoData {
 }
 
 /**
- * `round-start`: the round's photo and answer timer. The owner's name is never sent before `round-reveal`; only the
- * owner's own copy has `isOwner: true` (hold button, no voting).
+ * `round-start`: the round's photo and answer timer, the same for everyone (EXP-252). The app never shows the owner
+ * anything before `round-reveal` and other players can't infer it; this client knows internally only because it
+ * handled the `your-turn` and uploaded the photo.
  */
 export interface RoundStartData {
   photo: string;
   round: number;
   duration: number;
-  isOwner: boolean;
 }
 
 /** `round-reveal`: whose photo it was, shown for `duration` ms */
@@ -133,9 +133,8 @@ export interface GameStateSnapshot {
   phase: ServerPhase | null;
   round: number;
   totalRounds: number;
-  /** The round in play (answering/reveal/scores) is my photo; nobody else is told whose it is before the reveal */
-  isOwner: boolean;
   photo: string | null;
+  /** Whose photo it was, only from the reveal on (nobody, the owner included, is told earlier) */
   correctAnswer: string | null;
   duration: number;
   held: boolean;

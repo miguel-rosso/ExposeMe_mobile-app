@@ -143,13 +143,13 @@ export const PhotoProvider: React.FC<PhotoProviderProps> = ({ children }) => {
 
   /**
    * In-game photo for `your-turn`. Never navigates (leaving the game screen would drop the player from the
-   * game): it only asks for permission if it was never decided, and uses whatever photos are accessible,
-   * limited access included. Reports why when there is no photo to send.
+   * game) and never asks for permission: a system prompt only on this phone would tell the player the next photo
+   * is theirs (EXP-252). Uses whatever photos are accessible, limited access included. Reports why when there is
+   * no photo to send.
    */
   const pickGamePhoto = useCallback(async (): Promise<GamePhotoResult> => {
     try {
-      let { status, canAskAgain } = await MediaLibrary.getPermissionsAsync();
-      if (status === "undetermined" && canAskAgain) ({ status } = await MediaLibrary.requestPermissionsAsync());
+      const { status } = await MediaLibrary.getPermissionsAsync();
       if (status !== "granted") {
         console.log(`No gallery permission in game (${status}).`);
         return { error: "permission" };

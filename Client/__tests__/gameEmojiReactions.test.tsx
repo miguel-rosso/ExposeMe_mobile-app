@@ -97,7 +97,7 @@ afterEach(() => { jest.clearAllTimers(); jest.useRealTimers(); });
 
 const reactions = (r: TestRenderer.ReactTestRenderer) => r.root.findAllByType(EmojiReaction);
 const startRound = (round: number) =>
-  act(() => mockSocket.fire("round-start", { photo: `/temp/${round}.jpg`, round, duration: 8_000, isOwner: false }));
+  act(() => mockSocket.fire("round-start", { photo: `/temp/${round}.jpg`, round, duration: 8_000 }));
 const mount = async () => {
   let r!: TestRenderer.ReactTestRenderer;
   await act(async () => { r = TestRenderer.create(<GameScreen />); });

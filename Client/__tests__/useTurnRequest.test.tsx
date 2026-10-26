@@ -31,24 +31,22 @@ describe("useTurnRequest", () => {
     expect([...TURN_ENDING_EVENTS].sort()).toEqual(botEvents.sort());
   });
 
-  it("a new request asks for an upload and shows uploading; its photo is sent while in force", () => {
+  it("a new request asks for an upload; its photo is sent while in force", () => {
     const socket = makeSocket();
     const tr = mount(socket);
     let needsUpload = false;
     act(() => { needsUpload = tr().start(turn1); });
     expect(needsUpload).toBe(true);
-    expect(tr().uploading).toBe(true);
     expect(tr().isCurrent(turn1)).toBe(true);
     tr().sendPhoto(turn1, "/temp/a.jpg");
     expect(socket.emit).toHaveBeenCalledWith("photo-sent", { photo: "/temp/a.jpg" });
   });
 
-  it("after endTurn the photo is not sent, uploading stops, and the same request re-asked re-sends it", () => {
+  it("after endTurn the photo is not sent, and the same request re-asked re-sends it", () => {
     const socket = makeSocket();
     const tr = mount(socket);
     act(() => { tr().start(turn1); });
     act(() => tr().endTurn());
-    expect(tr().uploading).toBe(false);
     expect(tr().isCurrent(turn1)).toBe(false);
     tr().sendPhoto(turn1, "/temp/a.jpg");
     expect(socket.emit).not.toHaveBeenCalled();
@@ -56,14 +54,6 @@ describe("useTurnRequest", () => {
     act(() => { needsUpload = tr().start(turn1); });
     expect(needsUpload).toBe(false);
     expect(socket.emit).toHaveBeenCalledWith("photo-sent", { photo: "/temp/a.jpg" });
-  });
-
-  it("endTurn({ keepUploading }) keeps showing uploading (pause)", () => {
-    const tr = mount(makeSocket());
-    act(() => { tr().start(turn1); });
-    act(() => tr().endTurn({ keepUploading: true }));
-    expect(tr().uploading).toBe(true);
-    expect(tr().isCurrent(turn1)).toBe(false);
   });
 
   it("re-asked while its upload is in flight: waits for it; a new attempt uploads again", () => {
@@ -82,7 +72,6 @@ describe("useTurnRequest", () => {
     act(() => { tr().start(turn1); });
     act(() => tr().reportUnavailable("upload", turn1));
     expect(socket.emit).toHaveBeenCalledWith("photo-unavailable", { round: 1, attempt: 1 });
-    expect(tr().uploading).toBe(false);
     expect(tr().takeReportedReason()).toBe("upload");
     expect(tr().takeReportedReason()).toBeNull();
     // A later your-turn of the same request uploads again (the failed upload was forgotten)

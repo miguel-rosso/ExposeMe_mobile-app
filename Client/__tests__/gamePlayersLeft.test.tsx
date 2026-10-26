@@ -85,7 +85,7 @@ const optionPlayers = (root: ReactTestInstance) =>
     .props.data.map((p: { username: string; isHost: boolean }) => [p.username, p.isHost]);
 const press = (root: ReactTestInstance, name: string) =>
   act(() => root.find((n) => n.props.testID === playerOptionId(name) && typeof n.props.onPress === "function").props.onPress());
-const START = { photo: "/temp/x.jpg", round: 1, duration: 8_000, isOwner: false };
+const START = { photo: "/temp/x.jpg", round: 1, duration: 8_000 };
 
 describe("GameScreen: players leaving mid-game (EXP-042)", () => {
   let r: TestRenderer.ReactTestRenderer;
@@ -141,7 +141,7 @@ describe("GameScreen: players leaving mid-game (EXP-042)", () => {
 
   it("a merely disconnected player stays an option (DEC-016)", () => {
     act(() => mockSocket.fire("game-state", {
-      started: true, phase: "answering", round: 1, totalRounds: 10, isOwner: false, photo: "/temp/x.jpg",
+      started: true, phase: "answering", round: 1, totalRounds: 10, photo: "/temp/x.jpg",
       correctAnswer: "", duration: 4_000, held: false, pause: null, scores: [],
       players: mockPlayers.map((p) => (p.username === "carol" ? { ...p, connected: false } : p)),
     }));

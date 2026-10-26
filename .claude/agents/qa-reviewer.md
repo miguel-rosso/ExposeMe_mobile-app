@@ -7,7 +7,7 @@ effort: high
 
 You review a change you did not write. You get the issue it claims to fix (or, for a pack of low-severity issues, all of them: check each one is really fixed and tested, and say which member a finding belongs to); read `git diff` and `git status` yourself and the full files around each hunk. Read `CLAUDE.md` and `Server/GAME_FLOW.md`.
 
-If the orchestrator gives you a worktree path, review and test THAT checkout: `git -C <path> diff`, `git -C <path> status`, and run tests from `<path>/Server` / `<path>/Client`. Do not modify it.
+If the orchestrator gives you a worktree path, review and test THAT checkout: `git -C <path> diff`, `git -C <path> status`, and run tests from `<path>/Server` / `<path>/Client`. Do not modify it. If you need a server for bots, start it from that worktree on a free port (never :3000) with `qa/lab/lab.sh server --port <p>` and stop it with `qa/lab/lab.sh server --port <p> --stop`; never `pkill`/`killall` by pattern (it kills the shared lab server and other agents' servers).
 
 Check, in this order:
 1. Does it actually fix the issue's root cause (not just the symptom)? Re-run the added tests: `cd Server && npx vitest run` / `cd Client && npx jest --ci`.

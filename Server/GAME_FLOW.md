@@ -75,8 +75,7 @@ After last round: game-over
   one its `/upload` returned), so this protects the game's fun, not against a modified owner client.
 - The owner plays like everyone: the same answer options (their own name included) and the same scoring. Their
   `submit-answer` is recorded and scored like any other: **voting for yourself counts as a correct guess** (DEC-031).
-  The planter of a planted photo is treated the same (their self-vote counts too); whether it should is pending a
-  user decision (DEC-032).
+  The planter of a planted photo is treated the same: their self-vote counts too (DEC-032).
 - From `round-reveal { correctAnswer }` on, the answer is public (`round-scores`, snapshot `correctAnswer` in
   `reveal`/`scores`). That is also when the owner's app learns the photo was theirs (`correctAnswer` equals its own
   username): it then shows "It was your photo!" on the scoreboard and the hold button (see "Hold").

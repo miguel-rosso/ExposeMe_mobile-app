@@ -13,6 +13,9 @@ import { registerUpload } from "./helpers";
 const PHOTO = "/temp/0123456789abcdef0123456789abcdef.jpg";
 const PLANTED = "/temp/fedcba9876543210fedcba9876543210.jpg";
 const FORBIDDEN_KEYS = new Set(["socketId", "rejoinToken", "plantedPhoto", "hasPlantedPhoto", "isReady"]);
+// Fixed Math.random for the game's draws: among [alice, bob, carol] it picks bob as round 1's owner, and the
+// planted-slot shuffle of a 10-round game puts bob's planted photo in round 10, so round 1 is an uploaded photo.
+const RANDOM_BOB_OWNS_ROUND_1 = 0.4;
 
 interface Received { who: string; ev: string; args: unknown[] }
 
@@ -101,7 +104,7 @@ describe("player data in socket payloads", () => {
       await join(byName[name], gameCode, name);
     }
 
-    // bob plants a photo (another player than the future owner of round 1, in general)
+    // bob plants a photo: it is drawn for a later round, so it must not leak while round 1 plays
     registerUpload(gameCode, "bob", PLANTED);
     byName.bob.emit("plant-photo", { photoUrl: PLANTED });
 
@@ -117,13 +120,14 @@ describe("player data in socket payloads", () => {
     // game-started: only the allowlisted player fields
     const players = ["alice", "bob", "carol"];
     const started = players.map((n) => once<Record<string, unknown>[]>(byName[n], "game-started"));
+    vi.spyOn(Math, "random").mockReturnValue(RANDOM_BOB_OWNS_ROUND_1);
     alice.emit("start-game");
     const startedPlayers = await started[0];
     await Promise.all(started);
     expect(startedPlayers.map((p) => Object.keys(p).sort())).toEqual(players.map(() => ["connected", "isHost", "lastAnswerCorrect", "lastGuess", "points", "username"]));
 
-    // First round: an uploaded photo from the picked owner, or bob's planted photo (round-start never names the
-    // owner, EXP-128: it is whoever got your-turn, else the planter)
+    // First round: an uploaded photo from bob, the picked owner (round-start never names the owner, EXP-128: it
+    // is whoever got your-turn)
     let turnOwner: string | null = null;
     for (const n of players) {
       byName[n].once("your-turn", () => {
@@ -134,19 +138,16 @@ describe("player data in socket payloads", () => {
     }
     const roundStart = once<{ photo: string }>(alice, "round-start", 6_000);
     players.forEach((n) => byName[n].emit("im-ready"));
-    await roundStart;
-    const owner: string = turnOwner ?? "bob";
+    expect((await roundStart).photo).toBe(PHOTO);
+    const owner = "bob";
+    expect(turnOwner).toBe(owner);
 
-    // bob (host once alice leaves) answers during answering: right, or ignored when the photo is his own...
-    const guesser = "bob";
+    // bob (host once alice leaves) answers during answering: the owner guesses and scores like anyone (EXP-252),
+    // so naming himself is a right answer — the one answer that would give the owner away if it leaked...
+    const guesser = owner;
     byName[guesser].emit("submit-answer", { guess: owner });
-    if (owner === guesser) {
-      await new Promise((r) => setTimeout(r, 200));
-      expect(roomManager.getPlayer(gameCode, guesser)).toMatchObject({ lastGuess: "", points: 0 });
-    } else {
-      await until(() => roomManager.getPlayer(gameCode, guesser)?.lastGuess === owner);
-      expect(roomManager.getPlayer(gameCode, guesser)!.points).toBe(1);
-    }
+    await until(() => roomManager.getPlayer(gameCode, guesser)?.lastGuess === owner);
+    expect(roomManager.getPlayer(gameCode, guesser)).toMatchObject({ points: 1, lastAnswerCorrect: true });
 
     // ...and reconnects on a new socket: room-of-game and game-state hide that answer until round-scores
     const again = await newClient(guesser);

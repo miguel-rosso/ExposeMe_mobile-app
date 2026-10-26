@@ -1,6 +1,11 @@
 import { NextFunction, Request, Response } from "express";
+import { ipKey } from "./ipKey";
 
-export const clientIp = (req: Request) => req.ip || req.socket.remoteAddress || "unknown";
+/**
+ * Per-IP limit key of an HTTP request: req.ip (see "trust proxy" in app.ts) normalized by ipKey, so IPv6 counts by
+ * its /64 and IPv4-mapped IPv6 as plain IPv4, the same key the socket.io handshake limits use.
+ */
+export const clientIp = (req: Request) => ipKey(req.ip || req.socket.remoteAddress || "unknown");
 
 /** In-memory sliding window: at most `max` hits per key in any `windowMs`. */
 export function createSlidingWindow({ max, windowMs }: { max: number; windowMs: number }) {
@@ -37,7 +42,7 @@ function tooMany(res: Response, retryAfterS: number) {
 }
 
 /**
- * Sliding-window rate limit middleware keyed by client IP (req.ip; see "trust proxy" in app.ts), or by `key`.
+ * Sliding-window rate limit middleware keyed by client IP (clientIp: normalized req.ip), or by `key`.
  * At most `max` requests per key in any `windowMs`; extra requests get 429 and are not counted.
  */
 export function createRateLimiter({

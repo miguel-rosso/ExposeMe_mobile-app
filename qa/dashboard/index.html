@@ -269,6 +269,16 @@
     </details>
   </section>
 
+  <section id="cifras">
+    <h2>Cifras principales</h2>
+    <div class="qa-kpis">
+    <div class="qa-kpi c-yellow" id="kpi-open" data-kpi="open" role="button" tabindex="0" title="Ver en la tabla de incidencias"><div class="lbl">Incidencias abiertas</div><div class="val dash-skeleton" data-source="kpis" data-field="open" data-row="0">—</div><div class="sub">abiertas, en curso o bloqueadas</div></div>
+    <div class="qa-kpi c-red" id="kpi-high" data-kpi="high" role="button" tabindex="0" title="Ver en la tabla de incidencias"><div class="lbl">Altas o críticas</div><div class="val dash-skeleton" data-source="kpis" data-field="open_high" data-row="0">—</div><div class="sub">se arreglan primero</div></div>
+    <div class="qa-kpi c-green" id="kpi-done" data-kpi="done" role="button" tabindex="0" title="Ver en la tabla de incidencias"><div class="lbl">Resueltas</div><div class="val dash-skeleton" data-source="kpis" data-field="done" data-row="0">—</div><div class="sub"><span data-source="kpis" data-field="verified" data-row="0">—</span> verificadas en móviles</div></div>
+    <div class="qa-kpi c-blue" id="kpi-skew"><div class="lbl">Desfase entre jugadores</div><div class="val dash-skeleton" data-source="kpis" data-field="last_p95_skew" data-row="0">—</div><div class="sub">ms (p95) en la última partida, <span data-source="kpis" data-field="last_run" data-row="0">—</span></div></div>
+  </div>
+  </section>
+
   <section class="qa-card" id="issues">
     <h2>Incidencias <span class="qa-total"><span data-source="kpis" data-field="total" data-row="0" class="dash-skeleton">—</span> en total</span></h2>
     <p class="qa-hint">Encontradas por el auditor, el revisor de seguridad, los bots y las partidas en dispositivos.</p>
@@ -298,15 +308,6 @@
   </section>
 
 
-  <section id="cifras">
-    <h2>Cifras principales</h2>
-    <div class="qa-kpis">
-    <div class="qa-kpi c-yellow" id="kpi-open" data-kpi="open" role="button" tabindex="0" title="Ver en la tabla de incidencias"><div class="lbl">Incidencias abiertas</div><div class="val dash-skeleton" data-source="kpis" data-field="open" data-row="0">—</div><div class="sub">abiertas, en curso o bloqueadas</div></div>
-    <div class="qa-kpi c-red" id="kpi-high" data-kpi="high" role="button" tabindex="0" title="Ver en la tabla de incidencias"><div class="lbl">Altas o críticas</div><div class="val dash-skeleton" data-source="kpis" data-field="open_high" data-row="0">—</div><div class="sub">se arreglan primero</div></div>
-    <div class="qa-kpi c-green" id="kpi-done" data-kpi="done" role="button" tabindex="0" title="Ver en la tabla de incidencias"><div class="lbl">Resueltas</div><div class="val dash-skeleton" data-source="kpis" data-field="done" data-row="0">—</div><div class="sub"><span data-source="kpis" data-field="verified" data-row="0">—</span> verificadas en móviles</div></div>
-    <div class="qa-kpi c-blue" id="kpi-skew"><div class="lbl">Desfase entre jugadores</div><div class="val dash-skeleton" data-source="kpis" data-field="last_p95_skew" data-row="0">—</div><div class="sub">ms (p95) en la última partida, <span data-source="kpis" data-field="last_run" data-row="0">—</span></div></div>
-  </div>
-  </section>
 
   <section class="qa-grid">
     <div class="qa-card" id="by-type">

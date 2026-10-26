@@ -16,7 +16,7 @@ describe("isAllowedSocketOrigin", () => {
   it.each<OriginCase>([
     [undefined, "exposeme.onrender.com", "no Origin (bots, RN polling)"],
     ["https://exposeme.onrender.com", "exposeme.onrender.com", "RN WebSocket over wss, default port"],
-    ["http://192.168.1.20:3000", "192.168.1.20:3000", "RN WebSocket on the LAN lab server"],
+    ["http://192.0.2.20:3000", "192.0.2.20:3000", "RN WebSocket on the LAN lab server"],
     ["https://ExposeMe.OnRender.com", "exposeme.onrender.com", "host case differs"],
     ["https://exposeme.onrender.com:443", "exposeme.onrender.com", "explicit default port in Origin"],
     ["https://exposeme.onrender.com", "exposeme.onrender.com:443", "explicit default port in Host"],
@@ -27,7 +27,7 @@ describe("isAllowedSocketOrigin", () => {
   it.each<OriginCase>([
     ["https://evil.example", "exposeme.onrender.com", "another website"],
     ["https://exposeme.onrender.com.evil.example", "exposeme.onrender.com", "lookalike suffix"],
-    ["http://192.168.1.20:8080", "192.168.1.20:3000", "same IP, other port"],
+    ["http://192.0.2.20:8080", "192.0.2.20:3000", "same IP, other port"],
     ["null", "exposeme.onrender.com", "opaque origin (sandboxed iframe, file://)"],
     ["", "exposeme.onrender.com", "empty Origin"],
     ["chrome-extension://abcdef", "abcdef", "non-web protocol"],

@@ -13,11 +13,17 @@ const refuseStale = (res: Response) => res.status(409).json({ error: "Upload no 
 export const UploadRouter = async (req: Request, res: Response) => {
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
 
+  // The client may go away (abort, upload timeout) while its image waits for processing: its in-flight slot is freed
+  // then, so its job must leave the sanitize queue too (keeps queued buffers within the in-flight memory bound)
+  const gone = new AbortController();
+  const onClose = () => { if (!res.writableFinished) gone.abort(); };
+  res.once("close", onClose);
   let image: Awaited<ReturnType<typeof sanitizeImage>>;
   try {
-    image = await sanitizeImage(req.file.buffer);
+    image = await sanitizeImage(req.file.buffer, gone.signal);
   } catch (err) {
     if (err instanceof ImageRejected) {
+      if (res.headersSent || gone.signal.aborted) return;
       if (err.retryAfterS) res.setHeader("Retry-After", String(err.retryAfterS));
       return res.status(err.status).json({ error: err.message });
     }

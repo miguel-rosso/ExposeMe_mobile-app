@@ -116,6 +116,34 @@ describe("createLimiter", () => {
     await expect(a).resolves.toBe("a");
   });
 
+  it("EXP-178: a waiting job whose signal aborts leaves the queue without running and frees its place", async () => {
+    const run = createLimiter({ maxConcurrent: 1, maxQueued: 1, queueTimeoutMs: 5_000 });
+    let finishA!: (v: string) => void;
+    const a = run(() => new Promise<string>((r) => { finishA = r; })); // holds the only slot until resolved
+    const gone = new AbortController();
+    let ranB = false;
+    const b = run(async () => { ranB = true; return "b"; }, gone.signal);
+    expect(run.stats()).toEqual({ running: 1, queued: 1 });
+    gone.abort();
+    await expect(b).rejects.toBeInstanceOf(ImageRejected);
+    expect(run.stats()).toEqual({ running: 1, queued: 0 });
+    const c = run(async () => "c"); // the place b held is free again
+    expect(run.stats()).toEqual({ running: 1, queued: 1 });
+    finishA("a");
+    expect(await Promise.all([a, c])).toEqual(["a", "c"]);
+    expect(ranB).toBe(false);
+    expect(run.stats()).toEqual({ running: 0, queued: 0 });
+  });
+
+  it("EXP-178: an already aborted signal is rejected without taking a slot", async () => {
+    const run = createLimiter({ maxConcurrent: 1, maxQueued: 0, queueTimeoutMs: 50 });
+    const gone = new AbortController();
+    gone.abort();
+    await expect(run(async () => "x", gone.signal)).rejects.toBeInstanceOf(ImageRejected);
+    expect(run.stats()).toEqual({ running: 0, queued: 0 });
+    await expect(run(async () => "ok")).resolves.toBe("ok");
+  });
+
   it("releases the slot when a job throws", async () => {
     const run = createLimiter({ maxConcurrent: 1, maxQueued: 0, queueTimeoutMs: 50 });
     await expect(run(async () => { throw new Error("boom"); })).rejects.toThrow("boom");

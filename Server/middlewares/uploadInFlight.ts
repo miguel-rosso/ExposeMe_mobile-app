@@ -11,7 +11,8 @@ import { MAX_FILE_SIZE } from "./upload";
 //   byte of the body is read: per member, per room, per IP (429) and server-wide (503);
 // - every admitted upload must be fully received within UPLOAD_REQUEST_TIMEOUT_MS (408 and the connection is closed),
 //   so a slow sender can't hold a slot longer than that. Processing a complete body is not timed here (the slot is
-//   kept until the response; sanitizeImage's bounded queue limits that wait).
+//   kept until the response; sanitizeImage's queue is sized to UPLOAD_INFLIGHT_MAX, so an upload admitted here is
+//   never refused there, and a job whose client is gone leaves that queue with its slot).
 // Worst-case buffered memory ≈ UPLOAD_INFLIGHT_MAX × MAX_FILE_SIZE (32 × 5 MB = 160 MB by default). Holding every
 // slot needs UPLOAD_INFLIGHT_MAX / UPLOAD_INFLIGHT_PER_IP_MAX IPs and as many rooms / members.
 // A full party (12 players) shares one public IP and one room, so the per-IP and per-room defaults fit all of them

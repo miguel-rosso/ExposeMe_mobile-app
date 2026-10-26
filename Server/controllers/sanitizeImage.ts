@@ -1,4 +1,6 @@
 import sharp from "sharp";
+import { envInt } from "../middlewares/rateLimit";
+import { UPLOAD_INFLIGHT_MAX } from "../middlewares/uploadInFlight";
 
 export type SanitizedExt = "jpg" | "png" | "webp";
 type ImageFormat = "jpeg" | "png" | "webp";
@@ -10,10 +12,18 @@ export const MAX_INPUT_PIXELS = 24_000_000;
 export const MAX_OUTPUT_SIDE = 2048;
 /** Images processed at the same time (decode memory is the bottleneck on a small instance). */
 export const SANITIZE_MAX_CONCURRENT = 1;
-/** Uploads waiting for a slot; beyond this they get 503 right away. */
-export const SANITIZE_MAX_QUEUED = 16;
-/** Longest wait for a slot before giving up with 503. */
-export const SANITIZE_QUEUE_TIMEOUT_MS = 8_000;
+/**
+ * Uploads waiting for a slot; beyond this they get 503 right away. Every waiting job belongs to an upload that still
+ * holds its in-flight slot (the slot is kept until the response, and a job whose client is gone leaves the queue), so
+ * sizing it to the server-wide in-flight cap means an upload admitted by those caps is never refused here. The queue
+ * adds no memory of its own: the buffers it holds are the in-flight ones (≤ UPLOAD_INFLIGHT_MAX × MAX_FILE_SIZE).
+ */
+export const SANITIZE_MAX_QUEUED = UPLOAD_INFLIGHT_MAX;
+/**
+ * Backstop for a stuck job: longest wait for a slot before giving up with 503. Long enough for a full queue
+ * (32 × a few hundred ms per image on a small instance); the wait is otherwise bounded by the queue length.
+ */
+export const SANITIZE_QUEUE_TIMEOUT_MS = envInt("SANITIZE_QUEUE_TIMEOUT_MS", 60_000, 1_000, 600_000);
 /** Retry-After (seconds) sent with 503. */
 export const SANITIZE_RETRY_AFTER_S = 2;
 
@@ -83,7 +93,8 @@ export function headerSize(buf: Buffer, format: ImageFormat): { width: number; h
 // ── Concurrency limit ──
 /**
  * At most `maxConcurrent` jobs run at once; up to `maxQueued` wait (each for at most `queueTimeoutMs`);
- * anything else is refused with ImageRejected 503.
+ * anything else is refused with ImageRejected 503. A waiting job whose `signal` aborts (client gone) leaves the queue
+ * and is rejected without running.
  */
 export function createLimiter({ maxConcurrent, maxQueued, queueTimeoutMs }: { maxConcurrent: number; maxQueued: number; queueTimeoutMs: number }) {
   let running = 0;
@@ -96,18 +107,26 @@ export function createLimiter({ maxConcurrent, maxQueued, queueTimeoutMs }: { ma
     else running--;
   };
 
-  return async function run<T>(job: () => Promise<T>): Promise<T> {
+  const aborted = () => new ImageRejected("Upload aborted", 499);
+
+  async function run<T>(job: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    if (signal?.aborted) throw aborted();
     if (running < maxConcurrent) {
       running++;
     } else {
       if (waiting.length >= maxQueued) throw busy();
       await new Promise<void>((resolve, reject) => {
-        const start = () => { clearTimeout(timer); resolve(); };
-        const timer = setTimeout(() => {
+        const leave = (err: ImageRejected) => {
+          clearTimeout(timer);
+          signal?.removeEventListener("abort", onAbort);
           const i = waiting.indexOf(start);
           if (i !== -1) waiting.splice(i, 1);
-          reject(busy());
-        }, queueTimeoutMs);
+          reject(err);
+        };
+        const onAbort = () => leave(aborted());
+        const start = () => { clearTimeout(timer); signal?.removeEventListener("abort", onAbort); resolve(); };
+        const timer = setTimeout(() => leave(busy()), queueTimeoutMs);
+        signal?.addEventListener("abort", onAbort, { once: true });
         waiting.push(start);
       });
     }
@@ -116,10 +135,13 @@ export function createLimiter({ maxConcurrent, maxQueued, queueTimeoutMs }: { ma
     } finally {
       release();
     }
-  };
+  }
+  /** Jobs running and waiting (for tests). */
+  run.stats = () => ({ running, queued: waiting.length });
+  return run;
 }
 
-const limit = createLimiter({
+export const limit = createLimiter({
   maxConcurrent: SANITIZE_MAX_CONCURRENT,
   maxQueued: SANITIZE_MAX_QUEUED,
   queueTimeoutMs: SANITIZE_QUEUE_TIMEOUT_MS,
@@ -156,11 +178,11 @@ async function reencode(input: Buffer, format: ImageFormat): Promise<{ data: Buf
  * the format comes from the magic bytes, and only JPEG, PNG and WebP are accepted (415 otherwise, e.g. HEIC —
  * the app converts photos to JPEG before uploading).
  */
-export async function sanitizeImage(input: Buffer): Promise<{ data: Buffer; ext: SanitizedExt }> {
+export async function sanitizeImage(input: Buffer, signal?: AbortSignal): Promise<{ data: Buffer; ext: SanitizedExt }> {
   const format = sniffFormat(input);
   if (!format) throw new ImageRejected("Unsupported image format (use JPEG, PNG or WebP)", 415);
   const size = headerSize(input, format);
   if (!size || !size.width || !size.height) throw new ImageRejected("Invalid image");
   if (size.width * size.height > MAX_INPUT_PIXELS) throw new ImageRejected("Image too large", 413);
-  return limit(() => reencode(input, format));
+  return limit(() => reencode(input, format), signal);
 }

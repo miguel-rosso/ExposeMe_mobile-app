@@ -2,7 +2,7 @@ import React from "react";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import { StyleSheet } from "react-native";
 import tw from "twrnc";
-import { applyGameState, formatCountdown, GameStateSetters, turnUploadAction } from "../app/utils/gameState";
+import { formatCountdown, turnUploadAction } from "../app/utils/gameState";
 import { useGameConnection } from "../app/hooks/useGameConnection";
 import { GameStateSnapshot } from "../app/models/interfaces";
 import { TEST_IDS, playerOptionId } from "../app/utils/testIds";
@@ -70,95 +70,6 @@ const snapshot = (over: Partial<GameStateSnapshot> = {}): GameStateSnapshot => (
   scores: [{ username: "alice", points: 2, isHost: true, lastAnswerCorrect: false, lastGuess: "" }],
   players: [],
   ...over,
-});
-
-const makeSetters = () => {
-  const s = {
-    setPhoto: jest.fn(), setIsOwner: jest.fn(), setRound: jest.fn(), setPhase: jest.fn(),
-    setPhaseDuration: jest.fn(), setPhaseKey: jest.fn(), setCorrectAnswer: jest.fn(), setScores: jest.fn(),
-    setMySelection: jest.fn(), setGameHeld: jest.fn(), setPressing: jest.fn(), setPause: jest.fn(),
-  };
-  return s as typeof s & GameStateSetters;
-};
-
-describe("applyGameState", () => {
-  it("renders the current answering phase with the remaining time and keeps the guess of the same round", () => {
-    const s = makeSetters();
-    const r = applyGameState(snapshot(), "http://srv", { round: 3, photo: "http://srv/temp/1-a.jpg" }, s);
-    expect(r).toEqual({ gameOver: false, sendReady: false, resendGuess: true });
-    expect(s.setPhoto).toHaveBeenCalledWith("http://srv/temp/1-a.jpg");
-    expect(s.setIsOwner).toHaveBeenCalledWith(false);
-    expect(s.setPhase).toHaveBeenCalledWith("answering");
-    expect(s.setPhaseDuration).toHaveBeenCalledWith(4200);
-    expect(s.setPause).toHaveBeenCalledWith(null);
-    expect(s.setMySelection).not.toHaveBeenCalled();
-  });
-
-  // EXP-128: the snapshot never names the owner; only my own snapshot says the photo is mine
-  it("marks the photo as mine only when the snapshot says isOwner", () => {
-    const s = makeSetters();
-    applyGameState(snapshot({ isOwner: true }), "http://srv", { round: 3, photo: "http://srv/temp/1-a.jpg" }, s);
-    expect(s.setIsOwner).toHaveBeenCalledWith(true);
-    const s2 = makeSetters();
-    applyGameState(snapshot({ phase: "waiting-photo", photo: null }), "", { round: 3, photo: null }, s2);
-    expect(s2.setIsOwner).toHaveBeenCalledWith(false);
-  });
-
-  it("clears the guess when the round changed while away", () => {
-    const s = makeSetters();
-    applyGameState(snapshot(), "http://srv", { round: 2, photo: "http://srv/temp/0-b.jpg" }, s);
-    expect(s.setMySelection).toHaveBeenCalledWith("");
-  });
-
-  // EXP-148: answers freeze when answering ends, so a guess is only (re)sent in answering, never in reveal
-  it("never asks to send the guess in reveal, and shows scores in scores", () => {
-    const s = makeSetters();
-    expect(applyGameState(snapshot({ phase: "reveal", correctAnswer: "alice" }), "", { round: 3, photo: "http://srv/temp/1-a.jpg" }, s).resendGuess).toBe(false);
-    expect(s.setCorrectAnswer).toHaveBeenCalledWith("alice");
-    const s2 = makeSetters();
-    applyGameState(snapshot({ phase: "scores", correctAnswer: "alice" }), "", { round: 3, photo: "http://srv/temp/1-a.jpg" }, s2);
-    expect(s2.setScores).toHaveBeenCalledWith(snapshot().scores);
-  });
-
-  // EXP-148: a pick made while offline never reached the server; once answers are frozen it must not be coloured
-  it("clears a pick that was never sent when a same-round snapshot is past answering", () => {
-    for (const phase of ["reveal", "scores"] as const) {
-      const s = makeSetters();
-      applyGameState(snapshot({ phase, correctAnswer: "alice" }), "http://srv", { round: 3, photo: "http://srv/temp/1-a.jpg", pickSent: false }, s);
-      expect(s.setMySelection).toHaveBeenCalledWith("");
-      const sent = makeSetters();
-      applyGameState(snapshot({ phase, correctAnswer: "alice" }), "http://srv", { round: 3, photo: "http://srv/temp/1-a.jpg", pickSent: true }, sent);
-      expect(sent.setMySelection).not.toHaveBeenCalled();
-    }
-    // Still answering: kept (and re-sent by the screen)
-    const a = makeSetters();
-    applyGameState(snapshot(), "http://srv", { round: 3, photo: "http://srv/temp/1-a.jpg", pickSent: false }, a);
-    expect(a.setMySelection).not.toHaveBeenCalled();
-  });
-
-  it("shows the server's pause countdown", () => {
-    const s = makeSetters();
-    const pause = { duration: 299_000, waitingFor: [], pause: 2, maxPauses: 3 };
-    applyGameState(snapshot({ pause }), "", { round: 3, photo: "http://srv/temp/1-a.jpg" }, s);
-    expect(s.setPause).toHaveBeenCalledWith(pause);
-  });
-
-  it("waiting for a photo: the waiting screen for the next round (EXP-039); ready phase: send im-ready again", () => {
-    const s = makeSetters();
-    const r = applyGameState(snapshot({ phase: "waiting-photo", photo: null, duration: 9_000 }), "", { round: 3, photo: "http://srv/temp/1-a.jpg" }, s);
-    expect(r.sendReady).toBe(false);
-    expect(s.setPhoto).toHaveBeenCalledWith(null);
-    expect(s.setPhase).toHaveBeenCalledWith("waiting-photo");
-    expect(s.setRound).toHaveBeenCalledWith(4);
-    expect(s.setPhaseDuration).toHaveBeenCalledWith(9_000);
-    expect(applyGameState(snapshot({ phase: null, photo: null }), "", { round: 0, photo: null }, makeSetters()).sendReady).toBe(true);
-  });
-
-  it("reports game over when the game ended while away", () => {
-    const s = makeSetters();
-    expect(applyGameState(snapshot({ started: false, phase: null }), "", { round: 3, photo: "http://srv/temp/1-a.jpg" }, s).gameOver).toBe(true);
-    expect(s.setPhoto).not.toHaveBeenCalled();
-  });
 });
 
 describe("turnUploadAction / formatCountdown", () => {
@@ -308,6 +219,17 @@ describe("GameScreen reconnect handling", () => {
     expect(counter()).toBe("Pause 3 of 3");
     expect(has(r.root, TEST_IDS.pausedLastWarning)).toBe(true);
     expect(mockReplace).not.toHaveBeenCalled();
+    act(() => r.unmount());
+  });
+
+  // The pause ended while I was away: a snapshot without a pause closes the paused countdown
+  it("closes the paused countdown when a rejoin snapshot is no longer paused", async () => {
+    let r!: TestRenderer.ReactTestRenderer;
+    await act(async () => { r = TestRenderer.create(<GameScreen />); });
+    act(() => mockSocket.fire("game-paused", { duration: 300_000, waitingFor: ["carol"], pause: 1, maxPauses: 3 }));
+    expect(has(r.root, TEST_IDS.pausedModal)).toBe(true);
+    act(() => mockSocket.fire("game-state", snapshot({ pause: null })));
+    expect(has(r.root, TEST_IDS.pausedModal)).toBe(false);
     act(() => r.unmount());
   });
 

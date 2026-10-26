@@ -82,6 +82,37 @@ export interface WaitingPhotoData {
 }
 
 /**
+ * `round-start`: the round's photo and answer timer. The owner's name is never sent before `round-reveal`; only the
+ * owner's own copy has `isOwner: true` (hold button, no voting).
+ */
+export interface RoundStartData {
+  photo: string;
+  round: number;
+  duration: number;
+  isOwner: boolean;
+}
+
+/** `round-reveal`: whose photo it was, shown for `duration` ms */
+export interface RoundRevealData {
+  correctAnswer: string;
+  duration: number;
+}
+
+/** `round-scores`: the scores after round `round`, shown for `duration` ms */
+export interface RoundScoresData {
+  scores: ScoreRound[];
+  round: number;
+  totalRounds: number;
+  duration: number;
+}
+
+/** `hold-resume`: the held phase continues with `duration` ms */
+export interface HoldResumeData {
+  phase: string;
+  duration: number;
+}
+
+/**
  * `your-turn` (only to me): send the photo for `round`. `attempt` identifies this photo request (new per owner pick,
  * also when the round number repeats after a skip); `photo-unavailable` echoes both.
  */

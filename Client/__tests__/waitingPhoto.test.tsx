@@ -1,6 +1,6 @@
 import React from "react";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
-import { applyWaitingPhoto, skipNoticeFor, skipNoticeText } from "../app/utils/waitingPhoto";
+import { skipNoticeFor, skipNoticeText } from "../app/utils/waitingPhoto";
 import { TEST_IDS } from "../app/utils/testIds";
 import en from "../app/i18n/en";
 import es from "../app/i18n/es";
@@ -85,21 +85,6 @@ const textOf = (root: ReactTestInstance, id: string) => root.find((n) => n.props
 // ── Pure helpers ─────────────────────────────────────────
 
 describe("waiting-photo helpers", () => {
-  it("applyWaitingPhoto leaves the previous round and paints the server's wait", () => {
-    const s = {
-      setPhoto: jest.fn(), setIsOwner: jest.fn(), setRound: jest.fn(), setPhase: jest.fn(), setPhaseDuration: jest.fn(),
-      setPhaseKey: jest.fn(), setCorrectAnswer: jest.fn(), setScores: jest.fn(), setMySelection: jest.fn(),
-      setGameHeld: jest.fn(), setPressing: jest.fn(),
-    };
-    applyWaitingPhoto({ round: 4, duration: 15_000 }, s);
-    expect(s.setPhoto).toHaveBeenCalledWith(null);
-    expect(s.setPhase).toHaveBeenCalledWith("waiting-photo");
-    expect(s.setRound).toHaveBeenCalledWith(4);
-    expect(s.setPhaseDuration).toHaveBeenCalledWith(15_000);
-    expect(s.setScores).toHaveBeenCalledWith(null);
-    expect(s.setMySelection).toHaveBeenCalledWith("");
-  });
-
   it("the owner who reported photo-unavailable gets their own reason; everyone else the room's", () => {
     expect(skipNoticeFor({ round: 2, reason: "timeout" }, null)).toBe("timeout");
     expect(skipNoticeFor({ round: 2, reason: "unavailable" }, null)).toBe("unavailable");
@@ -309,5 +294,17 @@ describe("GameScreen while a photo is awaited", () => {
     act(() => mockSocket.fire("game-paused", { duration: 300_000, waitingFor: ["carol"], pause: 1, maxPauses: 3 }));
     act(() => mockSocket.fire("game-resumed", { phase: "waiting-photo", duration: 1_500 }));
     expect(has(r.root, TEST_IDS.gameWaitingPhoto)).toBe(true);
+  });
+
+  // Back-to-back events in one render batch build on each other: the resume sees the scores phase just set
+  it("round-scores and a waiting-photo resume in the same tick show the wait for the next round", () => {
+    act(() => mockSocket.fire("round-start", { photo: "/temp/x.jpg", round: 3, duration: 8_000, isOwner: false }));
+    act(() => {
+      mockSocket.fire("round-scores", { scores: [], round: 3, totalRounds: 10, duration: 5_000 });
+      mockSocket.fire("game-resumed", { phase: "waiting-photo", duration: 1_500 });
+    });
+    expect(has(r.root, TEST_IDS.gameWaitingPhoto)).toBe(true);
+    expect(r.root.findByProps({ children: en.roundOf.replace("{round}", "4").replace("{total}", "10") })).toBeTruthy();
+    expect(r.root.find((n) => n.props.testID === "progress-bar").props.duration).toBe(1_500);
   });
 });

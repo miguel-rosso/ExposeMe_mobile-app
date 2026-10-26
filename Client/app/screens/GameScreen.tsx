@@ -4,8 +4,8 @@ import { useFocusEffect } from "expo-router";
 import tw from "twrnc";
 import { useGameContext } from "../providers/GameContext";
 import {
-  GamePausedData, GameResumedData, GameStateSnapshot, PhotoUnavailableReason, Player, RoundSkippedData, ScoreRound,
-  WaitingPhotoData, YourTurnData,
+  GamePausedData, GameResumedData, GameStateSnapshot, HoldResumeData, PhotoUnavailableReason, Player, RoundRevealData,
+  RoundScoresData, RoundSkippedData, RoundStartData, ScoreRound, WaitingPhotoData, YourTurnData,
 } from "../models/interfaces";
 import { usePhotoContext } from "../providers/PhotoContext";
 import { useRouter } from "expo-router";
@@ -20,11 +20,11 @@ import { getWinners } from "@/app/utils/ranking";
 import EmojiReactionLane, { EmojiReactionData } from "@/app/components/IngameComunication/EmojiReactionLane";
 import EmojisButton from "@/app/components/IngameComunication/EmojisButtons";
 import { useI18n } from "../i18n";
-import { applyRoundStart, RoundStartData } from "../utils/roundStart";
 import { uploadPhoto } from "@/app/utils/uploadPhoto";
 import { photoAuthHeaders, resolvePhotoAuth } from "@/app/utils/photoAuth";
-import { applyGameState, turnUploadAction, TurnUpload } from "../utils/gameState";
-import { applyWaitingPhoto, SkipNotice, skipNoticeFor, skipNoticeText } from "../utils/waitingPhoto";
+import { turnUploadAction, TurnUpload } from "../utils/gameState";
+import { SkipNotice, skipNoticeFor, skipNoticeText } from "../utils/waitingPhoto";
+import { gameStateFollowUps, initialRoundView, RoundAction, roundReducer, RoundView } from "../utils/roundState";
 import { useGameConnection } from "../hooks/useGameConnection";
 import { withHost, withoutPlayer } from "../utils/roomPlayers";
 import PausedModal from "@/app/components/modals/PausedModal";
@@ -46,8 +46,6 @@ const GAME_EVENTS = [
   "round-skipped", "game-paused", "game-resumed", "game-state", "emoji-reaction",
 ];
 
-type Phase = "waiting-photo" | "answering" | "reveal" | "scores" | null;
-
 const GameScreen = () => {
   const { t } = useI18n();
   const {
@@ -67,17 +65,17 @@ const GameScreen = () => {
   useScreenshotReaction(socket);
 
   // ── Round state (reset each round) ───────────────────
-  const [photo, setPhoto] = useState<string | null>(null);
-  const [isOwner, setIsOwner] = useState(false); // this round's photo is mine (only the owner is told, EXP-128)
-  const [round, setRound] = useState(0);
-  const [phase, setPhase] = useState<Phase>(null);
-  const [phaseDuration, setPhaseDuration] = useState(0);
-  const [phaseKey, setPhaseKey] = useState(0);
-  const [correctAnswer, setCorrectAnswer] = useState("");
-  const [scores, setScores] = useState<ScoreRound[] | null>(null);
-  const [mySelection, _setMySelection] = useState("");
-  const mySelectionRef = useRef("");
-  const setMySelection = (val: string) => { mySelectionRef.current = val; _setMySelection(val); };
+  // roundRef always holds the latest state, updated on dispatch: socket listeners and timers read it (their closures
+  // would see stale state), and back-to-back events build on each other. The screen renders roundView.
+  const roundRef = useRef<RoundView>(initialRoundView);
+  const [roundView, setRoundView] = useState<RoundView>(initialRoundView);
+  const dispatchRound = (action: RoundAction) => {
+    roundRef.current = roundReducer(roundRef.current, action);
+    setRoundView(roundRef.current);
+  };
+  const {
+    photo, isOwner, round, phase, phaseDuration, phaseKey, correctAnswer, scores, mySelection, gameHeld, pressing,
+  } = roundView;
   // My pick goes to the server as soon as it changes: answers are only taken while answering (EXP-148), the last counts.
   // Rapid taps are coalesced: at most one send per PICK_SEND_INTERVAL, then a trailing send of the latest pick (within
   // the server's 300 ms grace), so its per-socket rate limit never drops the pick that counts.
@@ -89,10 +87,10 @@ const GameScreen = () => {
     pickTimer.current = null;
     lastPickSentAt.current = Date.now();
     pickSentRef.current = !!socket?.connected;
-    socket?.emit("submit-answer", { guess: mySelectionRef.current });
+    socket?.emit("submit-answer", { guess: roundRef.current.mySelection });
   };
   const pickGuess = (val: string) => {
-    setMySelection(val);
+    dispatchRound({ type: "pick", guess: val });
     pickSentRef.current = false;
     if (pickTimer.current) return; // the pending trailing send takes the latest pick
     const wait = lastPickSentAt.current + PICK_SEND_INTERVAL - Date.now();
@@ -108,9 +106,6 @@ const GameScreen = () => {
   // The answer bar (server duration) has run out: no more picks this phase (phaseKey changes with every phase/resume)
   const [answersClosedKey, setAnswersClosedKey] = useState(-1);
   const answersClosed = phase === "answering" && answersClosedKey === phaseKey;
-  // Current round/photo for the game-state handler (socket listeners would see stale state)
-  const roundRef = useRef<{ round: number; photo: string | null; phase: Phase }>({ round: 0, photo: null, phase: null });
-  roundRef.current = { round, photo, phase };
   // Latest players list for the room-membership handlers; updated on write too, so back-to-back events
   // (new-host + player-left arrive together) build on each other
   const playersRef = useRef<Player[]>(playersProvider);
@@ -134,10 +129,6 @@ const GameScreen = () => {
     setPauseEndsAt(p === null ? null : Date.now() + p.duration);
     if (p) setPauseCount({ pause: p.pause, maxPauses: p.maxPauses });
   };
-
-  // ── Hold state ───────────────────────────────────────
-  const [gameHeld, setGameHeld] = useState(false);  // server says game paused
-  const [pressing, setPressing] = useState(false);   // my finger is on button
 
   // ── End game ─────────────────────────────────────────
   const [finalScore, setFinalScore] = useState<ScoreRound[] | null>(null);
@@ -176,13 +167,13 @@ const GameScreen = () => {
   const onHoldPress = () => {
     if (!isOwner || !socket || pressing) return;
     if (phase !== "scores") return;
-    setPressing(true);
+    dispatchRound({ type: "pressing", pressing: true });
     socket.emit("hold-start");
   };
 
   const onHoldRelease = () => {
     if (!pressing || !socket) return;
-    setPressing(false);
+    dispatchRound({ type: "pressing", pressing: false });
     socket.emit("hold-end");
   };
 
@@ -246,16 +237,13 @@ const GameScreen = () => {
       currentTurnRef.current = null; // any earlier request of mine is over
       setTurnUploading(false);
       ownUnavailableRef.current = null; // a report of mine was answered by the round-skipped before this
-      applyWaitingPhoto(data, {
-        setPhoto, setIsOwner, setRound, setPhase, setPhaseDuration, setPhaseKey,
-        setCorrectAnswer, setScores, setMySelection, setGameHeld, setPressing,
-      });
+      dispatchRound({ type: "waiting-photo", data });
     });
 
     // My turn: pick photo → upload → send (or report photo-unavailable)
     socket.on("your-turn", async (data: YourTurnData) => {
       currentTurnRef.current = data;
-      setRound(data.round);
+      dispatchRound({ type: "your-turn", round: data.round });
       setTurnUploading(true);
       ownUnavailableRef.current = null;
       const action = turnUploadAction(turnUploadRef.current, data.attempt);
@@ -293,51 +281,37 @@ const GameScreen = () => {
       currentTurnRef.current = null;
       setTurnUploading(false);
       setSkipNotice(null);
-      applyRoundStart(data, SERVER_URL, {
-        setPhoto, setIsOwner, setRound, setPhase, setPhaseDuration, setPhaseKey,
-        setCorrectAnswer, setScores, setMySelection, setGameHeld, setPressing,
-      });
+      dispatchRound({ type: "round-start", data, serverUrl: SERVER_URL });
     });
 
     // Atomic: answer revealed (my pick was already sent when tapped; the server froze answers before this)
-    socket.on("round-reveal", (data: { correctAnswer: string; duration: number }) => {
-      console.log(`[GAME] round-reveal: ${data.correctAnswer}, my guess: ${mySelectionRef.current}`);
-      setPhase("reveal");
-      setCorrectAnswer(data.correctAnswer);
-      setPhaseDuration(data.duration);
-      setPhaseKey((k) => k + 1);
+    socket.on("round-reveal", (data: RoundRevealData) => {
+      console.log(`[GAME] round-reveal: ${data.correctAnswer}, my guess: ${roundRef.current.mySelection}`);
+      dispatchRound({ type: "round-reveal", data });
     });
 
     // Atomic: scores displayed
-    socket.on("round-scores", (data: { scores: ScoreRound[]; round: number; totalRounds: number; duration: number }) => {
+    socket.on("round-scores", (data: RoundScoresData) => {
       console.log(`[GAME] round-scores: round ${data.round}/${data.totalRounds}`);
-      setPhase("scores");
-      setScores(data.scores);
-      setRound(data.round);
-      setPhaseDuration(data.duration);
-      setPhaseKey((k) => k + 1);
+      dispatchRound({ type: "round-scores", data });
     });
 
     // Hold: everyone pauses
     socket.on("hold-start", () => {
       console.log("[GAME] hold-start");
-      setGameHeld(true);
+      dispatchRound({ type: "hold-start" });
     });
 
     // Hold ended (from server force-release or another client)
     socket.on("hold-end", () => {
       console.log("[GAME] hold-end");
-      setGameHeld(false);
-      setPressing(false);
+      dispatchRound({ type: "hold-end" });
     });
 
     // Hold resume: phase continues with remaining time
-    socket.on("hold-resume", (data: { phase: string; duration: number }) => {
+    socket.on("hold-resume", (data: HoldResumeData) => {
       console.log(`[GAME] hold-resume: ${data.phase} ${data.duration}ms`);
-      setGameHeld(false);
-      setPressing(false);
-      setPhaseDuration(data.duration);
-      setPhaseKey((k) => k + 1);
+      dispatchRound({ type: "hold-resume", data });
     });
 
     // No photo for this round: say why on the waiting screen until the next round starts
@@ -353,8 +327,7 @@ const GameScreen = () => {
     socket.on("game-paused", (data: GamePausedData) => {
       console.log(`[GAME] game-paused ${data.pause}/${data.maxPauses}: ${data.duration}ms, waiting for ${data.waitingFor.join(", ")}`);
       setPause(data);
-      setPressing(false);
-      setGameHeld(false);
+      dispatchRound({ type: "game-paused" });
       // The server ignores photos while paused and sends your-turn again on resume (an upload that finishes
       // meanwhile is kept and re-sent then)
       currentTurnRef.current = null;
@@ -363,16 +336,7 @@ const GameScreen = () => {
     socket.on("game-resumed", (data: GameResumedData) => {
       console.log(`[GAME] game-resumed: ${data.phase} ${data.duration}ms`);
       setPauseEndsAt(null);
-      // Paused between rounds (after scores): the next round's photo is awaited now
-      if (data.phase === "waiting-photo" && roundRef.current.phase !== "waiting-photo") {
-        setPhoto(null);
-        setIsOwner(false);
-        setScores(null);
-        setPhase("waiting-photo");
-        setRound(roundRef.current.round + 1);
-      }
-      setPhaseDuration(data.duration);
-      setPhaseKey((k) => k + 1);
+      dispatchRound({ type: "game-resumed", data });
     });
 
     // Snapshot after a rejoin: render whatever phase the server is in
@@ -383,14 +347,13 @@ const GameScreen = () => {
       currentTurnRef.current = null;
       setTurnUploading(false);
       if (snap.phase !== "waiting-photo") setSkipNotice(null);
-      const result = applyGameState(snap, SERVER_URL, { ...roundRef.current, pickSent: pickSentRef.current }, {
-        setPhoto, setIsOwner, setRound, setPhase, setPhaseDuration, setPhaseKey,
-        setCorrectAnswer, setScores, setMySelection, setGameHeld, setPressing, setPause,
-      });
+      dispatchRound({ type: "game-state", snap, serverUrl: SERVER_URL, pickSent: pickSentRef.current });
+      const result = gameStateFollowUps(snap);
+      setPause(result.pause);
       if (result.gameOver) showGameOver(snap.scores);
       if (result.sendReady) socket.emit("im-ready");
-      if (result.resendGuess && mySelectionRef.current) {
-        socket.emit("submit-answer", { guess: mySelectionRef.current });
+      if (result.resendGuess && roundRef.current.mySelection) {
+        socket.emit("submit-answer", { guess: roundRef.current.mySelection });
         pickSentRef.current = true;
       }
     });
@@ -404,7 +367,7 @@ const GameScreen = () => {
     // Someone left or was kicked: no longer an answer option (a disconnected player stays, they may come back)
     const dropPlayer = (name: string) => {
       setPlayers(withoutPlayer(playersRef.current, name));
-      if (roundRef.current.phase === "answering" && mySelectionRef.current === name) pickGuess("");
+      if (roundRef.current.phase === "answering" && roundRef.current.mySelection === name) pickGuess("");
     };
     socket.on("player-left", (name: string) => { console.log(`[GAME] player-left: ${name}`); dropPlayer(name); });
     socket.on("player-removed", (removed: Player) => { console.log(`[GAME] player-removed: ${removed.username}`); dropPlayer(removed.username); });

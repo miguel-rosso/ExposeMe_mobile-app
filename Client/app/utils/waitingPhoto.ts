@@ -1,5 +1,4 @@
-import { PhotoUnavailableReason, RoundSkippedData, WaitingPhotoData } from "../models/interfaces";
-import { RoundStartSetters } from "./roundStart";
+import { PhotoUnavailableReason, RoundSkippedData } from "../models/interfaces";
 
 // ── Waiting for the chosen player's photo (see Server/GAME_FLOW.md "Waiting for the photo") ──
 
@@ -16,24 +15,6 @@ const SKIP_TEXT_KEYS = {
 } as const;
 
 type SkipTextKey = (typeof SKIP_TEXT_KEYS)[SkipNotice];
-
-/**
- * `waiting-photo` (and a `game-state` in that phase): leave the previous round's photo and scores and show the
- * waiting screen for round `round`, with the server's `duration` for the progress bar.
- */
-export const applyWaitingPhoto = (data: WaitingPhotoData, s: RoundStartSetters) => {
-  s.setPhoto(null);
-  s.setIsOwner(false);
-  s.setRound(data.round);
-  s.setPhase("waiting-photo");
-  s.setPhaseDuration(data.duration);
-  s.setPhaseKey((k) => k + 1);
-  s.setCorrectAnswer("");
-  s.setScores(null);
-  s.setMySelection("");
-  s.setGameHeld(false);
-  s.setPressing(false);
-};
 
 /** `round-skipped`: my own reason when I reported photo-unavailable for this round, otherwise the room's. */
 export const skipNoticeFor = (data: RoundSkippedData, ownReason: PhotoUnavailableReason | null): SkipNotice =>

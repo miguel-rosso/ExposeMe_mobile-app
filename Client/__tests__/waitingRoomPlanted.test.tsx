@@ -1,5 +1,6 @@
 import React from "react";
 import TestRenderer, { act } from "react-test-renderer";
+import { FakeSocket } from "../testUtils/fakeSocket";
 import { ActivityIndicator, Alert } from "react-native";
 import { TEST_IDS } from "../app/utils/testIds";
 import en from "../app/i18n/en";
@@ -11,36 +12,6 @@ import { PLANT_FAILED_NOTICE_MS } from "../app/components/PlantPhotoButton";
 // The lobby shows "planted" once the server has the photo picked for this game (plantedPhotoSent; the context drops it
 // after a game, EXP-269: not while it uploads or after its upload failed) or when the server says it has mine
 // (room-of-game `hasPlantedPhoto`, my own mark only). A rejoin into a started game leaves it alone.
-
-// ── Fake socket ──────────────────────────────────────────
-
-type Handler = (...args: any[]) => void;
-class FakeSocket {
-  connected = true;
-  handlers = new Map<string, Set<Handler>>();
-  emitted: [string, ...any[]][] = [];
-  on(ev: string, fn: Handler) {
-    if (!this.handlers.has(ev)) this.handlers.set(ev, new Set());
-    this.handlers.get(ev)!.add(fn);
-    return this;
-  }
-  off(ev: string, fn?: Handler) {
-    if (fn) this.handlers.get(ev)?.delete(fn);
-    else this.handlers.delete(ev);
-    return this;
-  }
-  removeAllListeners() {
-    this.handlers.clear();
-    return this;
-  }
-  emit(ev: string, ...args: any[]) {
-    this.emitted.push([ev, ...args]);
-    return this;
-  }
-  fire(ev: string, ...args: any[]) {
-    [...(this.handlers.get(ev) ?? [])].forEach((fn) => fn(...args));
-  }
-}
 
 const mockSocket = new FakeSocket();
 // Context planted photo: a plain holder, read on every render (the provider re-renders with the new value)

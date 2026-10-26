@@ -7,6 +7,11 @@ type Handler = (...args: any[]) => void;
  */
 export class FakeSocket {
   connected = true;
+  /** socket.io's `active`: set it to false to play a connection the server refused (no reconnection will follow). */
+  active = true;
+  /** Spies, so a test can assert the app (did not) open or drop the connection. */
+  connect = jest.fn(() => this);
+  disconnect = jest.fn(() => this);
   handlers = new Map<string, Set<Handler>>();
   emitted: [string, ...any[]][] = [];
 
@@ -39,10 +44,13 @@ export class FakeSocket {
   listenerCount(ev: string) {
     return this.handlers.get(ev)?.size ?? 0;
   }
-  /** Back to a fresh, connected socket with no listeners and nothing emitted. */
+  /** Back to a fresh, connected socket with no listeners, nothing emitted and clean connect/disconnect spies. */
   reset() {
     this.connected = true;
+    this.active = true;
     this.handlers.clear();
     this.emitted = [];
+    this.connect.mockClear();
+    this.disconnect.mockClear();
   }
 }

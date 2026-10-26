@@ -1,39 +1,10 @@
 import React from "react";
 import TestRenderer, { act } from "react-test-renderer";
+import { FakeSocket } from "../testUtils/fakeSocket";
 // Loaded with the file (jest.mock calls below are hoisted above it), not inside a test
 import WaitingRoom from "../app/screens/WaitingRoom";
 
 // EXP-044: the "You" tag next to your own name comes from i18n (es: "Tú"), not hard-coded English.
-
-// ── Fake socket ──────────────────────────────────────────
-
-type Handler = (...args: any[]) => void;
-class FakeSocket {
-  connected = true;
-  handlers = new Map<string, Set<Handler>>();
-  emitted: [string, ...any[]][] = [];
-  on(ev: string, fn: Handler) {
-    if (!this.handlers.has(ev)) this.handlers.set(ev, new Set());
-    this.handlers.get(ev)!.add(fn);
-    return this;
-  }
-  off(ev: string, fn?: Handler) {
-    if (fn) this.handlers.get(ev)?.delete(fn);
-    else this.handlers.delete(ev);
-    return this;
-  }
-  removeAllListeners() {
-    this.handlers.clear();
-    return this;
-  }
-  emit(ev: string, ...args: any[]) {
-    this.emitted.push([ev, ...args]);
-    return this;
-  }
-  fire(ev: string, ...args: any[]) {
-    [...(this.handlers.get(ev) ?? [])].forEach((fn) => fn(...args));
-  }
-}
 
 const mockSocket = new FakeSocket();
 // Captures the confirm dialog's props so the test can press "Remove"

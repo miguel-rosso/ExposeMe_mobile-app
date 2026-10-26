@@ -1,5 +1,6 @@
 import React from "react";
 import TestRenderer, { act } from "react-test-renderer";
+import { FakeSocket } from "../testUtils/fakeSocket";
 // Loaded with the file (jest.mock calls below are hoisted above it): a cold transform must not hit the test timeout
 import GameScreen from "../app/screens/GameScreen";
 
@@ -9,28 +10,6 @@ import GameScreen from "../app/screens/GameScreen";
 jest.mock("@react-native-async-storage/async-storage", () =>
   require("@react-native-async-storage/async-storage/jest/async-storage-mock")
 );
-
-type Handler = (...args: any[]) => void;
-class FakeSocket {
-  connected = true;
-  handlers = new Map<string, Set<Handler>>();
-  emitted: [string, ...any[]][] = [];
-  connect = jest.fn(() => this);
-  disconnect = jest.fn(() => this);
-  on(ev: string, fn: Handler) {
-    if (!this.handlers.has(ev)) this.handlers.set(ev, new Set());
-    this.handlers.get(ev)!.add(fn);
-    return this;
-  }
-  off(ev: string, fn?: Handler) {
-    if (fn) this.handlers.get(ev)?.delete(fn);
-    else this.handlers.delete(ev);
-    return this;
-  }
-  emit(ev: string, ...args: any[]) { this.emitted.push([ev, ...args]); return this; }
-  fire(ev: string, ...args: any[]) { [...(this.handlers.get(ev) ?? [])].forEach((fn) => fn(...args)); }
-  count(ev: string) { return this.handlers.get(ev)?.size ?? 0; }
-}
 
 const mockSocket = new FakeSocket();
 jest.mock("expo-router", () => ({ useRouter: () => ({ replace: jest.fn() }), useFocusEffect: () => {} }));
@@ -88,7 +67,7 @@ const mount = async () => {
   return r;
 };
 // Listeners of the game screen itself (all of them minus the foreign one, if any)
-const ownCount = (ev: string) => mockSocket.count(ev) - (foreign[ev] ? 1 : 0);
+const ownCount = (ev: string) => mockSocket.listenerCount(ev) - (foreign[ev] ? 1 : 0);
 const expectOwnCounts = (events: string[], n: number) => {
   for (const ev of events) expect([ev, ownCount(ev)]).toEqual([ev, n]);
 };

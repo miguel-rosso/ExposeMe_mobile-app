@@ -1,5 +1,6 @@
 import React from "react";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
+import { FakeSocket } from "../testUtils/fakeSocket";
 import { skipNoticeFor, skipNoticeText } from "../app/utils/waitingPhoto";
 import { TEST_IDS } from "../app/utils/testIds";
 import { TURN_UPLOAD_RETRY } from "../app/utils/uploadRetry";
@@ -14,32 +15,6 @@ import GameScreen from "../app/screens/GameScreen";
 jest.mock("@react-native-async-storage/async-storage", () =>
   require("@react-native-async-storage/async-storage/jest/async-storage-mock")
 );
-
-type Handler = (...args: any[]) => void;
-class FakeSocket {
-  connected = true;
-  handlers = new Map<string, Set<Handler>>();
-  emitted: [string, ...any[]][] = [];
-  connect = jest.fn(() => this);
-  disconnect = jest.fn(() => this);
-  on(ev: string, fn: Handler) {
-    if (!this.handlers.has(ev)) this.handlers.set(ev, new Set());
-    this.handlers.get(ev)!.add(fn);
-    return this;
-  }
-  off(ev: string, fn?: Handler) {
-    if (fn) this.handlers.get(ev)?.delete(fn);
-    else this.handlers.delete(ev);
-    return this;
-  }
-  emit(ev: string, ...args: any[]) {
-    this.emitted.push([ev, ...args]);
-    return this;
-  }
-  fire(ev: string, ...args: any[]) {
-    [...(this.handlers.get(ev) ?? [])].forEach((fn) => fn(...args));
-  }
-}
 
 const mockReplace = jest.fn();
 const mockSocket = new FakeSocket();

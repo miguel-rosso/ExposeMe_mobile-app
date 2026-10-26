@@ -1,5 +1,6 @@
 import React from "react";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
+import { FakeSocket } from "../testUtils/fakeSocket";
 import { StyleSheet } from "react-native";
 import { formatCountdown, turnUploadAction } from "../app/utils/gameState";
 import { useGameConnection } from "../app/hooks/useGameConnection";
@@ -16,38 +17,6 @@ import { ANSWER_STATE_BORDER } from "../app/components/AnswerOption";
 jest.mock("@react-native-async-storage/async-storage", () =>
   require("@react-native-async-storage/async-storage/jest/async-storage-mock")
 );
-
-// ── Fake socket ──────────────────────────────────────────
-
-type Handler = (...args: any[]) => void;
-class FakeSocket {
-  connected = true;
-  handlers = new Map<string, Set<Handler>>();
-  emitted: [string, ...any[]][] = [];
-  connect = jest.fn(() => this);
-  disconnect = jest.fn(() => this);
-  removeAllListeners = jest.fn(() => this);
-  on(ev: string, fn: Handler) {
-    if (!this.handlers.has(ev)) this.handlers.set(ev, new Set());
-    this.handlers.get(ev)!.add(fn);
-    return this;
-  }
-  off(ev: string, fn?: Handler) {
-    if (fn) this.handlers.get(ev)?.delete(fn);
-    else this.handlers.delete(ev);
-    return this;
-  }
-  emit(ev: string, ...args: any[]) {
-    this.emitted.push([ev, ...args]);
-    return this;
-  }
-  fire(ev: string, ...args: any[]) {
-    [...(this.handlers.get(ev) ?? [])].forEach((fn) => fn(...args));
-  }
-  listeners(ev: string) {
-    return this.handlers.get(ev)?.size ?? 0;
-  }
-}
 
 beforeAll(() => { jest.spyOn(console, "log").mockImplementation(() => {}); });
 afterAll(() => { jest.restoreAllMocks(); });
@@ -144,9 +113,9 @@ describe("useGameConnection", () => {
     const other = jest.fn();
     t.socket.on("connect", other);
     act(() => t.r.unmount());
-    expect(t.socket.listeners("disconnect")).toBe(0);
-    expect(t.socket.listeners("room-of-game")).toBe(0);
-    expect(t.socket.listeners("connect")).toBe(1);
+    expect(t.socket.listenerCount("disconnect")).toBe(0);
+    expect(t.socket.listenerCount("room-of-game")).toBe(0);
+    expect(t.socket.listenerCount("connect")).toBe(1);
   });
 });
 

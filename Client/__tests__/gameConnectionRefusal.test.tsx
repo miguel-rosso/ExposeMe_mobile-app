@@ -1,35 +1,10 @@
 import React from "react";
 import TestRenderer, { act } from "react-test-renderer";
+import { FakeSocket } from "../testUtils/fakeSocket";
 import { useGameConnection } from "../app/hooks/useGameConnection";
 
 // EXP-180: in game, a connection the server refuses (e.g. "Too many connections") is final for socket.io, so the
 // game screen leaves with the server's reason (translated on the home screen) instead of "Reconnecting…" forever.
-
-type Handler = (...args: any[]) => void;
-class FakeSocket {
-  connected = true;
-  /** socket.io's `active`: false once the server refused the connection and no reconnection will follow */
-  active = true;
-  handlers = new Map<string, Set<Handler>>();
-  on(ev: string, fn: Handler) {
-    if (!this.handlers.has(ev)) this.handlers.set(ev, new Set());
-    this.handlers.get(ev)!.add(fn);
-    return this;
-  }
-  off(ev: string, fn: Handler) {
-    this.handlers.get(ev)?.delete(fn);
-    return this;
-  }
-  emit() {
-    return this;
-  }
-  fire(ev: string, ...args: any[]) {
-    [...(this.handlers.get(ev) ?? [])].forEach((fn) => fn(...args));
-  }
-  listeners(ev: string) {
-    return this.handlers.get(ev)?.size ?? 0;
-  }
-}
 
 const setup = () => {
   const socket = new FakeSocket();
@@ -62,10 +37,11 @@ describe("useGameConnection: connection refused by the server (EXP-180)", () => 
     act(() => t.r.unmount());
   });
 
-  it("removes its connect_error listener on unmount", () => {
+  it("removes only its own connect_error listener on unmount", () => {
     const t = setup();
-    expect(t.socket.listeners("connect_error")).toBe(1);
+    t.socket.on("connect_error", jest.fn());
+    expect(t.socket.listenerCount("connect_error")).toBe(2);
     act(() => t.r.unmount());
-    expect(t.socket.listeners("connect_error")).toBe(0);
+    expect(t.socket.listenerCount("connect_error")).toBe(1);
   });
 });

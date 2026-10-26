@@ -1,28 +1,11 @@
 import { attachHandlers } from "../app/utils/socketHandlers";
+import { FakeSocket } from "../testUtils/fakeSocket";
 
 // EXP-248: a screen removes only the listeners it attached; others on the shared socket stay
 
-type Handler = (...args: any[]) => void;
-const makeSocket = () => {
-  const handlers = new Map<string, Set<Handler>>();
-  return {
-    handlers,
-    on(ev: string, fn: Handler) {
-      if (!handlers.has(ev)) handlers.set(ev, new Set());
-      handlers.get(ev)!.add(fn);
-      return this;
-    },
-    off(ev: string, fn?: Handler) {
-      if (fn) handlers.get(ev)?.delete(fn);
-      else handlers.delete(ev);
-      return this;
-    },
-  };
-};
-
 describe("attachHandlers", () => {
   it("attaches every handler of the table and detach removes only those", () => {
-    const socket = makeSocket();
+    const socket = new FakeSocket();
     const foreign = jest.fn();
     socket.on("game-state", foreign);
     const onState = jest.fn();
@@ -37,7 +20,7 @@ describe("attachHandlers", () => {
   });
 
   it("detaching twice is harmless (game over, then unmount)", () => {
-    const socket = makeSocket();
+    const socket = new FakeSocket();
     const detach = attachHandlers(socket, { "round-start": jest.fn() });
     const offSpy = jest.spyOn(socket, "off");
     detach();

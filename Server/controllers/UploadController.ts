@@ -7,11 +7,35 @@ import { ImageRejected, sanitizeImage } from "./sanitizeImage";
 import { UPLOAD_TTL_MS } from "../middlewares/uploadSweeper";
 import { Member, stillMember } from "../middlewares/uploadAccess";
 import { UploadRecord, uploadStore } from "../middlewares/uploadStore";
+import { clientIp } from "../middlewares/rateLimit";
+import { prefix48 } from "../managers/socketGuards";
 
 const refuseStale = (res: Response) => res.status(409).json({ error: "Upload no longer accepted" });
 
+const STORAGE_ERRORS = { storage: "Server busy", "lobby-ip": "Too many photos stored" } as const;
+
+/** Key of the per-IP lobby-photo limit: the client's IP key, an IPv6 /64 widened to its /48 (like the join-miss guard). */
+const lobbyLimitKey = (req: Request) => {
+  const ip = clientIp(req);
+  return prefix48(ip) ?? ip;
+};
+
+/**
+ * Answers the request if the server-wide storage limits refuse this upload (lobby photos only, see uploadStore);
+ * true when it did.
+ */
+function refusedByStorageLimits(req: Request, res: Response): boolean {
+  const refusal = uploadStore.storageRefusal(res.locals.uploadKind, lobbyLimitKey(req));
+  if (!refusal) return false;
+  res.setHeader("Retry-After", String(refusal.retryAfterS));
+  res.status(refusal.status).json({ error: STORAGE_ERRORS[refusal.scope], scope: refusal.scope });
+  return true;
+}
+
 export const UploadRouter = async (req: Request, res: Response) => {
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+  // Checked before processing (no work for an upload that can't be stored) and again right before storing it
+  if (refusedByStorageLimits(req, res)) return;
 
   // The client may go away (abort, upload timeout) while its image waits for processing: its in-flight slot is freed
   // then, so its job must leave the sanitize queue too (keeps queued buffers within the in-flight memory bound)
@@ -22,7 +46,8 @@ export const UploadRouter = async (req: Request, res: Response) => {
   if (req.socket.destroyed) gone.abort();
   let image: Awaited<ReturnType<typeof sanitizeImage>>;
   try {
-    image = await sanitizeImage(req.file.buffer, gone.signal);
+    // Queued per uploader IP (the in-flight caps' key): IPs take turns, so one IP's backlog can't hold up the others
+    image = await sanitizeImage(req.file.buffer, { signal: gone.signal, key: clientIp(req) });
   } catch (err) {
     if (err instanceof ImageRejected) {
       if (res.headersSent || gone.signal.aborted) return;
@@ -38,6 +63,7 @@ export const UploadRouter = async (req: Request, res: Response) => {
   if (res.headersSent || req.socket.destroyed) return;
   const member = res.locals.member as Member;
   if (!stillMember(member)) return refuseStale(res);
+  if (refusedByStorageLimits(req, res)) return;
 
   // Unguessable name; nothing from the client (originalname, MIME) ends up in the URL
   const filename = `${crypto.randomBytes(16).toString("hex")}.${image.ext}`;
@@ -48,6 +74,7 @@ export const UploadRouter = async (req: Request, res: Response) => {
     file: filePath,
     round: member.room.round,
     kind: res.locals.uploadKind,
+    ip: lobbyLimitKey(req),
   };
   if (!uploadStore.register(filename, record, res.locals.uploadEpoch)) return refuseStale(res);
   try {

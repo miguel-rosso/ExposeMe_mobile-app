@@ -91,43 +91,87 @@ export function headerSize(buf: Buffer, format: ImageFormat): { width: number; h
 }
 
 // ── Concurrency limit ──
+/** How a job waits for a slot. */
+export interface JobOptions {
+  /** Aborts when the client is gone: a waiting job then leaves the queue without running. */
+  signal?: AbortSignal;
+  /** Who the job is for (the uploader's IP key): one key's jobs run in arrival order, keys take turns. */
+  key?: string;
+}
+
+const SHARED_KEY = "";
+
 /**
  * At most `maxConcurrent` jobs run at once; up to `maxQueued` wait (each for at most `queueTimeoutMs`);
  * anything else is refused with ImageRejected 503. A waiting job whose `signal` aborts (client gone) leaves the queue
  * and is rejected without running.
+ * Fairness: a freed slot goes to the keys with waiting jobs in turn (round-robin, oldest job of each key first), so
+ * one IP flooding the queue delays another IP's upload by at most one job per busy key, not by its whole backlog.
  */
 export function createLimiter({ maxConcurrent, maxQueued, queueTimeoutMs }: { maxConcurrent: number; maxQueued: number; queueTimeoutMs: number }) {
   let running = 0;
-  const waiting: Array<() => void> = [];
+  let queued = 0;
+  // Waiting jobs per key; Map order is the turn order (a key that just got a slot moves to the back)
+  const waiting = new Map<string, Array<() => void>>();
   const busy = () => new ImageRejected("Server busy, try again", 503, SANITIZE_RETRY_AFTER_S);
 
+  const enqueue = (key: string, start: () => void) => {
+    const jobs = waiting.get(key);
+    if (jobs) jobs.push(start);
+    else waiting.set(key, [start]);
+    queued++;
+  };
+
+  /** Removes a waiting job (no-op if it already left the queue). */
+  const dequeue = (key: string, start: () => void) => {
+    const jobs = waiting.get(key);
+    const i = jobs?.indexOf(start) ?? -1;
+    if (!jobs || i === -1) return;
+    jobs.splice(i, 1);
+    if (!jobs.length) waiting.delete(key);
+    queued--;
+  };
+
+  /** Oldest waiting job of the key whose turn it is; the key goes to the back of the turn order. */
+  const nextInTurn = (): (() => void) | undefined => {
+    const turn = waiting.entries().next();
+    if (turn.done) return undefined;
+    const [key, jobs] = turn.value;
+    const start = jobs[0];
+    dequeue(key, start);
+    if (jobs.length) {
+      waiting.delete(key);
+      waiting.set(key, jobs);
+    }
+    return start;
+  };
+
   const release = () => {
-    const start = waiting.shift();
+    const start = nextInTurn();
     if (start) start(); // the slot passes straight to the next job
     else running--;
   };
 
   const aborted = () => new ImageRejected("Upload aborted", 499);
 
-  async function run<T>(job: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+  async function run<T>(job: () => Promise<T>, { signal, key = SHARED_KEY }: JobOptions = {}): Promise<T> {
     if (signal?.aborted) throw aborted();
     if (running < maxConcurrent) {
       running++;
     } else {
-      if (waiting.length >= maxQueued) throw busy();
+      if (queued >= maxQueued) throw busy();
       await new Promise<void>((resolve, reject) => {
         const leave = (err: ImageRejected) => {
           clearTimeout(timer);
           signal?.removeEventListener("abort", onAbort);
-          const i = waiting.indexOf(start);
-          if (i !== -1) waiting.splice(i, 1);
+          dequeue(key, start);
           reject(err);
         };
         const onAbort = () => leave(aborted());
         const start = () => { clearTimeout(timer); signal?.removeEventListener("abort", onAbort); resolve(); };
         const timer = setTimeout(() => leave(busy()), queueTimeoutMs);
         signal?.addEventListener("abort", onAbort, { once: true });
-        waiting.push(start);
+        enqueue(key, start);
       });
     }
     try {
@@ -137,7 +181,7 @@ export function createLimiter({ maxConcurrent, maxQueued, queueTimeoutMs }: { ma
     }
   }
   /** Jobs running and waiting (for tests). */
-  run.stats = () => ({ running, queued: waiting.length });
+  run.stats = () => ({ running, queued });
   return run;
 }
 
@@ -176,13 +220,13 @@ async function reencode(input: Buffer, format: ImageFormat): Promise<{ data: Buf
  * Turn an uploaded image into a resized copy without metadata (EXIF incl. GPS, XMP, IPTC, ICC — sharp keeps
  * none by default), orientation applied to the pixels. The declared MIME type and file name are not trusted:
  * the format comes from the magic bytes, and only JPEG, PNG and WebP are accepted (415 otherwise, e.g. HEIC —
- * the app converts photos to JPEG before uploading).
+ * the app converts photos to JPEG before uploading). `options` go to the processing queue (see createLimiter).
  */
-export async function sanitizeImage(input: Buffer, signal?: AbortSignal): Promise<{ data: Buffer; ext: SanitizedExt }> {
+export async function sanitizeImage(input: Buffer, options?: JobOptions): Promise<{ data: Buffer; ext: SanitizedExt }> {
   const format = sniffFormat(input);
   if (!format) throw new ImageRejected("Unsupported image format (use JPEG, PNG or WebP)", 415);
   const size = headerSize(input, format);
   if (!size || !size.width || !size.height) throw new ImageRejected("Invalid image");
   if (size.width * size.height > MAX_INPUT_PIXELS) throw new ImageRejected("Image too large", 413);
-  return limit(() => reencode(input, format), signal);
+  return limit(() => reencode(input, format), options);
 }

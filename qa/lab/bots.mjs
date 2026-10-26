@@ -396,12 +396,14 @@ async function uploadPhoto(label, auth) {
   form.append("image", blob, `${label}.jpg`);
   const res = await fetch(`${SERVER}/upload`, { method: "POST", body: form, headers: auth });
   if (res.status === 429 || res.status === 503) {
-    // Server limit, not a game bug: name the knob from the body's `scope` (in-flight caps) or the error
+    // Server limit, not a game bug: name the knob from the body's `scope` (in-flight caps, storage limits) or the error
     const body = await res.json().catch(() => ({}));
     const knob = {
       member: "UPLOAD_INFLIGHT_PER_MEMBER_MAX", room: "UPLOAD_INFLIGHT_PER_ROOM_MAX", ip: "UPLOAD_INFLIGHT_PER_IP_MAX", server: "UPLOAD_INFLIGHT_MAX",
     }[body.scope];
+    const storageKnob = { storage: "UPLOAD_STORED_MAX", "lobby-ip": "UPLOAD_LOBBY_PER_IP_MAX" }[body.scope];
     const hint = knob ? `too many uploads in progress, raise ${knob}`
+      : storageKnob ? `too many photos stored, raise ${storageKnob}`
       : res.status === 503 ? "image processing took longer than SANITIZE_QUEUE_TIMEOUT_MS (controllers/sanitizeImage.ts)"
       : "rate-limited, raise UPLOAD_PLAYER_RATE_MAX / UPLOAD_ROOM_RATE_MAX (or the room holds 100 photos)";
     throw Object.assign(new Error(`upload ${res.status} ${hint} on the server`), { rateLimited: true });

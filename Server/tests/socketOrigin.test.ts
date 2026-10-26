@@ -1,8 +1,18 @@
+import type { IncomingMessage, ServerResponse } from "http";
 import { AddressInfo } from "net";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { io as connect, Socket as ClientSocket } from "socket.io-client";
 import { io, server } from "../app";
-import { isAllowedSocketOrigin, isJsonpRequest } from "../middlewares/socketOrigin";
+import {
+  createHandshakeLimit,
+  createSocketOriginGuard,
+  isAllowedHost,
+  isAllowedSocketOrigin,
+  isHandshakeRequest,
+  isJsonpRequest,
+  parseAllowedHosts,
+  SOCKET_HANDSHAKE_RATE_MAX,
+} from "../middlewares/socketOrigin";
 
 // Socket requests (EXP-244): CORS doesn't cover WebSockets or JSONP, so the server itself refuses socket.io
 // requests (handshakes and requests of an open session) whose Origin is another website, and JSONP polling.
@@ -34,6 +44,114 @@ describe("isAllowedSocketOrigin", () => {
     ["https://exposeme.onrender.com", undefined, "no Host header"],
   ])("refuses %s for Host %s (%s)", (origin, host) => {
     expect(isAllowedSocketOrigin(origin, host)).toBe(false);
+  });
+});
+
+// ── Host allowlist (EXP-251) ──
+describe("parseAllowedHosts", () => {
+  it("is null (any Host) when ALLOWED_HOSTS is unset, empty or names no valid host", () => {
+    expect(parseAllowedHosts(undefined)).toBeNull();
+    expect(parseAllowedHosts("")).toBeNull();
+    expect(parseAllowedHosts(" , ")).toBeNull();
+    expect(parseAllowedHosts("http://[bad")).toBeNull();
+  });
+
+  it("keeps lowercase hostnames, ignoring ports, spaces and malformed entries", () => {
+    expect(parseAllowedHosts(" ExposeMe.OnRender.com , play.example:8443,[::1]:3000, http://[bad ")).toEqual(
+      new Set(["exposeme.onrender.com", "play.example", "[::1]"])
+    );
+  });
+});
+
+describe("isAllowedHost", () => {
+  const allowlist = parseAllowedHosts("exposeme.onrender.com,192.0.2.20");
+
+  it("accepts any Host without an allowlist (default: behaviour unchanged)", () => {
+    expect(isAllowedHost("evil.example", null)).toBe(true);
+    expect(isAllowedHost(undefined, null)).toBe(true);
+  });
+
+  it.each([["exposeme.onrender.com"], ["EXPOSEME.onrender.com:443"], ["192.0.2.20:3000"]])("accepts allowlisted Host %s", (host) => {
+    expect(isAllowedHost(host, allowlist)).toBe(true);
+  });
+
+  it.each([["evil.example"], ["exposeme.onrender.com.evil.example"], ["192.0.2.21:3000"], [""], [undefined]])(
+    "refuses Host %s outside the allowlist",
+    (host) => {
+      expect(isAllowedHost(host, allowlist)).toBe(false);
+    }
+  );
+});
+
+describe("createSocketOriginGuard with ALLOWED_HOSTS", () => {
+  const guard = createSocketOriginGuard(parseAllowedHosts("exposeme.onrender.com"));
+  /** Error message the guard passes to next(), or "ok". */
+  const verdict = (headers: Record<string, string>, url = "/socket.io/?EIO=4&transport=polling") => {
+    let result = "pending";
+    const req = { url, headers } as unknown as IncomingMessage;
+    guard(req, {} as ServerResponse, (err?: Error) => { result = err ? err.message : "ok"; });
+    return result;
+  };
+
+  it("DNS rebinding: another name for the server's IP with a matching Origin → refused", () => {
+    expect(verdict({ host: "rebind.evil.example", origin: "http://rebind.evil.example" })).toBe("Host not allowed");
+  });
+
+  it("allowlisted Host: no Origin and same-host Origin → accepted; another Origin → refused", () => {
+    expect(verdict({ host: "exposeme.onrender.com" })).toBe("ok");
+    expect(verdict({ host: "exposeme.onrender.com", origin: "https://exposeme.onrender.com" })).toBe("ok");
+    expect(verdict({ host: "exposeme.onrender.com", origin: "https://evil.example" })).toBe("Origin not allowed");
+  });
+
+  it("no Origin on a Host outside the allowlist (bot or app aimed at another name) → refused", () => {
+    expect(verdict({ host: "203.0.113.9" })).toBe("Host not allowed");
+  });
+});
+
+// ── New sessions per IP (EXP-251) ──
+describe("isHandshakeRequest", () => {
+  it.each<[url: string, handshake: boolean]>([
+    ["/socket.io/?EIO=4&transport=polling", true],
+    ["/socket.io/?EIO=4&transport=websocket", true],
+    ["/socket.io/?EIO=4&transport=polling&sid=abc", false],
+    ["/socket.io/?EIO=4&transport=websocket&sid=abc", false],
+    // engine.io: last sid wins, and an empty sid opens a new session
+    ["/socket.io/?EIO=4&transport=polling&sid=", true],
+    ["/socket.io/?EIO=4&transport=polling&sid", true],
+    ["/socket.io/?EIO=4&transport=polling&sid=abc&sid=", true],
+    ["/socket.io/?EIO=4&transport=polling&sid=&sid=abc", false],
+  ])("%s → %s", (url, handshake) => {
+    expect(isHandshakeRequest(url)).toBe(handshake);
+  });
+});
+
+describe("createHandshakeLimit", () => {
+  const request = (ip: string, url = "/socket.io/?EIO=4&transport=polling") =>
+    ({ url, headers: {}, socket: { remoteAddress: ip } }) as unknown as IncomingMessage;
+  const verdict = (limit: ReturnType<typeof createHandshakeLimit>, req: IncomingMessage) => {
+    let result = "pending";
+    limit(req, {} as ServerResponse, (err?: Error) => { result = err ? err.message : "ok"; });
+    return result;
+  };
+
+  it("allows `max` new sessions per IP in the window, then refuses; other IPs and open sessions are unaffected", () => {
+    vi.useFakeTimers();
+    try {
+      const limit = createHandshakeLimit({ max: 2, windowMs: 60_000 });
+      expect(verdict(limit, request("198.51.100.1"))).toBe("ok");
+      expect(verdict(limit, request("::ffff:198.51.100.1"))).toBe("ok"); // same IP key
+      expect(verdict(limit, request("198.51.100.1"))).toBe("Too many handshakes");
+      expect(verdict(limit, request("198.51.100.1", "/socket.io/?EIO=4&transport=polling&sid=abc"))).toBe("ok");
+      expect(verdict(limit, request("198.51.100.2"))).toBe("ok");
+      vi.advanceTimersByTime(60_000);
+      expect(verdict(limit, request("198.51.100.1"))).toBe("ok");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("the server's limit has a generous default (a party on one IP reconnecting many times)", () => {
+    expect(SOCKET_HANDSHAKE_RATE_MAX).toBeGreaterThanOrEqual(100);
   });
 });
 

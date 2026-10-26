@@ -122,7 +122,7 @@ describe("createLimiter", () => {
     const a = run(() => new Promise<string>((r) => { finishA = r; })); // holds the only slot until resolved
     const gone = new AbortController();
     let ranB = false;
-    const b = run(async () => { ranB = true; return "b"; }, gone.signal);
+    const b = run(async () => { ranB = true; return "b"; }, { signal: gone.signal });
     expect(run.stats()).toEqual({ running: 1, queued: 1 });
     gone.abort();
     await expect(b).rejects.toBeInstanceOf(ImageRejected);
@@ -139,9 +139,73 @@ describe("createLimiter", () => {
     const run = createLimiter({ maxConcurrent: 1, maxQueued: 0, queueTimeoutMs: 50 });
     const gone = new AbortController();
     gone.abort();
-    await expect(run(async () => "x", gone.signal)).rejects.toBeInstanceOf(ImageRejected);
+    await expect(run(async () => "x", { signal: gone.signal })).rejects.toBeInstanceOf(ImageRejected);
     expect(run.stats()).toEqual({ running: 0, queued: 0 });
     await expect(run(async () => "ok")).resolves.toBe("ok");
+  });
+
+  // EXP-195: one IP's backlog must not delay another IP's upload by more than one job per busy IP
+  describe("fair turns between keys (EXP-195)", () => {
+    /** Holds the only slot until the returned release() is called. */
+    function holdSlot(run: ReturnType<typeof createLimiter>) {
+      let release!: () => void;
+      const held = run(() => new Promise<void>((r) => { release = r; }));
+      return { release: () => { release(); return held; } };
+    }
+
+    it("serves waiting keys round-robin, each key's jobs in arrival order", async () => {
+      const run = createLimiter({ maxConcurrent: 1, maxQueued: 32, queueTimeoutMs: 5_000 });
+      const order: string[] = [];
+      const job = (name: string) => async () => { order.push(name); };
+      const slot = holdSlot(run);
+      const jobs = [
+        ...["a1", "a2", "a3", "a4"].map((n) => run(job(n), { key: "ip-a" })),
+        ...["b1", "b2"].map((n) => run(job(n), { key: "ip-b" })),
+        run(job("c1"), { key: "ip-c" }),
+      ];
+      await slot.release();
+      await Promise.all(jobs);
+      expect(order).toEqual(["a1", "b1", "c1", "a2", "b2", "a3", "a4"]);
+    });
+
+    it("3 IPs flooding the queue: a 4th IP's job runs after at most one job of each of them", async () => {
+      const run = createLimiter({ maxConcurrent: 1, maxQueued: 40, queueTimeoutMs: 5_000 });
+      const order: string[] = [];
+      const slot = holdSlot(run);
+      const flood = ["x", "y", "z"].flatMap((ip) =>
+        Array.from({ length: 12 }, () => run(async () => { order.push(ip); }, { key: ip }))
+      );
+      const other = run(async () => { order.push("other-room"); }, { key: "w" });
+      await slot.release();
+      await Promise.all([...flood, other]);
+      expect(order.indexOf("other-room")).toBe(3);
+    });
+
+    it("a job that leaves the queue doesn't disturb the turns of the others", async () => {
+      const run = createLimiter({ maxConcurrent: 1, maxQueued: 8, queueTimeoutMs: 5_000 });
+      const order: string[] = [];
+      const job = (name: string) => async () => { order.push(name); };
+      const slot = holdSlot(run);
+      const gone = new AbortController();
+      const a1 = run(job("a1"), { key: "a", signal: gone.signal });
+      const rest = [run(job("a2"), { key: "a" }), run(job("b1"), { key: "b" })];
+      gone.abort();
+      await expect(a1).rejects.toBeInstanceOf(ImageRejected);
+      expect(run.stats()).toEqual({ running: 1, queued: 2 });
+      await slot.release();
+      await Promise.all(rest);
+      expect(order).toEqual(["a2", "b1"]);
+      expect(run.stats()).toEqual({ running: 0, queued: 0 });
+    });
+
+    it("maxQueued counts the jobs of every key together", async () => {
+      const run = createLimiter({ maxConcurrent: 1, maxQueued: 2, queueTimeoutMs: 5_000 });
+      const slot = holdSlot(run);
+      const queued = [run(async () => "a", { key: "a" }), run(async () => "b", { key: "b" })];
+      await expect(run(async () => "c", { key: "c" })).rejects.toMatchObject({ status: 503 });
+      await slot.release();
+      expect(await Promise.all(queued)).toEqual(["a", "b"]);
+    });
   });
 
   it("releases the slot when a job throws", async () => {

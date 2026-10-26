@@ -1,5 +1,29 @@
 import fs from "fs";
+import { envInt } from "./rateLimit";
 import { UPLOAD_TTL_MS } from "./uploadSweeper";
+
+// ── Server-wide storage limits ──
+// The per-room cap (MAX_UPLOADS_PER_ROOM) doesn't bound the disk when many rooms fill up, so lobby photos (anything
+// but the awaited owner's turn photo: lobby picks and planted photos, which wait minutes for their round) are shed
+// first: none is stored while the server holds UPLOAD_STORED_MAX photos, nor past UPLOAD_LOBBY_PER_IP_MAX of them
+// per uploader IP (IPv6 per /48, which one subscriber often holds whole), so one IP can't fill the server-wide budget
+// from rooms of its own. A turn photo of a started game is never refused here: it only comes from the awaited owner,
+// one per round at game pace, and the per-room cap still bounds it. Sanitized photos are ≤ 2048 px (~1 MB), so the default keeps lobby photos within a few GB.
+
+export const UPLOAD_STORED_MAX = envInt("UPLOAD_STORED_MAX", 3_000, 1, 10_000_000);
+/**
+ * Each player holds ~3 lobby photos (planted + re-picks), so a full party (12 players) needs ~36; the default fits
+ * several full parties on one venue Wi-Fi (one public IP) with room to spare.
+ */
+export const UPLOAD_LOBBY_PER_IP_MAX = envInt("UPLOAD_LOBBY_PER_IP_MAX", 150, 1, 10_000_000);
+
+/** Why a new upload can't be stored now: 503 server-wide, 429 for the uploader's IP; retry once a photo expires. */
+export interface StorageRefusal {
+  status: 429 | 503;
+  scope: "storage" | "lobby-ip";
+  /** Seconds until the oldest photo that counts against the exceeded limit expires (it may be released sooner). */
+  retryAfterS: number;
+}
 
 // ── Per-room upload registry ──
 // Every stored photo belongs to the room and player that uploaded it (GET /temp serves it only to members of that
@@ -25,16 +49,26 @@ export interface UploadRecord {
   kind?: "turn" | "planted";
   /** Planted with plant-photo (pending or already shown): only a later plant-photo of the same player releases it */
   planted?: boolean;
+  /** Uploader's lobby-limit key (clientIp, IPv6 widened to its /48): lobby photos count against UPLOAD_LOBBY_PER_IP_MAX */
+  ip?: string;
 }
+
+/** Counts against the lobby-photo limits: anything but the awaited owner's turn photo. */
+const isLobbyPhoto = (record: Pick<UploadRecord, "kind">) => record.kind !== "turn";
 
 /** Store name of a `/temp/<name>` path (or the name itself). */
 const nameOf = (pathOrName: string) => (pathOrName.startsWith("/temp/") ? pathOrName.slice("/temp/".length) : pathOrName);
 
 export class UploadStore {
+  /** Registration order, which is also expiry order (every record expires UPLOAD_TTL_MS after registering). */
   private byName = new Map<string, UploadRecord>();
   private byRoom = new Map<string, Set<string>>();
   /** Bumped on every release, so uploads authorized before it are refused when they finish processing. */
   private epochs = new Map<string, number>();
+  /** Stored lobby photos per uploader IP key (keys dropped at zero). */
+  private lobbyPerIp = new Map<string, number>();
+
+  constructor(private readonly limits = { storedMax: UPLOAD_STORED_MAX, lobbyPerIpMax: UPLOAD_LOBBY_PER_IP_MAX }) {}
 
   epoch(gameCode: string): number {
     return this.epochs.get(gameCode) ?? 0;
@@ -48,7 +82,40 @@ export class UploadStore {
     let names = this.byRoom.get(record.gameCode);
     if (!names) this.byRoom.set(record.gameCode, (names = new Set()));
     names.add(name);
+    this.countLobbyPhoto(record, +1);
     return true;
+  }
+
+  /**
+   * Null if a new upload of `kind` from IP key `ip` may be stored now, else why not (see the storage limits above).
+   * A turn photo is never refused.
+   */
+  storageRefusal(kind: UploadRecord["kind"], ip: string): StorageRefusal | null {
+    if (!isLobbyPhoto({ kind })) return null;
+    if (this.byName.size >= this.limits.storedMax) {
+      return { status: 503, scope: "storage", retryAfterS: this.secondsToFirstExpiry(() => true) };
+    }
+    if ((this.lobbyPerIp.get(ip) ?? 0) >= this.limits.lobbyPerIpMax) {
+      const ownLobbyPhoto = (r: UploadRecord) => r.ip === ip && isLobbyPhoto(r);
+      return { status: 429, scope: "lobby-ip", retryAfterS: this.secondsToFirstExpiry(ownLobbyPhoto) };
+    }
+    return null;
+  }
+
+  /** Whole seconds (≥ 1) until the oldest matching photo expires. */
+  private secondsToFirstExpiry(matches: (record: UploadRecord) => boolean): number {
+    const now = Date.now();
+    for (const record of this.byName.values()) {
+      if (matches(record)) return Math.max(1, Math.ceil(((record.expiresAt ?? now) - now) / 1000));
+    }
+    return 1;
+  }
+
+  private countLobbyPhoto(record: UploadRecord, delta: 1 | -1): void {
+    if (!record.ip || !isLobbyPhoto(record)) return;
+    const count = (this.lobbyPerIp.get(record.ip) ?? 0) + delta;
+    if (count > 0) this.lobbyPerIp.set(record.ip, count);
+    else this.lobbyPerIp.delete(record.ip);
   }
 
   get(name: string): UploadRecord | undefined {
@@ -68,6 +135,11 @@ export class UploadStore {
     return this.byRoom.get(gameCode)?.size ?? 0;
   }
 
+  /** Photos stored right now, all rooms together. */
+  get size(): number {
+    return this.byName.size;
+  }
+
   /** Forgets one upload without deleting its file (it was deleted elsewhere, e.g. TTL expiry). */
   forget(name: string): UploadRecord | undefined {
     const record = this.byName.get(name);
@@ -77,6 +149,7 @@ export class UploadStore {
     const names = this.byRoom.get(record.gameCode);
     names?.delete(name);
     if (names && !names.size) this.byRoom.delete(record.gameCode);
+    this.countLobbyPhoto(record, -1);
     return record;
   }
 
@@ -154,6 +227,7 @@ export class UploadStore {
     this.byName.clear();
     this.byRoom.clear();
     this.epochs.clear();
+    this.lobbyPerIp.clear();
   }
 }
 

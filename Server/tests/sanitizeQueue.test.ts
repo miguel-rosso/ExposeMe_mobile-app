@@ -49,6 +49,7 @@ describe("sanitize queue sized from the in-flight caps", () => {
     const busy = limit(() => new Promise<void>((r) => { finishBusy = r; })); // holds the only slot until resolved
     const res = Object.assign(new EventEmitter(), {
       headersSent: false,
+      locals: {},
       writableFinished: false,
       status: vi.fn(),
       json: vi.fn(),
@@ -76,6 +77,7 @@ describe("sanitize queue sized from the in-flight caps", () => {
     const busy = limit(() => new Promise<void>((r) => { finishBusy = r; })); // holds the only slot until resolved
     const res = Object.assign(new EventEmitter(), {
       headersSent: false,
+      locals: {},
       writableFinished: false,
       status: vi.fn(),
       json: vi.fn(),

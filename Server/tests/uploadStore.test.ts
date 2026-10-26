@@ -2,8 +2,16 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { UploadStore } from "../middlewares/uploadStore";
+
+// Default storage limits (no env override)
+vi.hoisted(() => {
+  delete process.env.UPLOAD_STORED_MAX;
+  delete process.env.UPLOAD_LOBBY_PER_IP_MAX;
+});
+
+import { UPLOAD_LOBBY_PER_IP_MAX, UPLOAD_STORED_MAX, UploadStore } from "../middlewares/uploadStore";
 import { acceptsPlantedPhoto } from "../middlewares/uploadAccess";
+import { UPLOAD_TTL_MS } from "../middlewares/uploadSweeper";
 import type { Room } from "../models/interfaces";
 
 // Per-room registry of uploaded photos (EXP-070): who uploaded each file, and deletion of a room's files when its
@@ -171,5 +179,64 @@ describe("acceptsPlantedPhoto (POST /upload and plant-photo share it)", () => {
     expect(acceptsPlantedPhoto(room("waiting-photo", 0))).toBe(true); // round 1 still awaited (also after skips)
     expect(acceptsPlantedPhoto(room("waiting-photo", 1))).toBe(false);
     for (const phase of ["answering", "reveal", "scores"] as const) expect(acceptsPlantedPhoto(room(phase, 1))).toBe(false);
+  });
+});
+
+// EXP-195: server-wide storage limits shed lobby photos only; Retry-After is when the oldest counted photo expires
+describe("UploadStore.storageRefusal", () => {
+  const TTL_S = UPLOAD_TTL_MS / 1000;
+  let limited: UploadStore;
+  let count = 0;
+  /** Registers a photo (no file written) and returns its name. */
+  const add = (ip: string, kind: "turn" | "planted", gameCode = "111111") => {
+    const name = (++count).toString(16).padStart(32, "0") + ".jpg";
+    limited.register(name, { gameCode, username: `u${count}`, file: path.join(dir, name), kind, ip }, limited.epoch(gameCode));
+    return name;
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    limited = new UploadStore({ storedMax: 3, lobbyPerIpMax: 2 });
+  });
+
+  it("defaults: 3000 stored photos server-wide; per IP, several full parties (12 players × ~3 lobby photos) on one Wi-Fi", () => {
+    const FULL_PARTY_LOBBY_PHOTOS = 12 * 3;
+    expect(UPLOAD_STORED_MAX).toBe(3_000);
+    expect(UPLOAD_LOBBY_PER_IP_MAX).toBe(150);
+    expect(UPLOAD_LOBBY_PER_IP_MAX).toBeGreaterThanOrEqual(2 * FULL_PARTY_LOBBY_PHOTOS);
+  });
+  afterEach(() => {
+    limited.clear();
+    vi.useRealTimers();
+  });
+
+  it("refuses lobby photos once the server holds storedMax photos (503), with the oldest photo's expiry as Retry-After", () => {
+    add("1.1.1.1", "planted");
+    vi.advanceTimersByTime(60_000);
+    add("2.2.2.2", "turn");
+    add("3.3.3.3", "planted");
+    expect(limited.storageRefusal("planted", "4.4.4.4")).toEqual({ status: 503, scope: "storage", retryAfterS: TTL_S - 60 });
+    expect(limited.storageRefusal(undefined, "4.4.4.4")).toMatchObject({ status: 503 });
+  });
+
+  it("never refuses a turn photo, even past storedMax or the IP's cap", () => {
+    for (let i = 0; i < 4; i++) add("1.1.1.1", i < 2 ? "planted" : "turn");
+    expect(limited.storageRefusal("turn", "1.1.1.1")).toBeNull();
+  });
+
+  it("caps lobby photos per IP (429), counting neither turn photos nor other IPs; forgetting one frees a place", () => {
+    limited = new UploadStore({ storedMax: 100, lobbyPerIpMax: 2 });
+    add("2.2.2.2", "planted"); // the server's oldest photo, from another IP
+    vi.advanceTimersByTime(60_000);
+    const first = add("1.1.1.1", "planted", "111111");
+    add("1.1.1.1", "turn");
+    vi.advanceTimersByTime(60_000);
+    expect(limited.storageRefusal("planted", "1.1.1.1")).toBeNull(); // 1 lobby photo + 1 turn photo
+    add("1.1.1.1", "planted", "222222");
+    // Retry-After: when this IP's oldest lobby photo (stored 60 s ago) expires
+    expect(limited.storageRefusal("planted", "1.1.1.1")).toEqual({ status: 429, scope: "lobby-ip", retryAfterS: TTL_S - 60 });
+    expect(limited.storageRefusal("planted", "2.2.2.2")).toBeNull();
+    limited.forget(first);
+    expect(limited.storageRefusal("planted", "1.1.1.1")).toBeNull();
   });
 });

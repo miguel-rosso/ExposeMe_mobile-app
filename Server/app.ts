@@ -8,7 +8,7 @@ import { serveUpload, startUploadSweeper } from "./middlewares/uploadSweeper";
 import { errorHandler } from "./middlewares/errorHandler";
 import { notFound, securityHeaders } from "./middlewares/securityHeaders";
 import { requireRoomMember, requireRoomUpload } from "./middlewares/uploadAccess";
-import { socketOriginGuard } from "./middlewares/socketOrigin";
+import { socketHandshakeLimit, socketOriginGuard } from "./middlewares/socketOrigin";
 
 const app = express();
 app.disable("x-powered-by");
@@ -69,12 +69,14 @@ server.requestTimeout = HTTP_REQUEST_TIMEOUT_MS;
 server.headersTimeout = HTTP_HEADERS_TIMEOUT_MS;
 // No `cors` option either (see app.use above): other websites can't read long-polling responses from a browser.
 // CORS doesn't cover WebSockets or JSONP, so every socket.io request (handshake, polling of an open session, upgrade)
-// is also checked: another website's Origin and JSONP polling are refused (see socketOrigin).
+// is also checked: another website's Origin, a Host outside ALLOWED_HOSTS (when set) and JSONP polling are refused,
+// then new sessions are rate limited per IP (see socketOrigin).
 const io = new Server(server, {
   pingInterval: PING_INTERVAL,
   pingTimeout: PING_TIMEOUT,
 });
 io.engine.use(socketOriginGuard);
+io.engine.use(socketHandshakeLimit);
 
 // Deletes uploads past their TTL at startup (leftovers from a previous process) and periodically after that
 const uploadSweeper = startUploadSweeper(uploadPath);

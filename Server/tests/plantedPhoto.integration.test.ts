@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { io as connect, Socket as ClientSocket } from "socket.io-client";
 import { io, server } from "../app";
 import { roomManager } from "../routes/socketRoutes";
-import { registerUpload } from "./helpers";
+import { registerTurnUpload, registerUpload } from "./helpers";
 
 // EXP-126 / EXP-035: the app plants its photo from the lobby (upload + plant-photo). Whether a player planted one is
 // told only to that player (room-of-game `hasPlantedPhoto`), never in anyone's player data, and no message can drop
@@ -105,9 +105,9 @@ describe("planted photo from the lobby", () => {
     const firstRound = once(alice, "round-start", 8_000);
     for (const n of ["alice", "bob", "carol"]) {
       const c = { alice, bob, carol }[n]!;
-      c.once("your-turn", () => {
+      c.once("your-turn", (turn: { round: number }) => {
         const photo = "/temp/" + n[0].repeat(32) + ".jpg";
-        registerUpload(gameCode, n, photo);
+        registerTurnUpload(gameCode, n, photo, turn.round);
         c.emit("photo-sent", { photo });
       });
     }

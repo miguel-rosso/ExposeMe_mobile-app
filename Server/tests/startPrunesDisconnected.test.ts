@@ -3,7 +3,7 @@ import { GameEngine } from "../managers/GameEngine";
 import { DISCONNECT_GRACE, RoomManager } from "../managers/RoomManager";
 import { uploadStore } from "../middlewares/uploadStore";
 import { Room } from "../models/interfaces";
-import { CapturedEmit, createFakeIo, registerUpload } from "./helpers";
+import { CapturedEmit, createFakeIo, registerTurnUpload, registerUpload } from "./helpers";
 
 // EXP-129 (DEC-016 A): a game start drops every disconnected player from the room, so "Play again" has no ghosts
 // (answer options, tied winners with 0). If they come back they join as new players. Only players disconnected for
@@ -68,7 +68,7 @@ describe("game start removes disconnected players (EXP-129)", () => {
     engine.onConnectionChange(room);
     room.rounds = room.round + 1;
     const owner = room.currentPlayer!;
-    registerUpload(room.gameCode, owner.username, PHOTO);
+    registerTurnUpload(room.gameCode, owner.username, PHOTO, room.round + 1);
     engine.onPhotoReceived(room, PHOTO, owner.username);
     vi.advanceTimersByTime(ANSWER_TIME + 3_000 + 5_000);
     expect(room.started).toBe(false);
@@ -154,7 +154,7 @@ describe("no guess is stored as an empty string (EXP-132)", () => {
     room.players.forEach((p) => engine.markReady(room, p));
     vi.advanceTimersByTime(GAME_START_DELAY);
     const owner = room.currentPlayer!;
-    registerUpload(room.gameCode, owner.username, PHOTO);
+    registerTurnUpload(room.gameCode, owner.username, PHOTO, room.round + 1);
     engine.onPhotoReceived(room, PHOTO, owner.username);
     return room;
   }
@@ -189,7 +189,7 @@ describe("no guess is stored as an empty string (EXP-132)", () => {
     vi.advanceTimersByTime(ANSWER_TIME + 3_000 + 5_000);
     const owner = room.currentPlayer!;
     const next = "/temp/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.jpg";
-    registerUpload(room.gameCode, owner.username, next);
+    registerTurnUpload(room.gameCode, owner.username, next, room.round + 1);
     engine.onPhotoReceived(room, next, owner.username);
     const voter = room.players.find((p) => p !== owner)!;
     engine.recordAnswer(room, voter.username, owner.username);

@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { io as connect, Socket as ClientSocket } from "socket.io-client";
 import { io, server } from "../app";
 import { roomManager } from "../routes/socketRoutes";
-import { registerUpload } from "./helpers";
+import { registerTurnUpload, registerUpload } from "./helpers";
 
 // Session hardening: identity (room + username) comes from the server-side session set on join,
 // rejoining an existing username requires the rejoin token, and the token never leaves its owner.
@@ -381,9 +381,10 @@ describe("photo-sent", () => {
     const OTHERS = "/temp/" + "b".repeat(32) + ".jpg"; // uploaded by the other player of this room
     const FOREIGN = "/temp/" + "c".repeat(32) + ".jpg"; // uploaded by the owner's username in another room
     const UNREGISTERED = "/temp/" + "d".repeat(32) + ".jpg"; // right shape, never uploaded
-    registerUpload(gameCode, ownerName, OWN);
-    registerUpload(gameCode, ownerName === "alice" ? "bob" : "alice", OTHERS);
-    registerUpload("999999", ownerName, FOREIGN);
+    // All of them round-1 turn photos, so only who uploaded them where tells them apart
+    registerTurnUpload(gameCode, ownerName, OWN, 1);
+    registerTurnUpload(gameCode, ownerName === "alice" ? "bob" : "alice", OTHERS, 1);
+    registerTurnUpload("999999", ownerName, FOREIGN, 1);
 
     const quiet = silent(alice, "round-start", 500);
     other.emit("photo-sent", { photo: OWN });

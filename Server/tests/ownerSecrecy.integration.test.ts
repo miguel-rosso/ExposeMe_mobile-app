@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { io as connect, Socket as ClientSocket } from "socket.io-client";
 import { io, server } from "../app";
 import { roomManager } from "../routes/socketRoutes";
-import { registerUpload } from "./helpers";
+import { registerTurnUpload } from "./helpers";
 import { ANSWER_GRACE } from "../managers/GameEngine";
 
 // EXP-128 / EXP-252: real server + real clients, every event each socket receives is recorded. Until round-reveal,
@@ -96,7 +96,7 @@ describe("photo owner secrecy over the socket (EXP-128, EXP-252)", () => {
     const others = NAMES.filter((n) => n !== owner);
 
     const starts = NAMES.map((n) => once<Record<string, unknown>>(socks[n], "round-start"));
-    registerUpload(gameCode, owner, PHOTO);
+    registerTurnUpload(gameCode, owner, PHOTO, 1);
     socks[owner].emit("photo-sent", { photo: PHOTO });
     const startData = await Promise.all(starts);
     startData.forEach((data) => expect(data).toEqual({ photo: PHOTO, round: 1, duration: 8_000 - ANSWER_GRACE }));

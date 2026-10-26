@@ -5,7 +5,7 @@ import { io, server } from "../app";
 import { roomManager } from "../routes/socketRoutes";
 import { GameEngine } from "../managers/GameEngine";
 import { GAME_EVENT_LIMITS, type LimitedGameEvent } from "../managers/socketGuards";
-import { registerUpload } from "./helpers";
+import { registerTurnUpload, registerUpload } from "./helpers";
 
 // EXP-062: lobby/game events are rate-limited per socket (GAME_EVENT_LIMITS). A flood of each event reaches its
 // handler's work at most `burst` times; the rest is dropped silently. The real handlers' targets are stubbed so every
@@ -135,7 +135,7 @@ describe("per-socket game event limits (EXP-062)", () => {
 
   it("photo-sent", async () => {
     const { guest, gameCode, barrier } = await lobby();
-    registerUpload(gameCode, "guest", PHOTO);
+    registerTurnUpload(gameCode, "guest", PHOTO, 1);
     const onPhoto = vi.spyOn(GameEngine.prototype, "onPhotoReceived").mockImplementation(() => {});
     await expectFloodCapped(guest, "photo-sent", { photo: PHOTO }, onPhoto, barrier);
   });

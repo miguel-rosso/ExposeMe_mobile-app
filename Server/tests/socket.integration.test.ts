@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { io as connect, Socket as ClientSocket } from "socket.io-client";
 import { io, server } from "../app";
 import { roomManager } from "../routes/socketRoutes";
-import { registerUpload } from "./helpers";
+import { registerTurnUpload } from "./helpers";
 import { ANSWER_GRACE } from "../managers/GameEngine";
 
 // Real server on an ephemeral port + 3 real socket.io clients.
@@ -77,7 +77,7 @@ describe("socket flow", () => {
 
     // Photo → round-start broadcast to everyone
     const roundStarts = [alice, bob, carol].map((c) => once<Record<string, unknown>>(c, "round-start"));
-    registerUpload(gameCode, owner, PHOTO); // as if the owner had uploaded it (photo-sent takes only own uploads)
+    registerTurnUpload(gameCode, owner, PHOTO, 1); // as if the owner had uploaded it (photo-sent takes only own uploads)
     byName[owner].emit("photo-sent", { photo: PHOTO, gameCode });
     const payloads = await Promise.all(roundStarts);
     // Same payload for everyone, owner included: nobody is told whose photo it is (EXP-128, EXP-252)

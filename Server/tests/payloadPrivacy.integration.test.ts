@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { io as connect, Socket as ClientSocket } from "socket.io-client";
 import { io, server } from "../app";
 import { roomManager } from "../routes/socketRoutes";
-import { registerUpload } from "./helpers";
+import { registerTurnUpload, registerUpload } from "./helpers";
 
 // EXP-017 / EXP-027: real server + real clients. Records every event each client receives and checks that no
 // payload carries a socket id, a rejoin token (other than the receiver's own, in room-of-game) or a planted photo
@@ -130,9 +130,9 @@ describe("player data in socket payloads", () => {
     // is whoever got your-turn)
     let turnOwner: string | null = null;
     for (const n of players) {
-      byName[n].once("your-turn", () => {
+      byName[n].once("your-turn", (turn: { round: number }) => {
         turnOwner = n;
-        registerUpload(gameCode, n, PHOTO);
+        registerTurnUpload(gameCode, n, PHOTO, turn.round);
         byName[n].emit("photo-sent", { photo: PHOTO });
       });
     }

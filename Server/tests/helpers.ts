@@ -1,5 +1,5 @@
 import type { Server } from "socket.io";
-import { uploadStore } from "../middlewares/uploadStore";
+import { UploadRecord, uploadStore } from "../middlewares/uploadStore";
 import type { Player } from "../models/interfaces";
 
 export interface CapturedEmit {
@@ -28,13 +28,29 @@ export function createFakeIo(): { io: Server; emits: CapturedEmit[] } {
   return { io: io as unknown as Server, emits };
 }
 
+/** Records `photo` (a `/temp/<name>` path) as uploaded by `username` in `gameCode`; no file is written. */
+function register(gameCode: string, username: string, photo: string, meta: Pick<UploadRecord, "kind" | "round">): void {
+  const name = photo.replace(/^\/temp\//, "");
+  const record = { gameCode, username, file: `/nonexistent/exposeme-test/${name}`, ...meta };
+  uploadStore.register(name, record, uploadStore.epoch(gameCode));
+}
+
 /**
- * Records `photo` (a `/temp/<name>` path) as uploaded by `username` in room `gameCode`, as POST /upload does, so
- * photo-sent / plant-photo accept it without a real upload. No file is written (deleting it later is a no-op).
+ * Records `photo` (a `/temp/<name>` path) as a lobby upload of `username` in room `gameCode` (a planted-photo pick,
+ * as POST /upload stores it outside the uploader's photo turn), so plant-photo accepts it without a real upload.
+ * photo-sent never takes it: use registerTurnUpload for that. No file is written (deleting it later is a no-op).
  */
 export function registerUpload(gameCode: string, username: string, photo: string): void {
-  const name = photo.replace(/^\/temp\//, "");
-  uploadStore.register(name, { gameCode, username, file: `/nonexistent/exposeme-test/${name}` }, uploadStore.epoch(gameCode));
+  register(gameCode, username, photo, { kind: "planted", round: 0 });
+}
+
+/**
+ * Records `photo` as `username`'s turn photo for game round `round` (the `round` of their your-turn / of the
+ * round-start it will start), as POST /upload stores it while that photo is awaited (room.round is `round - 1`
+ * then). photo-sent accepts it only for that round. No file is written (deleting it later is a no-op).
+ */
+export function registerTurnUpload(gameCode: string, username: string, photo: string, round: number): void {
+  register(gameCode, username, photo, { kind: "turn", round: round - 1 });
 }
 
 /**

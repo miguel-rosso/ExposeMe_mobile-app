@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { io as connect, Socket as ClientSocket } from "socket.io-client";
 import { io, server } from "../app";
 import { roomManager } from "../routes/socketRoutes";
-import { registerUpload } from "./helpers";
+import { registerTurnUpload } from "./helpers";
 
 // EXP-148: the app sends submit-answer on every tap, so the server rate-limits it per socket (token bucket, excess
 // dropped silently) and the legacy correct-answer / incorrect-answer aliases are gone.
@@ -65,7 +65,7 @@ describe("submit-answer over the socket (EXP-148)", () => {
     const [burst, legacy, recovers] = NAMES.filter((n) => n !== owner);
 
     const starts = NAMES.map((n) => once(socks[n], "round-start"));
-    registerUpload(gameCode, owner, PHOTO);
+    registerTurnUpload(gameCode, owner, PHOTO, 1);
     socks[owner].emit("photo-sent", { photo: PHOTO });
     await Promise.all(starts);
 

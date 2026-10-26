@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { io as connect, Socket as ClientSocket } from "socket.io-client";
 import { io, server } from "../app";
 import { roomManager } from "../routes/socketRoutes";
-import { registerUpload } from "./helpers";
+import { registerTurnUpload } from "./helpers";
 
 // EXP-218: whenever the photo owner goes away while holding the scores screen (kicked by the host, leave-room or a
 // dropped connection), the hold ends at once for everyone (hold-end + hold-resume) and the game goes on, instead of
@@ -54,7 +54,7 @@ async function ownerHoldingScores(photoChar: string) {
   const owner = await turn;
 
   const photo = "/temp/" + photoChar.repeat(32) + ".jpg";
-  registerUpload(gameCode, owner, photo);
+  registerTurnUpload(gameCode, owner, photo, 1);
   const scores = NAMES.map((n) => once(socks[n], "round-scores", SCORES_TIMEOUT_MS));
   socks[owner].emit("photo-sent", { photo });
   await Promise.all(scores);

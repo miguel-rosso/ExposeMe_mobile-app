@@ -3,7 +3,7 @@ import { GameEngine } from "../managers/GameEngine";
 import { DISCONNECT_GRACE, RoomManager } from "../managers/RoomManager";
 import { uploadStore } from "../middlewares/uploadStore";
 import { Room } from "../models/interfaces";
-import { CapturedEmit, createFakeIo, registerUpload } from "./helpers";
+import { CapturedEmit, createFakeIo, registerTurnUpload } from "./helpers";
 
 // EXP-157: a host gone from the lobby (disconnected > DISCONNECT_GRACE) hands the role to the next connected player,
 // and the lobby is told who is gone. EXP-149: a game start only removes players gone for longer than the grace.
@@ -136,7 +136,7 @@ describe("lobby host handover after the disconnect grace (EXP-157)", () => {
     expect(host(room)).toEqual(["alice"]); // mid-game the role doesn't move
     room.rounds = room.round;
     const owner = room.currentPlayer!;
-    registerUpload(room.gameCode, owner.username, PHOTO);
+    registerTurnUpload(room.gameCode, owner.username, PHOTO, room.round + 1);
     engine.onPhotoReceived(room, PHOTO, owner.username);
     vi.advanceTimersByTime(ANSWER_TIME + 3_000 + 5_000 + 16_000);
     expect(room.started).toBe(false);

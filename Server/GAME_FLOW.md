@@ -404,7 +404,7 @@ All game events are **atomic** — each contains everything the client needs.
 | `remove-player` | `{ username }` | Host only: removes that player (not the host) and evicts their sockets |
 | `leave-room` | - (with an ack callback) | Explicit leave (Exit button): player removed, host handed over, `player-left` to the room; from a socket replaced by a rejoin it only detaches that socket. Acked (no data) once handled, also from a socket bound to no room; not acked when dropped by the rate limit |
 | `im-ready` | - | Player ready to start (session player; payload ignored) |
-| `photo-sent` | `{ photo }` | Photo uploaded; only from the current owner, `photo` must be a path the owner got from `/upload` in this room (`/temp/<32 hex>.jpg\|png\|webp`) |
+| `photo-sent` | `{ photo }` | Photo uploaded; only from the current owner, `photo` must be a path the owner got from `/upload` in this room (`/temp/<32 hex>.jpg\|png\|webp`) for the photo awaited now (uploaded during this `waiting-photo`'s round as their turn photo; not a planted photo, not one from an earlier round) |
 | `photo-unavailable` | `{ round, attempt }` (from its `your-turn`) | The awaited owner has no photo to send (no access, no photos, upload failed): skip the round now |
 | `submit-answer` | `{ guess }` | Player's pick, sent on every tap (the photo owner's too, scored like any other). Only during `answering`, the last one counts (`""` withdraws it); ignored in `reveal`/`scores`, or if `guess` is not a player in the room; at most 10 per socket, refilled 5/s (excess dropped). No guess is stored and sent in scores as `lastGuess: ""` (the app shows its own translated "No guess") |
 | `hold-start` | - | Photo owner pressed hold (scores only; per-round limits, see "Hold") |
@@ -500,7 +500,9 @@ unknown room or a token that is not a current member of it → **403**.
   symlinks, subdirectories, dotfiles (`.gitkeep`) and any other name are never touched.
 - `photo-sent` / `plant-photo` take the returned `/temp/...` path, and only a photo that **the sender uploaded in
   this room** (and that still exists); anything else (another player's or another room's photo, a path never
-  uploaded) is ignored.
+  uploaded) is ignored. `photo-sent` additionally takes only the owner's turn upload for the photo awaited now: an
+  upload made while it wasn't their turn (lobby pick, planted photo), one marked with `plant-photo`, or one stored in
+  an earlier round (already shown) is ignored.
 - Accepted formats: JPEG, PNG, WebP, detected from the file contents (the file name and declared MIME type are ignored). The app is expected to send JPEG; HEIC and anything else is refused.
 - The stored image is re-encoded: orientation applied, scaled down to fit 2048×2048, all metadata (EXIF incl. GPS, XMP, ICC) removed, same format as the input.
 - Images are processed one at a time (`controllers/sanitizeImage.ts`). The queue holds `UPLOAD_INFLIGHT_MAX` jobs, so an upload admitted by the in-flight caps is never refused for a full queue; a queued job is dropped if its client disconnects, and `SANITIZE_QUEUE_TIMEOUT_MS` (60 s) is only a safety net for a stuck job. Waiting jobs take turns by uploader IP (round-robin, each IP's own jobs in arrival order), so an upload waits for at most one job of each other IP with uploads queued, however many that IP sent.

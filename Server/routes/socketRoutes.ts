@@ -4,7 +4,7 @@ import { isAllowedRounds, RoomManager } from "../managers/RoomManager";
 import { GameEngine } from "../managers/GameEngine";
 import { isRoomCode, normalizeRoomCode } from "../managers/roomCode";
 import { acceptsPlantedPhoto, setUploadRooms } from "../middlewares/uploadAccess";
-import { uploadStore } from "../middlewares/uploadStore";
+import { UploadRecord, uploadStore } from "../middlewares/uploadStore";
 import { createSlidingWindow } from "../middlewares/rateLimit";
 import {
   ALLOWED_EMOJIS, createConnectionCounter, createEventLimiter, createJoinMissGuard, createTokenBucket, EMOJI_BURST, EMOJI_RATE_PER_S,
@@ -59,11 +59,25 @@ function isUploadPath(value: unknown): value is string {
   return typeof value === "string" && value.length <= MAX_PHOTO_URL_LENGTH && UPLOAD_PATH_RE.test(value);
 }
 
+/** Store record of a /upload path that this player uploaded in this room (and that hasn't been deleted). */
+function ownUploadRecord(value: unknown, room: Room, player: Player): UploadRecord | undefined {
+  if (!isUploadPath(value)) return undefined;
+  const record = uploadStore.get(value.slice("/temp/".length));
+  return record?.gameCode === room.gameCode && record.username === player.username ? record : undefined;
+}
+
 /** A /upload path that this player uploaded in this room (and that hasn't been deleted). */
 function isOwnUpload(value: unknown, room: Room, player: Player): value is string {
-  if (!isUploadPath(value)) return false;
-  const record = uploadStore.get(value.slice("/temp/".length));
-  return record?.gameCode === room.gameCode && record.username === player.username;
+  return ownUploadRecord(value, room, player) !== undefined;
+}
+
+/**
+ * An own upload made as the awaited owner's turn photo for the photo being awaited now: not a planted photo (lobby
+ * pick or plant-photo) and not one stored at an earlier round, i.e. already shown (rounds only advance on show).
+ */
+function isCurrentTurnUpload(value: unknown, room: Room, player: Player): value is string {
+  const record = ownUploadRecord(value, room, player);
+  return record?.kind === "turn" && !record.planted && record.round === room.round;
 }
 
 /**
@@ -356,12 +370,12 @@ io.on("connection", (socket: Socket) => {
 
   // ── In-game ────────────────────────────────────────
 
-  // Only the current photo owner, and only with a path this player uploaded in this room
+  // Only the current photo owner, and only with the turn photo they uploaded for this round in this room
   socket.on("photo-sent", (data: { photo: string }) => {
     try {
       if (!gameEvents.take("photo-sent")) return;
       const s = session(socket);
-      if (!s || !isOwnUpload(data?.photo, s.room, s.player)) return;
+      if (!s || !isCurrentTurnUpload(data?.photo, s.room, s.player)) return;
       gameEngine.onPhotoReceived(s.room, data.photo, s.player.username);
     } catch (e) { console.error("photo-sent error:", e); }
   });

@@ -132,7 +132,8 @@ export default {
   androidTapPermissions: 'Tap "Permissions".',
   tapPhotosVideos: "Tap on access to Photos and videos.",
   allowAllTime: 'Choose "Allow all" or "Select photos".',
-  iosTapPhotosChooseAccess: 'Tap "Photos" and choose "Full Access" or "Limited Access".',
+  iosTapPhotosChooseAccess:
+    'If Settings opens on its main page, go to "Apps" > "Expose Me". Tap "Photos" and choose "Full Access" or "Limited Access".',
   iosConfirmFullAccess: 'If you choose "Full Access", confirm with "Allow Full Access".',
   back: "Back",
   openSettings: "Open Settings",

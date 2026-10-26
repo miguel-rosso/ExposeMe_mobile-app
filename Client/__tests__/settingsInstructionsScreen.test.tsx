@@ -1,12 +1,14 @@
 import React from "react";
-import TestRenderer, { act, ReactTestRenderer } from "react-test-renderer";
+import TestRenderer, { act, ReactTestInstance, ReactTestRenderer } from "react-test-renderer";
 import { Image, Linking, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { TEST_IDS, settingsStepId } from "../app/utils/testIds";
 
 // EXP-123: "Open Settings" must use the public Linking.openSettings() on iOS too (never a private App-Prefs URL),
-// and the iOS steps must describe the app's own Settings page that it opens, not the Privacy path.
+// and the iOS steps must describe the app's own Settings page that it opens, not the Privacy path. iOS may still land
+// on the Settings root (seen on the simulator), so step 1 also names the way from there to the app's page.
 // EXP-190: Android step 1 shows App info, so it must say to tap "Permissions", not a generic text shared with iOS.
-// EXP-196: the bottom inset pads the scroll content so the buttons clear the Android gesture bar.
+// EXP-196: the buttons sit in a fixed footer outside the ScrollView, padded by the bottom inset, so they are always
+// fully on screen above the Android gesture bar (inside the scroll content they started half under it).
 
 jest.mock("expo-router", () => ({ useRouter: () => ({ replace: jest.fn(), push: jest.fn() }) }));
 jest.mock("@/assets/images/PermInstructions1.jpg", () => "PermInstructions1", { virtual: true });
@@ -22,7 +24,7 @@ jest.mock("@/app/components/CustomCarousel/CustomCarousel", () => {
     <View>{data.map((item: any, index: number) => <View key={item.id}>{renderItem({ item, index })}</View>)}</View>
   ));
 });
-// A tall gesture-bar inset, so the test can tell whether the scroll content clears it
+// A tall gesture-bar inset, so the test can tell whether the footer clears it
 const MOCK_BOTTOM_INSET = 48;
 jest.mock("react-native-safe-area-context", () => {
   const { View } = require("react-native");
@@ -59,6 +61,14 @@ const imageSources = (tree: ReactTestRenderer) => tree.root.findAllByType(Image)
 const byTestID = (tree: ReactTestRenderer, id: string) => tree.root.findAll((n) => n.props.testID === id)[0];
 const stepDescription = (tree: ReactTestRenderer, step: number) =>
   [].concat(byTestID(tree, settingsStepId(step)).props.children).join("").trim();
+// paddingBottom of the closest ancestor that sets one (the footer that holds the node)
+const bottomPadding = (node: ReactTestInstance): number | undefined => {
+  for (let n = node.parent; n; n = n.parent) {
+    const padding = StyleSheet.flatten(n.props.style)?.paddingBottom;
+    if (typeof padding === "number") return padding;
+  }
+  return undefined;
+};
 const pressOpenSettings = async (tree: ReactTestRenderer) => {
   await act(async () => {
     byTestID(tree, TEST_IDS.settingsInstructionsOpenSettings).props.onPress();
@@ -106,6 +116,20 @@ describe("SettingsInstructionsScreen", () => {
     expect(shown.join(" ")).not.toMatch(/privacy|privacidad/i);
   });
 
+  it.each([
+    ["en", en, /main page/, /"Photos"/],
+    ["es", es, /portada de Ajustes/, /"Fotos"/],
+  ])("iOS step 1 also guides from the Settings root to the app's page (%s)", async (_lang, t, settingsRoot, photos) => {
+    mockT = t;
+    const { tree, restore } = await render("ios");
+    restorePlatform = restore;
+    const step1 = stepDescription(tree, 1);
+
+    expect(step1).toMatch(settingsRoot);
+    expect(step1).toContain(`"Apps" > "${t.appName}"`);
+    expect(step1).toMatch(photos);
+  });
+
   it("the Privacy-path copy and screenshots are gone", () => {
     for (const t of [en, es]) {
       expect(t).not.toHaveProperty("goPrivacySettings");
@@ -135,15 +159,20 @@ describe("SettingsInstructionsScreen", () => {
   });
 
   // ── EXP-196 ──
-  it.each(["android", "ios"] as const)("scroll content clears the bottom inset (%s)", async (os) => {
+  it.each(["android", "ios"] as const)("the buttons are a fixed footer above the bottom inset (%s)", async (os) => {
     const { tree, restore } = await render(os);
     restorePlatform = restore;
-    const content = StyleSheet.flatten(tree.root.findByType(ScrollView).props.contentContainerStyle);
-    expect(content.flexGrow).toBe(1);
-    expect(content.paddingBottom).toBeGreaterThanOrEqual(MOCK_BOTTOM_INSET + 16);
-
-    // The frame must not also pad the bottom edge (that would shrink the viewport instead of the content)
     const frame = tree.root.find((n) => n.type === View && n.props.testID === TEST_IDS.settingsInstructionsScreen);
+    const scroll = tree.root.findByType(ScrollView);
+    const openSettingsButton = byTestID(tree, TEST_IDS.settingsInstructionsOpenSettings);
+
+    // Not inside the scroll content: never pushed below the screen edge, whatever the content height
+    expect(scroll.findAll((n) => n === openSettingsButton).length).toBe(0);
+    // The ScrollView takes the remaining height, and the footer below it clears the inset
+    expect(StyleSheet.flatten(scroll.props.style).flexGrow).toBe(1);
+    expect(bottomPadding(openSettingsButton)).toBeGreaterThanOrEqual(MOCK_BOTTOM_INSET + 16);
+
+    // The frame leaves the bottom edge to the footer (padding it as well would count the inset twice)
     expect(frame.props.edges).toEqual(["top", "left", "right"]);
   });
 });

@@ -25,14 +25,14 @@ import { TEST_IDS, settingsStepId } from "../utils/testIds";
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get("window");
 // Gap kept between the buttons and the bottom inset (same as the p-4 padding on the other edges)
-const CONTENT_BOTTOM_GAP = 16;
+const FOOTER_BOTTOM_GAP = 16;
 
 const SettingsInstructionsScreen: React.FC = () => {
   const { t } = useI18n();
   const router = useRouter();
   const carouselRef = useRef<any>(null);
-  // The bottom inset (Android gesture bar / iOS home indicator) pads the scroll content, not the frame,
-  // so the buttons can always be scrolled above it
+  // The buttons live in a fixed footer outside the ScrollView, padded by the bottom inset (Android gesture bar /
+  // iOS home indicator), so they are always fully on screen whatever the content height
   const insets = useSafeAreaInsets();
 
   const androidImages = [
@@ -41,7 +41,8 @@ const SettingsInstructionsScreen: React.FC = () => {
     { id: 3, source: PermInstruction3, title: t.step3, description: t.allowAllTime },
   ];
 
-  // Linking.openSettings() lands on this app's own Settings page, so the iOS steps start at its "Photos" row
+  // Linking.openSettings() usually lands on this app's own Settings page, so the iOS steps start at its "Photos" row;
+  // step 1 also covers the Settings root (where the iOS simulator can land) by naming the path to the app's page
   const iosImages = [
     { id: 1, source: IOSPermInstruction1, title: t.step1, description: t.iosTapPhotosChooseAccess },
     { id: 2, source: IOSPermInstruction2, title: t.step2, description: t.iosConfirmFullAccess },
@@ -56,10 +57,7 @@ const SettingsInstructionsScreen: React.FC = () => {
   return (
     <SafeAreaView testID={TEST_IDS.settingsInstructionsScreen} edges={["top", "left", "right"]} style={tw`flex-1 bg-gray-900`}>
       <StatusBar barStyle="light-content" />
-      <ScrollView
-        contentContainerStyle={[tw`flex-grow p-4`, { paddingBottom: insets.bottom + CONTENT_BOTTOM_GAP }]}
-        showsVerticalScrollIndicator={false}
-      >
+      <ScrollView style={tw`flex-1`} contentContainerStyle={tw`flex-grow p-4`} showsVerticalScrollIndicator={false}>
         <View style={tw`flex-1 items-center max-w-[500px] w-full self-center`}>
           {/* Header */}
           <View style={tw`items-center mb-5`}>
@@ -110,27 +108,29 @@ const SettingsInstructionsScreen: React.FC = () => {
               />
             </View>
           </View>
-
-          {/* Bottom buttons */}
-          <View style={tw`flex-row justify-between w-full mt-4 mb-2`}>
-            <TouchableOpacity
-              style={tw`bg-gray-700 p-4 rounded-xl flex-1 mr-3 border border-gray-600`}
-              onPress={() => router.replace("/")}
-              activeOpacity={0.7}
-            >
-              <Text style={tw`text-gray-200 text-base font-medium text-center`}>{t.back}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={tw`bg-blue-600 p-4 flex-1 ml-3 rounded-xl border border-blue-500 shadow-lg`}
-              testID={TEST_IDS.settingsInstructionsOpenSettings}
-              onPress={() => Linking.openSettings()}
-              activeOpacity={0.7}
-            >
-              <Text style={tw`text-white text-base font-medium text-center`}>{t.openSettings}</Text>
-            </TouchableOpacity>
-          </View>
         </View>
       </ScrollView>
+
+      {/* Bottom buttons: fixed footer above the bottom inset */}
+      <View style={[tw`px-4 pt-3`, { paddingBottom: insets.bottom + FOOTER_BOTTOM_GAP }]}>
+        <View style={tw`flex-row justify-between w-full max-w-[500px] self-center`}>
+          <TouchableOpacity
+            style={tw`bg-gray-700 p-4 rounded-xl flex-1 mr-3 border border-gray-600`}
+            onPress={() => router.replace("/")}
+            activeOpacity={0.7}
+          >
+            <Text style={tw`text-gray-200 text-base font-medium text-center`}>{t.back}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={tw`bg-blue-600 p-4 flex-1 ml-3 rounded-xl border border-blue-500 shadow-lg`}
+            testID={TEST_IDS.settingsInstructionsOpenSettings}
+            onPress={() => Linking.openSettings()}
+            activeOpacity={0.7}
+          >
+            <Text style={tw`text-white text-base font-medium text-center`}>{t.openSettings}</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
     </SafeAreaView>
   );
 };

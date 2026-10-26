@@ -1,8 +1,8 @@
 # EXP-123 / EXP-190 / EXP-196: with photo access denied for good, the home gate's "How to enable" opens
 # SettingsInstructionsScreen. Its first step matches the platform (Android: App info → "Permissions"; iOS: this app's
-# own Settings page → "Photos"), and "Open Settings" leaves the app for that system page (Linking.openSettings(),
-# never a private App-Prefs URL). The bottom-inset layout is covered by
-# Client/__tests__/settingsInstructionsScreen.test.tsx; here the button is scrolled into view and tapped.
+# own Settings page → "Photos", or from the Settings root via "Apps" > "Expose Me"), and "Open Settings" leaves the
+# app for that system page (Linking.openSettings(), never a private App-Prefs URL). The bottom-inset layout is covered by
+# Client/__tests__/settingsInstructionsScreen.test.tsx; here the fixed footer button is tapped without scrolling.
 # Cold-starts with photos denied (any later flow that needs access must run open-app.yaml, which grants it again).
 # No server or bots needed:
 #   ~/.maestro/bin/maestro --device <id> test qa/maestro/settings-instructions.yaml -e USERNAME=<label> -e METRO_URL=<url-encoded>
@@ -92,10 +92,11 @@ appId: com.socketNull.ExposeMe
       - assertVisible:
           id: "settings-step-1"
           text: '.*("Photos"|"Fotos").*'
-# EXP-196: the button sits at the end of the scroll content, above the bottom inset
-- scrollUntilVisible:
-    element:
-      id: "settings-instructions-open-settings"
+# EXP-196: the button lives in a fixed footer above the bottom inset, so it is on screen without scrolling.
+# (A scroll would hide a regression: Maestro clips bounds to the screen, so a button half under the gesture bar
+# still counts as "visible" and the tap lands on the gesture bar.)
+- assertVisible:
+    id: "settings-instructions-open-settings"
 - tapOn:
     id: "settings-instructions-open-settings"
 # The app goes to the background: the system Settings page of this app is in front
@@ -110,10 +111,20 @@ appId: com.socketNull.ExposeMe
       - extendedWaitUntil:
           visible: "Permissions|Permisos"
           timeout: 10000
+# EXP-123: iOS usually opens this app's page ("Photos" row), but the simulator can land on the Settings root instead
+# (step 1 covers that case). Accept either, as long as Settings was opened from this app: the root shows the
+# status-bar breadcrumb back to it ("Back to Expose Me" / "Volver a Expose Me").
 - runFlow:
     when:
       platform: iOS
     commands:
       - extendedWaitUntil:
-          visible: "Photos|Fotos"
+          visible: "Photos|Fotos|Settings|Ajustes"
           timeout: 10000
+- runFlow:
+    when:
+      platform: iOS
+      notVisible: "Photos|Fotos"
+    commands:
+      - assertVisible: "Settings|Ajustes"
+      - assertVisible: ".*Expose Me"

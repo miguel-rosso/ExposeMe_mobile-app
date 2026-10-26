@@ -132,7 +132,8 @@ export default {
   androidTapPermissions: 'Pulsa en "Permisos".',
   tapPhotosVideos: "Pulsa en acceso a Fotos y vídeos.",
   allowAllTime: 'Elige "Permitir todo" o "Seleccionar fotos".',
-  iosTapPhotosChooseAccess: 'Pulsa en "Fotos" y elige "Acceso total" o "Acceso limitado".',
+  iosTapPhotosChooseAccess:
+    'Si se abre la portada de Ajustes, ve a "Apps" > "Expose Me". Pulsa en "Fotos" y elige "Acceso total" o "Acceso limitado".',
   iosConfirmFullAccess: 'Si eliges "Acceso total", confírmalo con "Permitir acceso total".',
   back: "Volver",
   openSettings: "Abrir Ajustes",

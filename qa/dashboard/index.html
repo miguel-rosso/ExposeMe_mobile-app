@@ -518,8 +518,8 @@ dash.calc("by_type", {
   title: "Incidencias abiertas por tipo y severidad",
   description: "Incidencias abiertas, en curso y bloqueadas contadas por tipo y separadas por severidad.",
   fn: (issues) => {
-    const order = ["sync", "bug", "security", "perf", "ux", "test", "infra"];
-    const labels = { sync: "sincronización", bug: "bug", security: "seguridad", perf: "rendimiento", ux: "UX", test: "tests", infra: "infra" };
+    const order = ["sync", "bug", "security", "perf", "ux", "test", "infra", "cleanup"];
+    const labels = { sync: "sincronización", bug: "bug", security: "seguridad", perf: "rendimiento", ux: "UX", test: "tests", infra: "infra", cleanup: "limpieza" };
     const active = issues.filter((i) => ["open", "in-progress", "blocked"].includes(i.status));
     return order
       .map((type) => {

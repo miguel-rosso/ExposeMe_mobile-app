@@ -17,7 +17,7 @@ const sevRank = { critical: 0, high: 1, medium: 2, low: 3 };
 const ES = {
   critical: "crítica", high: "alta", medium: "media", low: "baja",
   open: "abierta", "in-progress": "en curso", blocked: "bloqueada", fixed: "resuelta", verified: "verificada", wontfix: "descartada",
-  sync: "sincronización", bug: "bug", security: "seguridad", perf: "rendimiento", ux: "UX", test: "tests", infra: "infra",
+  sync: "sincronización", bug: "bug", security: "seguridad", perf: "rendimiento", ux: "UX", test: "tests", infra: "infra", cleanup: "limpieza",
   server: "servidor", client: "cliente", both: "ambos", lab: "laboratorio", pass: "OK", fail: "fallo",
 };
 const es = (v) => ES[v] ?? v;

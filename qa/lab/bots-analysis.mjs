@@ -16,6 +16,9 @@ const MAX_PAUSES = 3; // counted pauses per game
 const MAX_TOTAL_PAUSES = 10; // pauses per game, counted or refunded
 const PAUSE_GRACE_MS = 10_000; // a pause resumed sooner is refunded (not counted)
 const GRACE_SLACK_MS = 500; // near PAUSE_GRACE_MS, network latency decides: accept both
+// Answer grace, as in Server/managers/GameEngine.ts (GAME_FLOW.md; bots-cli.test.sh checks the copy): round-start
+// announces ANSWER_GRACE_MS less than the server's answer timer, which keeps taking answers until it fires
+const ANSWER_GRACE_MS = 300;
 
 // Phase events every player receives (keyed by round), and the events that ended a bot's stay in the room
 const SYNCED_EVENTS = ["round-start", "round-reveal", "round-scores", "game-over", "game-started"];
@@ -444,12 +447,15 @@ function checkKickedBot(r, name) {
 /** Round numbers run 1, 2, 3… with no gap. */
 const checkRoundNumbering = (ctx) => ctx.roundsSeen.flatMap((n, i) => (n !== i + 1 ? [`round numbering gap: expected ${i + 1}, got ${n}`] : []));
 
-/** How much later than its duration each round-start's answering phase ended (round-reveal), per bot and round. */
+/**
+ * How much later than the server's answer timer (round-start's duration plus the answer grace) each answering phase
+ * ended (round-reveal), per bot and round.
+ */
 function answerPhaseOverruns(ctx) {
   const gaps = [];
   for (const s of ctx.starts) {
     const rv = ctx.reveals.find((x) => x.bot === s.bot && x.round === s.round);
-    if (rv) gaps.push(rv.t - s.t - s.payload.duration);
+    if (rv) gaps.push(rv.t - s.t - (s.payload.duration + ANSWER_GRACE_MS));
   }
   return gaps;
 }

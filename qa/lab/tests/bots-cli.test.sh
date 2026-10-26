@@ -99,6 +99,7 @@ mirrors managers/RoomManager.ts "$BOTS" QA_ROUNDS QA_ROUNDS
 mirrors managers/GameEngine.ts "$ANALYSIS" MAX_PAUSES MAX_PAUSES
 mirrors managers/GameEngine.ts "$ANALYSIS" MAX_TOTAL_PAUSES MAX_TOTAL_PAUSES
 mirrors managers/GameEngine.ts "$ANALYSIS" PAUSE_GRACE_MS PAUSE_GRACE
+mirrors managers/GameEngine.ts "$ANALYSIS" ANSWER_GRACE_MS ANSWER_GRACE
 mirrors routes/socketRoutes.ts "$BOTS" MAX_USERNAME_LENGTH MAX_USERNAME_LENGTH
 
 # ── --leave-round / --kick: players out of the room (EXP-139) ──

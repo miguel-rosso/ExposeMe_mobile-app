@@ -103,7 +103,6 @@ export default {
   step3: "Paso 3",
   step4: "Paso 4",
   step5: "Paso 5",
-  tapAllow: "Pulsa Permitir.",
   tapAllowAll: "Permite el acceso a todas tus fotos o solo a las que selecciones.",
   continue_: "Continuar",
   tapToProceed: "Pulsa para continuar tras configurar los permisos",

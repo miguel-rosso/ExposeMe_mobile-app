@@ -2,13 +2,11 @@ import React from "react";
 import { View, Text, TouchableOpacity, Image, Dimensions, Platform, StatusBar, ScrollView } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import tw from "twrnc";
-import AudioPermissionIMG from "@/assets/images/audioPermissionIMG.jpg";
 import GalleryPermissionIMG from "@/assets/images/galleryPermissionIMG.jpg";
 import PermissionRequestIOS from "@/assets/images/PermissionRequestIOS.jpg";
 import FingerAnimation from "@/assets/animations/FingerAnimation.json";
 import { useRouter } from "expo-router";
 import { usePhotoContext } from "@/app/providers/PhotoContext";
-import CustomCarousel from "@/app/components/CustomCarousel/CustomCarousel";
 import LottieView from "lottie-react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useI18n } from "../i18n";
@@ -30,10 +28,8 @@ const InitialScreen: React.FC = () => {
     router.replace("/");
   };
 
-  const androidImages = [
-    { id: 1, source: AudioPermissionIMG, title: t.step1, description: t.tapAllow },
-    { id: 2, source: GalleryPermissionIMG, title: t.step2, description: t.tapAllowAll },
-  ];
+  // The app only asks for photos (audio/video are blocked in app.json): one system dialog per platform
+  const permissionDialogImage = Platform.OS === "android" ? GalleryPermissionIMG : PermissionRequestIOS;
 
   // Calculate responsive dimensions for images
   const imageWidth = screenWidth * 0.7;
@@ -73,39 +69,14 @@ const InitialScreen: React.FC = () => {
               </Text>
             </View>
 
-            {Platform.OS === "android" ? (
-              <View style={tw`p-3 items-center`}>
-                <CustomCarousel
-                  data={androidImages}
-                  renderItem={({ item }) => (
-                    <View
-                      style={[{ width: screenWidth * 0.8, alignItems: "center", justifyContent: "center", paddingVertical: 10 }]}
-                    >
-                      <View style={tw`bg-gray-700 rounded-lg overflow-hidden shadow-lg mb-3 p-1 border border-gray-600`}>
-                        <Image source={item.source} style={{ width: imageWidth, height: imageHeight }} resizeMode="contain" />
-                      </View>
-                      <Text style={tw`text-base font-bold text-gray-200 mb-1`}>{item.title}</Text>
-                      <Text style={tw`text-sm text-gray-400`}>{item.description}</Text>
-                    </View>
-                  )}
-                  disablePagination={false}
-                  widthBoundaryForPagination={screenWidth * 0.8}
-                  decelerationRate="fast"
-                  snapToInterval={screenWidth * 0.8}
-                  indicatorColor={["gray", "white", "gray"]}
-                  paginationContainerStyle={tw`mt-3`}
-                />
+            <View style={tw`p-3 items-center`}>
+              <View style={tw`bg-gray-700 rounded-lg overflow-hidden shadow-lg mb-3 p-1 border border-gray-600`}>
+                <Image source={permissionDialogImage} style={{ width: imageWidth, height: imageHeight }} resizeMode="contain" />
               </View>
-            ) : (
-              <View style={tw`p-3 items-center`}>
-                <View style={tw`bg-gray-700 rounded-lg overflow-hidden shadow-lg mb-3 p-1 border border-gray-600`}>
-                  <Image source={PermissionRequestIOS} style={{ width: imageWidth, height: imageHeight }} resizeMode="contain" />
-                </View>
-                <Text style={tw`text-sm text-gray-300 text-center`}>
-                  {t.tapAllowAll}
-                </Text>
-              </View>
-            )}
+              <Text style={tw`text-sm text-gray-300 text-center`}>
+                {t.tapAllowAll}
+              </Text>
+            </View>
           </View>
 
           {/* Continue button and animation */}

@@ -103,7 +103,6 @@ export default {
   step3: "Step 3",
   step4: "Step 4",
   step5: "Step 5",
-  tapAllow: "Tap on Allow.",
   tapAllowAll: "Allow access to all your photos or only to the ones you select.",
   continue_: "Continue",
   tapToProceed: "Tap to proceed after setting permissions",

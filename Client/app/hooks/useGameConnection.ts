@@ -8,7 +8,7 @@ interface GameConnectionOptions {
   username: string | null;
   getRejoinToken: (gameCode: string, username: string) => Promise<string | null>;
   saveRejoinToken: (gameCode: string, username: string, token: string) => void;
-  /** We can't get back into the game (kicked, room gone, rejoin refused): leave the game screen */
+  /** We can't get back into the game (kicked, room gone, rejoin or connection refused): leave the game screen */
   onLeave: (message?: string) => void;
 }
 
@@ -44,6 +44,12 @@ export const useGameConnection = ({ socket, gameCode, username, getRejoinToken, 
       else console.log(`[GAME] Socket disconnected (${reason}) — waiting to reconnect`);
     };
 
+    // The server refused the connection itself (e.g. "Too many connections"): socket.io won't retry that, so the
+    // "Reconnecting…" indicator would stay forever. Network errors leave the socket active and it keeps retrying.
+    const onConnectError = (err: Error) => {
+      if (!socket.active) latest.current.onLeave(err.message);
+    };
+
     const onRoomOfGame = (data: RoomOfGameResponse) => {
       const { username: name, onLeave: leave, saveRejoinToken: save } = latest.current;
       if (!data.success) { leave(data.message); return; }
@@ -52,10 +58,12 @@ export const useGameConnection = ({ socket, gameCode, username, getRejoinToken, 
 
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
+    socket.on("connect_error", onConnectError);
     socket.on("room-of-game", onRoomOfGame);
     return () => {
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
+      socket.off("connect_error", onConnectError);
       socket.off("room-of-game", onRoomOfGame);
     };
   }, [socket]);

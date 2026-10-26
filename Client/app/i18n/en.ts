@@ -42,6 +42,17 @@ export default {
   errorSelectingImage: "There was an error selecting your image.",
   shareMessage: "Join my ExposeMe game!\n",
 
+  // Server errors (see app/utils/serverMessage.ts)
+  serverErrorTooManyAttempts: "Too many attempts. Wait a moment and try again.",
+  serverErrorTooManyConnections: "Too many connections from this network. Try again in a moment.",
+  serverErrorInvalidUsername: "That name isn't valid. Try a different one.",
+  serverErrorGameNotFound: "Game not found. Check the code and try again.",
+  serverErrorGameAlreadyStarted: "This game has already started.",
+  serverErrorUsernameTaken: "That name is already taken in this game. Choose another one.",
+  serverErrorRoomFull: "This game is full.",
+  serverErrorServerBusy: "The server is busy. Try again in a moment.",
+  serverErrorUnknown: "Something went wrong. Try again.",
+
   // GameScreen
   areYouReady: "ARE YOU READY?",
   holdPhoto: "Hold photo",

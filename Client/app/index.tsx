@@ -35,6 +35,7 @@ import LanguageToggle from "./components/LanguageToggle";
 import { TEST_IDS } from "./utils/testIds";
 import { handleHomeBackPress } from "./utils/homeBackPress";
 import { isRoomCode, sanitizeRoomCodeInput } from "./utils/roomCode";
+import { translateServerMessage } from "./utils/serverMessage";
 
 SplashScreen.preventAutoHideAsync();
 // Animaciones personalizadas para React Native Animatable
@@ -216,8 +217,10 @@ const Index = () => {
     checkInitialScreen();
     loadUsername();
 
-    if (message) {
-      alert(message);
+    // The server's reason for sending us home (room-of-game refusal, connection refused), in our language
+    const serverMessage = Array.isArray(message) ? message[0] : message;
+    if (serverMessage) {
+      alert(translateServerMessage(serverMessage, t));
     }
   }, []);
 

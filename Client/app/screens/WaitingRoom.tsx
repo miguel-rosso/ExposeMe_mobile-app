@@ -274,6 +274,12 @@ const WaitingRoom = ({}) => {
       socket.emit("join-create-game", { gameCode: code, username, ...(rejoinToken ? { rejoinToken } : {}) });
     };
 
+    // Back to the home screen, which shows the server's reason in the user's language
+    const leaveWithServerMessage = (message?: string) => {
+      endSocket();
+      navigation.replace({ pathname: "/", params: { message } });
+    };
+
     // Remove all previous listeners to avoid duplicates
     socket.removeAllListeners();
 
@@ -282,13 +288,20 @@ const WaitingRoom = ({}) => {
       doJoin();
     });
 
+    // The server refused the connection itself (e.g. "Too many connections"): socket.io won't retry that, so the
+    // loading screen would spin forever. Network errors leave the socket active and it keeps retrying on its own.
+    socket.on("connect_error", (err: Error) => {
+      if (socket.active) return;
+      setIsLoading(false);
+      leaveWithServerMessage(err.message);
+    });
+
     socket.on("room-of-game", (data: RoomOfGameResponse) => {
       const { rejoinToken: _token, ...loggable } = data;
       console.log("Room data:", loggable);
       setIsLoading(false);
       if (!data.success) {
-        endSocket();
-        navigation.replace({ pathname: "/", params: { message: data.message } });
+        leaveWithServerMessage(data.message);
       } else if (data.room) {
         joinedRef.current = true;
         bindingRef.current = { gameCode: data.room.gameCode, rejoinToken: data.rejoinToken };

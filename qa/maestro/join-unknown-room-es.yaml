@@ -1,0 +1,80 @@
+# EXP-180 / EXP-036: server refusals are shown in the user's language. With the UI in Spanish, joining a
+# well-formed code that matches no room sends the player home with the server's "Game not found", which must
+# read "No se ha encontrado la partida…" (never the raw English text). The app must already be on the home
+# screen (run open-app.yaml first); the language is restored at the end if this flow switched it.
+# No bots or room needed, so run it directly rather than through `lab.sh play`:
+#   ~/.maestro/bin/maestro --device <id> test qa/maestro/join-unknown-room-es.yaml -e USERNAME=<label>
+# env: USERNAME
+appId: com.socketNull.ExposeMe
+---
+- extendedWaitUntil:
+    visible:
+      id: "join-game-button"
+    timeout: 30000
+# Switch to Spanish when the device language is English, and remember to switch back
+- runFlow:
+    when:
+      visible: "Join Game"
+    commands:
+      - tapOn:
+          id: "language-toggle"
+      - evalScript: ${output.switchedToSpanish = true}
+- extendedWaitUntil:
+    visible: "Unirse a Partida"
+    timeout: 5000
+# Same name entry as join-room.yaml (clear a saved name, retype once if the field lost it)
+- tapOn:
+    id: "username-clear-button"
+    optional: true
+- tapOn:
+    id: "username-input"
+- inputText: ${USERNAME}
+- runFlow:
+    when:
+      notVisible:
+        id: "username-input"
+        text: "${USERNAME}"
+    commands:
+      - tapOn:
+          id: "username-input"
+      - inputText: ${USERNAME}
+# Submit instead of hideKeyboard (see join-room.yaml)
+- pressKey: Enter
+- tapOn:
+    id: "join-game-button"
+- runFlow:
+    when:
+      visible:
+        id: "game-code-input"
+        text: "[A-Z0-9]+"
+    commands:
+      - doubleTapOn:
+          id: "game-code-input"
+      - eraseText: 12
+- tapOn:
+    id: "game-code-input"
+# Well-formed (room-code alphabet, 6 characters) but not a live room
+- inputText: "ZZZZZZ"
+- pressKey: Enter
+- tapOn:
+    id: "search-room-button"
+# Back on the home screen with the system alert, translated
+- extendedWaitUntil:
+    visible: "No se ha encontrado la partida.*"
+    timeout: 30000
+- assertNotVisible: "Game not found"
+- takeScreenshot: unknown-room-es-${USERNAME}
+- tapOn: "OK|Aceptar"
+- extendedWaitUntil:
+    visible:
+      id: "join-game-button"
+    timeout: 10000
+- runFlow:
+    when:
+      true: ${output.switchedToSpanish}
+    commands:
+      - tapOn:
+          id: "language-toggle"
+      - extendedWaitUntil:
+          visible: "Join Game"
+          timeout: 5000

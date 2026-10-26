@@ -54,6 +54,7 @@ export default {
   serverErrorGameNotFound: "No se ha encontrado la partida. Revisa el código e inténtalo de nuevo.",
   serverErrorGameAlreadyStarted: "Esta partida ya ha empezado.",
   serverErrorUsernameTaken: "Ese nombre ya está en uso en esta partida. Elige otro.",
+  serverErrorUsernameTooSimilar: "Ese nombre se parece demasiado al de otro jugador. Elige otro.",
   serverErrorRoomFull: "Esta partida está llena.",
   serverErrorServerBusy: "El servidor está ocupado. Inténtalo de nuevo en un momento.",
   serverErrorUnknown: "Algo ha ido mal. Inténtalo de nuevo.",

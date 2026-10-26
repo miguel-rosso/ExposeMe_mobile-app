@@ -234,7 +234,7 @@ if (!isLocalServerUrl(SERVER)) {
 const N_BOTS = Number(args.bots || 3);
 const N_ROOMS = Number(args.rooms || 1);
 // Bot names: [--name-prefix][r<room>- with --rooms > 1]bot<n>. The server refuses longer usernames
-// (Server/routes/socketRoutes.ts; qa/lab/tests/bots-cli.test.sh checks the copy matches)
+// (Server/managers/playerName.ts; qa/lab/tests/bots-cli.test.sh checks the copy matches)
 const MAX_USERNAME_LENGTH = 20;
 const NAME_PREFIX_RE = /^[A-Za-z0-9_-]+$/;
 const NAME_PREFIX = args["name-prefix"] ?? "";

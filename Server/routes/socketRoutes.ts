@@ -2,6 +2,7 @@ import { Socket } from "socket.io";
 import { io } from "../app";
 import { isAllowedRounds, RoomManager } from "../managers/RoomManager";
 import { GameEngine } from "../managers/GameEngine";
+import { isValidUsername, MAX_USERNAME_LENGTH } from "../managers/playerName";
 import { isRoomCode, normalizeRoomCode } from "../managers/roomCode";
 import { acceptsPlantedPhoto, setUploadRooms } from "../middlewares/uploadAccess";
 import { UploadRecord, uploadStore } from "../middlewares/uploadStore";
@@ -30,7 +31,6 @@ const chatCooldowns = new Map<string, number>();
 // submit-answer rate limit, per socket: token bucket of ANSWER_BURST refilled at ANSWER_RATE_PER_S
 const ANSWER_BURST = 10;
 const ANSWER_RATE_PER_S = 5;
-const MAX_USERNAME_LENGTH = 20;
 const MAX_CHAT_LENGTH = 100;
 // Per-IP limits (see managers/socketGuards): open sockets, and join attempts with a code that matches no room
 const connections = createConnectionCounter(MAX_CONNECTIONS_PER_IP);
@@ -211,7 +211,8 @@ io.on("connection", (socket: Socket) => {
 
       const username = data?.username;
       const rawCode = data?.gameCode;
-      if (typeof username !== "string" || !username.trim() || username.length > MAX_USERNAME_LENGTH) {
+      // No invisible characters; lookalikes of a player's name are refused by RoomManager.joinRoom (EXP-032)
+      if (!isValidUsername(username)) {
         socket.emit("room-of-game", { success: false, message: "Invalid username" });
         return;
       }

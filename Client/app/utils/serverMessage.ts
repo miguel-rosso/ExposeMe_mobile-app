@@ -20,6 +20,7 @@ const SERVER_MESSAGE_KEYS = {
   "Game not found": "serverErrorGameNotFound",
   "Game already started": "serverErrorGameAlreadyStarted",
   "Username already taken": "serverErrorUsernameTaken",
+  "Username too similar": "serverErrorUsernameTooSimilar",
   "Room is full": "serverErrorRoomFull",
   "Server is busy": "serverErrorServerBusy",
   [KICKED_BY_HOST_MESSAGE]: "kickedByHost",

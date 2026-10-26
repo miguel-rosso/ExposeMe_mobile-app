@@ -54,6 +54,7 @@ export default {
   serverErrorGameNotFound: "Game not found. Check the code and try again.",
   serverErrorGameAlreadyStarted: "This game has already started.",
   serverErrorUsernameTaken: "That name is already taken in this game. Choose another one.",
+  serverErrorUsernameTooSimilar: "That name looks too much like another player's. Choose another one.",
   serverErrorRoomFull: "This game is full.",
   serverErrorServerBusy: "The server is busy. Try again in a moment.",
   serverErrorUnknown: "Something went wrong. Try again.",

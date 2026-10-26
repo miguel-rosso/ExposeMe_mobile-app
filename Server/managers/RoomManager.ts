@@ -1,6 +1,7 @@
 import { randomBytes, timingSafeEqual } from "crypto";
 import { Player, PublicPlayer, Room, SafeRoom } from "../models/interfaces";
 import { uploadStore } from "../middlewares/uploadStore";
+import { nameClash, NameKeys, nameKeys } from "./playerName";
 import { randomRoomCode } from "./roomCode";
 
 const ROOM_CLEANUP_DELAY = 30 * 60 * 1000;
@@ -29,6 +30,8 @@ export function isAllowedRounds(rounds: unknown, env: NodeJS.ProcessEnv = proces
 export class RoomManager {
   private rooms = new Map<string, Room>();
   private roomTimeouts = new Map<string, NodeJS.Timeout>();
+  // Name keys per player, computed once: a join only computes the new name's keys (EXP-032)
+  private playerNameKeys = new WeakMap<Player, NameKeys>();
 
   createRoom(username: string, socketId: string): Room {
     const gameCode = this.generateRoomCode();
@@ -83,13 +86,11 @@ export class RoomManager {
     const room = this.rooms.get(gameCode);
     if (!room) return { success: false, message: "Game not found" };
 
-    // Re-join: same username reconnecting (e.g. after app background) — only with that player's token
-    const existing = room.players.find((p) => p.username === username);
-    if (existing && !this.tokenMatches(existing.rejoinToken, rejoinToken)) {
-      return { success: false, message: room.started ? "Game already started" : "Username already taken" };
-    }
-
-    if (existing) {
+    // Re-join: same username reconnecting (e.g. after app background) — only with that player's token and the exact
+    // stored name
+    const others = room.players.filter((p) => p.username !== replacing);
+    const existing = others.find((p) => p.username === username);
+    if (existing && this.tokenMatches(existing.rejoinToken, rejoinToken)) {
       this.cancelRoomDeletion(gameCode);
       existing.socketId = socketId; // Update socket ID
       existing.connected = true;
@@ -98,12 +99,29 @@ export class RoomManager {
     }
 
     if (room.started) return { success: false, message: "Game already started" };
-    const taken = room.players.filter((p) => p.username !== replacing).length;
-    if (taken >= MAX_PLAYERS_PER_ROOM) return { success: false, message: "Room is full" };
+    // Before comparing names, so a full room tells nothing about who is in it
+    if (others.length >= MAX_PLAYERS_PER_ROOM) return { success: false, message: "Room is full" };
+    // Another spelling of a player's name ("bob ", "Bob", "bob" with a Cyrillic o) is taken, even with that player's
+    // token; a different name that only reads alike in some fonts ("AIice", "Clara" next to "Dara") is too similar
+    const keys = nameKeys(username);
+    const clashes = others.map((p) => nameClash(this.nameKeysOf(p), keys));
+    if (clashes.includes("same")) return { success: false, message: "Username already taken" };
+    if (clashes.includes("similar")) return { success: false, message: "Username too similar" };
     this.cancelRoomDeletion(gameCode);
-    room.players.push(this.createPlayer(username, socketId, room.players.length === 0));
+    const player = this.createPlayer(username, socketId, room.players.length === 0);
+    this.playerNameKeys.set(player, keys);
+    room.players.push(player);
     if (room.players.length >= 2) room._hadGuests = true;
     return { success: true, room };
+  }
+
+  private nameKeysOf(player: Player): NameKeys {
+    let keys = this.playerNameKeys.get(player);
+    if (!keys) {
+      keys = nameKeys(player.username);
+      this.playerNameKeys.set(player, keys);
+    }
+    return keys;
   }
 
   /** `username` is a player of room `gameCode` and `rejoinToken` is theirs (a join would be a rejoin). */

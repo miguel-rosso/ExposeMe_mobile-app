@@ -17,6 +17,7 @@ describe("serverMessageKey", () => {
     ["Game not found", "serverErrorGameNotFound"],
     ["Game already started", "serverErrorGameAlreadyStarted"],
     ["Username already taken", "serverErrorUsernameTaken"],
+    ["Username too similar", "serverErrorUsernameTooSimilar"],
     ["Room is full", "serverErrorRoomFull"],
     ["Server is busy", "serverErrorServerBusy"],
     [KICKED_BY_HOST_MESSAGE, "kickedByHost"],
@@ -36,6 +37,16 @@ describe("translateServerMessage", () => {
   it("returns the Spanish text for Spanish translations", () => {
     expect(translateServerMessage("Too many attempts", es)).toBe(es.serverErrorTooManyAttempts);
     expect(translateServerMessage("Too many connections", es)).toBe(es.serverErrorTooManyConnections);
+  });
+
+  it("tells a name that is too similar apart from a taken one (EXP-032)", () => {
+    expect(translateServerMessage("Username too similar", es)).toBe(
+      "Ese nombre se parece demasiado al de otro jugador. Elige otro.",
+    );
+    expect(translateServerMessage("Username too similar", en)).toBe(
+      "That name looks too much like another player's. Choose another one.",
+    );
+    expect(translateServerMessage("Username too similar", es)).not.toBe(es.serverErrorUsernameTaken);
   });
 
   it("never returns the raw server text for unknown messages", () => {

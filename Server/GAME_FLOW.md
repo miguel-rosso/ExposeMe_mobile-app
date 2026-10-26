@@ -124,7 +124,48 @@ After last round: game-over
   over the limit the handshake gets **400** and the client's `connect_error` (socket.io reconnects with backoff). This
   bounds the sessions a browser can open without ever joining (e.g. with `<img>` tags, which send no `Origin`).
 - `join-create-game { gameCode, username, rejoinToken? }`: `gameCode: null` creates a room (sender is host).
-  `username` must be a string, 1–20 chars and not blank.
+  `username` (`managers/playerName.ts`) is free-form: any script, emoji, symbols, punctuation or ASCII art, also with
+  no letter at all (`¯\_(ツ)_/¯`, `(•_•)`, `<3 <3`, `🔥🔥`). It must be a string of 1–20 chars (UTF-16 units) and at
+  most 60 after NFKC (one Arabic ligature such as U+FDFA expands to 18 letters), not blank, with no combining mark at
+  the start (after any leading spaces) or on a trailing space, at most four combining marks in a row (Tibetan and
+  pointed Hebrew stack three; more is "Zalgo" text), and none of: controls, format characters (zero-width characters,
+  bidi overrides/isolates, BOM), default-ignorable characters (fillers, variation selectors, combining grapheme
+  joiner), private-use/unassigned code points, characters drawn blank (U+2800, U+16FE4, U+1D159, U+FFFC) or spaces
+  other than U+0020 (no-break, ideographic, em...). Allowed where they belong: inside an emoji the zero-width joiner
+  of a sequence (woman technologist), the emoji/text presentation selectors (red heart, keycaps) and the tags of a
+  subdivision flag (England); the zero-width joiner and non-joiner between two letters of Arabic, Syriac or the Indic
+  scripts and Sinhala (Persian half-space, Sinhala "Sri"). Letters that read as Latin (Latin ones, and those of other
+  scripts listed in the confusables table below), with their accents dropped, may not come from two of the
+  Latin-lookalike scripts (Latin, Greek, Cyrillic, Armenian, Cherokee, Lisu, Coptic), so `Dave` with a Greek nu,
+  `Mike` with a Cyrillic small ka, `Dave` with a Greek alpha with tonos or a Greek alpha with a Cyrillic be is
+  refused. Any other mix is free (`Li 李`, `Dave Ж`, `Σ(ﾟДﾟ)`, `(ノಠ益ಠ)ノ`). Otherwise: `"Invalid username"`. The name
+  is stored and sent to everyone **exactly as typed** (the app compares its own typed name with the room's names).
+- Names that read the same on screen can't share a room. Two keys are compared. `nameKey`: characters drawn like
+  ASCII letters or digits replaced by them (a table generated from UTS #39 `confusables.txt` covering every script,
+  symbol and spacing mark, plus the lowercase forms of letters it only lists as capitals, such as Cyrillic small ka;
+  `managers/asciiConfusables.ts`, regenerated with `scripts/generateAsciiConfusables.mjs`), then NFKC, combining
+  marks and accents dropped unless they sit on a space, the table again, case-folded, joiners dropped, whitespace
+  trimmed and collapsed. The table runs before NFKC too, so long s still reads as `f`. `visualKey`: the same, but
+  I / l / | / 1 read as `l`, then `rn` as `m`, `vv` as `w`, `cl` as `d` and `0` as `o`. Both keys are taken from the
+  name as stored and as drawn (`managers/displayOrder.ts`: the Unicode Bidirectional Algorithm via `bidi-js`, with
+  the direction of the first strong letter, whole grapheme clusters moved (a letter keeps its marks) and brackets
+  mirrored in right-to-left runs; so `Mi` followed by Hebrew samekh and vav, or by an Arabic-Indic five and a vav,
+  reads `Milo`). Stored order is compared with stored order and drawn order with drawn order, so a right-to-left
+  name never meets its own reversal. Each player's keys are computed once, when they join.
+  - Same `nameKey` = the **same name**: with `bob` in the room, `bob `, `Bob`, full-width `bob`, `bob` with a dot
+    below or `BOB` in Cyrillic capitals get `"Username already taken"`, and so do `Dave` written with a Latin small
+    capital A or in Cherokee letters, `ᗅlice` (Canadian Syllabics) or `A│ice` (box drawing) next to `Alice`, `Raſe`
+    next to `Rafe`, `Mike` in Cyrillic or Greek letters, `Bంb` (Telugu anusvara) next to `Bob`, `Mi` + Hebrew
+    samekh and vav next to `Milo`, and `(•_•) ` or full-width `<3` next to `(•_•)` or `<3`. This holds even with the
+    existing player's token: a rejoin needs the exact stored name.
+  - Only the same `visualKey` = a **different name that looks too alike**: `AIice` next to `Alice`, `b0b` next to
+    `bob`, and real names such as `Clara` next to `Dara` or `Arnie` next to `Amie` get `"Username too similar"`, so
+    the player knows the name isn't in use and only needs to differ more. Letters drawn like a capital I (Cyrillic
+    І, Arabic alef) have the prototype `l` in UTS #39, so next to a name with I they also get `"Username too
+    similar"` rather than `"Username already taken"`: both refuse the name.
+  - Checked in this order: a valid rejoin (exact stored name and its token) first; then `"Game already started"`
+    mid-game and `"Room is full"` at 12 players, **before** comparing names, so neither tells anything about the
+    names in the room; then the two answers above.
 - On success the server answers **only to that socket** with
   `room-of-game { success, room, rounds?, rejoinToken, hasPlantedPhoto }`. `hasPlantedPhoto` is the joining
   player's own planted-photo mark (never sent about anyone else). `rejoinToken` is a random secret per player
@@ -132,7 +173,8 @@ After last round: game-over
   AsyncStorage with the game code and username) to reconnect.
 - Joining with a username that already exists in the room is a **rejoin** and requires the matching
   `rejoinToken` (compared in constant time). Without it the join is rejected with
-  `"Username already taken"` (lobby) or `"Game already started"` (game in progress). A rejoin returns the
+  `"Username already taken"` (lobby; `"Room is full"` if the room has 12 players) or `"Game already started"` (game
+  in progress). A rejoin returns the
   same token, rebinds the player to the new socket and does not broadcast `player-joined`. Every other socket
   still bound to that player in the room (the replaced one, if still alive) is **evicted**: removed from the
   socket.io room, session cleared and disconnected, so it receives no more room events (e.g. photo URLs).

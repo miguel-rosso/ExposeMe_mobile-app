@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { RoomManager } from "../managers/RoomManager";
+import { MAX_PLAYERS_PER_ROOM, RoomManager } from "../managers/RoomManager";
 
 const ROOM_CLEANUP_DELAY = 30 * 60 * 1000;
 
@@ -81,6 +81,75 @@ describe("joinRoom", () => {
     room.started = true;
     expect(rm.joinRoom(room.gameCode, "bob", "sock-x")).toEqual({ success: false, message: "Game already started" });
     expect(rm.getPlayer(room.gameCode, "bob")!.socketId).toBe("sock-bob");
+  });
+
+  // EXP-032: a name that reads the same as a player's on screen is that player's name
+  it.each([
+    ["trailing space", "bob", "bob "],
+    ["case variant", "bob", "Bob"],
+    ["Cyrillic o", "bob", "b\u043Eb"],
+    ["full-width", "bob", "\uFF42\uFF4F\uFF42"],
+    ["accent", "Jose", "Jos\u00E9"],
+    ["Latin small capital", "Dave", "D\u1D00ve"],
+    ["Cherokee", "Dave", "\u13A0\u13AA\u13D9\u13AC"],
+    ["box-drawing line as l", "Alice", "A\u2502ice"],
+    ["long s as f", "Rafe", "Ra\u017Fe"],
+    ["all-Cyrillic with small ka", "Mike", "\u041C\u0456\u043A\u0435"],
+    ["Hebrew drawn reversed", "Milo", "Mi\u05E1\u05D5"],
+    ["kaomoji with a trailing space", "(\u2022_\u2022)", "(\u2022_\u2022) "],
+  ])("refuses another spelling of an existing name (%s), even with that player's token", (_label, existing, lookalike) => {
+    const room = rm.createRoom("host", "sock-host");
+    rm.joinRoom(room.gameCode, existing, "sock-existing");
+    const existingToken = rm.getPlayer(room.gameCode, existing)!.rejoinToken;
+    for (const token of [undefined, existingToken]) {
+      expect(rm.joinRoom(room.gameCode, lookalike, "sock-x", token)).toEqual({ success: false, message: "Username already taken" });
+    }
+    room.started = true;
+    expect(rm.joinRoom(room.gameCode, lookalike, "sock-x")).toEqual({ success: false, message: "Game already started" });
+    expect(room.players.map((p) => p.username)).toEqual(["host", existing]);
+    expect(rm.getPlayer(room.gameCode, existing)!.socketId).toBe("sock-existing");
+  });
+
+  it.each([
+    ["capital I as l", "Alice", "AIice"],
+    ["rn as m", "Mike", "rnike"],
+    ["cl as d", "Dara", "Clara"],
+    ["Arabic alef as I (UTS #39 reads it as l)", "XI", "X\u0627"],
+  ])("refuses a name that only looks like an existing one (%s) as too similar", (_label, existing, lookalike) => {
+    const room = rm.createRoom("host", "sock-host");
+    rm.joinRoom(room.gameCode, existing, "sock-existing");
+    const existingToken = rm.getPlayer(room.gameCode, existing)!.rejoinToken;
+    for (const token of [undefined, existingToken]) {
+      expect(rm.joinRoom(room.gameCode, lookalike, "sock-x", token)).toEqual({ success: false, message: "Username too similar" });
+    }
+    room.started = true;
+    expect(rm.joinRoom(room.gameCode, lookalike, "sock-x")).toEqual({ success: false, message: "Game already started" });
+    expect(room.players.map((p) => p.username)).toEqual(["host", existing]);
+  });
+
+  it("still admits distinct names and rejoins with the exact stored name", () => {
+    const room = rm.createRoom("bob ", "sock-bob");
+    expect(rm.joinRoom(room.gameCode, "rob", "sock-rob").success).toBe(true);
+    expect(rm.joinRoom(room.gameCode, "bobby", "sock-bobby").success).toBe(true);
+    const token = room.players[0].rejoinToken;
+    expect(rm.joinRoom(room.gameCode, "bob ", "sock-bob-2", token)).toMatchObject({ success: true, rejoin: true });
+    expect(room.players.map((p) => p.username)).toEqual(["bob ", "rob", "bobby"]);
+  });
+
+  it("answers a full room before comparing names, and still lets its players rejoin", () => {
+    const room = rm.createRoom("bob", "sock-0");
+    for (let i = 1; i < MAX_PLAYERS_PER_ROOM; i++) rm.joinRoom(room.gameCode, `player${i}`, `sock-${i}`);
+    for (const name of ["Bob", "b0b", "carol"]) {
+      expect(rm.joinRoom(room.gameCode, name, "sock-x")).toEqual({ success: false, message: "Room is full" });
+    }
+    const token = room.players[0].rejoinToken;
+    expect(rm.joinRoom(room.gameCode, "bob", "sock-0b", token)).toMatchObject({ success: true, rejoin: true });
+  });
+
+  it("lets a socket switch to a lookalike of its own name (the replaced slot doesn't count)", () => {
+    const room = rm.createRoom("alice", "sock-alice");
+    rm.joinRoom(room.gameCode, "bob", "sock-bob");
+    expect(rm.joinRoom(room.gameCode, "Bob", "sock-bob", undefined, "bob")).toMatchObject({ success: true });
   });
 });
 

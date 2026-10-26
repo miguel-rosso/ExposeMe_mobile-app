@@ -88,6 +88,10 @@ describe("E2E testIDs (EXP-008)", () => {
       lobbyPlayerOfflineId("bot2"),
       lobbyPlayerOfflineId("${USERNAME}"),
       "never-shown-linger-wait",
+      // EXP-206 invite-link-after-game flow: the linked room's own players, and nobody offline there
+      lobbyPlayerId("bot3"),
+      lobbyPlayerId("${USERNAME}"),
+      lobbyPlayerOfflineId(".*"),
       roundsOptionId(0).replace("0", ".*"),
       // EXP-085 tie flow: the device user and a bot
       ...["${USERNAME}", "bot1"].flatMap((u) => [winnerNameId(u), finalWinnerId(u), finalRankId(u)]),

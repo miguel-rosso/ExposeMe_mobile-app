@@ -1,0 +1,67 @@
+# EXP-206: an invite link always wins over the room left from a previous game. The device plays a short game in room A,
+# taps "Play again" (back in A's lobby, socket still bound to A), then opens the invite deep link of room B: it must
+# leave A and land in B's lobby (B's code, B's players), not rejoin A. Before the fix the lobby ignored the link
+# while GameContext still held A's code.
+# Room A has 2 bots and room B 3 (bot names repeat across bots.mjs processes, but each room is separate on the
+# server): lobby-player-bot3 only exists in B. A's bots record the device's player-left when it switches rooms.
+# lab.sh play only passes GAME_CODE, so this flow runs by hand (two bots.mjs processes + maestro), from the repo root
+# against the lab server (never production):
+#   1. Room B: 3 bots that only wait in the lobby (5 players never arrive, so it never starts; the run ends by
+#      --timeout, which bots.mjs reports as a timeout error: expected here)
+#        node qa/lab/bots.mjs --server http://localhost:3000 --bots 3 --host --wait-players 5 --timeout 900 \
+#          --photos qa/runs/photos/bots --out qa/runs/invite-b.json --code-file qa/runs/invite-b.code &
+#   2. Room A: 2 bots that start once the device joins, play 3 rounds and wait in the lobby again after game over
+#        node qa/lab/bots.mjs --server http://localhost:3000 --bots 2 --host --rounds 3 --wait-players 3 \
+#          --play-again-linger 60 --play-again-linger-bot 0 \
+#          --photos qa/runs/photos/bots --out qa/runs/invite-a.json --code-file qa/runs/invite-a.code &
+#   3. maestro --device <id> test qa/maestro/invite-link-after-game.yaml \
+#        -e GAME_CODE="$(cat qa/runs/invite-a.code)" -e NEW_CODE="$(cat qa/runs/invite-b.code)" \
+#        -e USERNAME=<label> -e METRO_URL=http%3A%2F%2Flocalhost%3A8081
+# env: GAME_CODE (room A), NEW_CODE (room B), USERNAME, METRO_URL (url-encoded)
+# Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
+appId: com.socketNull.ExposeMe
+---
+- runFlow: open-app.yaml
+- runFlow: join-room.yaml
+- runFlow: play-rounds.yaml
+- runFlow: play-again.yaml
+# Back in room A's lobby: the app still remembers A
+- extendedWaitUntil:
+    visible:
+      id: "lobby-game-code"
+      text: "${GAME_CODE}"
+    timeout: 20000
+- assertNotVisible:
+    id: "lobby-player-bot3"
+- takeScreenshot: invite-old-lobby-${USERNAME}
+# The invite link the server's /join/<code> page redirects to (Server/routes/uploadRoutes.ts)
+- openLink: "myapp://screens/WaitingRoom?code=${NEW_CODE}"
+# iOS 26+/Xcode 27 simulators confirm custom-scheme links with a system alert
+- runFlow:
+    when:
+      platform: iOS
+      visible: "Open in Expose Me\\?|¿Abrir en Expose Me\\?"
+    commands:
+      - tapOn: "Open|Abrir"
+# Room B's lobby, not A's
+- extendedWaitUntil:
+    visible:
+      id: "lobby-game-code"
+      text: "${NEW_CODE}"
+    timeout: 30000
+- extendedWaitUntil:
+    visible:
+      id: "lobby-player-bot3"
+    timeout: 20000
+- assertVisible:
+    id: "lobby-player-bot1"
+- assertVisible:
+    id: "lobby-player-${USERNAME}"
+- assertNotVisible:
+    id: "lobby-player-offline-.*"
+# B's host is bot1: the device is a guest here
+- assertVisible:
+    id: "lobby-waiting"
+- assertNotVisible:
+    id: "start-game-button"
+- takeScreenshot: invite-new-lobby-${USERNAME}

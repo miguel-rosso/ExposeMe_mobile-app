@@ -219,15 +219,6 @@ const WaitingRoom = ({}) => {
     }
   };
 
-  // If opened via the invite deep link, join its room (a malformed code is ignored)
-  useEffect(() => {
-    const linkedCode = parseRoomCodeParam(deepLinkCode);
-    if (linkedCode && !gameCode) {
-      console.log("Deep link code:", linkedCode);
-      setGameCode(linkedCode);
-    }
-  }, [deepLinkCode]);
-
   // Ref always holds current gameCode (avoids stale closures)
   const gameCodeRef = useRef(gameCode);
   useEffect(() => { gameCodeRef.current = gameCode; }, [gameCode]);
@@ -237,10 +228,39 @@ const WaitingRoom = ({}) => {
   // Set when we enter a game that was already running (rejoin via "Join" after closing the app)
   const resyncOnLeaveRef = useRef(false);
 
-  // Start socket once on mount
+  // Leave the current room for good (Exit, or an invite link to another room): the server removes us and hands the
+  // host role over, and the rejoin token for that room is forgotten
+  const leaveRoom = () => {
+    if (socket) socket.emit("leave-room");
+    clearRejoinToken();
+    endSocket();
+  };
+
+  // Forget everything this lobby showed for the previous room (an invite link can switch rooms in place)
+  const resetLobbyState = () => {
+    setPlayers([]);
+    setChatMessages([]);
+    setServerPlanted(false);
+    joinedRef.current = false;
+    bindingRef.current = null;
+  };
+
+  // On mount, and whenever an invite deep link (re)opens this screen: a linked room always wins over the code left
+  // from a previous game. If the socket is still bound to that room, leave it first; a code without a socket (e.g.
+  // typed on Home) binds nothing, and its stored rejoin token may well belong to the linked room, so it is kept.
+  // A malformed code is ignored. Then start (or reuse) the socket.
   useEffect(() => {
+    const linkedCode = parseRoomCodeParam(deepLinkCode);
+    if (linkedCode && linkedCode !== gameCodeRef.current) {
+      console.log("Deep link code:", linkedCode);
+      if (gameCodeRef.current && socket) leaveRoom();
+      resetLobbyState();
+      // Set synchronously: the join below may run in this same commit, before the state update lands
+      gameCodeRef.current = linkedCode;
+      setGameCode(linkedCode);
+    }
     startSocket();
-  }, []);
+  }, [deepLinkCode]);
 
   // Single effect: setup listeners, join room, handle reconnect
   useEffect(() => {
@@ -344,9 +364,7 @@ const WaitingRoom = ({}) => {
   }, [socket, username]);
 
   const handleLeaveGame = () => {
-    if (socket) socket.emit("leave-room");
-    clearRejoinToken();
-    endSocket();
+    leaveRoom();
     navigation.replace("/");
   };
 

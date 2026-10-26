@@ -34,6 +34,7 @@ class FakeSocket {
 
 const mockReplace = jest.fn();
 const mockEndSocket = jest.fn();
+const mockSetPlanted = jest.fn();
 const mockSocket = new FakeSocket();
 const mockPickGamePhoto = jest.fn();
 const mockWinnerProps: { visible?: boolean }[] = [];
@@ -43,6 +44,7 @@ jest.mock("../app/providers/GameContext", () => ({
     username: "bob", gameCode: "123456", socket: mockSocket, endSocket: mockEndSocket,
     playersProvider: [], setPlayersProvider: jest.fn(), roundsOfGame: 10, plantedPhotoUri: null,
     plantedPhotoSent: false, plantPhoto: jest.fn(), getRejoinToken: async () => "tok-123", saveRejoinToken: jest.fn(),
+    setPlantedPhotoUri: mockSetPlanted,
   }),
 }));
 jest.mock("../app/providers/PhotoContext", () => ({
@@ -69,6 +71,8 @@ beforeAll(() => {
 afterAll(() => jest.restoreAllMocks());
 beforeEach(() => {
   mockEndSocket.mockClear();
+  mockReplace.mockClear();
+  mockSetPlanted.mockClear();
   mockSocket.disconnect.mockClear();
   mockPickGamePhoto.mockReset();
   mockWinnerProps.length = 0;
@@ -119,5 +123,43 @@ describe("GameScreen at game over (EXP-172)", () => {
     expect(mockSocket.handlers.get("your-turn")?.size).toBe(1);
     act(() => r.unmount());
     expect(mockSocket.handlers.has("your-turn")).toBe(false);
+  });
+});
+
+// EXP-184 (DEC-018 A): a player still on the final screens is taken into the next game as soon as the host starts it,
+// through the same path as "Play again" (lobby rejoin on this socket -> snapshot -> fresh game screen -> im-ready)
+describe("GameScreen final screens when the next game starts (EXP-184)", () => {
+  it("game-started takes me to the lobby hand-over at once, once, dropping the old planted photo", async () => {
+    const r = await mountAndEndGame();
+    expect(mockReplace).not.toHaveBeenCalled();
+    act(() => {
+      mockSocket.fire("game-started", [{ username: "bob" }, { username: "ana" }], 10);
+      mockSocket.fire("game-started", [{ username: "bob" }, { username: "ana" }], 10);
+    });
+    expect(mockReplace).toHaveBeenCalledTimes(1);
+    expect(mockReplace).toHaveBeenCalledWith("/screens/WaitingRoom");
+    expect(mockSetPlanted).toHaveBeenCalledWith(null);
+    expect(mockEndSocket).not.toHaveBeenCalled();
+    act(() => r.unmount());
+    expect(mockSocket.handlers.has("game-started")).toBe(false);
+    expect(mockSocket.handlers.has("game-state")).toBe(false);
+  });
+
+  it("a snapshot of a started game (reconnected while on the final screens) also joins the next game", async () => {
+    const r = await mountAndEndGame();
+    act(() => mockSocket.fire("game-state", { started: false, phase: null, scores: finalScore, players: [] }));
+    expect(mockReplace).not.toHaveBeenCalled();
+    act(() => mockSocket.fire("game-state", { started: true, phase: null, round: 0, totalRounds: 10, scores: [], players: [] }));
+    expect(mockReplace).toHaveBeenCalledWith("/screens/WaitingRoom");
+    act(() => r.unmount());
+  });
+
+  it("game-started during the game itself (never sent by the server then) does not navigate", async () => {
+    let r!: TestRenderer.ReactTestRenderer;
+    await act(async () => { r = TestRenderer.create(<GameScreen />); });
+    await flush();
+    act(() => mockSocket.fire("game-started", [], 10));
+    expect(mockReplace).not.toHaveBeenCalled();
+    act(() => r.unmount());
   });
 });

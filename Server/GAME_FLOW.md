@@ -176,10 +176,12 @@ After last round: game-over
   The app keeps its socket open through `game-over` and the winner / final screens (the player stays connected
   and in the room, so lingering there never makes it "gone" nor hands the host role over): "Play again" re-sends
   `join-create-game` on that same socket (the no-op rejoin above), "Exit" sends `leave-room` and closes it. The
-  finished game screen stops listening to game events, so a next game started meanwhile only reaches that player
-  once it is back in the lobby (`game-state` snapshot → game screen). Until then it answers any `your-turn` at once
-  with `photo-unavailable { round, attempt }` (it never picks a photo from there), so the room is not kept waiting
-  the 15 s photo timeout for it (interim behaviour; what a lingering player should do in the next game is DEC-018).
+  finished game screen stops listening to game events. **A next game started meanwhile takes the player in at once**
+  (DEC-018 A): on `game-started` (or a `game-state` with `started: true`, e.g. after a reconnect) the final screens do
+  what "Play again" does: back to the lobby, which re-sends `join-create-game` on the same socket, gets the snapshot
+  of the started game and opens a fresh game screen that sends `im-ready`, so the ready phase is not left waiting the
+  10 s `READY_TIMEOUT` for it. Should a `your-turn` still reach the final screens before that hand-over, it is
+  answered at once with `photo-unavailable { round, attempt }` (no photo is ever picked from there).
 - **Public player data.** Every player object sent to clients (`player-joined`, `game-started`, `new-host`,
   `player-removed`, `room-of-game.room.players`, `game-state.players`) is built by one allowlist
   (`RoomManager.publicPlayer`): `{ username, points, isHost, connected, lastGuess,

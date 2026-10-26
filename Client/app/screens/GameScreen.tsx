@@ -50,7 +50,7 @@ const GameScreen = () => {
   const { t } = useI18n();
   const {
     username, gameCode, socket, playersProvider, setPlayersProvider, roundsOfGame, plantedPhotoUri,
-    plantedPhotoSent, plantPhoto, getRejoinToken, saveRejoinToken,
+    plantedPhotoSent, plantPhoto, getRejoinToken, saveRejoinToken, setPlantedPhotoUri,
   } = useGameContext();
   const safeUsername = username ?? "";
   const safeGameCode = gameCode ?? "";
@@ -194,8 +194,21 @@ const GameScreen = () => {
     if (gameOverRef.current) return;
     gameOverRef.current = true;
     GAME_EVENTS.forEach((ev) => socket?.off(ev));
-    // Still in the room on the final screens: if a next game picks me, say at once there is no photo so nobody waits
-    // the 15 s photo timeout for me (the photo is never picked from here). Removed with GAME_EVENTS on unmount.
+    // Still in the room on the final screens: when the host starts the next game, join it at once (DEC-018 A), the
+    // same way "Play again" does: the lobby rejoins on this socket, gets the started game's snapshot and opens a fresh
+    // game screen, which sends im-ready. A snapshot of a started game (I reconnected meanwhile) means the same thing.
+    let joiningNext = false;
+    const joinNextGame = () => {
+      if (joiningNext) return;
+      joiningNext = true;
+      console.log("[GAME] next game started from the final screens — joining it");
+      setPlantedPhotoUri(null); // planted for the game that ended
+      router.replace("/screens/WaitingRoom");
+    };
+    socket?.on("game-started", joinNextGame);
+    socket?.on("game-state", (snap: GameStateSnapshot) => { if (snap?.started) joinNextGame(); });
+    // Until then, if the next game picks me, say at once there is no photo so nobody waits the 15 s photo timeout
+    // (the photo is never picked from here). Removed with GAME_EVENTS on unmount.
     socket?.on("your-turn", (turn: YourTurnData) => {
       socket.emit("photo-unavailable", { round: turn?.round, attempt: turn?.attempt });
     });
@@ -403,7 +416,8 @@ const GameScreen = () => {
 
     return () => {
       GAME_EVENTS.forEach((ev) => socket.off(ev));
-      socket.off("game-over"); socket.off("player-left"); socket.off("player-removed"); socket.off("new-host");
+      socket.off("game-over"); socket.off("game-started"); socket.off("player-left"); socket.off("player-removed");
+      socket.off("new-host");
       // The socket is not ended here: "Play again" reuses it (the lobby rejoins on the same socket); leaving for
       // home ends it there (Exit, or the home screen on focus)
     };

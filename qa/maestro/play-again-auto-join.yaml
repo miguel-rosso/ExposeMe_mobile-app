@@ -1,0 +1,31 @@
+# EXP-184 (DEC-018 A): a player still on the final results when the host starts the next game is taken into it at
+# once. The device plays a game, stays on the final ranking without tapping anything, and the bots' host starts a
+# second game (15 s after game over, all bots back in the lobby): the final ranking must go away on its own and the
+# device must land in the new game and play it (it sent im-ready, so the bots check that the second game's first round
+# came ~1 s after game-started, not after the 10 s ready timeout, and that no round was skipped by the photo timeout).
+# Before the fix the device stayed on the final ranking until someone tapped "Play again".
+#   qa/lab/lab.sh play --flow play-again-auto-join --bots 2 --rounds 3 --devices <label> \
+#     --bot-args "--play-again-linger 1 --play-again-linger-bot 0 --start-next-game 15"
+# env: GAME_CODE, USERNAME, METRO_URL (url-encoded)
+# Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
+appId: com.socketNull.ExposeMe
+---
+- runFlow: open-app.yaml
+- runFlow: join-room.yaml
+- runFlow: play-rounds.yaml
+- assertVisible:
+    id: "final-score-modal"
+- takeScreenshot: auto-join-results-${USERNAME}
+# No tap: the next game takes the device off the final ranking by itself
+- extendedWaitUntil:
+    notVisible:
+      id: "final-score-modal"
+    timeout: 30000
+- extendedWaitUntil:
+    visible:
+      id: "game-waiting-ready|game-waiting-photo|player-option-.*|own-photo-hint"
+    timeout: 20000
+- takeScreenshot: auto-join-next-game-${USERNAME}
+# The second game is played to the end like any other
+- runFlow: play-rounds.yaml
+- takeScreenshot: auto-join-second-results-${USERNAME}

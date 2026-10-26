@@ -217,7 +217,8 @@ play r24 --bots 2 --devices ios-a
 grep -q -- "-e LOBBY_WAIT_MS=$LOBBY_WAIT_MS " "$TMP/maestro.args" && ok "play passes LOBBY_WAIT_MS to the flows" || ko "LOBBY_WAIT_MS passed" "$(cat "$TMP/maestro.args")"
 grep -qF "timeout: \${LOBBY_WAIT_MS || $LOBBY_WAIT_MS}" "$MAESTRO_DIR/wait-game-start.yaml" \
   && ok "wait-game-start.yaml defaults to lab.sh's LOBBY_WAIT_MS ($LOBBY_WAIT_MS ms)" || ko "wait-game-start.yaml default in sync with lab.sh"
-first_open_wait_ms="$(grep -m1 -oE 'timeout: [0-9]+' "$MAESTRO_DIR/open-app.yaml" | grep -oE '[0-9]+$')"
+# open-app.yaml's bundle wait lives in its dev-client-boot.yaml subflow: the longest wait there
+first_open_wait_ms="$(grep -oE 'timeout: [0-9]+' "$MAESTRO_DIR/dev-client-boot.yaml" | grep -oE '[0-9]+$' | sort -n | tail -1)"
 [ "$((STUCK_ATTEMPT_S * 1000))" -gt "$first_open_wait_ms" ] \
   && [ "$LOBBY_WAIT_MS" -ge "$(((STUCK_ATTEMPT_S + RETRY_OPEN_JOIN_S) * 1000))" ] && [ "$LOBBY_WAIT_MS" -ge 420000 ] \
   && ok "lobby budget: stuck attempt > open-app's bundle wait ($first_open_wait_ms ms), lobby >= stuck attempt + retry" \

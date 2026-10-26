@@ -19,51 +19,47 @@ import PermInstruction2 from "@/assets/images/PermInstructions2.jpg";
 import PermInstruction3 from "@/assets/images/PermInstructions3.jpg";
 import IOSPermInstruction1 from "@/assets/images/IOSPermInstruction1.jpg";
 import IOSPermInstruction2 from "@/assets/images/IOSPermInstruction2.jpg";
-import IOSPermInstruction3 from "@/assets/images/IOSPermInstruction3.jpg";
-import IOSPermInstruction4 from "@/assets/images/IOSPermInstruction4.jpg";
-import IOSPermInstruction5 from "@/assets/images/IOSPermInstruction5.jpg";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useI18n } from "../i18n";
+import { TEST_IDS, settingsStepId } from "../utils/testIds";
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get("window");
+// Gap kept between the buttons and the bottom inset (same as the p-4 padding on the other edges)
+const CONTENT_BOTTOM_GAP = 16;
 
 const SettingsInstructionsScreen: React.FC = () => {
   const { t } = useI18n();
   const router = useRouter();
   const carouselRef = useRef<any>(null);
+  // The bottom inset (Android gesture bar / iOS home indicator) pads the scroll content, not the frame,
+  // so the buttons can always be scrolled above it
+  const insets = useSafeAreaInsets();
 
   const androidImages = [
-    { id: 1, source: PermInstruction1, title: t.step1, description: t.enablePermissions },
+    { id: 1, source: PermInstruction1, title: t.step1, description: t.androidTapPermissions },
     { id: 2, source: PermInstruction2, title: t.step2, description: t.tapPhotosVideos },
     { id: 3, source: PermInstruction3, title: t.step3, description: t.allowAllTime },
   ];
 
+  // Linking.openSettings() lands on this app's own Settings page, so the iOS steps start at its "Photos" row
   const iosImages = [
-    { id: 1, source: IOSPermInstruction1, title: t.step1, description: t.enablePermissions },
-    { id: 2, source: IOSPermInstruction2, title: t.step2, description: t.tapPhotosVideos },
-    { id: 3, source: IOSPermInstruction3, title: t.step3, description: t.allowAllTime },
-    { id: 4, source: IOSPermInstruction4, title: t.step4, description: t.goPrivacySettings },
-    { id: 5, source: IOSPermInstruction5, title: t.step5, description: t.enableAllPermissions },
+    { id: 1, source: IOSPermInstruction1, title: t.step1, description: t.iosTapPhotosChooseAccess },
+    { id: 2, source: IOSPermInstruction2, title: t.step2, description: t.iosConfirmFullAccess },
   ];
 
   const images = Platform.OS === "ios" ? iosImages : androidImages;
-
-  const openSettings = () => {
-    if (Platform.OS === "ios") {
-      Linking.openURL("App-Prefs:root=Privacy");
-    } else {
-      Linking.openSettings();
-    }
-  };
 
   // Calculate fixed dimensions for images
   const imageContainerWidth = screenWidth * 0.75;
   const imageContainerHeight = screenHeight * 0.4;
 
   return (
-    <SafeAreaView style={tw`flex-1 bg-gray-900`}>
+    <SafeAreaView testID={TEST_IDS.settingsInstructionsScreen} edges={["top", "left", "right"]} style={tw`flex-1 bg-gray-900`}>
       <StatusBar barStyle="light-content" />
-      <ScrollView contentContainerStyle={tw`flex-grow p-4`} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={[tw`flex-grow p-4`, { paddingBottom: insets.bottom + CONTENT_BOTTOM_GAP }]}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={tw`flex-1 items-center max-w-[500px] w-full self-center`}>
           {/* Header */}
           <View style={tw`items-center mb-5`}>
@@ -102,7 +98,9 @@ const SettingsInstructionsScreen: React.FC = () => {
                       <Image source={item.source} style={{ width: "100%", height: "100%" }} resizeMode="contain" />
                     </View>
                     <Text style={tw`text-base font-bold text-gray-200 mb-1`}>{item.title}</Text>
-                    <Text style={tw`text-sm text-gray-400 text-center`}>{item.description}</Text>
+                    <Text testID={settingsStepId(item.id)} style={tw`text-sm text-gray-400 text-center`}>
+                      {item.description}
+                    </Text>
                   </View>
                 )}
                 disablePagination={false}
@@ -124,7 +122,8 @@ const SettingsInstructionsScreen: React.FC = () => {
             </TouchableOpacity>
             <TouchableOpacity
               style={tw`bg-blue-600 p-4 flex-1 ml-3 rounded-xl border border-blue-500 shadow-lg`}
-              onPress={openSettings}
+              testID={TEST_IDS.settingsInstructionsOpenSettings}
+              onPress={() => Linking.openSettings()}
               activeOpacity={0.7}
             >
               <Text style={tw`text-white text-base font-medium text-center`}>{t.openSettings}</Text>

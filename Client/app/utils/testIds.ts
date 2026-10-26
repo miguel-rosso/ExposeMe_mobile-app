@@ -48,6 +48,9 @@ export const TEST_IDS = {
   galleryRetryButton: "gallery-retry-button",
   galleryHelpButton: "gallery-help-button",
   galleryBackButton: "gallery-back-button",
+  // ── Settings instructions ──
+  settingsInstructionsScreen: "settings-instructions-screen",
+  settingsInstructionsOpenSettings: "settings-instructions-open-settings",
   // ── Modals ──
   alertModal: "alert-modal",
   alertModalConfirm: "alert-modal-confirm",
@@ -80,3 +83,5 @@ export const finalRankId = (username: string) => `final-rank-${username}`;
 export const scoreRankId = (username: string) => `score-rank-${username}`;
 export const scoreGuessId = (username: string) => `score-guess-${username}`;
 export const roundsOptionId = (rounds: number) => `rounds-option-${rounds}`;
+/** Description text of a SettingsInstructionsScreen carousel step, numbered from 1 */
+export const settingsStepId = (step: number) => `settings-step-${step}`;

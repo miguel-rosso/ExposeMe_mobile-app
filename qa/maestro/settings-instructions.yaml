@@ -1,0 +1,119 @@
+# EXP-123 / EXP-190 / EXP-196: with photo access denied for good, the home gate's "How to enable" opens
+# SettingsInstructionsScreen. Its first step matches the platform (Android: App info → "Permissions"; iOS: this app's
+# own Settings page → "Photos"), and "Open Settings" leaves the app for that system page (Linking.openSettings(),
+# never a private App-Prefs URL). The bottom-inset layout is covered by
+# Client/__tests__/settingsInstructionsScreen.test.tsx; here the button is scrolled into view and tapped.
+# Cold-starts with photos denied (any later flow that needs access must run open-app.yaml, which grants it again).
+# No server or bots needed:
+#   ~/.maestro/bin/maestro --device <id> test qa/maestro/settings-instructions.yaml -e USERNAME=<label> -e METRO_URL=<url-encoded>
+# env: USERNAME, METRO_URL (url-encoded)
+# App selectors are testIDs (Client/app/utils/testIds.ts); the system permission dialog and Settings pages use text.
+appId: com.socketNull.ExposeMe
+---
+- launchApp:
+    clearState: true
+    permissions:
+      photos: deny
+      medialibrary: deny
+- runFlow: dev-client-boot.yaml
+# First-run explainer: Continue asks for access. iOS answers "denied" without a prompt; Android shows its dialog.
+- runFlow:
+    when:
+      visible:
+        id: "initial-screen"
+    commands:
+      - scrollUntilVisible:
+          element:
+            id: "initial-continue-button"
+      - tapOn:
+          id: "initial-continue-button"
+      - runFlow:
+          when:
+            platform: Android
+          commands:
+            - extendedWaitUntil:
+                visible: "Don.t allow|No permitir"
+                timeout: 10000
+            - tapOn: "Don.t allow|No permitir"
+- extendedWaitUntil:
+    visible:
+      id: "join-game-button"
+    timeout: 30000
+# Creating a game runs the gallery gate (no server or room involved while access is missing)
+- tapOn:
+    id: "username-input"
+- inputText: ${USERNAME}
+# Submit instead of hideKeyboard (on Android hideKeyboard sends Back, which closes the app on the home screen)
+- pressKey: Enter
+- tapOn:
+    id: "create-game-button"
+# Android asks once more; a second "Don't allow" makes the denial permanent, which is what offers "How to enable".
+# If the gate shows its own "Allow access" first, use it to reach that second prompt.
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - runFlow:
+          when:
+            visible:
+              id: "gallery-allow-button"
+          commands:
+            - tapOn:
+                id: "gallery-allow-button"
+      - extendedWaitUntil:
+          visible: "Don.t allow|No permitir"
+          timeout: 10000
+          optional: true
+      - tapOn:
+          text: "Don.t allow|No permitir"
+          optional: true
+- extendedWaitUntil:
+    visible:
+      id: "gallery-help-button"
+    timeout: 10000
+- tapOn:
+    id: "gallery-help-button"
+- extendedWaitUntil:
+    visible:
+      id: "settings-instructions-screen"
+    timeout: 10000
+# EXP-190 / EXP-123: step 1 describes the page Linking.openSettings() lands on, in either UI language
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - assertVisible:
+          id: "settings-step-1"
+          text: '.*("Permissions"|"Permisos").*'
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - assertVisible:
+          id: "settings-step-1"
+          text: '.*("Photos"|"Fotos").*'
+# EXP-196: the button sits at the end of the scroll content, above the bottom inset
+- scrollUntilVisible:
+    element:
+      id: "settings-instructions-open-settings"
+- tapOn:
+    id: "settings-instructions-open-settings"
+# The app goes to the background: the system Settings page of this app is in front
+- extendedWaitUntil:
+    notVisible:
+      id: "settings-instructions-screen"
+    timeout: 10000
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - extendedWaitUntil:
+          visible: "Permissions|Permisos"
+          timeout: 10000
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - extendedWaitUntil:
+          visible: "Photos|Fotos"
+          timeout: 10000

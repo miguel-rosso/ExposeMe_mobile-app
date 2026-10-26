@@ -1,6 +1,6 @@
 # Cold-start the dev client pointed at local Metro and get past first-run screens.
-# App screens are matched by testID (Client/app/utils/testIds.ts). Only the Expo dev-client UI
-# (always English) and the first wait below, which must OR dev-menu text with app content, use text.
+# App screens are matched by testID (Client/app/utils/testIds.ts); only the dev-client boot (dev-client-boot.yaml)
+# and the system photo alert use text. env: METRO_URL (url-encoded)
 appId: com.socketNull.ExposeMe
 ---
 - launchApp:
@@ -8,71 +8,7 @@ appId: com.socketNull.ExposeMe
     permissions:
       photos: allow
       medialibrary: allow
-- openLink: "exp+expose-me://expo-development-client/?url=${METRO_URL}"
-- waitForAnimationToEnd:
-    timeout: 5000
-# iOS 26+/Xcode 27 simulators confirm custom-scheme links with a system alert
-- runFlow:
-    when:
-      platform: iOS
-      visible: "Open in Expose Me\\?|¿Abrir en Expose Me\\?"
-    commands:
-      - tapOn: "Open|Abrir"
-# After clearState the dev client may stay on its launcher instead of loading the bundle
-- runFlow:
-    when:
-      visible: "Development servers"
-    commands:
-      # the server entry is discovered after the header renders (slow emulators)
-      - extendedWaitUntil:
-          visible: "http://.*:8081"
-          timeout: 30000
-      - tapOn: "http://.*:8081"
-# The launcher can also show up only after the check above (seen on Android): wait for it too, then pick the server
-- extendedWaitUntil:
-    visible: "This is the developer menu.*|Join Game|Unirse a Partida|Tap to proceed after setting permissions|Pulsa para continuar tras configurar los permisos|Development servers|DEVELOPMENT SERVERS"
-    timeout: 120000
-- runFlow:
-    when:
-      visible: "Development servers|DEVELOPMENT SERVERS"
-    commands:
-      # the server entry is discovered after the header renders (slow emulators)
-      - extendedWaitUntil:
-          visible: "http://.*:8081"
-          timeout: 30000
-      - tapOn: "http://.*:8081"
-- extendedWaitUntil:
-    visible: "This is the developer menu.*|Join Game|Unirse a Partida|Tap to proceed after setting permissions|Pulsa para continuar tras configurar los permisos"
-    timeout: 120000
-# Expo dev-menu onboarding sheet (first launch after clearState)
-- runFlow:
-    when:
-      visible: "This is the developer menu.*"
-    commands:
-      - tapOn: "Continue"
-# The full dev menu stays open after onboarding: close it (SDK 58 menu header shows "Runtime version")
-- runFlow:
-    when:
-      visible: "Connected to:|Runtime version:.*"
-    commands:
-      - runFlow:
-          when:
-            platform: Android
-          commands:
-            - pressKey: Back
-      - runFlow:
-          when:
-            platform: iOS
-          commands:
-            # Drag the sheet itself (a plain DOWN swipe starts above the sheet and does nothing)
-            - swipe:
-                from:
-                  text: "Runtime version:.*|Connected to:.*"
-                direction: DOWN
-- extendedWaitUntil:
-    visible:
-      id: "join-game-button|initial-screen"
-    timeout: 60000
+- runFlow: dev-client-boot.yaml
 # App first-run permissions explainer (InitialScreen)
 - runFlow:
     when:

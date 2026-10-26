@@ -4,6 +4,7 @@ import path from "path";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import {
   TEST_IDS, playerOptionId, lobbyPlayerId, lobbyPlayerOfflineId, roundsOptionId, winnerNameId, finalWinnerId, finalRankId,
+  settingsStepId,
 } from "../app/utils/testIds";
 import AlertModal from "../app/components/modals/AlertModal";
 import CloseButton from "../app/components/CloseButton";
@@ -74,6 +75,7 @@ describe("E2E testIDs (EXP-008)", () => {
     expect(sources).toContain("winnerNameId(w.username)");
     expect(sources).toContain("finalWinnerId(w.username)");
     expect(sources).toContain("finalRankId(item.username)");
+    expect(sources).toContain("settingsStepId(item.id)");
   });
 
   it("only uses registered ids in Maestro flows", () => {
@@ -97,6 +99,8 @@ describe("E2E testIDs (EXP-008)", () => {
       lobbyPlayerId("${USERNAME}"),
       lobbyPlayerOfflineId(".*"),
       roundsOptionId(0).replace("0", ".*"),
+      // settings-instructions flow: the first step of the carousel
+      settingsStepId(1),
       // EXP-085 tie flow: the device user and a bot
       ...["${USERNAME}", "bot1"].flatMap((u) => [winnerNameId(u), finalWinnerId(u), finalRankId(u)]),
       // System photo picker and crop screen used by plant-photo.yaml (not our components)

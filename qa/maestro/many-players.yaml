@@ -3,6 +3,9 @@
 #   qa/lab/lab.sh play --flow many-players --devices pair --bots 10 --rounds 3
 #   qa/lab/lab.sh play --flow many-players --devices <label> --bots 11 --rounds 3
 # Options follow the join order and the bots join first, so the devices' own options are the last ones.
+# EXP-257: with 12 players a slow Android emulator takes 2-4 s per screen read, and the options are only up for 8 s
+# (answering) + 3 s (reveal). So the checks are split over two rounds, a few cheap steps each (budgeted between the
+# `timed:` markers by qa/lab/tests/maestro-timing.test.sh): round 1 the layout, round 2 scrolling to the last option.
 # env: GAME_CODE, USERNAME, METRO_URL (url-encoded)
 # Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
 appId: com.socketNull.ExposeMe
@@ -10,40 +13,49 @@ appId: com.socketNull.ExposeMe
 - runFlow: open-app.yaml
 - runFlow: join-room.yaml
 - runFlow: wait-game-start.yaml
-# Answering is the only phase with the timer bar and the options together (reveal: options only; scores: timer only)
-- extendedWaitUntil:
-    visible:
-      id: "round-progress"
-    timeout: 180000
-# Every player gets the options, the photo owner too (EXP-252: nobody is told whose photo it is before the reveal)
+# ── Round 1: the layout ──
+# Every player gets the options, the photo owner too (EXP-252: nobody is told whose photo it is before the reveal).
+# Answering is the only phase with the timer bar and the options together (reveal: options only; scores: timer only):
+# `below` checks both in one screen read, with the options lower than the bar
+# ── timed: answering ──
 - extendedWaitUntil:
     visible:
       id: "answer-options"
-    timeout: 3000
-# The answer window is short (8 s): checks only, no settle waits, and the screenshot before anything else
-- assertVisible:
-    id: "round-progress"
-- assertVisible:
-    id: "photo-view"
+      below:
+        id: "round-progress"
+    timeout: 180000
 - takeScreenshot: many-players-answers-${USERNAME}
-# Reach the last option. scrollUntilVisible swipes the middle of the screen (the photo, which doesn't scroll), so
-# swipe inside the options list itself until the last one shows
-- repeat:
-    times: 3
-    while:
-      notVisible:
-        id: "player-option-${USERNAME}"
-    commands:
-      - swipe:
-          from:
-            id: "answer-options"
-          direction: UP
-          duration: 300
-- assertVisible:
-    id: "player-option-${USERNAME}"
 - tapOn:
-    id: "player-option-bot10"
+    id: "player-option-bot1"
     waitToSettleTimeoutMs: 500
+# ── end timed ──
+# The photo is on screen through answering, reveal and scores
 - assertVisible:
     id: "photo-view"
+# ── Round 2: reach the last option ──
+# Round 1's scoreboard first, so the next check can't match what is left of round 1's answering phase
+- extendedWaitUntil:
+    visible:
+      id: "score-modal"
+    timeout: 30000
+# ── timed: answering ──
+- extendedWaitUntil:
+    visible:
+      id: "answer-options"
+      below:
+        id: "round-progress"
+    timeout: 60000
+# scrollUntilVisible swipes the middle of the screen (the photo, which doesn't scroll), so swipe inside the options
+# list itself: from its centre up to the top of the screen, longer than the list (<= 40% of the window) can hide.
+- swipe:
+    from:
+      id: "answer-options"
+    direction: UP
+    duration: 300
+    waitToSettleTimeoutMs: 500
+# Tapping it is the check that the last option was reached (voting for yourself counts, DEC-031)
+- tapOn:
+    id: "player-option-${USERNAME}"
+    waitToSettleTimeoutMs: 500
+# ── end timed ──
 - runFlow: play-rounds.yaml

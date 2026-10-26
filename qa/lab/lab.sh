@@ -11,7 +11,8 @@
 #   server [--restart] [--port N] [--stop]  Local Server on :3000 (log: qa/runs/server.log); --port for a worktree's own server
 #                               QA render telemetry on: qa-ack lines in qa/runs/telemetry.jsonl (telemetry-<port>.jsonl)
 #   metro  [--restart]          Start Metro with EXPO_PUBLIC_SERVER_URL=http://localhost:3000 and EXPO_PUBLIC_QA=1
-#   photos [N]                  Generate N labelled photos per device and push to its gallery (default 12)
+#   photos [N] [--reset]        Seed N labelled photos per device gallery (default 12); idempotent: replaces the
+#                               lab's own photos, never stacks copies (--reset: wipe lab photos / iOS photo library first)
 #   build [ios|android|all]     Build dev-client binaries (slow, only when native deps change)
 #   install                     Install the last built binaries on every lab device
 #   open                        Open the app on every device, pointed at local Metro
@@ -246,23 +247,124 @@ cmd_metro() {
   die "metro not ready — see $RUNS/metro.log"
 }
 
-cmd_photos() {
-  local n=${1:-12}
-  devices | while read -r d; do
-    local label id plat dir
-    label="$(jq -r .label <<<"$d")"; id="$(jq -r .id <<<"$d")"; plat="$(jq -r .platform <<<"$d")"
-    dir="$RUNS/photos/$label"; rm -rf "$dir"; mkdir -p "$dir"
-    swift "$QA/lab/make-photos.swift" "$dir" "$label" "$n"
-    if [ "$plat" = ios ]; then
-      xcrun simctl addmedia "$id" "$dir"/*.jpg
-    else
-      adbs "$id" shell mkdir -p /sdcard/Pictures/ExposeMeQA
-      adbs "$id" push "$dir"/. /sdcard/Pictures/ExposeMeQA/ >/dev/null
-      adbs "$id" shell content call --method scan_volume --uri content://media --arg external_primary >/dev/null 2>&1 || true
-    fi
-    log "$label: $n photos pushed"
+# ── Gallery seeding (sourceable: qa/lab/tests/lab-photos.test.sh) ──
+# `photos` is idempotent: re-running it never stacks a second copy of the labelled photos.
+#  - Android: every lab file is named exposeme-lab-<label>-NN.jpg inside the lab-only folder
+#    ANDROID_PHOTO_DIR; its old *.jpg files are deleted before the push and the media rescan drops
+#    them from MediaStore. Media outside that folder is never touched.
+#  - iOS: `simctl addmedia` can't delete and renames imports to IMG_NNNN, so after seeding the lab
+#    writes a marker ("<label> <count>") into the simulator's Media folder and later only adds the
+#    photos the gallery is missing. The marker lives next to the photo library, so erasing the
+#    simulator forgets it too. Photos deleted by hand leave the marker stale: use --reset.
+#  - --reset: Android deletes the whole lab folder; iOS shuts the simulator down, deletes its photo
+#    library (Media/DCIM + Media/PhotoData: ALL photos on that simulator) and boots it again.
+LAB_PHOTO_PREFIX="exposeme-lab-"
+ANDROID_PHOTO_DIR="/sdcard/Pictures/ExposeMeQA"
+IOS_PHOTO_MARKER="${LAB_PHOTO_PREFIX}seeded"
+SIM_DEVICES_DIR="${SIM_DEVICES_DIR:-$HOME/Library/Developer/CoreSimulator/Devices}"
+DEFAULT_PHOTO_COUNT=12
+
+parse_photos_args() { # [N] [--reset] -> sets PHOTOS_N and PHOTOS_RESET (0|1); returns 1 on a bad argument
+  PHOTOS_N=$DEFAULT_PHOTO_COUNT PHOTOS_RESET=0
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --reset) PHOTOS_RESET=1;;
+      *) [[ "$1" =~ ^[1-9][0-9]*$ ]] || { echo "[lab] photos: bad argument '$1' (usage: photos [N] [--reset])" >&2; return 1; }
+         PHOTOS_N=$1;;
+    esac
+    shift
   done
-  mkdir -p "$RUNS/photos/bots"; swift "$QA/lab/make-photos.swift" "$RUNS/photos/bots" "bot" "$n"
+}
+generate_lab_photos() { # dir, label, count: fresh labelled photos, no leftovers from an older run
+  rm -rf "$1"; mkdir -p "$1"
+  swift "$QA/lab/make-photos.swift" "$1" "$2" "$3" "$LAB_PHOTO_PREFIX"
+}
+lab_photos_from() { # dir, first index: the generated photos numbered >= first index, in order
+  local f i
+  for f in "$1/$LAB_PHOTO_PREFIX"*.jpg; do
+    [ -e "$f" ] || continue
+    i="${f##*-}"; i="${i%.jpg}"
+    [ $((10#$i)) -ge "$2" ] && echo "$f"
+  done
+  return 0
+}
+
+# ── Android ──
+android_seed_photos() { # serial, dir, reset (0|1)
+  local serial=$1 dir=$2 reset=$3
+  # The folder is lab-only, so every *.jpg in it is a lab photo (also those named before the
+  # exposeme-lab- prefix). adb runs the command through the device shell: the quoted * expands there
+  if [ "$reset" = 1 ]; then adbs "$serial" shell rm -rf "$ANDROID_PHOTO_DIR"
+  else adbs "$serial" shell rm -f "$ANDROID_PHOTO_DIR/*.jpg"; fi
+  adbs "$serial" shell mkdir -p "$ANDROID_PHOTO_DIR"
+  adbs "$serial" push "$dir"/. "$ANDROID_PHOTO_DIR/" >/dev/null
+  # The rescan also prunes the deleted files from MediaStore, so the gallery never lists them twice
+  adbs "$serial" shell content call --method scan_volume --uri content://media --arg external_primary >/dev/null 2>&1 || true
+}
+
+# ── iOS ──
+ios_media_dir() { echo "$SIM_DEVICES_DIR/$1/data/Media"; } # udid
+ios_photo_plan() { # seeded label, seeded count, label, count -> "add <first index>" | "skip <reason>"
+  local seeded_label=$1 seeded_n=$2 label=$3 n=$4
+  if [ -z "$seeded_label" ]; then echo "add 1"
+  elif [ "$seeded_label" != "$label" ]; then echo "skip gallery holds $seeded_label photos (run: photos --reset)"
+  elif [ "$seeded_n" -gt "$n" ]; then echo "skip already has $seeded_n photos, more than $n (run: photos --reset to shrink)"
+  elif [ "$seeded_n" -eq "$n" ]; then echo "skip already has $n photos"
+  else echo "add $((seeded_n + 1))"
+  fi
+}
+is_sim_udid() { [[ "$1" =~ ^[0-9A-Fa-f]{8}-([0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}$ ]]; }
+# Guards every path built from a udid: a real simulator UUID whose folder holds a device.plist
+# (never "booted", "../x" or a missing simulator, so the deletes below can't leave its folder)
+check_sim_dir() { # udid
+  is_sim_udid "$1" || { echo "'$1' is not a simulator UUID"; return 1; }
+  [ -f "$SIM_DEVICES_DIR/$1/device.plist" ] || { echo "no simulator at $SIM_DEVICES_DIR/$1"; return 1; }
+}
+# These run inside $(...) where errexit is off: every step checks its own status and they print
+# the reason on failure so cmd_photos can report it
+ios_reset_photos() { # udid: wipes the simulator's whole photo library (shutdown -> delete -> boot)
+  local media
+  check_sim_dir "$1" || return 1
+  media="$(ios_media_dir "$1")"
+  xcrun simctl shutdown "$1" 2>/dev/null || true
+  rm -rf "$media/DCIM" "$media/PhotoData" "$media/$IOS_PHOTO_MARKER" || { echo "could not delete the photo library in $media"; return 1; }
+  xcrun simctl boot "$1" || { echo "simctl boot failed after the reset"; return 1; }
+  xcrun simctl bootstatus "$1" -b >/dev/null || { echo "simulator did not finish booting after the reset"; return 1; }
+}
+ios_seed_photos() { # udid, dir, label, count, reset (0|1); prints what it did, or why it failed (non-zero)
+  local udid=$1 dir=$2 label=$3 n=$4 reset=$5 marker seeded_label="" seeded_n=0 plan first f files=()
+  check_sim_dir "$udid" || return 1
+  marker="$(ios_media_dir "$udid")/$IOS_PHOTO_MARKER"
+  if [ "$reset" = 1 ]; then ios_reset_photos "$udid" || return 1; fi
+  [ -f "$marker" ] && read -r seeded_label seeded_n <"$marker"
+  plan="$(ios_photo_plan "$seeded_label" "${seeded_n:-0}" "$label" "$n")"
+  [ "${plan%% *}" = skip ] && { echo "${plan#skip }"; return 0; }
+  first="${plan#add }"
+  generate_lab_photos "$dir" "$label" "$n" >/dev/null || { echo "make-photos.swift failed"; return 1; }
+  while read -r f; do files+=("$f"); done < <(lab_photos_from "$dir" "$first")
+  [ ${#files[@]} -gt 0 ] || { echo "no generated photos from #$first in $dir"; return 1; }
+  xcrun simctl addmedia "$udid" "${files[@]}" || { echo "simctl addmedia failed (gallery not marked as seeded)"; return 1; }
+  mkdir -p "${marker%/*}" && echo "$label $n" >"$marker" || { echo "could not write $marker"; return 1; }
+  echo "added photos #$first-#$n"
+}
+
+cmd_photos() {
+  parse_photos_args "$@" || exit 1
+  local n=$PHOTOS_N reset=$PHOTOS_RESET
+  devices | while read -r d; do
+    local label id plat dir out
+    label="$(jq -r .label <<<"$d")"; id="$(jq -r .id <<<"$d")"; plat="$(jq -r .platform <<<"$d")"
+    dir="$RUNS/photos/$label"
+    if [ "$plat" = ios ]; then
+      out="$(ios_seed_photos "$id" "$dir" "$label" "$n" "$reset")" || die "$label: $out"
+      log "$label: $out"
+    else
+      generate_lab_photos "$dir" "$label" "$n" >/dev/null
+      android_seed_photos "$id" "$dir" "$reset"
+      log "$label: $n photos (previous lab photos replaced)"
+    fi
+  done || exit 1   # a device that failed (die in the pipeline's subshell) stops the command
+  generate_lab_photos "$RUNS/photos/bots" "bot" "$n"
 }
 
 cmd_build() {

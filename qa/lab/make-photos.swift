@@ -1,17 +1,19 @@
 // Generates labelled test photos so screenshots prove WHOSE photo is on screen.
 // Each image = a real-looking picture (picsum.photos, seeded) + a banner "<LABEL> · #n".
 // Falls back to a coloured gradient when offline.
-//   swift qa/lab/make-photos.swift <outDir> <label> <count>
+// Files are named <prefix><label>-NN.jpg (lab.sh passes "exposeme-lab-" so it can find and replace its own photos).
+//   swift qa/lab/make-photos.swift <outDir> <label> <count> [filePrefix]
 import AppKit
 import Foundation
 
 let argv = CommandLine.arguments
 guard argv.count >= 4, let count = Int(argv[3]) else {
-    FileHandle.standardError.write("usage: make-photos.swift <outDir> <label> <count>\n".data(using: .utf8)!)
+    FileHandle.standardError.write("usage: make-photos.swift <outDir> <label> <count> [filePrefix]\n".data(using: .utf8)!)
     exit(2)
 }
 let outDir = URL(fileURLWithPath: argv[1], isDirectory: true)
 let label = argv[2].uppercased()
+let filePrefix = argv.count >= 5 ? argv[4] : ""
 try? FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
 
 let W = 1080, H = 1440
@@ -57,7 +59,7 @@ for i in 1...count {
         .draw(in: NSRect(x: 0, y: H / 2 - 80, width: W, height: 160))
     NSGraphicsContext.restoreGraphicsState()
 
-    let file = outDir.appendingPathComponent(String(format: "%@-%02d.jpg", label.lowercased(), i))
+    let file = outDir.appendingPathComponent(String(format: "%@%@-%02d.jpg", filePrefix, label.lowercased(), i))
     guard let jpg = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.85]) else { exit(1) }
     try jpg.write(to: file)
 }

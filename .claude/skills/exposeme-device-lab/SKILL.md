@@ -48,6 +48,11 @@ qa/lab/lab.sh play --devices ios-a --bots 2 --rounds 3 --flow invite-link-after-
 ## Why the photos are labelled
 `make-photos.swift` stamps `IOS-A · #3`, `ANDROID-B · #7`, `BOT · #2` on each picture. In a screenshot you can see whose gallery the photo came from and check it against the revealed owner — a direct test of the "who's photo" logic and of cross-device sync.
 
+`photos [N]` is idempotent (re-running it never stacks a 2nd copy of the same labels):
+- Android: files are named `exposeme-lab-<label>-NN.jpg` in the lab-only `/sdcard/Pictures/ExposeMeQA`; each run deletes the folder's previous `*.jpg` files (also the ones named before the prefix), pushes the new ones and rescans MediaStore. Nothing outside that folder is touched.
+- iOS: `simctl addmedia` can't delete and renames imports to `IMG_NNNN`, so after seeding the lab writes `exposeme-lab-seeded` (`<label> <count>`) into the simulator's `data/Media` folder. Later runs skip the simulator, or add only the missing numbers when N grows. Erasing the simulator removes the marker too.
+- `photos [N] --reset` wipes first: the Android lab folder, and on iOS the simulator's whole photo library (shutdown → delete `data/Media/DCIM` + `data/Media/PhotoData` → boot; ALL photos on that simulator; the id must be a simulator UUID with a `device.plist`, and a failed boot/import stops `photos` without writing the marker). Use it once on simulators seeded before this marker existed (duplicates), after deleting photos by hand, or to shrink N.
+
 ## Parallel fixers (git worktrees)
 Each worktree runs its own server for bots: `qa/lab/worktree-setup.sh <worktree>` once, then from the worktree root `qa/lab/lab.sh server --port 3101` … `--stop --port 3101`. The devices, Metro (:8081) and the main server (:3000) belong to the main checkout and are used only after changes are merged into `qa/loop`.
 
@@ -71,11 +76,12 @@ Summary fields: `pass`, `skew_ms` (spread between players receiving the same pha
 
 ## Troubleshooting
 - App shows "Could not connect to development server": `lab.sh metro --restart`, then `lab.sh open`; on Android re-run `adb reverse` (`lab.sh up` does it).
-- Gallery empty in app: re-run `lab.sh photos`; on Android check `adb shell ls /sdcard/Pictures/ExposeMeQA` and the media scan.
+- Gallery empty in app: re-run `lab.sh photos` (`--reset` if the iOS marker says it is seeded but the photos are gone); on Android check `adb shell ls /sdcard/Pictures/ExposeMeQA` and the media scan.
+- Same photo shows up twice / duplicate labels in a gallery: `lab.sh photos 12 --reset` once.
 - Permission screen loops: iOS `simctl privacy … grant photos`, Android `pm grant … READ_MEDIA_IMAGES` (done by `up`/`install`).
 - Maestro can't find an element: flows select by testID (`Client/app/utils/testIds.ts`, `id:` selectors); check the id in `maestro studio`.
 - iOS simulators are shown in DeviceHub (Xcode 27 replaced Simulator.app; `lab.sh up` opens it). `lab.sh shot` takes screenshots.
 - `metro`/`build`/`doctor` fail with "Client needs Node N": install the major pinned in `Client/.nvmrc` (`nvm install N`); the lab picks it from nvm or Homebrew `node@N` when the default node differs.
 - iOS "Cannot find native module …": `lab.sh build ios` re-runs `pod install` whenever `Client/ios/Podfile.lock` differs from `Pods/Manifest.lock` or `Client/package*.json`/`Podfile` changed after the last install. Config-plugin/`app.json` changes still need a manual `npx expo prebuild` in `Client/` first.
-- Lab helper tests (no devices): `qa/lab/tests/lab-functions.test.sh`, `qa/lab/tests/lab-play.test.sh` (`play` arguments, `--second-room`/`--maestro-env` plumbing, bots cleanup; stub node/maestro), `qa/lab/tests/bots-cli.test.sh` (bots.mjs command line: `--help` and bad arguments exit before any network activity), `qa/lab/tests/render-skew.test.sh` (render-skew summary from telemetry lines, `play`'s skew print, server/Metro telemetry flags and file rotation).
+- Lab helper tests (no devices): `qa/lab/tests/lab-functions.test.sh`, `qa/lab/tests/lab-photos.test.sh` (`photos` idempotency: arguments, file prefix, adb/simctl commands, iOS marker; stub swift/adb/xcrun), `qa/lab/tests/lab-play.test.sh` (`play` arguments, `--second-room`/`--maestro-env` plumbing, bots cleanup; stub node/maestro), `qa/lab/tests/bots-cli.test.sh` (bots.mjs command line: `--help` and bad arguments exit before any network activity), `qa/lab/tests/render-skew.test.sh` (render-skew summary from telemetry lines, `play`'s skew print, server/Metro telemetry flags and file rotation).
 - Machine is slow: `up --ios 1 --android 1` and use more bots.

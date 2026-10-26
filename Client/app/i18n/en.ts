@@ -52,6 +52,7 @@ export default {
   serverErrorRoomFull: "This game is full.",
   serverErrorServerBusy: "The server is busy. Try again in a moment.",
   serverErrorUnknown: "Something went wrong. Try again.",
+  kickedByHost: "The host removed you from the room.",
 
   // GameScreen
   areYouReady: "ARE YOU READY?",

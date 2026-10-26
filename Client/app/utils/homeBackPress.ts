@@ -1,18 +1,16 @@
 // ── Android hardware back on the home screen ──
 
+import { dismissKeyboardOnBackPress, KeyboardControl } from "./keyboardBackPress";
+
 export type HomeBackPressDeps = {
-  keyboard: { isVisible: () => boolean; dismiss: () => void };
+  keyboard: KeyboardControl;
   isJoiningGame: boolean;
   cancelJoin: () => void;
 };
 
 /** Returns true when the press is consumed; false lets Android run the default (leave the app). */
 export const handleHomeBackPress = ({ keyboard, isJoiningGame, cancelJoin }: HomeBackPressDeps): boolean => {
-  // Android (RN 0.88) still delivers the back press to the app after the IME used it to close the keyboard
-  if (keyboard.isVisible()) {
-    keyboard.dismiss();
-    return true;
-  }
+  if (dismissKeyboardOnBackPress(keyboard)) return true;
   if (isJoiningGame) {
     cancelJoin();
     return true;

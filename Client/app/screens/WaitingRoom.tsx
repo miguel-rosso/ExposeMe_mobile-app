@@ -39,6 +39,9 @@ import { useI18n } from "../i18n";
 import { TEST_IDS, lobbyPlayerId, lobbyPlayerOfflineId, roundsOptionId } from "../utils/testIds";
 import { isHostIn, withConnection, withHost } from "../utils/roomPlayers";
 import { parseRoomCodeParam } from "../utils/roomCode";
+import { KICKED_BY_HOST_MESSAGE } from "../utils/serverMessage";
+import { dismissKeyboardOnBackPress } from "../utils/keyboardBackPress";
+import { useBackHandler } from "@react-native-community/hooks";
 
 // Define chat message interface
 interface ChatMessageType {
@@ -132,6 +135,9 @@ const WaitingRoom = ({}) => {
       hideListener.remove();
     };
   }, []);
+
+  // Android back with the chat keyboard open only closes the keyboard (EXP-058 behaviour on the home screen)
+  useBackHandler(() => dismissKeyboardOnBackPress(Keyboard));
 
   const removeChatMessage = (id: string) => {
     setChatMessages((prevMessages) => prevMessages.filter((msg) => msg.id !== id));
@@ -274,93 +280,95 @@ const WaitingRoom = ({}) => {
       socket.emit("join-create-game", { gameCode: code, username, ...(rejoinToken ? { rejoinToken } : {}) });
     };
 
-    // Back to the home screen, which shows the server's reason in the user's language
-    const leaveWithServerMessage = (message?: string) => {
+    // Back to the home screen, which shows the reason (a server refusal, or kicked) in the user's language
+    const leaveWithMessage = (message?: string) => {
       endSocket();
       navigation.replace({ pathname: "/", params: { message } });
     };
 
-    // Remove all previous listeners to avoid duplicates
-    socket.removeAllListeners();
+    // This screen's own handlers. Only these are removed on unmount, so listeners that others attach to the shared
+    // socket (e.g. the game screen, mounted in the same commit) survive whatever order React runs the effects in.
+    const handlers: Record<string, (...args: any[]) => void> = {
+      connect: () => {
+        console.log("Socket connected");
+        doJoin();
+      },
 
-    socket.on("connect", () => {
-      console.log("Socket connected");
-      doJoin();
-    });
+      // The server refused the connection itself (e.g. "Too many connections"): socket.io won't retry that, so the
+      // loading screen would spin forever. Network errors leave the socket active and it keeps retrying on its own.
+      connect_error: (err: Error) => {
+        if (socket.active) return;
+        setIsLoading(false);
+        leaveWithMessage(err.message);
+      },
 
-    // The server refused the connection itself (e.g. "Too many connections"): socket.io won't retry that, so the
-    // loading screen would spin forever. Network errors leave the socket active and it keeps retrying on its own.
-    socket.on("connect_error", (err: Error) => {
-      if (socket.active) return;
-      setIsLoading(false);
-      leaveWithServerMessage(err.message);
-    });
-
-    socket.on("room-of-game", (data: RoomOfGameResponse) => {
-      const { rejoinToken: _token, ...loggable } = data;
-      console.log("Room data:", loggable);
-      setIsLoading(false);
-      if (!data.success) {
-        leaveWithServerMessage(data.message);
-      } else if (data.room) {
-        joinedRef.current = true;
-        bindingRef.current = { gameCode: data.room.gameCode, rejoinToken: data.rejoinToken };
-        if (data.rejoinToken) saveRejoinToken(data.room.gameCode, username, data.rejoinToken);
-        setPlayers(data.room.players);
-        setGameCode(data.room.gameCode);
-        setRoundsOfGame(data.room.rounds);
-        // Lobby only (a rejoin into a started game leaves the planted photo alone): show the server's own mark, and
-        // plant the picked photo again if the server doesn't have it (upload failed, or lost on a new socket)
-        if (!data.room.started) {
-          setServerPlanted(!!data.hasPlantedPhoto);
-          if (!data.hasPlantedPhoto && plantedUriRef.current) plantPhoto();
+      "room-of-game": (data: RoomOfGameResponse) => {
+        const { rejoinToken: _token, ...loggable } = data;
+        console.log("Room data:", loggable);
+        setIsLoading(false);
+        if (!data.success) {
+          leaveWithMessage(data.message);
+        } else if (data.room) {
+          joinedRef.current = true;
+          bindingRef.current = { gameCode: data.room.gameCode, rejoinToken: data.rejoinToken };
+          if (data.rejoinToken) saveRejoinToken(data.room.gameCode, username, data.rejoinToken);
+          setPlayers(data.room.players);
+          setGameCode(data.room.gameCode);
+          setRoundsOfGame(data.room.rounds);
+          // Lobby only (a rejoin into a started game leaves the planted photo alone): show the server's own mark,
+          // and plant the picked photo again if the server doesn't have it (upload failed, or lost on a new socket)
+          if (!data.room.started) {
+            setServerPlanted(!!data.hasPlantedPhoto);
+            if (!data.hasPlantedPhoto && plantedUriRef.current) plantPhoto();
+          }
         }
-      }
-    });
+      },
 
-    socket.on("chat-message", (data: { username: string; message: string }) => {
-      if (data.username !== username) {
-        const msg = { id: `${Date.now()}-${Math.random()}`, username: data.username, message: data.message };
-        setChatMessages((prev) => appendCapped(prev, msg, MAX_CHAT_MESSAGES));
-      }
-    });
+      "chat-message": (data: { username: string; message: string }) => {
+        if (data.username !== username) {
+          const msg = { id: `${Date.now()}-${Math.random()}`, username: data.username, message: data.message };
+          setChatMessages((prev) => appendCapped(prev, msg, MAX_CHAT_MESSAGES));
+        }
+      },
 
-    socket.on("rounds-updated", (rounds: number) => setRoundsOfGame(rounds));
-    socket.on("player-joined", (p: Player) => setPlayers((prev) => [...prev, p]));
-    socket.on("player-left", (name: string) => setPlayers((prev) => prev.filter((p) => p.username !== name)));
-    socket.on("new-host", (h: Player) => setPlayers((prev) => withHost(prev, h.username)));
-    socket.on("player-connection", (d: PlayerConnectionData) => setPlayers((prev) => withConnection(prev, d.username, d.connected)));
+      "rounds-updated": (rounds: number) => setRoundsOfGame(rounds),
+      "player-joined": (p: Player) => setPlayers((prev) => [...prev, p]),
+      "player-left": (name: string) => setPlayers((prev) => prev.filter((p) => p.username !== name)),
+      "new-host": (h: Player) => setPlayers((prev) => withHost(prev, h.username)),
+      "player-connection": (d: PlayerConnectionData) =>
+        setPlayers((prev) => withConnection(prev, d.username, d.connected)),
 
-    socket.on("game-started", (players: Player[]) => {
-      setPlayersProvider(players);
-      navigation.replace("/screens/GameScreen");
-    });
+      "game-started": (players: Player[]) => {
+        setPlayersProvider(players);
+        navigation.replace("/screens/GameScreen");
+      },
 
-    // Every rejoin is followed by a snapshot; a started game means we came back to a game in progress
-    // (e.g. "Join" after closing the app): go straight to the game screen
-    socket.on("game-state", (snap: GameStateSnapshot) => {
-      if (!snap.started || resyncOnLeaveRef.current) return;
-      resyncOnLeaveRef.current = true;
-      setPlayersProvider(snap.players);
-      setRoundsOfGame(snap.totalRounds);
-      navigation.replace("/screens/GameScreen");
-    });
+      // Every rejoin is followed by a snapshot; a started game means we came back to a game in progress
+      // (e.g. "Join" after closing the app): go straight to the game screen
+      "game-state": (snap: GameStateSnapshot) => {
+        if (!snap.started || resyncOnLeaveRef.current) return;
+        resyncOnLeaveRef.current = true;
+        setPlayersProvider(snap.players);
+        setRoundsOfGame(snap.totalRounds);
+        navigation.replace("/screens/GameScreen");
+      },
 
-    socket.on("player-removed", (removed: Player) => {
-      if (removed.username === username) {
-        clearRejoinToken();
-        endSocket();
-        navigation.replace("/");
-      } else {
-        setPlayers((prev) => prev.filter((p) => p.username !== removed.username));
-      }
-    });
+      "player-removed": (removed: Player) => {
+        if (removed.username === username) {
+          clearRejoinToken();
+          leaveWithMessage(KICKED_BY_HOST_MESSAGE);
+        } else {
+          setPlayers((prev) => prev.filter((p) => p.username !== removed.username));
+        }
+      },
+    };
+    Object.entries(handlers).forEach(([event, handler]) => socket.on(event, handler));
 
     // If already connected, join now
     if (socket.connected) doJoin();
 
     return () => {
-      socket.removeAllListeners();
+      Object.entries(handlers).forEach(([event, handler]) => socket.off(event, handler));
       // The snapshot (and a your-turn for an awaited photo) reached this screen, not the game screen. The game
       // screen's listeners are attached in this same commit, before any server reply can arrive, so ask again:
       // a join on the same socket answers with a fresh snapshot (and your-turn) for the game screen to render.

@@ -3,7 +3,7 @@ import path from "path";
 import en from "../app/i18n/en";
 import es from "../app/i18n/es";
 import {
-  KNOWN_SERVER_MESSAGES, serverMessageKey, translateServerMessage, UNKNOWN_SERVER_MESSAGE_KEY,
+  KICKED_BY_HOST_MESSAGE, KNOWN_SERVER_MESSAGES, serverMessageKey, translateServerMessage, UNKNOWN_SERVER_MESSAGE_KEY,
 } from "../app/utils/serverMessage";
 
 // EXP-180 / EXP-036: server error texts (room-of-game refusals, connect_error) are shown in the user's language,
@@ -19,6 +19,7 @@ describe("serverMessageKey", () => {
     ["Username already taken", "serverErrorUsernameTaken"],
     ["Room is full", "serverErrorRoomFull"],
     ["Server is busy", "serverErrorServerBusy"],
+    [KICKED_BY_HOST_MESSAGE, "kickedByHost"],
   ])("maps %p to %p", (message, key) => {
     expect(serverMessageKey(message)).toBe(key);
   });

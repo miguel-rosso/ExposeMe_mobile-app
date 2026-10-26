@@ -52,6 +52,7 @@ export default {
   serverErrorRoomFull: "Esta partida está llena.",
   serverErrorServerBusy: "El servidor está ocupado. Inténtalo de nuevo en un momento.",
   serverErrorUnknown: "Algo ha ido mal. Inténtalo de nuevo.",
+  kickedByHost: "El anfitrión te ha sacado de la sala.",
 
   // GameScreen
   areYouReady: "¿ESTÁS LISTO?",

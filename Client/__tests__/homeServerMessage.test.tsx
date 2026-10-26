@@ -35,6 +35,7 @@ jest.mock("../app/providers/GameContext", () => ({
 
 import Index from "../app/index";
 import es from "../app/i18n/es";
+import { KICKED_BY_HOST_MESSAGE } from "../app/utils/serverMessage";
 
 const mockAlert = jest.fn();
 beforeAll(() => {
@@ -68,6 +69,11 @@ describe("Home screen: server message after being sent back (EXP-180)", () => {
   it("shows a generic Spanish message for unknown server text", async () => {
     await mountWithMessage("Some new server error");
     expect(mockAlert).toHaveBeenCalledWith(es.serverErrorUnknown);
+  });
+
+  it("tells a player removed by the host why they are back, in Spanish (EXP-045)", async () => {
+    await mountWithMessage(KICKED_BY_HOST_MESSAGE);
+    expect(mockAlert).toHaveBeenCalledWith("El anfitrión te ha sacado de la sala.");
   });
 
   it("shows nothing without a message", async () => {

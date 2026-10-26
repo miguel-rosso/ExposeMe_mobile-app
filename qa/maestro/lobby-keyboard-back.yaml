@@ -1,0 +1,35 @@
+# EXP-064: Android hardware back with the lobby chat keyboard open only closes the keyboard (the EXP-058 home
+# behaviour); the device stays in the room. With the keyboard hidden, back keeps its default: the lobby was pushed
+# from home, so it pops back to the home screen.
+# No bots needed (the device hosts the room itself), so run it directly rather than through `lab.sh play`:
+#   ~/.maestro/bin/maestro --device <android id> test qa/maestro/lobby-keyboard-back.yaml -e USERNAME=<label> -e METRO_URL=<url-encoded>
+# On iOS the Android-only steps are skipped (there is no hardware back).
+# env: USERNAME, METRO_URL (url-encoded)
+# Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
+appId: com.socketNull.ExposeMe
+---
+- runFlow: host-lobby.yaml
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - tapOn:
+          id: "chat-input"
+      - inputText: "hi"
+      # First back: only the keyboard closes
+      - pressKey: Back
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - assertVisible:
+          id: "lobby-game-code"
+      - assertVisible:
+          id: "chat-input"
+      - takeScreenshot: lobby-keyboard-back-${USERNAME}
+      # Second back (keyboard hidden): default behaviour, back to home
+      - pressKey: Back
+      - extendedWaitUntil:
+          visible:
+            id: "create-game-button"
+          timeout: 10000
+      - assertNotVisible:
+          id: "lobby-game-code"

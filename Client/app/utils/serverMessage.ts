@@ -3,9 +3,15 @@ import en from "../i18n/en";
 type TranslationKey = keyof typeof en;
 
 /**
+ * Reason the lobby passes home when the host removed us: the server only sends `player-removed` (no text), so this
+ * one is the client's own, shown through the same home-screen message as the server's refusals.
+ */
+export const KICKED_BY_HOST_MESSAGE = "Removed by host";
+
+/**
  * Exact error texts the server can send to a client that ends up on the home screen: `room-of-game` refusals
  * (socketRoutes / RoomManager) and the socket middleware's `connect_error`. The protocol stays plain English;
- * the client maps it to its own language here.
+ * the client maps it to its own language here. Also holds the client's own KICKED_BY_HOST_MESSAGE.
  */
 const SERVER_MESSAGE_KEYS = {
   "Too many attempts": "serverErrorTooManyAttempts",
@@ -16,6 +22,7 @@ const SERVER_MESSAGE_KEYS = {
   "Username already taken": "serverErrorUsernameTaken",
   "Room is full": "serverErrorRoomFull",
   "Server is busy": "serverErrorServerBusy",
+  [KICKED_BY_HOST_MESSAGE]: "kickedByHost",
 } as const satisfies Record<string, TranslationKey>;
 
 /** Every server text with its own translation (a parity test checks the server sends no others). */

@@ -79,10 +79,10 @@ const optionNames = (root: ReactTestInstance) =>
   root
     .findAll((n) => typeof n.type === "string" && typeof n.props.testID === "string" && n.props.testID.startsWith("player-option-"))
     .map((n) => n.props.testID.replace("player-option-", ""));
-// The players behind the answer options (the FlatList data), with their host flag
+// The players behind the answer options (the options grid's players), with their host flag
 const optionPlayers = (root: ReactTestInstance) =>
-  root.findAll((n) => Array.isArray(n.props.data) && typeof n.props.renderItem === "function")[0]
-    .props.data.map((p: { username: string; isHost: boolean }) => [p.username, p.isHost]);
+  root.findAll((n) => Array.isArray(n.props.players) && typeof n.props.renderOption === "function")[0]
+    .props.players.map((p: { username: string; isHost: boolean }) => [p.username, p.isHost]);
 const press = (root: ReactTestInstance, name: string) =>
   act(() => root.find((n) => n.props.testID === playerOptionId(name) && typeof n.props.onPress === "function").props.onPress());
 const START = { photo: "/temp/x.jpg", round: 1, duration: 8_000 };

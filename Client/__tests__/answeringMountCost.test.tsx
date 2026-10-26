@@ -1,14 +1,19 @@
 import React, { Profiler } from "react";
-import { Platform } from "react-native";
+import { NativeModules, Platform } from "react-native";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 // Loaded with the file (jest.mock calls below are hoisted above it): a cold transform must not hit the test timeout
 import GameScreen from "../app/screens/GameScreen";
-import { TEST_IDS, emojiButtonId } from "../app/utils/testIds";
 import { honourNativeAnimationDurations } from "../testUtils/nativeAnimations";
 
 // EXP-225: Androids painted the answering phase 350-430 ms (p50) after its round-start handler ran, iPhones in ~30 ms.
 // This measures what GameScreen renders and commits on the round-start transition, with the Android photo layer and the
 // real progress bar, answer options and emoji buttons, and pins the cheaper mount down.
+// EXP-265: still 250-420 ms (p50) on Android for answering and 120-230 ms for the scoreboard. The options are a plain
+// grid (no list cells re-rendering after the mount), and the reveal and the scoreboard no longer re-render the photo
+// and the emoji buttons.
+
+// The real ids, for the checks below (the module is mocked to count renders)
+const { TEST_IDS, emojiButtonId } = jest.requireActual<typeof import("../app/utils/testIds")>("../app/utils/testIds");
 
 jest.mock("@react-native-async-storage/async-storage", () =>
   require("@react-native-async-storage/async-storage/jest/async-storage-mock")
@@ -63,25 +68,33 @@ jest.mock("@/app/hooks/useGalleryAccessGuard", () => ({
   useGalleryAccessGuard: () => ({ blocked: null, check: jest.fn(), selectMore: jest.fn() }),
 }));
 jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/en").default }) }));
+// A plain glyph: the icon font isn't loaded in tests
+jest.mock("react-native-vector-icons/FontAwesome", () => "Icon");
 jest.mock("@/app/components/modals/FinalScoreModal", () => () => null);
 jest.mock("@/app/components/modals/WinnerModal", () => () => null);
-// Every render of an answer option (each one asks for its testID once per render), and of the emoji buttons
-const mockOptionRenders = { count: 0 };
-const mockEmojiButtonsRenders = { count: 0 };
-jest.mock("@/app/components/IngameComunication/EmojisButtons", () => {
-  const ActualEmojisButton = jest.requireActual("@/app/components/IngameComunication/EmojisButtons").default;
-  return () => {
-    mockEmojiButtonsRenders.count++;
-    return require("react").createElement(ActualEmojisButton);
-  };
-});
+// Every render of an answer option, the emoji buttons, the photo and the scoreboard: each one asks for its testID once
+// per render (the emoji buttons, one per button: the first one counts)
+const mockRenders = { options: 0, emojiButtons: 0, photo: 0, scoreboard: 0 };
 jest.mock("../app/utils/testIds", () => {
   const actual = jest.requireActual("../app/utils/testIds");
+  const countedId = (part: keyof typeof mockRenders, id: string) =>
+    ({ enumerable: true, get: () => { mockRenders[part]++; return id; } });
   return {
     ...actual,
-    playerOptionId: (name: string) => { mockOptionRenders.count++; return actual.playerOptionId(name); },
+    TEST_IDS: Object.defineProperties({ ...actual.TEST_IDS }, {
+      photoView: countedId("photo", actual.TEST_IDS.photoView),
+      scoreModal: countedId("scoreboard", actual.TEST_IDS.scoreModal),
+    }),
+    playerOptionId: (name: string) => { mockRenders.options++; return actual.playerOptionId(name); },
+    emojiButtonId: (index: number) => { if (index === 0) mockRenders.emojiButtons++; return actual.emojiButtonId(index); },
   };
 });
+const resetRenderCounts = () => {
+  mockRenders.options = 0;
+  mockRenders.emojiButtons = 0;
+  mockRenders.photo = 0;
+  mockRenders.scoreboard = 0;
+};
 
 const realOS = Platform.OS;
 beforeAll(() => {
@@ -117,8 +130,8 @@ describe("GameScreen: round-start mount cost on Android (EXP-225)", () => {
   let r: TestRenderer.ReactTestRenderer;
   // What each commit of the screen had rendered so far: answer options, emoji buttons
   let commits: { options: number; emojiButtons: number }[] = [];
-  const onRender = () => { commits.push({ options: mockOptionRenders.count, emojiButtons: mockEmojiButtonsRenders.count }); };
-  const resetCounts = () => { commits = []; mockOptionRenders.count = 0; mockEmojiButtonsRenders.count = 0; };
+  const onRender = () => { commits.push({ options: mockRenders.options, emojiButtons: mockRenders.emojiButtons }); };
+  const resetCounts = () => { commits = []; resetRenderCounts(); };
   // The main photo's image finished loading (the native onLoad)
   const photoLoaded = () => {
     const photo = r.root.find((n) =>
@@ -166,23 +179,25 @@ describe("GameScreen: round-start mount cost on Android (EXP-225)", () => {
     startRound(1);
     const laidOut = new Set<unknown>();
     layOut(laidOut);
-    // Measuring the options' top (for the reaction lane) re-renders the screen once, but no option
-    expect(mockOptionRenders.count).toBe(PLAYER_COUNT);
-    expect(commits.length).toBeLessThanOrEqual(4);
+    // The mount, the emoji buttons, and measuring the options' top (for the reaction lane) re-renders the screen once,
+    // but no option
+    expect(mockRenders.options).toBe(PLAYER_COUNT);
+    expect(commits).toHaveLength(3);
     // The backdrop comes with the loaded photo (EXP-131): one commit of the photo alone, no option re-rendered
     const commitsBeforeLoad = commits.length;
     photoLoaded();
     expect(blurredImages(r.root)).toHaveLength(1);
     expect(commits).toHaveLength(commitsBeforeLoad + 1);
-    expect(mockOptionRenders.count).toBe(PLAYER_COUNT);
+    expect(mockRenders.options).toBe(PLAYER_COUNT);
 
-    // Later rounds: the options' top is already known, the layout pass costs no commit of the screen
+    // Later rounds: the options' top is already known and the options have no list cells reporting their layout
+    // (EXP-265): the mount and the emoji buttons right after it, nothing else
     act(() => mockSocket.fire("waiting-photo", { round: 2, duration: 10_000 }));
     resetCounts();
     startRound(2);
     layOut(laidOut);
-    expect(mockOptionRenders.count).toBe(PLAYER_COUNT);
-    expect(commits.length).toBeLessThanOrEqual(3);
+    expect(mockRenders.options).toBe(PLAYER_COUNT);
+    expect(commits).toHaveLength(2);
   });
 
   it("re-renders only the option I pick", () => {
@@ -191,7 +206,105 @@ describe("GameScreen: round-start mount cost on Android (EXP-225)", () => {
     resetCounts();
     const option = r.root.find((n) => n.props.testID === "player-option-player3" && typeof n.props.onPress === "function");
     act(() => option.props.onPress());
-    expect(mockOptionRenders.count).toBe(1);
+    expect(mockRenders.options).toBe(1);
     expect(mockSocket.emitted).toContainEqual(["submit-answer", { guess: "player3" }]);
+  });
+});
+
+// EXP-265: the reveal and the scoreboard only render what they change
+describe("GameScreen: reveal and scoreboard render cost on Android (EXP-265)", () => {
+  const ANSWERING_MS = 8_000;
+  const REVEAL_MS = 3_000;
+  const roundScores = mockPlayers.map((p, i) => ({ ...p, points: i * 10, lastGuess: "player2", lastAnswerCorrect: i % 2 === 0 }));
+  let r: TestRenderer.ReactTestRenderer;
+  // The phase of each commit of the screen ("update", or "nested-update" for one scheduled while committing)
+  let commits: string[] = [];
+  const resetCounts = () => { commits = []; resetRenderCounts(); };
+  const pick = (name: string) => {
+    const option = r.root.find((n) => n.props.testID === `player-option-${name}` && typeof n.props.onPress === "function");
+    act(() => option.props.onPress());
+  };
+  const reveal = () => act(() => mockSocket.fire("round-reveal", { correctAnswer: "player2", duration: REVEAL_MS }));
+  const showScores = () =>
+    act(() => mockSocket.fire("round-scores", { scores: roundScores, round: 1, totalRounds: 10, duration: 5_000 }));
+  // The answer bar runs out (the options are disabled) as the server reveals the answer
+  const closeAnswers = () => act(() => jest.advanceTimersByTime(ANSWERING_MS - SETTLE_MS));
+  // Native animation work sent while `run` runs: animations started, animated nodes made and dropped, values read back
+  const NATIVE_ANIMATED_OPS = ["startAnimatingNode", "createAnimatedNode", "dropAnimatedNode", "getValue"] as const;
+  const nativeAnimatedOps = (run: () => void) => {
+    const module = NativeModules.NativeAnimatedModule as Record<string, jest.Mock>;
+    NATIVE_ANIMATED_OPS.forEach((op) => module[op].mockClear());
+    run();
+    return Object.fromEntries(NATIVE_ANIMATED_OPS.map((op) => [op, module[op].mock.calls.length]));
+  };
+
+  // Round 1 laid out (the options' entrance over) with its photo loaded and my pick made
+  beforeEach(async () => {
+    jest.useFakeTimers();
+    mockSocket.handlers.clear();
+    await act(async () => {
+      r = TestRenderer.create(<Profiler id="game" onRender={(_id, phase) => { commits.push(phase); }}><GameScreen /></Profiler>);
+    });
+    await act(async () => {});
+    act(() => mockSocket.fire("round-start", { photo: "/temp/1.jpg", round: 1, duration: ANSWERING_MS }));
+    runLayoutPass(r.root, new Set());
+    act(() => jest.advanceTimersByTime(SETTLE_MS));
+    const photo = r.root.find((n) =>
+      typeof n.props.onLoad === "function" && n.props.resizeMode === "contain" && typeof n.type !== "string");
+    act(() => photo.props.onLoad());
+    pick("player3");
+    resetCounts();
+  });
+  afterEach(() => {
+    act(() => r.unmount());
+    jest.clearAllTimers();
+    jest.useRealTimers();
+  });
+
+  it("reveal: one commit that re-renders only my option, not the photo or the emoji buttons", () => {
+    closeAnswers();
+    resetCounts();
+    reveal();
+    expect(commits).toEqual(["update"]);
+    expect(mockRenders.options).toBe(1);
+    expect(mockRenders.photo).toBe(0);
+    expect(mockRenders.emojiButtons).toBe(0);
+  });
+
+  it("scores: the scoreboard is drawn once in one commit, without re-rendering the photo or the emoji buttons", () => {
+    closeAnswers();
+    reveal();
+    act(() => jest.advanceTimersByTime(REVEAL_MS));
+    resetCounts();
+    showScores();
+    expect(has(r.root, TEST_IDS.scoreModal)).toBe(true);
+    // The owner card's entrance (react-native-animatable) sets its first frame as it mounts: nothing else re-renders
+    expect(commits).toEqual(["update", "nested-update"]);
+    expect(mockRenders.scoreboard).toBe(1);
+    expect(mockRenders.photo).toBe(0);
+    expect(mockRenders.emojiButtons).toBe(0);
+
+    // The screen still re-renders during scores (here a reaction comes in): the scoreboard and the photo don't
+    act(() => mockSocket.fire("emoji-reaction", { username: "player2", emoji: "🔥" }));
+    expect(mockRenders.scoreboard).toBe(1);
+    expect(mockRenders.photo).toBe(0);
+  });
+
+  it("closing the answers animates nothing on the options, and the scoreboard drops only their own motion", () => {
+    // The options just stop taking picks: before EXP-265 every card's touch layer ran an opacity animation here
+    // (42 new animated nodes, 10 animations with 8 players)
+    const closing = nativeAnimatedOps(() => { closeAnswers(); reveal(); });
+    expect(closing.createAnimatedNode).toBe(0);
+    // Only the reveal's progress bar and my pick's reveal motion
+    expect(closing.startAnimatingNode).toBeLessThanOrEqual(2);
+    act(() => jest.advanceTimersByTime(REVEAL_MS));
+
+    // Each option drops its entrance/pick motion (value, offset, scale, interpolation, transform, style, props): their
+    // touch layers were never animated, so they have nothing to drop or read back (before: 80 nodes, 32 values)
+    const OPTION_MOTION_NODES = 7;
+    const OPTION_MOTION_VALUES = 3;
+    const scores = nativeAnimatedOps(() => { showScores(); act(() => jest.advanceTimersByTime(SETTLE_MS)); });
+    expect(scores.dropAnimatedNode).toBeLessThanOrEqual(PLAYER_COUNT * OPTION_MOTION_NODES);
+    expect(scores.getValue).toBeLessThanOrEqual(PLAYER_COUNT * OPTION_MOTION_VALUES);
   });
 });

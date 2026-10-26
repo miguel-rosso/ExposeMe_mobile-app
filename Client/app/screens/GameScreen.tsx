@@ -1,7 +1,6 @@
-import React, { useEffect, useState, useCallback, useRef } from "react";
+import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import {
-  View, Text, TouchableOpacity, StatusBar, FlatList, BackHandler, LayoutChangeEvent, ListRenderItemInfo,
-  useWindowDimensions,
+  View, Text, TouchableOpacity, StatusBar, BackHandler, LayoutChangeEvent, useWindowDimensions,
 } from "react-native";
 import { useFocusEffect } from "expo-router";
 import tw from "twrnc";
@@ -22,7 +21,8 @@ import WinnerModal from "@/app/components/modals/WinnerModal";
 import { getWinners } from "@/app/utils/ranking";
 import EmojiReactionLane, { EmojiReactionData } from "@/app/components/IngameComunication/EmojiReactionLane";
 import EmojisButton from "@/app/components/IngameComunication/EmojisButtons";
-import AnswerOption, { ANSWER_GRID, answerOptionState } from "@/app/components/AnswerOption";
+import AnswerOption, { answerOptionState } from "@/app/components/AnswerOption";
+import AnswerOptionsGrid from "@/app/components/AnswerOptionsGrid";
 import DeferredMount from "@/app/components/DeferredMount";
 import { useI18n } from "../i18n";
 import { uploadPhoto } from "@/app/utils/uploadPhoto";
@@ -50,8 +50,8 @@ const PICK_SEND_INTERVAL = 200; // ms between submit-answer sends (server: 10 pe
 // Round progress bar strip at the top of the photo (bar plus its padding); emoji reactions start right below it
 const PROGRESS_BAR_AREA = { top: 60, height: 40 } as const;
 const REACTION_LANE_TOP = PROGRESS_BAR_AREA.top + PROGRESS_BAR_AREA.height;
-const answerOptionKey = (player: Player) => player.username;
 const NO_REACTIONS: EmojiReactionData[] = [];
+const NO_SCORES: ScoreRound[] = [];
 
 const GameScreen = () => {
   const { t } = useI18n();
@@ -416,16 +416,16 @@ const GameScreen = () => {
   // Top edge of the answer buttons (measured): the reaction lane ends above it
   const [answersTop, setAnswersTop] = useState<number | null>(null);
   const onAnswersLayout = useCallback((e: LayoutChangeEvent) => setAnswersTop(e.nativeEvent.layout.y), []);
-  // Denser options in crowded rooms, in a bounded area that scrolls: the photo and the timer stay visible (EXP-250)
+  // Denser options in crowded rooms, in a bounded area that scrolls: the photo and the timer stay visible (EXP-250).
+  // Kept stable for the memoised options grid
   const { height: windowHeight } = useWindowDimensions();
-  const answersLayout = answerOptionsLayout(playersProvider.length, windowHeight);
-  const answersListRef = useRef<FlatList<Player>>(null);
-  // iOS only draws the scroll indicator while scrolling: flash it when some options are out of view
-  const hintMoreAnswers = (_width: number, contentHeight: number) => {
-    if (contentHeight > answersLayout.maxHeight) answersListRef.current?.flashScrollIndicators();
-  };
+  const answersLayout = useMemo(
+    () => answerOptionsLayout(playersProvider.length, windowHeight), [playersProvider.length, windowHeight],
+  );
 
   // ── Render helpers ───────────────────────────────────
+  // Stable props for the memoised scoreboard: the game screen re-renders during scores (reactions, hold)
+  const scoreRounds = useMemo(() => ({ round, roundsOfGame }), [round, roundsOfGame]);
   // The options are drawn while answering and in the reveal (not in scores: the scoreboard covers the photo)
   const isReveal = phase === "reveal";
 
@@ -440,13 +440,13 @@ const GameScreen = () => {
   const optionColors = usePlayerColors(playersProvider);
   const reduceMotion = useReduceMotion();
 
-  const renderAnswerOption = useCallback(({ item, index }: ListRenderItemInfo<Player>) => (
+  const renderAnswerOption = useCallback((player: Player, index: number) => (
     <AnswerOption
-      username={item.username}
+      username={player.username}
       index={index}
-      state={answerOptionState(item.username, { mySelection, correctAnswer, isReveal })}
-      color={optionColors.get(item.username)!}
-      isMe={item.username === safeUsername}
+      state={answerOptionState(player.username, { mySelection, correctAnswer, isReveal })}
+      color={optionColors.get(player.username)!}
+      isMe={player.username === safeUsername}
       youLabel={t.you}
       columns={answersLayout.columns}
       compact={answersLayout.compact}
@@ -539,31 +539,15 @@ const GameScreen = () => {
                     style={tw`absolute z-40 bottom-22 left-0 right-0 p-2 flex-row justify-center`}
                     onLayout={onAnswersLayout}
                   >
-                    <FlatList
-                      // numColumns can't change on a mounted list (players may leave mid-game): remount instead
-                      key={`answers-${answersLayout.columns}`}
-                      ref={answersListRef}
-                      testID={TEST_IDS.answerOptions}
-                      data={playersProvider}
-                      renderItem={renderAnswerOption}
-                      keyExtractor={answerOptionKey}
-                      numColumns={answersLayout.columns}
-                      columnWrapperStyle={ANSWER_GRID.row}
-                      style={[tw`w-full max-w-[500px] px-2`, { maxHeight: answersLayout.maxHeight }]}
-                      contentContainerStyle={ANSWER_GRID.content}
-                      showsVerticalScrollIndicator
-                      persistentScrollbar
-                      indicatorStyle="white"
-                      onContentSizeChange={hintMoreAnswers}
-                    />
+                    <AnswerOptionsGrid players={playersProvider} layout={answersLayout} renderOption={renderAnswerOption} />
                   </View>
                 )}
 
                 {/* Score modal */}
                 <ScoreModal
                   visible={phase === "scores" && !!scores}
-                  scoreRound={scores || []}
-                  rounds={{ round, roundsOfGame: roundsOfGame }}
+                  scoreRound={scores ?? NO_SCORES}
+                  rounds={scoreRounds}
                   correctAnswer={correctAnswer}
                   myUsername={safeUsername}
                   reserveHoldButton={holdButtonMounted}

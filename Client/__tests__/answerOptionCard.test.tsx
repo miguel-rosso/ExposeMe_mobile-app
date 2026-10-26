@@ -104,6 +104,25 @@ describe("playerColors (EXP-253)", () => {
       Object.defineProperty(Intl, "Segmenter", segmenter);
     }
   });
+
+  // EXP-265: every card asks for its initial when it mounts, every round: one segmenter serves them all
+  it("builds the grapheme segmenter once for all the initials", () => {
+    const segmenter = Object.getOwnPropertyDescriptor(Intl, "Segmenter")!;
+    const constructed = jest.fn();
+    class CountedSegmenter extends Intl.Segmenter {
+      constructor(...args: ConstructorParameters<typeof Intl.Segmenter>) {
+        super(...args);
+        constructed();
+      }
+    }
+    Object.defineProperty(Intl, "Segmenter", { ...segmenter, value: CountedSegmenter });
+    try {
+      for (const [name, initial] of initialCases) expect(playerInitial(name)).toBe(initial);
+      expect(constructed).toHaveBeenCalledTimes(1);
+    } finally {
+      Object.defineProperty(Intl, "Segmenter", segmenter);
+    }
+  });
 });
 
 describe("usePlayerColors", () => {
@@ -244,6 +263,22 @@ describe("AnswerOption (EXP-253)", () => {
     update({ state: "selected", disabled: true });
     expect(interpolate).toHaveBeenCalledTimes(1);
     expect(style(cell()).transform).toHaveLength(motion.length);
+  });
+
+  // EXP-265: TouchableOpacity animates its opacity whenever its `disabled` prop flips, on every card as answers close
+  it("a disabled card takes no pick and says so, without animating its touch layer", () => {
+    const onPick = jest.fn();
+    render({ state: "idle", onPick });
+    const timing = jest.spyOn(Animated, "timing");
+    update({ state: "idle", onPick, disabled: true });
+    expect(timing).not.toHaveBeenCalled();
+    expect(pressable().props.accessibilityState).toEqual({ selected: false, disabled: true });
+    expect(pressable().props.focusable).toBe(false);
+    act(() => pressable().props.onPress());
+    expect(onPick).not.toHaveBeenCalled();
+    update({ state: "idle", onPick, disabled: false });
+    act(() => pressable().props.onPress());
+    expect(onPick).toHaveBeenCalledWith("alice");
   });
 
   it("with reduce motion: shown at once, and state changes don't move", () => {

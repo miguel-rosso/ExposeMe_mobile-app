@@ -17,8 +17,6 @@ const OPTION_CARD = {
 // Every card has the same width: an odd one out in the last row is centred by the row, not stretched
 const OPTION_BASIS = { 2: "flex-basis-[48%]", 3: "flex-basis-[30%]" } as const;
 const OPTION_CELL_MARGIN = { marginHorizontal: "1%" } as const;
-/** The grid the options sit in: rows centre their cards; room on top for a picked card's scale */
-export const ANSWER_GRID = { row: tw`justify-center`, content: tw`w-full pt-1` };
 
 /** Only MY selection is marked: accent while answering, then green if it was right, red if wrong (from the reveal) */
 export type AnswerOptionState = "idle" | "selected" | "correct" | "wrong";
@@ -139,6 +137,7 @@ const AnswerOption = ({
   }, [state, animate]);
 
   const onPress = () => {
+    if (disabled) return;
     if (state === "idle") pickFeedback();
     onPick(username);
   };
@@ -154,9 +153,12 @@ const AnswerOption = ({
         ]}
         activeOpacity={PRESSED_OPACITY}
         onPress={onPress}
-        disabled={disabled}
+        // Disabled through its accessibility state, which TouchableOpacity also honours for touches and the press dim
+        // (and no focus, as its `disabled` prop gave): that prop would start a no-op opacity animation on every card
+        // each time the answers close, making every card's touch layer native-driven (EXP-265)
+        focusable={!disabled}
         accessibilityRole="button"
-        accessibilityState={{ selected: state !== "idle" }}
+        accessibilityState={{ selected: state !== "idle", disabled }}
       >
         <View style={tw`flex-row items-center`}>
           <View

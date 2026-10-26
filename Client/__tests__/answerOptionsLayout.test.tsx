@@ -150,7 +150,7 @@ describe("GameScreen answer options (EXP-250)", () => {
 
     const opts = options(r.root, names);
     expect(opts).toHaveLength(12);
-    for (const name of names) expect(pressable(r.root, name).props.disabled).toBe(false);
+    for (const name of names) expect(pressable(r.root, name).props.accessibilityState.disabled).toBe(false);
     for (const o of opts) {
       expect(touchHeight(o)).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
       expect(styleOf(cellOf(o)).flexBasis).toBe("30%");

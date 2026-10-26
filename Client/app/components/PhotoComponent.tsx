@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { View, Platform, Animated, Image, ActivityIndicator } from "react-native";
 import { BlurView } from "expo-blur";
 import tw from "twrnc";
@@ -68,4 +68,5 @@ const PhotoComponent: React.FC<PhotoComponentProps> = ({ photoUrl, headers, onLo
   );
 };
 
-export default PhotoComponent;
+// Memoised: the game screen re-renders on every phase and pick, the photo only changes with the round (EXP-265)
+export default memo(PhotoComponent);

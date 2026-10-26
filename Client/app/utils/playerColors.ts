@@ -68,10 +68,22 @@ const GRAPHEME_EXTENSION =
 // A flag (pair of regional indicators), or one character with its extensions
 const FIRST_GRAPHEME = new RegExp(`^(?:[\\u{1F1E6}-\\u{1F1FF}]{2}|.(?:${GRAPHEME_EXTENSION})*)`, "u");
 
+// One grapheme segmenter for every call (each answer card asks for its initial when it mounts, every round), made the
+// first time it is needed by the engine's current Intl.Segmenter
+let sharedSegmenter: { Segmenter: typeof Intl.Segmenter; instance: Intl.Segmenter } | null = null;
+const graphemeSegmenter = (): Intl.Segmenter | null => {
+  if (typeof Intl.Segmenter !== "function") return null; // Hermes has none
+  if (sharedSegmenter?.Segmenter !== Intl.Segmenter) {
+    sharedSegmenter = { Segmenter: Intl.Segmenter, instance: new Intl.Segmenter(undefined, { granularity: "grapheme" }) };
+  }
+  return sharedSegmenter.instance;
+};
+
 /** The first user-perceived character of a text: Intl.Segmenter where the engine has it, else the pattern above */
 export const firstGrapheme = (text: string): string => {
-  if (typeof Intl.Segmenter === "function") {
-    const [first] = new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text);
+  const segmenter = graphemeSegmenter();
+  if (segmenter) {
+    const [first] = segmenter.segment(text);
     return first?.segment ?? "";
   }
   return text.match(FIRST_GRAPHEME)?.[0] ?? "";

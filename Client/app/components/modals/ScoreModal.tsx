@@ -1,4 +1,4 @@
-import React from "react";
+import React, { memo } from "react";
 import { View, Text, ScrollView } from "react-native";
 import tw from "twrnc";
 import { ScoreRound } from "../../models/interfaces";
@@ -101,4 +101,5 @@ const ScoreModal: React.FC<ScoreModalProps> = ({
   );
 };
 
-export default ScoreModal;
+// Memoised: during scores the game screen still re-renders (reactions, the hold button), the scoreboard doesn't change
+export default memo(ScoreModal);

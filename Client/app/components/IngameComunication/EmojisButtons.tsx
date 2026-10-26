@@ -1,7 +1,7 @@
 import { ScrollView, Text, TouchableOpacity, View } from "react-native";
 import tw from "twrnc";
 import { useGameContext } from "../../providers/GameContext";
-import { useRef } from "react";
+import { memo, useRef } from "react";
 import { REACTION_EMOJIS } from "../../utils/reactions";
 import { emojiButtonId } from "../../utils/testIds";
 
@@ -40,4 +40,5 @@ function EmojisButton() {
   );
 }
 
-export default EmojisButton;
+// Memoised: it takes no props, the game screen re-renders on every phase and pick (EXP-265)
+export default memo(EmojisButton);

@@ -4,19 +4,14 @@
 # while GameContext still held A's code.
 # Room A has 2 bots and room B 3 (bot names repeat across bots.mjs processes, but each room is separate on the
 # server): lobby-player-bot3 only exists in B. A's bots record the device's player-left when it switches rooms.
-# lab.sh play only passes GAME_CODE, so this flow runs by hand (two bots.mjs processes + maestro), from the repo root
-# against the lab server (never production):
-#   1. Room B: 3 bots that only wait in the lobby (5 players never arrive, so it never starts; the run ends by
-#      --timeout, which bots.mjs reports as a timeout error: expected here)
-#        node qa/lab/bots.mjs --server http://localhost:3000 --bots 3 --host --wait-players 5 --timeout 900 \
-#          --photos qa/runs/photos/bots --out qa/runs/invite-b.json --code-file qa/runs/invite-b.code &
-#   2. Room A: 2 bots that start once the device joins, play 3 rounds and wait in the lobby again after game over
-#        node qa/lab/bots.mjs --server http://localhost:3000 --bots 2 --host --rounds 3 --wait-players 3 \
-#          --play-again-linger 60 --play-again-linger-bot 0 \
-#          --photos qa/runs/photos/bots --out qa/runs/invite-a.json --code-file qa/runs/invite-a.code &
-#   3. maestro --device <id> test qa/maestro/invite-link-after-game.yaml \
-#        -e GAME_CODE="$(cat qa/runs/invite-a.code)" -e NEW_CODE="$(cat qa/runs/invite-b.code)" \
-#        -e USERNAME=<label> -e METRO_URL=http%3A%2F%2Flocalhost%3A8081
+# Run from the repo root against the lab server (never production), one device at a time:
+#   qa/lab/lab.sh play --devices <label> --bots 2 --rounds 3 --flow invite-link-after-game \
+#     --bot-args "--play-again-linger 60 --play-again-linger-bot 0" \
+#     --second-room "--bots 3 --host --wait-players 5 --timeout 900"
+# Room A is the main play room (2 bots + the device: starts once it joins, plays 3 rounds, then every bot plays again
+# at once and waits in A's lobby). Room B is the --second-room: 3 bots that only wait in the lobby (5 players never
+# arrive, so it never starts); lab.sh passes its code as NEW_CODE and stops those bots when the run ends (their
+# result does not count).
 # env: GAME_CODE (room A), NEW_CODE (room B), USERNAME, METRO_URL (url-encoded)
 # Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
 appId: com.socketNull.ExposeMe

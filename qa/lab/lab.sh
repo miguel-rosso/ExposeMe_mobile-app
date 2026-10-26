@@ -18,6 +18,8 @@
 #   play [--bots N] [--rounds R] [--devices all|pair|ios|android|none|<label,label>] [--flow play-game] [--bot-args "..."]
 #                               Full multiplayer session: bots host a room, devices join and play
 #                               (--bot-args: extra bots.mjs flags, e.g. --flow tie-game --bot-args --no-answer)
+#        [--second-room "<bots.mjs args>"]  also start a 2nd bots room; its code reaches the flows as NEW_CODE
+#        [--maestro-env KEY=VALUE]          extra Maestro variable for every device (repeatable)
 #   bots [args]                 Run qa/lab/bots.mjs directly (headless players / load / sync metrics)
 set -euo pipefail
 
@@ -314,11 +316,42 @@ cmd_shot() {
   log "screenshots in $dir"
 }
 
+# ── play helpers (sourceable: qa/lab/tests/lab-play.test.sh) ──
+ROOM_CODE_TIMEOUT_S=30          # how long a bots room may take to publish its code (override: LAB_ROOM_CODE_TIMEOUT)
+MAESTRO_ENV_RE='^[A-Za-z_][A-Za-z0-9_]*='
+PLAY_BG_PIDS=()                 # bots.mjs processes started by the current play, stopped on exit
+
+stop_play_bots() { # a bots room that already exited is fine (kill fails, set -e must not abort)
+  local p; for p in "${PLAY_BG_PIDS[@]:-}"; do [ -z "$p" ] || kill "$p" 2>/dev/null || true; done; PLAY_BG_PIDS=()
+}
+
+forget_bots_pid() { # pid: drop a reaped bots process so a reused PID is never signalled
+  local p kept=(); for p in "${PLAY_BG_PIDS[@]:-}"; do [ -z "$p" ] || [ "$p" = "$1" ] || kept+=("$p"); done
+  PLAY_BG_PIDS=(${kept[@]+"${kept[@]}"})
+}
+
+start_bots_room() { # dir, bots.mjs args...: runs bots.mjs in the background → dir/{code,bots.json,bots.log}; sets BOTS_PID
+  local dir=$1; shift; mkdir -p "$dir"
+  node "$QA/lab/bots.mjs" --photos "$RUNS/photos/bots" --out "$dir/bots.json" --code-file "$dir/code" "$@" \
+    >"$dir/bots.log" 2>&1 &
+  BOTS_PID=$!; PLAY_BG_PIDS+=("$BOTS_PID")
+}
+
+wait_room_code() { # dir, label: prints the room code the bots wrote to dir/code, or dies
+  local dir=$1 label=$2 i
+  for ((i = 0; i < ${LAB_ROOM_CODE_TIMEOUT:-$ROOM_CODE_TIMEOUT_S}; i++)); do [ -s "$dir/code" ] && break; sleep 1; done
+  [ -s "$dir/code" ] || die "$label did not create a room — see $dir/bots.log"
+  cat "$dir/code"
+}
+
 cmd_play() {
-  local bots=3 rounds=10 which=all flow=play-game bot_args=""
+  local bots=3 rounds=10 which=all flow=play-game bot_args="" second_room="" maestro_env=()
   while [ $# -gt 0 ]; do case $1 in
     --bots) bots=$2; shift 2;; --rounds) rounds=$2; shift 2;; --devices) which=$2; shift 2;; --flow) flow=$2; shift 2;;
     --bot-args) bot_args=$2; shift 2;;
+    --second-room) [ $# -ge 2 ] || die "--second-room needs the bots.mjs args of the 2nd room"; second_room=$2; shift 2;;
+    --maestro-env) [[ ${2:-} =~ $MAESTRO_ENV_RE ]] || die "--maestro-env needs KEY=VALUE (got '${2:-}')"
+      maestro_env+=(-e "$2"); shift 2;;
     *) die "bad arg $1";; esac; done
   export RUN_ID; RUN_ID="$(run_id)"; local dir="$RUNS/$RUN_ID"; mkdir -p "$dir/maestro"
   local sel='.'; [ "$which" = ios ] && sel='select(.platform=="ios")'; [ "$which" = android ] && sel='select(.platform=="android")'
@@ -333,24 +366,35 @@ cmd_play() {
   local total=$((bots + n_dev))
   [ "$total" -ge 2 ] || die "need at least 2 players"
   log "RUN $RUN_ID: $bots bots + $n_dev devices, $rounds rounds"
-  node "$QA/lab/bots.mjs" --bots "$bots" --host --rounds "$rounds" --wait-players "$total" \
-    --photos "$RUNS/photos/bots" --out "$dir/bots.json" --code-file "$dir/code" $bot_args >"$dir/bots.log" 2>&1 &
-  local bots_pid=$!
-  for _ in $(seq 1 30); do [ -s "$dir/code" ] && break; sleep 1; done
-  [ -s "$dir/code" ] || { kill $bots_pid 2>/dev/null; die "bots did not create a room — see $dir/bots.log"; }
-  local code; code="$(cat "$dir/code")"; log "room $code"
+  trap stop_play_bots EXIT
+  # Optional 2nd room (e.g. the invite target of invite-link-after-game): its code reaches the flows as NEW_CODE.
+  # It is auxiliary: it is stopped once the main run ends and its exit status does not count.
+  if [ -n "$second_room" ]; then
+    # shellcheck disable=SC2086 # second_room is a list of bots.mjs flags
+    start_bots_room "$dir/second-room" $second_room
+    local new_code; new_code="$(wait_room_code "$dir/second-room" "second room")" || exit 1
+    log "second room $new_code"; maestro_env+=(-e "NEW_CODE=$new_code")
+  fi
+  # shellcheck disable=SC2086 # bot_args is a list of bots.mjs flags
+  start_bots_room "$dir" --bots "$bots" --host --rounds "$rounds" --wait-players "$total" $bot_args
+  local bots_pid=$BOTS_PID
+  local code; code="$(wait_room_code "$dir" "bots")" || exit 1
+  log "room $code"
   local pids=()
   while read -r d; do
     [ -n "$d" ] || continue
     local id dl; id="$(jq -r .id <<<"$d")"; dl="$(jq -r .label <<<"$d")"
     "$MAESTRO" --device "$id" test "$QA/maestro/$flow.yaml" \
       -e GAME_CODE="$code" -e USERNAME="$dl" -e METRO_URL="http%3A%2F%2Flocalhost%3A$METRO_PORT" \
+      ${maestro_env[@]+"${maestro_env[@]}"} \
       --test-output-dir "$dir/maestro/$dl" --format junit --output "$dir/maestro/$dl.xml" >"$dir/maestro/$dl.log" 2>&1 &
     pids+=($!)
   done < <(devices | jq -c "$sel")
   local fail=0
   for p in "${pids[@]:-}"; do [ -n "$p" ] && { wait "$p" || fail=1; }; done
   wait $bots_pid || fail=1
+  forget_bots_pid "$bots_pid"
+  stop_play_bots
   node -e 'const r=require(process.argv[1]);console.log(JSON.stringify(r.summary,null,2))' "$dir/bots.json" 2>/dev/null || true
   [ $fail = 0 ] && log "RUN $RUN_ID PASS ($dir)" || { log "RUN $RUN_ID had failures ($dir)"; exit 1; }
 }
@@ -368,5 +412,5 @@ c=${1:-help}; shift || true
 case $c in
   doctor|setup|up|down|status|server|metro|photos|build|install|open|shot|play) "cmd_$c" "$@";;
   bots) node "$QA/lab/bots.mjs" "$@";;
-  *) sed -n '2,24p' "$0";;
+  *) sed -n '2,23p' "$0";;
 esac

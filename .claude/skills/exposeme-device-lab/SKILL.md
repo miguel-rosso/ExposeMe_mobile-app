@@ -37,6 +37,12 @@ qa/lab/lab.sh down                                   # when finished
 ```
 `play` = bots create the room and wait for `bots + devices` players → each device runs `qa/maestro/play-game.yaml` in parallel (open → join with the code → play, tapping `bot1` as its guess and screenshotting every loop) → host bot starts → results in `qa/runs/<RUN_ID>/` (`bots.json`, `bots.log`, `maestro/<device>/…`, junit xml).
 
+Extra inputs for a flow: `--maestro-env KEY=VALUE` (repeatable) passes another variable to every device's Maestro run, and `--second-room "<bots.mjs args>"` starts a 2nd bots room first (results in `qa/runs/<RUN_ID>/second-room/`) and passes its code as `NEW_CODE`; it is stopped when the run ends and its exit status does not count. The invite-link check is one line (see the header of `qa/maestro/invite-link-after-game.yaml`):
+```bash
+qa/lab/lab.sh play --devices ios-a --bots 2 --rounds 3 --flow invite-link-after-game \
+  --bot-args "--play-again-linger 60 --play-again-linger-bot 0" --second-room "--bots 3 --host --wait-players 5 --timeout 900"
+```
+
 `--rounds` takes 10/15/20, or 3 for short QA runs (~1 min): 3 is QA-only, accepted only because `lab.sh server` starts the server with `ALLOW_QA_ROUNDS=1` (a server started another way, or production, ignores it and the bots report a `game-started with 10 rounds, asked for 3` consistency error). The app never offers 3 rounds.
 
 ## Why the photos are labelled
@@ -69,5 +75,5 @@ Summary fields: `pass`, `skew_ms` (spread between players receiving the same pha
 - iOS simulators are shown in DeviceHub (Xcode 27 replaced Simulator.app; `lab.sh up` opens it). `lab.sh shot` takes screenshots.
 - `metro`/`build`/`doctor` fail with "Client needs Node N": install the major pinned in `Client/.nvmrc` (`nvm install N`); the lab picks it from nvm or Homebrew `node@N` when the default node differs.
 - iOS "Cannot find native module …": `lab.sh build ios` re-runs `pod install` whenever `Client/ios/Podfile.lock` differs from `Pods/Manifest.lock` or `Client/package*.json`/`Podfile` changed after the last install. Config-plugin/`app.json` changes still need a manual `npx expo prebuild` in `Client/` first.
-- Lab helper tests (no devices): `qa/lab/tests/lab-functions.test.sh`, `qa/lab/tests/bots-cli.test.sh` (bots.mjs command line: `--help` and bad arguments exit before any network activity).
+- Lab helper tests (no devices): `qa/lab/tests/lab-functions.test.sh`, `qa/lab/tests/lab-play.test.sh` (`play` arguments, `--second-room`/`--maestro-env` plumbing, bots cleanup; stub node/maestro), `qa/lab/tests/bots-cli.test.sh` (bots.mjs command line: `--help` and bad arguments exit before any network activity).
 - Machine is slow: `up --ios 1 --android 1` and use more bots.

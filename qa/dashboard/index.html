@@ -377,6 +377,7 @@
           <li><b>Definir <code>NODE_ENV=production</code> en Render (EXP-105):</b> variable de entorno del servicio; defensa extra para que Express nunca muestre trazas de error. Sin riesgo funcional.</li>
           <li><b>Definir <code>ALLOWED_HOSTS</code> en Render (EXP-251):</b> en Environment, <code>ALLOWED_HOSTS=exposeme.onrender.com</code> (el nombre real del servicio y, si hay dominio propio, añadido separado por comas). Cierra el último hueco para que una web ajena no pueda usar el servidor. Después comprueba desde un móvil que la app conecta; si el valor no coincide, los sockets fallan. Los demás límites nuevos (conexiones por IP, fotos guardadas) ya tienen valores por defecto adecuados.</li>
           <li><b>Nueva build de la app por el esquema <code>exposeme://</code> (EXP-168, DEC-030):</b> los enlaces de invitación dejan de usar <code>myapp://</code>; la app y el servidor tienen que publicarse a la vez.</li>
+          <li><b>Confirmar en la build de tienda de iPhone que no pide «red local» (EXP-090):</b> en local, la build Release ya quita ese permiso del cliente de desarrollo; en la primera build de producción de EAS (TestFlight o interna), comprueba que al abrir la app no sale el aviso de red local.</li>
         </ol>
       </div>
     </details>

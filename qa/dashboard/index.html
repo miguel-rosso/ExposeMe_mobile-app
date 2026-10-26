@@ -110,6 +110,12 @@
 #dash-root .qa-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr)); gap: 1rem; }
 #dash-root .qa-chart { position: relative; min-height: 220px; margin-top: 0.75rem; }
 #dash-root .qa-chart svg text { font-family: var(--qa-font); }
+#dash-root .qa-fold { cursor: pointer; user-select: none; }
+#dash-root .qa-fold::before { content: "▾"; display: inline-block; width: 1rem; margin-right: 0.3rem; color: var(--color-fg-muted); transition: transform 0.15s; }
+#dash-root .qa-folded .qa-fold::before { transform: rotate(-90deg); }
+#dash-root .qa-fold:focus-visible { outline: 2px solid var(--qa-blue); outline-offset: 2px; border-radius: 4px; }
+#dash-root .qa-folded > *:not(h2):not(.qa-sec-head) { display: none !important; }
+#dash-root .qa-folded .qa-sec-head > *:not(h2) { display: none; }
 #dash-root .qa-tip { position: absolute; pointer-events: none; background: var(--cds-surface-popover); border: 1px solid var(--cds-border); border-radius: 10px; box-shadow: var(--cds-shadow-popover); padding: 0.4rem 0.6rem; font-size: 0.9rem; white-space: nowrap; z-index: 2; }
 #dash-root .qa-tip .k { color: var(--color-fg-muted); }
 #dash-root .qa-pace-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem; margin-top: 0.5rem; }
@@ -244,7 +250,8 @@
     </p>
   </header>
 
-  <section id="now" aria-label="Ahora mismo">
+  <section id="now">
+    <h2>Ahora mismo</h2>
     <div class="qa-now" id="now-box" data-source="activity"></div>
   </section>
 
@@ -289,11 +296,14 @@
   </section>
 
 
-  <section class="qa-kpis" aria-label="Cifras principales">
+  <section id="cifras">
+    <h2>Cifras principales</h2>
+    <div class="qa-kpis">
     <div class="qa-kpi c-yellow" id="kpi-open" data-kpi="open" role="button" tabindex="0" title="Ver en la tabla de incidencias"><div class="lbl">Incidencias abiertas</div><div class="val dash-skeleton" data-source="kpis" data-field="open" data-row="0">—</div><div class="sub">abiertas, en curso o bloqueadas</div></div>
     <div class="qa-kpi c-red" id="kpi-high" data-kpi="high" role="button" tabindex="0" title="Ver en la tabla de incidencias"><div class="lbl">Altas o críticas</div><div class="val dash-skeleton" data-source="kpis" data-field="open_high" data-row="0">—</div><div class="sub">se arreglan primero</div></div>
     <div class="qa-kpi c-green" id="kpi-done" data-kpi="done" role="button" tabindex="0" title="Ver en la tabla de incidencias"><div class="lbl">Resueltas</div><div class="val dash-skeleton" data-source="kpis" data-field="done" data-row="0">—</div><div class="sub"><span data-source="kpis" data-field="verified" data-row="0">—</span> verificadas en móviles</div></div>
     <div class="qa-kpi c-blue" id="kpi-skew"><div class="lbl">Desfase entre jugadores</div><div class="val dash-skeleton" data-source="kpis" data-field="last_p95_skew" data-row="0">—</div><div class="sub">ms (p95) en la última partida, <span data-source="kpis" data-field="last_run" data-row="0">—</span></div></div>
+  </div>
   </section>
 
   <section class="qa-grid">
@@ -499,6 +509,31 @@
 </div>
 
 <script>
+  // Every block folds from its title; each viewer's choice is remembered in this browser
+  (function foldable() {
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem("qa-folded") || "{}"); } catch (e) { saved = {}; }
+    document.querySelectorAll(".qa h2").forEach((h2) => {
+      const box = h2.closest(".qa-card, section");
+      if (!box || !box.id) return;
+      h2.classList.add("qa-fold");
+      h2.setAttribute("role", "button");
+      h2.tabIndex = 0;
+      const set = (folded) => { box.classList.toggle("qa-folded", folded); h2.setAttribute("aria-expanded", String(!folded)); };
+      set(!!saved[box.id]);
+      const toggle = (ev) => {
+        if (ev.target.closest("a, input")) return;
+        const folded = !box.classList.contains("qa-folded");
+        set(folded);
+        saved[box.id] = folded;
+        try { localStorage.setItem("qa-folded", JSON.stringify(saved)); } catch (e) { /* private mode: fold just for now */ }
+        if (!folded) window.dispatchEvent(new Event("resize"));
+      };
+      h2.addEventListener("click", toggle);
+      h2.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); toggle(ev); } });
+    });
+  })();
+
 const ACTIVE = ["open", "in-progress", "blocked"];
 const DONE = ["fixed", "verified"];
 const SEVS = ["critical", "high", "medium", "low"];

@@ -211,6 +211,22 @@
 #dash-root .qa-tbl th[aria-sort="descending"] button::after { content: "↓"; color: var(--qa-blue); opacity: 1; }
 #dash-root .qa-tbl th button:hover { color: var(--qa-blue); }
 #dash-root .qa-tbl th button:focus-visible { outline: 2px solid var(--qa-blue); outline-offset: 2px; border-radius: 4px; }
+/* Workflow explainer (collapsed at the bottom) */
+#dash-root .qa-flow > summary { font-size: 1.1rem; color: var(--color-fg); }
+#dash-root .qa-flow-body { margin-top: 0.75rem; display: flex; flex-direction: column; gap: 1rem; }
+#dash-root .qa-flow-body p { margin: 0; max-width: 72ch; }
+#dash-root .qa-flow-body h3 { font-size: 1.05rem; margin: 0.5rem 0 0; }
+#dash-root .qa-fig { margin: 0; }
+#dash-root .qa-fig svg { display: block; width: 100%; max-width: 860px; height: auto; color: var(--color-fg); }
+#dash-root .qa-fig .qa-fig-hi { stroke: var(--qa-teal); stroke-width: 2; }
+#dash-root .qa-fig .qa-fig-muted { fill: var(--color-fg-muted); }
+#dash-root .qa-fig figcaption { font-size: 0.9rem; color: var(--color-fg-muted); margin-top: 0.5rem; max-width: 72ch; }
+#dash-root .qa-flow-dl { display: grid; grid-template-columns: minmax(9rem, max-content) 1fr; gap: 0.5rem 1rem; margin: 0; }
+#dash-root .qa-flow-dl dt { font-weight: 700; }
+#dash-root .qa-flow-dl dd { margin: 0; color: var(--color-fg-muted); }
+#dash-root .qa-flow-ol, #dash-root .qa-flow-ul { margin: 0; padding-left: 1.25rem; display: flex; flex-direction: column; gap: 0.45rem; max-width: 80ch; }
+#dash-root .qa-flow code { font-family: var(--qa-mono); font-size: 0.9em; }
+@media (max-width: 40rem) { #dash-root .qa-flow-dl { grid-template-columns: 1fr; } #dash-root .qa-flow-dl dd { margin-bottom: 0.4rem; } }
 </style>
 
 <div class="qa">
@@ -331,6 +347,125 @@
         </table>
       </div>
     </div>
+  </section>
+  <section id="flujo">
+    <details class="qa-archive qa-flow">
+      <summary>Cómo funciona el flujo de QA (agentes, pasos y reglas)</summary>
+      <div class="qa-card qa-flow-body">
+        <p>Un bucle autónomo pule el juego por iteraciones. Claude hace de <b>orquestador</b>: planifica, reparte el trabajo entre agentes especializados, decide lo técnico, integra los cambios y mantiene este panel. No escribe el código de la app; lo escriben los agentes y lo revisan otros agentes antes de entrar.</p>
+
+        <figure class="qa-fig">
+          <svg viewBox="0 0 860 430" role="img" aria-label="Una iteración: descubrir incidencias, elegir un lote de hasta 3 independientes, arreglarlas en paralelo en worktrees, revisarlas (código y seguridad, con hasta 2 rondas de corrección), integrarlas una a una con tests y bots, prueba rápida en iPhone y Android si cambia una pantalla, y publicar en el panel. Cada 3 iteraciones: al empezar, pasada de limpieza; al terminar, partida de regresión.">
+            <defs>
+              <marker id="qa-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+            </defs>
+            <g fill="none" stroke="currentColor" stroke-width="1.4">
+              <!-- row 1 -->
+              <rect x="20" y="30" width="150" height="62" rx="10"/>
+              <rect x="235" y="30" width="150" height="62" rx="10"/>
+              <rect x="450" y="20" width="170" height="82" rx="10" stroke-dasharray="5 4"/>
+              <rect x="690" y="30" width="150" height="62" rx="10"/>
+              <!-- row 2 -->
+              <rect x="690" y="190" width="150" height="62" rx="10"/>
+              <rect x="450" y="190" width="170" height="62" rx="10"/>
+              <rect x="235" y="190" width="150" height="62" rx="10"/>
+              <rect x="20" y="190" width="150" height="62" rx="10"/>
+              <!-- row 3 -->
+              <rect x="20" y="350" width="240" height="62" rx="10" class="qa-fig-hi"/>
+              <rect x="310" y="350" width="240" height="62" rx="10"/>
+              <rect x="600" y="350" width="240" height="62" rx="10"/>
+            </g>
+            <g stroke="currentColor" stroke-width="1.4" fill="none" marker-end="url(#qa-arr)">
+              <line x1="170" y1="61" x2="231" y2="61"/>
+              <line x1="385" y1="61" x2="446" y2="61"/>
+              <line x1="620" y1="61" x2="686" y2="61"/>
+              <line x1="765" y1="92" x2="765" y2="186"/>
+              <line x1="690" y1="221" x2="624" y2="221"/>
+              <line x1="450" y1="221" x2="389" y2="221"/>
+              <line x1="235" y1="221" x2="174" y2="221"/>
+              <path d="M95,190 L95,140 L95,96"/>
+              <path d="M720,190 L720,140 L590,140 L590,106" stroke-dasharray="5 4"/>
+            </g>
+            <g fill="currentColor" font-size="13" text-anchor="middle">
+              <text x="95" y="56" font-weight="700">1 · Descubrir</text>
+              <text x="95" y="74" font-size="11.5">auditor · seguridad · bots</text>
+              <text x="310" y="56" font-weight="700">2 · Elegir lote</text>
+              <text x="310" y="74" font-size="11.5">≤3, sin ficheros comunes</text>
+              <text x="535" y="46" font-weight="700">3 · Arreglar</text>
+              <text x="535" y="64" font-size="11.5">qa-fixer × 3 en paralelo</text>
+              <text x="535" y="80" font-size="11.5">cada uno en su worktree</text>
+              <text x="535" y="94" font-size="11.5">test primero</text>
+              <text x="765" y="56" font-weight="700">4 · Revisar</text>
+              <text x="765" y="74" font-size="11.5">código + seguridad</text>
+              <text x="765" y="216" font-weight="700">¿Aprobado?</text>
+              <text x="765" y="234" font-size="11.5">sí → integrar</text>
+              <text x="535" y="216" font-weight="700">5 · Integrar</text>
+              <text x="535" y="234" font-size="11.5">uno a uno · tests + bots</text>
+              <text x="310" y="216" font-weight="700">6 · Prueba rápida</text>
+              <text x="310" y="234" font-size="11.5">iPhone + Android a la vez</text>
+              <text x="310" y="248" font-size="11" class="qa-fig-muted">solo si cambió una pantalla</text>
+              <text x="95" y="216" font-weight="700">7 · Publicar</text>
+              <text x="95" y="234" font-size="11.5">backlog → este panel</text>
+              <text x="140" y="376" font-weight="700">Cada 3 iteraciones, al final</text>
+              <text x="140" y="394" font-size="11.5">partida completa: 2 iPhone + 2 Android + bots</text>
+              <text x="430" y="376" font-weight="700">Cada 3 iteraciones, al inicio</text>
+              <text x="430" y="394" font-size="11.5">pasada de limpieza (clean code)</text>
+              <text x="720" y="376" font-weight="700">Decisiones de juego</text>
+              <text x="720" y="394" font-size="11.5">tarjeta aquí → tu respuesta</text>
+            </g>
+            <g fill="currentColor" font-size="11.5" text-anchor="middle" class="qa-fig-muted">
+              <text x="728" y="160" text-anchor="start">no → corregir</text>
+              <text x="728" y="174" text-anchor="start">(máx. 2 rondas)</text>
+              <text x="103" y="146" text-anchor="start">siguiente iteración</text>
+            </g>
+          </svg>
+          <figcaption>Una iteración del bucle. Las flechas discontinuas son vueltas atrás: un arreglo que la revisión no aprueba vuelve a su agente, como mucho dos veces. Los dispositivos no frenan cada arreglo: la prueba rápida corre en segundo plano y la partida completa se hace cada 3 iteraciones.</figcaption>
+        </figure>
+
+        <h3>Los agentes</h3>
+        <dl class="qa-flow-dl">
+          <dt>Orquestador (Claude)</dt><dd>Elige qué arreglar, lanza a los demás, decide lo técnico, integra los cambios en la rama <code>qa/loop</code> (un commit por incidencia) y mantiene el backlog y este panel. Nunca sube nada ni despliega: eso lo decides tú.</dd>
+          <dt>qa-auditor</dt><dd>Busca incidencias nuevas leyendo el código y los resultados del laboratorio. Rota de enfoque: sincronización → errores → pulido visual → rendimiento → resistencia a cortes → salud del código.</dd>
+          <dt>qa-fixer</dt><dd>Arregla una incidencia en su propia copia del repo (worktree). Primero escribe un test que falla, luego el arreglo mínimo y limpio, y prueba con bots en su propio servidor.</dd>
+          <dt>qa-reviewer</dt><dd>Revisa cada cambio antes de entrar: que arregle la causa, que no rompa otras fases del juego, que los tests detecten el fallo de verdad y que el código sea mantenible.</dd>
+          <dt>qa-security</dt><dd>Revisa todo cambio que toque el servidor, los sockets, las subidas de fotos o los permisos, y hace una auditoría completa cada 5 iteraciones. Intenta romperlo con pruebas reales en local.</dd>
+          <dt>qa-device-tester</dt><dd>Juega partidas reales en simuladores de iPhone y emuladores de Android junto a bots, revisa capturas y logs, y mide el desfase entre jugadores.</dd>
+        </dl>
+
+        <h3>Paso a paso</h3>
+        <ol class="qa-flow-ol">
+          <li><b>Descubrir.</b> Cuando quedan pocas incidencias abiertas, el auditor busca nuevas; cada 5, también seguridad. Se agrupan por causa para no duplicar.</li>
+          <li><b>Elegir un lote.</b> Hasta 3 incidencias, las más graves primero, y solo si no tocan los mismos ficheros (zonas: núcleo del servidor, HTTP/subidas, pantalla de partida, sala de espera, resto del cliente, laboratorio). Un cambio de dependencias va siempre solo.</li>
+          <li><b>Arreglar en paralelo.</b> Cada qa-fixer trabaja aislado. Regla: test en cada capa que toca (servidor → vitest, cliente → jest, protocolo → ambos + escenario de bots, flujo visible → Maestro).</li>
+          <li><b>Revisar.</b> Revisor de código siempre; seguridad si toca servidor, sockets, subidas o permisos. Los hallazgos graves vuelven al mismo agente (máximo 2 rondas; si no, se bloquea). Los menores se arreglan o quedan como incidencias.</li>
+          <li><b>Integrar uno a uno.</b> Cada arreglo entra como un solo commit y después se repiten todos los tests, la comprobación de tipos y una partida de bots. Si algo falla, se revierte ese commit.</li>
+          <li><b>Prueba rápida en dispositivos</b> solo si cambió una pantalla: un iPhone y un Android a la vez con el flujo de esa incidencia, en segundo plano, sin parar el resto.</li>
+          <li><b>Publicar.</b> Estado, actividad, cambios y ejecuciones se exportan desde el backlog local a este panel en cada paso.</li>
+        </ol>
+
+        <h3>Cada cierto tiempo</h3>
+        <ul class="qa-flow-ul">
+          <li><b>Cada 3 iteraciones van juntas: primero limpieza, después regresión.</b> Así la partida de regresión también comprueba que la limpieza no ha roto nada.</li>
+          <li><b>Pasada de limpieza</b> (al empezar esa iteración, y antes de proponer fusionar a <code>main</code>): busca deuda estructural (código duplicado o muerto, ficheros enormes, nombres poco claros) y apunta como mucho 5 incidencias «Limpieza: …». Solo cambios que no alteran el comportamiento, con tests antes y después, y como mucho una por lote.</li>
+          <li><b>Partida de regresión</b> (al terminar esa iteración, y siempre antes de parar): 10 rondas con los 4 dispositivos y 3 bots, más una partida de caos solo con bots (cortes de red y subidas fallidas). Lo que se ve funcionar pasa de <span class="pill st-fixed">hecho</span> a <span class="pill st-verified">verificado</span>.</li>
+          <li><b>Calidad en cada arreglo</b>: el código nuevo debe ser limpio y dejar lo que toca igual o mejor; el revisor lo exige.</li>
+        </ul>
+
+        <h3>Quién decide qué</h3>
+        <ul class="qa-flow-ul">
+          <li><b>Claude decide</b> lo técnico (arquitectura, librerías, tests, parámetros menores) y lo deja anotado como tarjeta «Decidido por Claude».</li>
+          <li><b>Tú decides</b> cómo se juega (reglas, puntos, qué ve cada jugador, qué pasa si alguien se va) y todo lo irreversible o hacia fuera: subir código, desplegar, tiendas, configuración de producción. Te llega como tarjeta en «Necesito tu respuesta» y el bucle sigue con otras cosas mientras tanto.</li>
+        </ul>
+
+        <h3>Reglas fijas</h3>
+        <ul class="qa-flow-ul">
+          <li>El servidor es la única fuente de verdad de los tiempos de la partida; la app solo pinta lo que recibe.</li>
+          <li>Repositorio público: nunca se suben secretos, fotos, logs, IPs ni detalles de vulnerabilidades sin arreglar. El backlog y los datos de este panel viven solo en local.</li>
+          <li>Nada de tráfico de pruebas contra producción. El laboratorio usa su propio servidor y cada agente el suyo, en otro puerto.</li>
+          <li>Sin push, sin merge a <code>main</code> y sin despliegues: la rama <code>qa/loop</code> la revisas y fusionas tú.</li>
+        </ul>
+      </div>
+    </details>
   </section>
 </div>
 

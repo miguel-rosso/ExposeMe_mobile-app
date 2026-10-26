@@ -8,7 +8,7 @@ import FingerAnimation from "@/assets/animations/FingerAnimation.json";
 import { useRouter } from "expo-router";
 import { usePhotoContext } from "@/app/providers/PhotoContext";
 import LottieView from "lottie-react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useI18n } from "../i18n";
 import LanguageToggle from "../components/LanguageToggle";
 import { TEST_IDS } from "../utils/testIds";
@@ -19,6 +19,9 @@ const InitialScreen: React.FC = () => {
   const { t } = useI18n();
   const router = useRouter();
   const { handleContinue } = usePhotoContext();
+  // The bottom inset (Android gesture bar / iOS home indicator) pads the scroll content, not the frame,
+  // so the hint under "Continue" can always be scrolled above it
+  const insets = useSafeAreaInsets();
 
   // Maneja el evento de presionar el botón de continuar
   const handleContinuePress = async () => {
@@ -36,9 +39,12 @@ const InitialScreen: React.FC = () => {
   const imageHeight = screenHeight * 0.3;
 
   return (
-    <SafeAreaView testID={TEST_IDS.initialScreen} style={tw`flex-1 bg-gray-900`}>
+    <SafeAreaView testID={TEST_IDS.initialScreen} edges={["top", "left", "right"]} style={tw`flex-1 bg-gray-900`}>
       <StatusBar barStyle="light-content" />
-      <ScrollView contentContainerStyle={tw`flex-grow`} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={[tw`flex-grow`, { paddingBottom: insets.bottom + 16 }]}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={tw`flex-1 px-4 pt-4 pb-6 max-w-[500px] w-full self-center`}>
           {/* Language (the onboarding carries the privacy notice: let users read it in their language) */}
           <View style={tw`items-end mb-2`}>

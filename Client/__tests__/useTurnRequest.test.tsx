@@ -91,6 +91,20 @@ describe("useTurnRequest", () => {
     expect(needsUpload).toBe(true);
   });
 
+  // EXP-237: a new photo wait or a rejoin snapshot means the round-skipped answering my report already went by
+  it("endTurn({ forgetReport }) drops my report reason; a plain endTurn keeps it for the round-skipped", () => {
+    const tr = mount(makeSocket());
+    act(() => { tr().start(turn1); });
+    act(() => tr().reportUnavailable("permission", turn1));
+    act(() => tr().endTurn());
+    expect(tr().takeReportedReason()).toBe("permission");
+
+    act(() => { tr().start({ round: 1, attempt: 2 }); });
+    act(() => tr().reportUnavailable("no-photos", { round: 1, attempt: 2 }));
+    act(() => tr().endTurn({ forgetReport: true }));
+    expect(tr().takeReportedReason()).toBeNull();
+  });
+
   it("a stale request reports nothing", () => {
     const socket = makeSocket();
     const tr = mount(socket);

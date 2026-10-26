@@ -225,6 +225,22 @@ describe("GameScreen while a photo is awaited", () => {
     expect(textOf(r.root, TEST_IDS.roundSkippedNotice)).toBe(en.roundSkippedUnavailable);
   });
 
+  // EXP-237: my report was answered by a round-skipped lost while offline; the rejoin snapshot ends that turn
+  it("after a rejoin snapshot, another player's skipped round shows the room's notice, not my old reason", async () => {
+    mockPickGamePhoto.mockResolvedValue({ error: "permission" });
+    act(() => mockSocket.fire("waiting-photo", { round: 1, duration: 15_000 }));
+    act(() => mockSocket.fire("your-turn", { round: 1, attempt: 1 }));
+    await flush();
+    expect(mockSocket.emitted).toContainEqual(["photo-unavailable", { round: 1, attempt: 1 }]);
+    // Offline meanwhile: round-skipped (and the next waiting-photo) never arrived; the rejoin answers with a snapshot
+    act(() => mockSocket.fire("game-state", {
+      started: true, phase: "waiting-photo", round: 1, totalRounds: 10, isOwner: false, photo: null, correctAnswer: null,
+      duration: 9_000, held: false, pause: null, scores: [], players: [],
+    }));
+    act(() => mockSocket.fire("round-skipped", { round: 1, reason: "unavailable" })); // someone else's report
+    expect(textOf(r.root, TEST_IDS.roundSkippedNotice)).toBe(en.roundSkippedUnavailable);
+  });
+
   it("re-picked for the same round: the old flow neither reports nor sends, and doesn't break the new turn", async () => {
     let rejectOld!: (e: Error) => void;
     mockPickGamePhoto.mockReturnValueOnce(new Promise((_, rej) => { rejectOld = rej; }));

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Socket } from "socket.io-client";
 import { RoomOfGameResponse } from "../models/interfaces";
+import { attachHandlers } from "../utils/socketHandlers";
 
 interface GameConnectionOptions {
   socket: Socket | null;
@@ -56,16 +57,12 @@ export const useGameConnection = ({ socket, gameCode, username, getRejoinToken, 
       if (data.rejoinToken && data.room && name) save(data.room.gameCode, name, data.rejoinToken);
     };
 
-    socket.on("connect", onConnect);
-    socket.on("disconnect", onDisconnect);
-    socket.on("connect_error", onConnectError);
-    socket.on("room-of-game", onRoomOfGame);
-    return () => {
-      socket.off("connect", onConnect);
-      socket.off("disconnect", onDisconnect);
-      socket.off("connect_error", onConnectError);
-      socket.off("room-of-game", onRoomOfGame);
-    };
+    return attachHandlers(socket, {
+      connect: onConnect,
+      disconnect: onDisconnect,
+      connect_error: onConnectError,
+      "room-of-game": onRoomOfGame,
+    });
   }, [socket]);
 
   return { connected };

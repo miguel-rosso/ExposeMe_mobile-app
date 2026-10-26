@@ -16,6 +16,12 @@ export const TURN_ENDING_EVENTS = [
 export interface EndTurnOptions {
   /** Keep showing "uploading your photo" (game-paused: the upload goes on; game-over: the final screens cover it). */
   keepUploading?: boolean;
+  /**
+   * Also forget why I reported my photo unavailable. On a new photo wait (waiting-photo) or a rejoin snapshot
+   * (game-state) the round-skipped answering that report has gone by (or was lost while offline): a later skip is
+   * someone else's and must show the room's reason, not mine.
+   */
+  forgetReport?: boolean;
 }
 
 /**
@@ -29,7 +35,7 @@ export function useTurnRequest(socket: Socket | null | undefined) {
   const currentRef = useRef<YourTurnData | null>(null);
   // Photo uploaded (or being uploaded) for a request: re-sent if the server asks again
   const uploadRef = useRef<TurnUpload | null>(null);
-  // Why I reported photo-unavailable, until round-skipped (or the next waiting-photo) takes it
+  // Why I reported photo-unavailable, until round-skipped takes it (or a new wait / snapshot forgets it)
   const reportedRef = useRef<PhotoUnavailableReason | null>(null);
 
   const actions = useMemo(() => {
@@ -65,9 +71,10 @@ export function useTurnRequest(socket: Socket | null | undefined) {
     };
 
     /** A TURN_ENDING_EVENT arrived: any request of mine is over. */
-    const endTurn = ({ keepUploading = false }: EndTurnOptions = {}) => {
+    const endTurn = ({ keepUploading = false, forgetReport = false }: EndTurnOptions = {}) => {
       currentRef.current = null;
       if (!keepUploading) setUploading(false);
+      if (forgetReport) reportedRef.current = null;
     };
 
     /** Why I reported this turn unavailable (null if I didn't), cleared once taken. */

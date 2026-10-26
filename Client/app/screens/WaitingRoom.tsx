@@ -38,6 +38,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useI18n } from "../i18n";
 import { TEST_IDS, lobbyPlayerId, lobbyPlayerOfflineId, roundsOptionId } from "../utils/testIds";
 import { isHostIn, withConnection, withHost } from "../utils/roomPlayers";
+import { attachHandlers, SocketHandlers } from "../utils/socketHandlers";
 import { parseRoomCodeParam } from "../utils/roomCode";
 import { KICKED_BY_HOST_MESSAGE } from "../utils/serverMessage";
 import { dismissKeyboardOnBackPress } from "../utils/keyboardBackPress";
@@ -288,7 +289,7 @@ const WaitingRoom = ({}) => {
 
     // This screen's own handlers. Only these are removed on unmount, so listeners that others attach to the shared
     // socket (e.g. the game screen, mounted in the same commit) survive whatever order React runs the effects in.
-    const handlers: Record<string, (...args: any[]) => void> = {
+    const handlers: SocketHandlers = {
       connect: () => {
         console.log("Socket connected");
         doJoin();
@@ -362,13 +363,13 @@ const WaitingRoom = ({}) => {
         }
       },
     };
-    Object.entries(handlers).forEach(([event, handler]) => socket.on(event, handler));
+    const detachHandlers = attachHandlers(socket, handlers);
 
     // If already connected, join now
     if (socket.connected) doJoin();
 
     return () => {
-      Object.entries(handlers).forEach(([event, handler]) => socket.off(event, handler));
+      detachHandlers();
       // The snapshot (and a your-turn for an awaited photo) reached this screen, not the game screen. The game
       // screen's listeners are attached in this same commit, before any server reply can arrive, so ask again:
       // a join on the same socket answers with a fresh snapshot (and your-turn) for the game screen to render.

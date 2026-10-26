@@ -118,11 +118,11 @@ describe("GameScreen at game over (EXP-172)", () => {
     // Never a gallery pick behind the modal, but the server is told right away so nobody waits 15 s for me
     expect(mockPickGamePhoto).not.toHaveBeenCalled();
     expect(mockSocket.emitted).toEqual([["photo-unavailable", { round: 1, attempt: 7 }]]);
-    expect(mockSocket.handlers.has("round-start")).toBe(false);
-    expect(mockSocket.handlers.has("waiting-photo")).toBe(false);
+    expect(mockSocket.handlers.get("round-start")?.size ?? 0).toBe(0);
+    expect(mockSocket.handlers.get("waiting-photo")?.size ?? 0).toBe(0);
     expect(mockSocket.handlers.get("your-turn")?.size).toBe(1);
     act(() => r.unmount());
-    expect(mockSocket.handlers.has("your-turn")).toBe(false);
+    expect(mockSocket.handlers.get("your-turn")?.size ?? 0).toBe(0);
   });
 });
 
@@ -141,8 +141,8 @@ describe("GameScreen final screens when the next game starts (EXP-184)", () => {
     expect(mockSetPlanted).toHaveBeenCalledWith(null);
     expect(mockEndSocket).not.toHaveBeenCalled();
     act(() => r.unmount());
-    expect(mockSocket.handlers.has("game-started")).toBe(false);
-    expect(mockSocket.handlers.has("game-state")).toBe(false);
+    expect(mockSocket.handlers.get("game-started")?.size ?? 0).toBe(0);
+    expect(mockSocket.handlers.get("game-state")?.size ?? 0).toBe(0);
   });
 
   it("a snapshot of a started game (reconnected while on the final screens) also joins the next game", async () => {

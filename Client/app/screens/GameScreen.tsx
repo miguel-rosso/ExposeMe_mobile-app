@@ -35,6 +35,7 @@ import { useQaRenderAck } from "../hooks/useQaRenderAck";
 import { useScreenshotReaction } from "../hooks/useScreenshotReaction";
 import { appendCapped, isAllowedReaction, MAX_VISIBLE_REACTIONS } from "../utils/reactions";
 import { answerOptionsLayout } from "../utils/answerOptionsLayout";
+import { attachHandlers, SocketHandlers } from "../utils/socketHandlers";
 
 const { SERVER_URL } = getEnvVars();
 const PICK_SEND_INTERVAL = 200; // ms between submit-answer sends (server: 10 per socket, refilled 5/s)
@@ -48,13 +49,6 @@ const OPTION_CARD = {
   compact: { card: "py-3 px-2 mb-1.5", text: "text-sm", ellipsize: "middle" },
 } as const;
 const OPTION_BASIS = { 2: "flex-basis-[48%]", 3: "flex-basis-[30%]" } as const;
-
-// Game events detached at game over: the socket stays open on the final screens (still in the room), and a next game
-// started meanwhile must not drive this finished one (e.g. a your-turn picking and uploading a photo behind the modal)
-const GAME_EVENTS = [
-  "waiting-photo", "your-turn", "round-start", "round-reveal", "round-scores", "hold-start", "hold-end", "hold-resume",
-  "round-skipped", "game-paused", "game-resumed", "game-state", "emoji-reaction",
-];
 
 const GameScreen = () => {
   const { t } = useI18n();
@@ -201,10 +195,15 @@ const GameScreen = () => {
     },
   });
 
+  // Removers of this screen's own socket listeners (never socket.off(event): the socket is shared, see socketHandlers).
+  // The game ones go at game over, the final screens' ones (attached then) on unmount.
+  const detachGameHandlers = useRef<(() => void) | null>(null);
+  const detachFinalScreenHandlers = useRef<(() => void) | null>(null);
+
   const showGameOver = (finalScore: ScoreRound[]) => {
     if (gameOverRef.current) return;
     gameOverRef.current = true;
-    GAME_EVENTS.forEach((ev) => socket?.off(ev));
+    detachGameHandlers.current?.();
     // Still in the room on the final screens: when the host starts the next game, join it at once (DEC-018 A), the
     // same way "Play again" does: the lobby rejoins on this socket, gets the started game's snapshot and opens a fresh
     // game screen, which sends im-ready. A snapshot of a started game (I reconnected meanwhile) means the same thing.
@@ -216,13 +215,17 @@ const GameScreen = () => {
       setPlantedPhotoUri(null); // planted for the game that ended
       router.replace("/screens/WaitingRoom");
     };
-    socket?.on("game-started", joinNextGame);
-    socket?.on("game-state", (snap: GameStateSnapshot) => { if (snap?.started) joinNextGame(); });
-    // Until then, if the next game picks me, say at once there is no photo so nobody waits the 15 s photo timeout
-    // (the photo is never picked from here). Removed with GAME_EVENTS on unmount.
-    socket?.on("your-turn", (turn: YourTurnData) => {
-      socket.emit("photo-unavailable", { round: turn?.round, attempt: turn?.attempt });
-    });
+    if (socket) {
+      detachFinalScreenHandlers.current = attachHandlers(socket, {
+        "game-started": joinNextGame,
+        "game-state": (snap: GameStateSnapshot) => { if (snap?.started) joinNextGame(); },
+        // Until then, if the next game picks me, say at once there is no photo so nobody waits the 15 s photo timeout
+        // (the photo is never picked from here)
+        "your-turn": (turn: YourTurnData) => {
+          socket.emit("photo-unavailable", { round: turn?.round, attempt: turn?.attempt });
+        },
+      });
+    }
     setPauseEndsAt(null);
     setFinalScore(finalScore);
     if (finalScore?.length > 0) { setWinners(getWinners(finalScore)); setShowWinner(true); }
@@ -232,140 +235,150 @@ const GameScreen = () => {
   useEffect(() => {
     if (!socket) return;
 
-    // Whole room: a photo is awaited (the owner is not revealed). Comes right before my own your-turn.
-    socket.on("waiting-photo", (data: WaitingPhotoData) => {
-      markPhaseHandled("waiting-photo");
-      console.log(`[GAME] waiting-photo: round ${data.round}, ${data.duration}ms`);
-      turnRequest.endTurn(); // any earlier request of mine is over
-      turnRequest.takeReportedReason(); // a report of mine was answered by the round-skipped before this
-      dispatchRound({ type: "waiting-photo", data });
-    });
+    // Game events, detached at game over: the socket stays open on the final screens (still in the room), and a next
+    // game started meanwhile must not drive this finished one (e.g. a your-turn picking and uploading a photo behind
+    // the modal)
+    const gameHandlers: SocketHandlers = {
+      // Whole room: a photo is awaited (the owner is not revealed). Comes right before my own your-turn.
+      "waiting-photo": (data: WaitingPhotoData) => {
+        markPhaseHandled("waiting-photo");
+        console.log(`[GAME] waiting-photo: round ${data.round}, ${data.duration}ms`);
+        // Any earlier request of mine is over; a report of mine was answered by the round-skipped before this
+        turnRequest.endTurn({ forgetReport: true });
+        dispatchRound({ type: "waiting-photo", data });
+      },
 
-    // My turn: pick photo → upload → send (or report photo-unavailable)
-    socket.on("your-turn", async (data: YourTurnData) => {
-      const needsUpload = turnRequest.start(data); // a re-sent request re-sends or awaits its photo
-      dispatchRound({ type: "your-turn", round: data.round });
-      if (!needsUpload) return;
-      try {
-        const picked = await pickGamePhoto();
-        if ("error" in picked) { turnRequest.reportUnavailable(picked.error, data); return; }
-        let url: string;
-        try { url = await uploadWithRetry(picked.uri, uploadImage); }
-        catch { turnRequest.reportUnavailable("upload", data); return; }
-        setPhotoUri(null);
-        turnRequest.sendPhoto(data, url);
-        return;
-      } catch (e) { console.error("your-turn error:", e); }
-      turnRequest.reportUnavailable("failed", data);
-    });
+      // My turn: pick photo → upload → send (or report photo-unavailable)
+      "your-turn": async (data: YourTurnData) => {
+        const needsUpload = turnRequest.start(data); // a re-sent request re-sends or awaits its photo
+        dispatchRound({ type: "your-turn", round: data.round });
+        if (!needsUpload) return;
+        try {
+          const picked = await pickGamePhoto();
+          if ("error" in picked) { turnRequest.reportUnavailable(picked.error, data); return; }
+          let url: string;
+          try { url = await uploadWithRetry(picked.uri, uploadImage); }
+          catch { turnRequest.reportUnavailable("upload", data); return; }
+          setPhotoUri(null);
+          turnRequest.sendPhoto(data, url);
+          return;
+        } catch (e) { console.error("your-turn error:", e); }
+        turnRequest.reportUnavailable("failed", data);
+      },
 
-    // Atomic: new round — photo + answer timer
-    socket.on("round-start", (data: RoundStartData) => {
-      markPhaseHandled("answering");
-      console.log(`[GAME] round-start: round=${data.round}, mine=${data.isOwner}`);
-      turnRequest.endTurn();
-      setSkipNotice(null);
-      dispatchRound({ type: "round-start", data, serverUrl: SERVER_URL });
-    });
+      // Atomic: new round — photo + answer timer
+      "round-start": (data: RoundStartData) => {
+        markPhaseHandled("answering");
+        console.log(`[GAME] round-start: round=${data.round}, mine=${data.isOwner}`);
+        turnRequest.endTurn();
+        setSkipNotice(null);
+        dispatchRound({ type: "round-start", data, serverUrl: SERVER_URL });
+      },
 
-    // Atomic: answer revealed (the server froze answers before this: only a pick already sent can have counted)
-    socket.on("round-reveal", (data: RoundRevealData) => {
-      markPhaseHandled("reveal");
-      console.log(`[GAME] round-reveal: ${data.correctAnswer}, my guess: ${roundRef.current.sentGuess}`);
-      dispatchRound({ type: "round-reveal", data });
-    });
+      // Atomic: answer revealed (the server froze answers before this: only a pick already sent can have counted)
+      "round-reveal": (data: RoundRevealData) => {
+        markPhaseHandled("reveal");
+        console.log(`[GAME] round-reveal: ${data.correctAnswer}, my guess: ${roundRef.current.sentGuess}`);
+        dispatchRound({ type: "round-reveal", data });
+      },
 
-    // Atomic: scores displayed
-    socket.on("round-scores", (data: RoundScoresData) => {
-      markPhaseHandled("scores");
-      console.log(`[GAME] round-scores: round ${data.round}/${data.totalRounds}`);
-      dispatchRound({ type: "round-scores", data });
-    });
+      // Atomic: scores displayed
+      "round-scores": (data: RoundScoresData) => {
+        markPhaseHandled("scores");
+        console.log(`[GAME] round-scores: round ${data.round}/${data.totalRounds}`);
+        dispatchRound({ type: "round-scores", data });
+      },
 
-    // Hold: everyone pauses
-    socket.on("hold-start", () => {
-      console.log("[GAME] hold-start");
-      dispatchRound({ type: "hold-start" });
-    });
+      // Hold: everyone pauses
+      "hold-start": () => {
+        console.log("[GAME] hold-start");
+        dispatchRound({ type: "hold-start" });
+      },
 
-    // Hold ended (from server force-release or another client)
-    socket.on("hold-end", () => {
-      console.log("[GAME] hold-end");
-      dispatchRound({ type: "hold-end" });
-    });
+      // Hold ended (from server force-release or another client)
+      "hold-end": () => {
+        console.log("[GAME] hold-end");
+        dispatchRound({ type: "hold-end" });
+      },
 
-    // Hold resume: phase continues with remaining time
-    socket.on("hold-resume", (data: HoldResumeData) => {
-      console.log(`[GAME] hold-resume: ${data.phase} ${data.duration}ms`);
-      dispatchRound({ type: "hold-resume", data });
-    });
+      // Hold resume: phase continues with remaining time
+      "hold-resume": (data: HoldResumeData) => {
+        console.log(`[GAME] hold-resume: ${data.phase} ${data.duration}ms`);
+        dispatchRound({ type: "hold-resume", data });
+      },
 
-    // No photo for this round: say why on the waiting screen until the next round starts
-    socket.on("round-skipped", (data: RoundSkippedData) => {
-      console.log(`[GAME] round-skipped: round ${data.round} (${data.reason})`);
-      setSkipNotice(skipNoticeFor(data, turnRequest.takeReportedReason()));
-      turnRequest.endTurn();
-    });
+      // No photo for this round: say why on the waiting screen until the next round starts
+      "round-skipped": (data: RoundSkippedData) => {
+        console.log(`[GAME] round-skipped: round ${data.round} (${data.reason})`);
+        setSkipNotice(skipNoticeFor(data, turnRequest.takeReportedReason()));
+        turnRequest.endTurn();
+      },
 
-    // Fewer than 2 players connected: the server froze the game and shows its countdown
-    socket.on("game-paused", (data: GamePausedData) => {
-      console.log(`[GAME] game-paused ${data.pause}/${data.maxPauses}: ${data.duration}ms, waiting for ${data.waitingFor.join(", ")}`);
-      setPause(data);
-      dispatchRound({ type: "game-paused" });
-      // The server ignores photos while paused and sends your-turn again on resume (an upload that finishes
-      // meanwhile is kept and re-sent then)
-      turnRequest.endTurn({ keepUploading: true });
-    });
+      // Fewer than 2 players connected: the server froze the game and shows its countdown
+      "game-paused": (data: GamePausedData) => {
+        console.log(`[GAME] game-paused ${data.pause}/${data.maxPauses}: ${data.duration}ms, waiting for ${data.waitingFor.join(", ")}`);
+        setPause(data);
+        dispatchRound({ type: "game-paused" });
+        // The server ignores photos while paused and sends your-turn again on resume (an upload that finishes
+        // meanwhile is kept and re-sent then)
+        turnRequest.endTurn({ keepUploading: true });
+      },
 
-    socket.on("game-resumed", (data: GameResumedData) => {
-      console.log(`[GAME] game-resumed: ${data.phase} ${data.duration}ms`);
-      setPauseEndsAt(null);
-      dispatchRound({ type: "game-resumed", data });
-    });
+      "game-resumed": (data: GameResumedData) => {
+        console.log(`[GAME] game-resumed: ${data.phase} ${data.duration}ms`);
+        setPauseEndsAt(null);
+        dispatchRound({ type: "game-resumed", data });
+      },
 
-    // Snapshot after a rejoin: render whatever phase the server is in
-    socket.on("game-state", (snap: GameStateSnapshot) => {
-      console.log(`[GAME] game-state: ${snap.phase} round ${snap.round}, paused=${!!snap.pause}`);
-      setPlayers(snap.players);
-      // An awaited photo of mine is asked again with your-turn right after this snapshot
-      turnRequest.endTurn();
-      if (snap.phase !== "waiting-photo") setSkipNotice(null);
-      dispatchRound({ type: "game-state", snap, serverUrl: SERVER_URL });
-      const result = gameStateFollowUps(snap);
-      setPause(result.pause);
-      if (result.gameOver) showGameOver(snap.scores);
-      if (result.sendReady) socket.emit("im-ready");
-      if (result.resendGuess && roundRef.current.mySelection) sendPick();
-    });
+      // Snapshot after a rejoin: render whatever phase the server is in
+      "game-state": (snap: GameStateSnapshot) => {
+        console.log(`[GAME] game-state: ${snap.phase} round ${snap.round}, paused=${!!snap.pause}`);
+        setPlayers(snap.players);
+        // An awaited photo of mine is asked again with your-turn right after this snapshot. A report of mine was
+        // answered while I was away (that round-skipped is lost): a later skip is not mine.
+        turnRequest.endTurn({ forgetReport: true });
+        if (snap.phase !== "waiting-photo") setSkipNotice(null);
+        dispatchRound({ type: "game-state", snap, serverUrl: SERVER_URL });
+        const result = gameStateFollowUps(snap);
+        setPause(result.pause);
+        if (result.gameOver) showGameOver(snap.scores);
+        if (result.sendReady) socket.emit("im-ready");
+        if (result.resendGuess && roundRef.current.mySelection) sendPick();
+      },
 
-    socket.on("game-over", (data: { finalScore: ScoreRound[] }) => {
-      console.log("[GAME] game-over");
-      turnRequest.endTurn({ keepUploading: true });
-      showGameOver(data.finalScore);
-    });
+      // Only the picker's emojis (and the screenshot one), only while a photo is shown, at most a few on screen
+      "emoji-reaction": (data: { username: string; emoji: string }) => {
+        if (!roundRef.current.photo || !isAllowedReaction(data?.emoji) || typeof data.username !== "string") return;
+        const reaction = { id: `${Date.now()}-${Math.random()}`, username: data.username, emoji: data.emoji };
+        setEmojiReactions((c) => appendCapped(c, reaction, MAX_VISIBLE_REACTIONS));
+      },
+    };
 
     // Someone left or was kicked: no longer an answer option (a disconnected player stays, they may come back)
     const dropPlayer = (name: string) => {
       setPlayers(withoutPlayer(playersRef.current, name));
       if (roundRef.current.phase === "answering" && roundRef.current.mySelection === name) pickGuess("");
     };
-    socket.on("player-left", (name: string) => { console.log(`[GAME] player-left: ${name}`); dropPlayer(name); });
-    socket.on("player-removed", (removed: Player) => { console.log(`[GAME] player-removed: ${removed.username}`); dropPlayer(removed.username); });
-    socket.on("new-host", (host: Player) => setPlayers(withHost(playersRef.current, host.username)));
+    // Kept on the final screens until unmount (still in the room)
+    const roomHandlers: SocketHandlers = {
+      "game-over": (data: { finalScore: ScoreRound[] }) => {
+        console.log("[GAME] game-over");
+        turnRequest.endTurn({ keepUploading: true });
+        showGameOver(data.finalScore);
+      },
+      "player-left": (name: string) => { console.log(`[GAME] player-left: ${name}`); dropPlayer(name); },
+      "player-removed": (removed: Player) => { console.log(`[GAME] player-removed: ${removed.username}`); dropPlayer(removed.username); },
+      "new-host": (host: Player) => setPlayers(withHost(playersRef.current, host.username)),
+    };
 
-    // Only the picker's emojis (and the screenshot one), only while a photo is shown, at most a few on screen
-    socket.on("emoji-reaction", (data: { username: string; emoji: string }) => {
-      if (!roundRef.current.photo || !isAllowedReaction(data?.emoji) || typeof data.username !== "string") return;
-      const reaction = { id: `${Date.now()}-${Math.random()}`, username: data.username, emoji: data.emoji };
-      setEmojiReactions((c) => appendCapped(c, reaction, MAX_VISIBLE_REACTIONS));
-    });
-
+    detachGameHandlers.current = attachHandlers(socket, gameHandlers);
+    const detachRoomHandlers = attachHandlers(socket, roomHandlers);
     setIsReady(true);
 
     return () => {
-      GAME_EVENTS.forEach((ev) => socket.off(ev));
-      socket.off("game-over"); socket.off("game-started"); socket.off("player-left"); socket.off("player-removed");
-      socket.off("new-host");
+      detachGameHandlers.current?.();
+      detachRoomHandlers();
+      detachFinalScreenHandlers.current?.();
       // The socket is not ended here: "Play again" reuses it (the lobby rejoins on the same socket); leaving for
       // home ends it there (Exit, or the home screen on focus)
     };

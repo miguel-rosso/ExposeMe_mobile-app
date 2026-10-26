@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # `lab.sh play` argument parsing and Maestro env plumbing (EXP-212), with stub node/maestro and a fake devices.json:
 # no devices, servers or network. Covers --second-room (2nd bots room -> NEW_CODE), --maestro-env KEY=VALUE and
-# --server/--port (EXP-220: bots and render telemetry on a worktree's own lab server).
+# --server/--port (EXP-220: bots and render telemetry on a worktree's own lab server), and the kicked-notice
+# invocation (EXP-139: --bot-args '--kick <device label>').
 # Run: qa/lab/tests/lab-play.test.sh
 set -uo pipefail
 
@@ -74,6 +75,17 @@ pid="$(cat "$TMP/linger.pid" 2>/dev/null)"
 main_pid="$(cat "$TMP/main.pid" 2>/dev/null)"
 [ -n "$main_pid" ] && ! grep -qw "$main_pid" "$TMP/kill.log" \
   && ok "main bots PID is not signalled after it was reaped (PID reuse)" || ko "main bots PID not signalled after wait" "main=$main_pid kills=$(cat "$TMP/kill.log" 2>/dev/null)"
+
+# ── kicked-notice (EXP-139): the host bot removes the device, named by its label (= its USERNAME) ──
+play r-kick --bots 1 --devices ios-a --flow kicked-notice --bot-args "--kick ios-a"
+rc=$?
+[ $rc = 0 ] && completed r-kick && ok "kicked-notice play passes" || ko "kicked-notice play passes" "rc=$rc $(cat "$TMP/play.out")"
+grep -q -- "--bots 1 --host --rounds 10 --wait-players 2 --kick ios-a" "$TMP/node.args" \
+  && ok "the bots get --kick <device label>" || ko "the bots get --kick <device label>" "$(cat "$TMP/node.args")"
+grep -q "maestro/kicked-notice.yaml" "$TMP/maestro.args" && grep -q -- "-e USERNAME=ios-a" "$TMP/maestro.args" \
+  && ok "the device runs kicked-notice as ios-a" || ko "the device runs kicked-notice as ios-a" "$(cat "$TMP/maestro.args")"
+grep -q -- "--flow kicked-notice --bots 1 --devices <label> --bot-args '--kick <label>'" "$HERE/../../maestro/kicked-notice.yaml" \
+  && ok "kicked-notice.yaml documents that invocation" || ko "kicked-notice.yaml documents that invocation"
 
 # Second room never publishes a code: fail loudly, nothing left running, no device run
 STUB_NO_CODE=3 LAB_ROOM_CODE_TIMEOUT=1 play r3 --bots 2 --devices ios-a --second-room "--bots 3 --host --wait-players 99"

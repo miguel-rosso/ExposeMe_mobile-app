@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qa/lab/stats.mjs (EXP-236): the nearest-rank percentile shared by bots.mjs and render-skew.mjs.
+# qa/lab/stats.mjs (EXP-236): the nearest-rank percentile shared by the bots checks (bots-analysis.mjs) and render-skew.mjs.
 # Run: qa/lab/tests/stats.test.sh
 set -uo pipefail
 
@@ -36,7 +36,7 @@ out="$(node --input-type=module -e '
 check "input is not reordered" "$out" "3,1,2"
 
 # ── Both reports use it (no private percentile left) ──
-for f in bots.mjs render-skew.mjs; do
+for f in bots-analysis.mjs render-skew.mjs; do
   grep -q 'from "./stats.mjs"' "$HERE/../$f" && ! grep -qE 'function percentile|const pct' "$HERE/../$f" \
     && ok "$f uses the shared percentile" || ko "$f uses the shared percentile"
 done

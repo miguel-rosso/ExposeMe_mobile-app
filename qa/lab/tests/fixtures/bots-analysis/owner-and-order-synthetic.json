@@ -1,0 +1,106 @@
+{
+"scenario": "synthetic: 3 bots, a wrong owner signal, an owner never told, a round-start without its wait, a numbering gap",
+"opts": {"host":true,"rounds":3,"playAgainLingerS":0,"lingerBot":0,"startNextGameS":0},
+"room": {"code":"QAROOM","reason":"game-over","players":["bot1","bot2","bot3"],"errors":[],"uploads":[],"rateLimited":0,"events": [
+{"bot":"bot1","ev":"game-started","round":0,"t":100,"payload":{"rounds":3}},
+{"bot":"bot2","ev":"game-started","round":0,"t":200,"payload":{"rounds":3}},
+{"bot":"bot3","ev":"game-started","round":0,"t":300,"payload":{"rounds":3}},
+{"bot":"bot1","ev":"waiting-photo","round":1,"t":400,"payload":{"round":1,"duration":15000}},
+{"bot":"bot2","ev":"waiting-photo","round":1,"t":500,"payload":{"round":1,"duration":15000}},
+{"bot":"bot3","ev":"waiting-photo","round":1,"t":600,"payload":{"round":1,"duration":15000}},
+{"bot":"bot1","ev":"round-start","round":1,"t":700,"payload":{"photo":"/temp/photo-1.jpg","duration":7700}},
+{"bot":"bot2","ev":"round-start","round":1,"t":800,"payload":{"photo":"/temp/photo-1.jpg","duration":7700}},
+{"bot":"bot3","ev":"round-start","round":1,"t":900,"payload":{"photo":"/temp/photo-1.jpg","duration":7700}},
+{"bot":"bot2","ev":"owner-signal","round":1,"t":1000,"payload":{"via":"round-start"}},
+{"bot":"bot1","ev":"round-reveal","round":1,"t":1100,"payload":{"correctAnswer":"bot1"}},
+{"bot":"bot2","ev":"round-reveal","round":1,"t":1200,"payload":{"correctAnswer":"bot1"}},
+{"bot":"bot3","ev":"round-reveal","round":1,"t":1300,"payload":{"correctAnswer":"bot1"}},
+{"bot":"bot1","ev":"round-scores","round":1,"t":1400,"payload":{"scores":[{"username":"bot1","points":0,"lastGuess":""},{"username":"bot2","points":0,"lastGuess":""},{"username":"bot3","points":0,"lastGuess":""}]}},
+{"bot":"bot2","ev":"round-scores","round":1,"t":1500,"payload":{"scores":[{"username":"bot1","points":0,"lastGuess":""},{"username":"bot2","points":0,"lastGuess":""},{"username":"bot3","points":0,"lastGuess":""}]}},
+{"bot":"bot3","ev":"round-scores","round":1,"t":1600,"payload":{"scores":[{"username":"bot1","points":0,"lastGuess":""},{"username":"bot2","points":0,"lastGuess":""},{"username":"bot3","points":0,"lastGuess":""}]}},
+{"bot":"bot1","ev":"waiting-photo","round":2,"t":1700,"payload":{"round":2,"duration":15000}},
+{"bot":"bot2","ev":"waiting-photo","round":2,"t":1800,"payload":{"round":2,"duration":15000}},
+{"bot":"bot1","ev":"round-start","round":2,"t":1900,"payload":{"photo":"/temp/photo-2.jpg","duration":7700}},
+{"bot":"bot2","ev":"round-start","round":2,"t":2000,"payload":{"photo":"/temp/photo-2.jpg","duration":7700}},
+{"bot":"bot3","ev":"round-start","round":2,"t":2100,"payload":{"photo":"/temp/photo-2.jpg","duration":7700}},
+{"bot":"bot3","ev":"owner-signal","round":2,"t":2200,"payload":{"via":"round-start"}},
+{"bot":"bot1","ev":"round-reveal","round":2,"t":2300,"payload":{"correctAnswer":"bot3"}},
+{"bot":"bot2","ev":"round-reveal","round":2,"t":2400,"payload":{"correctAnswer":"bot3"}},
+{"bot":"bot3","ev":"round-reveal","round":2,"t":2500,"payload":{"correctAnswer":"bot3"}},
+{"bot":"bot1","ev":"round-scores","round":2,"t":2600,"payload":{"scores":[{"username":"bot1","points":0,"lastGuess":""},{"username":"bot2","points":0,"lastGuess":""},{"username":"bot3","points":0,"lastGuess":""}]}},
+{"bot":"bot2","ev":"round-scores","round":2,"t":2700,"payload":{"scores":[{"username":"bot1","points":0,"lastGuess":""},{"username":"bot2","points":0,"lastGuess":""},{"username":"bot3","points":0,"lastGuess":""}]}},
+{"bot":"bot3","ev":"round-scores","round":2,"t":2800,"payload":{"scores":[{"username":"bot1","points":0,"lastGuess":""},{"username":"bot2","points":0,"lastGuess":""},{"username":"bot3","points":0,"lastGuess":""}]}},
+{"bot":"bot1","ev":"waiting-photo","round":4,"t":2900,"payload":{"round":4,"duration":15000}},
+{"bot":"bot2","ev":"waiting-photo","round":4,"t":3000,"payload":{"round":4,"duration":15000}},
+{"bot":"bot3","ev":"waiting-photo","round":4,"t":3100,"payload":{"round":4,"duration":15000}},
+{"bot":"bot1","ev":"round-start","round":4,"t":3200,"payload":{"photo":"/temp/photo-3.jpg","duration":7700}},
+{"bot":"bot2","ev":"round-start","round":4,"t":3300,"payload":{"photo":"/temp/photo-3.jpg","duration":7700}},
+{"bot":"bot3","ev":"round-start","round":4,"t":3400,"payload":{"photo":"/temp/photo-3.jpg","duration":7700}},
+{"bot":"bot1","ev":"owner-signal","round":4,"t":3500,"payload":{"via":"round-start"}},
+{"bot":"bot1","ev":"round-reveal","round":4,"t":3600,"payload":{"correctAnswer":"bot1"}},
+{"bot":"bot2","ev":"round-reveal","round":4,"t":3700,"payload":{"correctAnswer":"bot1"}},
+{"bot":"bot3","ev":"round-reveal","round":4,"t":3800,"payload":{"correctAnswer":"bot1"}},
+{"bot":"bot1","ev":"round-scores","round":4,"t":3900,"payload":{"scores":[{"username":"bot1","points":0,"lastGuess":""},{"username":"bot2","points":0,"lastGuess":""},{"username":"bot3","points":0,"lastGuess":""}]}},
+{"bot":"bot2","ev":"round-scores","round":4,"t":4000,"payload":{"scores":[{"username":"bot1","points":0,"lastGuess":""},{"username":"bot2","points":0,"lastGuess":""},{"username":"bot3","points":0,"lastGuess":""}]}},
+{"bot":"bot3","ev":"round-scores","round":4,"t":4100,"payload":{"scores":[{"username":"bot1","points":0,"lastGuess":""},{"username":"bot2","points":0,"lastGuess":""},{"username":"bot3","points":0,"lastGuess":""}]}},
+{"bot":"bot1","ev":"game-over","round":4,"t":4200,"payload":{"finalScore":[]}},
+{"bot":"bot2","ev":"game-over","round":4,"t":4300,"payload":{"finalScore":[]}},
+{"bot":"bot3","ev":"game-over","round":4,"t":4400,"payload":{"finalScore":[]}}
+]},
+"expected": {
+ "code": "QAROOM",
+ "reason": "game-over",
+ "players": 3,
+ "rounds_played": 3,
+ "rounds_skipped": 0,
+ "planted_sent": 0,
+ "planted_rounds": [
+  1,
+  2,
+  4
+ ],
+ "skipped_unavailable": 0,
+ "unavailable_skip_ms": {
+  "max": null
+ },
+ "waiting_photo": 3,
+ "waiting_photo_skew_ms": {
+  "p50": "200.0",
+  "max": "1400.0"
+ },
+ "disconnects": 0,
+ "resyncs": 0,
+ "pauses": 0,
+ "max_pause_number": 0,
+ "resumes": 0,
+ "linger_turns_reported": 0,
+ "second_game_rounds": 0,
+ "second_game_ready_ms": null,
+ "skew_ms": {
+  "p50": "200.0",
+  "p95": "1400.0",
+  "max": "1400.0"
+ },
+ "answer_phase_overrun_ms": {
+  "p50": "-7300.0",
+  "max": "-7300.0"
+ },
+ "upload_ms": {
+  "max": null
+ },
+ "uploads_rate_limited": 0,
+ "missed_events": {
+  "bot3": [
+   "waiting-photo#3"
+  ]
+ },
+ "consistency_errors": [
+  "waiting-photo#2: players received different payloads",
+  "round 1: bot2 was told isOwner (round-start) but the answer was bot1",
+  "round 1: owner bot1 got round-start without isOwner",
+  "bot3: round-start for round 2 without a preceding waiting-photo",
+  "round numbering gap: expected 3, got 4"
+ ],
+ "errors": []
+}
+}

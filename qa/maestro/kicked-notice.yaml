@@ -1,0 +1,23 @@
+# EXP-139 / EXP-045: the host removes the device from the lobby. The device is sent back to the home screen with the
+# notice in its language ("The host removed you from the room." / "El anfitrión te ha sacado de la sala."), never
+# a raw server text, and can join again from there.
+# Run with ONE bot (the host) and ONE device; the host bot kicks the device by its label (its username in the room)
+# 5 s after it joined, then the bots run ends (reason "lobby-kick", nobody left to play with):
+#   qa/lab/lab.sh play --flow kicked-notice --bots 1 --devices <label> --bot-args '--kick <label>'
+# env: GAME_CODE, USERNAME, METRO_URL (url-encoded)
+# Selectors are testIDs (Client/app/utils/testIds.ts) except the system alert, matched in both UI languages.
+appId: com.socketNull.ExposeMe
+---
+- runFlow: open-app.yaml
+- runFlow: join-room.yaml
+# Removed by the host: back on the home screen with the system alert, translated
+- extendedWaitUntil:
+    visible: "(The host removed you from the room|El anfitrión te ha sacado de la sala).*"
+    timeout: 30000
+- assertNotVisible: "Removed by host"
+- takeScreenshot: kicked-notice-${USERNAME}
+- tapOn: "OK|Aceptar"
+- extendedWaitUntil:
+    visible:
+      id: "join-game-button"
+    timeout: 10000

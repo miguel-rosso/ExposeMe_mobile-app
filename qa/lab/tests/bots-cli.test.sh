@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Command line of qa/lab/bots.mjs (EXP-197): --help and bad arguments exit before any network activity (also bad
-# --rounds, EXP-203, --drop-round/--drop-rounds, EXP-096, and --name-prefix, EXP-207), and the server constants it
-# mirrors match the server.
+# --rounds, EXP-203, --drop-round/--drop-rounds, EXP-096, --name-prefix, EXP-207, and --leave-round/--kick, EXP-139),
+# and the server constants it (and its checks, bots-analysis.mjs) mirrors match the server.
 # A local TCP listener stands in for the server and counts connections; nothing else is contacted.
 # Run: qa/lab/tests/bots-cli.test.sh
 set -uo pipefail
@@ -85,20 +85,55 @@ for good in "--drop-rounds 4,2,2" "--drop-rounds 7" "--drop-round 2"; do
   [[ "$rc" != 2 ]] && ok "$good is accepted" || ko "$good is accepted" "$(cat "$TMP/err")"
 done
 
-# ── Server constants bots.mjs mirrors (the server is TypeScript, bots.mjs plain node) ──
+# ── Server constants bots.mjs and its checks (bots-analysis.mjs) mirror (the server is TypeScript, they plain node) ──
 SERVER_SRC="$HERE/../../../Server"
-mirrors() { # server file (from Server/), bots.mjs const, server const: same initializer in both (digit separators ignored)
+ANALYSIS="$HERE/../bots-analysis.mjs"
+mirrors() { # server file (from Server/), our file, our const, server const: same initializer in both (digit separators ignored)
   local theirs ours
-  theirs="$(sed -n "s/^\(export \)\{0,1\}const $3 = \([^;]*\);.*/\2/p" "$SERVER_SRC/$1")"
-  ours="$(sed -n "s/^const $2 = \([^;]*\);.*/\1/p" "$BOTS")"
-  [[ -n "$theirs" && "${ours//_/}" == "${theirs//_/}" ]] && ok "$2 matches the server's $3" || ko "$2 matches the server's $3" "bots=[$ours] server=[$theirs]"
+  theirs="$(sed -n "s/^\(export \)\{0,1\}const $4 = \([^;]*\);.*/\2/p" "$SERVER_SRC/$1")"
+  ours="$(sed -n "s/^const $3 = \([^;]*\);.*/\1/p" "$2")"
+  [[ -n "$theirs" && "${ours//_/}" == "${theirs//_/}" ]] && ok "$3 matches the server's $4" || ko "$3 matches the server's $4" "ours=[$ours] server=[$theirs]"
 }
-mirrors managers/RoomManager.ts ROUND_OPTIONS ROUND_OPTIONS
-mirrors managers/RoomManager.ts QA_ROUNDS QA_ROUNDS
-mirrors managers/GameEngine.ts MAX_PAUSES MAX_PAUSES
-mirrors managers/GameEngine.ts MAX_TOTAL_PAUSES MAX_TOTAL_PAUSES
-mirrors managers/GameEngine.ts PAUSE_GRACE_MS PAUSE_GRACE
-mirrors routes/socketRoutes.ts MAX_USERNAME_LENGTH MAX_USERNAME_LENGTH
+mirrors managers/RoomManager.ts "$BOTS" ROUND_OPTIONS ROUND_OPTIONS
+mirrors managers/RoomManager.ts "$BOTS" QA_ROUNDS QA_ROUNDS
+mirrors managers/GameEngine.ts "$ANALYSIS" MAX_PAUSES MAX_PAUSES
+mirrors managers/GameEngine.ts "$ANALYSIS" MAX_TOTAL_PAUSES MAX_TOTAL_PAUSES
+mirrors managers/GameEngine.ts "$ANALYSIS" PAUSE_GRACE_MS PAUSE_GRACE
+mirrors routes/socketRoutes.ts "$BOTS" MAX_USERNAME_LENGTH MAX_USERNAME_LENGTH
+
+# ── --leave-round / --kick: players out of the room (EXP-139) ──
+for bad in 0 abc 2,3 -1; do
+  run 2 "--leave-round $bad exits 2" --bots 3 --host --leave-round "$bad" --timeout 1
+  [[ "$err" == *"--leave-round \"$bad\" is not a round number"* ]] && ok "--leave-round $bad is named" || ko "--leave-round $bad is named" "$err"
+done
+run 2 "--kick without --host exits 2" --bots 2 --code K7MQ4X --kick bot2 --timeout 1
+[[ "$err" == *"--kick needs --host"* ]] && ok "--kick without --host is named" || ko "--kick without --host is named" "$err"
+run 2 "--kick of the host itself exits 2" --bots 3 --host --kick bot1 --timeout 1
+[[ "$err" == *"the host can't remove itself"* ]] && ok "--kick of the host is named" || ko "--kick of the host is named" "$err"
+run 2 "--kick with several rooms exits 2" --bots 3 --host --rooms 2 --kick bot2 --timeout 1
+run 2 "--kick of a name longer than the server's 20 exits 2" --bots 3 --host --kick abcdefghijklmnopqrstu --timeout 1
+run 2 "--kick of an empty name exits 2" --bots 3 --host --kick "@2" --timeout 1
+run 2 "--kick of a name with surrounding spaces exits 2" --bots 3 --host --kick " ios-a" --timeout 1
+# A planned exit must fall inside the hosted game (--rounds), or it never happens
+run 2 "--leave-round beyond --rounds exits 2" --bots 3 --host --rounds 3 --leave-round 4 --timeout 1
+[[ "$err" == *"--leave-round: round 4 is beyond the game's 3 rounds"* ]] && ok "--leave-round beyond --rounds is named" || ko "--leave-round beyond --rounds is named" "$err"
+run 2 "--leave-round beyond the default 10 rounds exits 2" --bots 3 --host --leave-round 11 --timeout 1
+run 2 "--kick NAME@R beyond --rounds exits 2" --bots 3 --host --rounds 3 --kick bot3@4 --timeout 1
+[[ "$err" == *"--kick: round 4 is beyond the game's 3 rounds"* ]] && ok "--kick @R beyond --rounds is named" || ko "--kick @R beyond --rounds is named" "$err"
+for good in "--rounds 3 --leave-round 3" "--rounds 3 --kick bot3@3"; do
+  # shellcheck disable=SC2086
+  SERVER_URL="$URL" node "$BOTS" --bots 3 --host $good --timeout 1 >/dev/null 2>"$TMP/err"; rc=$?
+  [[ "$rc" != 2 ]] && ok "$good is accepted" || ko "$good is accepted" "$(cat "$TMP/err")"
+done
+# Joining a room (--code): its length is not ours to know
+SERVER_URL="$URL" node "$BOTS" --bots 2 --code K7MQ4X --leave-round 15 --timeout 1 >/dev/null 2>"$TMP/err"; rc=$?
+[[ "$rc" != 2 ]] && ok "--leave-round 15 with --code is accepted" || ko "--leave-round 15 with --code is accepted" "$(cat "$TMP/err")"
+for good in "--leave-round 2" "--kick bot3" "--kick bot3@2" "--kick ios-a" "--kick a@b"; do
+  # shellcheck disable=SC2086
+  SERVER_URL="$URL" node "$BOTS" --bots 3 --host $good --timeout 1 >/dev/null 2>"$TMP/err"; rc=$?
+  [[ "$rc" != 2 ]] && ok "$good is accepted" || ko "$good is accepted" "$(cat "$TMP/err")"
+done
+[[ "$(node "$BOTS" --help)" == *"--leave-round R"* && "$(node "$BOTS" --help)" == *"--kick NAME[@R]"* ]] && ok "--help lists --leave-round and --kick" || ko "--help lists --leave-round and --kick"
 
 # ── Loopback servers only: QA traffic never leaves the machine (EXP-220) ──
 # Reserved/unresolvable hosts only, so a broken guard can't reach a real server (--timeout 1 as well)

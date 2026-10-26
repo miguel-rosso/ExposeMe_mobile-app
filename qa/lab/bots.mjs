@@ -78,6 +78,20 @@
 //                           it (qa/maestro/play-again-auto-join.yaml). Same second-game checks as above (ready phase
 //                           shorter than 8 s, no timeout skips); the run ends with the second game's game-over.
 //   node qa/lab/bots.mjs --bots 2 --host --rounds 3 --play-again-linger 1 --play-again-linger-bot 0 --start-next-game 15
+//            --leave-round R  the last bot leaves at round R's round-start exactly like the app's Exit (leave-room and
+//                           closes its socket in the same tick; EXP-139; a "never got player-left" failure is app bug EXP-254). Every other bot gets player-left and drops it
+//                           from its answer options; it is in no later round-scores nor answer, and the game goes on while
+//                           2 players remain (with 2 bots the other one gets game-over at once) ("consistency").
+//   node qa/lab/bots.mjs --bots 3 --host --rounds 3 --leave-round 2
+//            --kick NAME[@R]  the host bot removes NAME (remove-player, EXP-139): in the lobby 5 s after NAME is in (the
+//                           game then starts without it), or at round R's round-start. Every bot gets player-removed
+//                           { NAME }; NAME is in no later game-started, round-scores or answer, and nobody guesses it. A
+//                           kicked bot gets player-removed itself, then the server closes its connection ("kicked-out")
+//                           and it gets no more game events ("consistency"). NAME may be a device's: with one bot host and
+//                           the device alone (qa/maestro/kicked-notice.yaml) nobody is left to play, so the run ends right
+//                           after the kick (reason "lobby-kick") and the device checks its notice.
+//   node qa/lab/bots.mjs --bots 3 --host --rounds 3 --kick bot3@2
+//   Checks and metrics of each room: qa/lab/bots-analysis.mjs (tested on recorded events by qa/lab/tests/bots-analysis.test.sh).
 //   Every bot records waiting-photo { round, duration } (room-wide, owner secret): same payload for all, skew measured.
 //   Photos: uploads send the room code + the bot's rejoin token (X-Game-Code / Authorization: Bearer), like the app;
 //   on each round-start one non-owner bot GETs the photo with them (must be 200) and without (must be 401): "photo-access".
@@ -104,7 +118,7 @@
 import { io } from "socket.io-client";
 import fs from "node:fs";
 import path from "node:path";
-import { percentile } from "./stats.mjs";
+import { analyseRoom } from "./bots-analysis.mjs";
 
 // ── Command line ──
 // Parsed and validated before anything touches the network (EXP-197): --help and bad arguments never connect
@@ -112,7 +126,7 @@ const BOOL_FLAGS = new Set(["host", "no-answer", "app-resync", "lobby-host-drop"
 const VALUE_FLAGS = new Set([
   "server", "bots", "rooms", "rounds", "wait-players", "code", "code-file", "photos", "out", "chaos", "upload-fail",
   "timeout", "no-ready", "drop-round", "drop-rounds", "drop-secs", "drop-bot", "photo-unavailable", "plant", "play-again-linger",
-  "play-again-linger-bot", "start-next-game", "name-prefix",
+  "play-again-linger-bot", "start-next-game", "name-prefix", "leave-round", "kick",
 ]);
 const USAGE = `usage: node qa/lab/bots.mjs [options]
 
@@ -135,6 +149,8 @@ Headless ExposeMe players (see the header of qa/lab/bots.mjs for every scenario)
   --chaos P  --upload-fail P  --photo-unavailable P  --no-ready K  --no-answer  --plant K
   --drop-round R | --drop-rounds R1,R2,...  --drop-secs S [--drop-bot K | --drop-on-turn (--drop-round only)]
   --app-resync  --lobby-host-drop
+  --leave-round R            the last bot leaves the room (leave-room) at round R's round-start
+  --kick NAME[@R]            the host bot removes NAME (remove-player): in the lobby once NAME is in, or at round R
   --play-again-linger S [--play-again-linger-bot K] [--start-next-game D]
   --help, -h                 print this help and exit (no network)
 
@@ -235,7 +251,6 @@ const WAIT_PLAYERS = Number(args["wait-players"] || N_BOTS);
 const CHAOS = Number(args.chaos || 0);
 const UPLOAD_FAIL = Number(args["upload-fail"] || 0);
 const PHOTO_UNAVAILABLE = Number(args["photo-unavailable"] || 0);
-const UNAVAILABLE_SKIP_MAX_MS = 2_000; // photo-unavailable → round-skipped must be immediate (the wait is 15 s)
 const NO_READY = Number(args["no-ready"] || 0);
 const PLANT = Number(args.plant || 0);
 const NO_ANSWER = !!args["no-answer"];
@@ -261,13 +276,43 @@ const LOBBY_HOST_DROP = !!args["lobby-host-drop"];
 const PLAY_AGAIN_LINGER_S = Number(args["play-again-linger"] || 0);
 const LINGER_BOT = Number(args["play-again-linger-bot"] || 1) - 1;
 const START_NEXT_GAME_S = Number(args["start-next-game"] || 0); // K = 0: the bots start a 2nd game while a device lingers
-// A second game whose players all sent im-ready starts its first round ~1 s after game-started; the ready timeout is 10 s
-const NEXT_GAME_READY_MAX_MS = 8_000;
-const DISCONNECT_GRACE_MS = 15_000; // server: a player disconnected this long is gone (lobby shows it, host hands over)
-// Pause limits, as in Server/managers/GameEngine.ts (GAME_FLOW.md "Pause limit"; bots-cli.test.sh checks the copies)
-const MAX_PAUSES = 3; // counted pauses per game
-const MAX_TOTAL_PAUSES = 10; // pauses per game, counted or refunded
-const PAUSE_GRACE_MS = 10_000; // a pause resumed sooner is refunded (not counted)
+
+// ── Players out of the room (EXP-139) ──
+/** --leave-round R: the round at whose round-start the last bot leaves (0: nobody leaves). */
+function plannedLeaveRound() {
+  const value = args["leave-round"];
+  if (value === undefined) return 0;
+  const rounds = parseRoundList(value);
+  if (rounds?.length !== 1) exitUsage(`--leave-round "${value}" is not a round number`);
+  return withinHostedGame("--leave-round", rounds[0]);
+}
+/** A planned exit at `round` must happen in the game: with --host the bots set its length (--rounds). */
+function withinHostedGame(option, round) {
+  if (args.host && round > ROUNDS) exitUsage(`${option}: round ${round} is beyond the game's ${ROUNDS} rounds (--rounds)`);
+  return round;
+}
+/** --kick NAME[@R] -> { name, round } (round 0: in the lobby, once NAME is in), null without --kick. */
+function plannedKick() {
+  const value = args.kick;
+  if (value === undefined) return null;
+  const [, name = "", round] = value.match(/^(.*?)(?:@([1-9][0-9]*))?$/s);
+  if (!args.host) exitUsage("--kick needs --host (only the host can remove a player)");
+  if (N_ROOMS > 1) exitUsage("--kick takes a single room (bot names differ per room)");
+  if (!name || name.trim() !== name || name.length > MAX_USERNAME_LENGTH) {
+    exitUsage(`--kick "${value}": "${name}" is not a username (1-${MAX_USERNAME_LENGTH} characters, no surrounding spaces)`);
+  }
+  if (name === botName(0, 0)) exitUsage(`--kick "${value}": the host can't remove itself`);
+  return { name, round: round ? withinHostedGame("--kick", Number(round)) : 0 };
+}
+const LEAVE_ROUND = plannedLeaveRound();
+const LEAVER = N_BOTS - 1; // the bot that leaves with --leave-round
+// A lobby kick waits this long after NAME joined, like a host reading the list (and so a device's flow sees its lobby)
+const LOBBY_KICK_DELAY_MS = 5_000;
+const KICK_SETTLE_MS = 1_000; // after a lobby kick that ends the run: time for the kicked player to get its notice
+const KICK = plannedKick();
+const LOBBY_KICK = KICK?.round === 0;
+// What the room checks need to know about this run (qa/lab/bots-analysis.mjs)
+const ANALYSIS_OPTS = { host: !!args.host, rounds: ROUNDS, playAgainLingerS: PLAY_AGAIN_LINGER_S, lingerBot: LINGER_BOT, startNextGameS: START_NEXT_GAME_S };
 const PHOTOS = args.photos ? fs.readdirSync(args.photos).filter((f) => f.endsWith(".jpg")).map((f) => path.join(args.photos, f)) : [];
 
 const now = () => performance.timeOrigin + performance.now();
@@ -375,7 +420,11 @@ function runRoom(roomIdx, fixedCode) {
       bots.forEach((b) => b.socket.disconnect());
       resolve({ code, events, errors, uploads, rateLimited, reason, players: bots.map((b) => b.name) });
     };
-    const timer = setTimeout(() => { errors.push(`timeout after ${TIMEOUT_S}s`); done("timeout"); }, TIMEOUT_S * 1000);
+    const timer = setTimeout(() => {
+      errors.push(`timeout after ${TIMEOUT_S}s`);
+      if (LOBBY_KICK && !kick.scheduled) errors.push(kickTargetMissing());
+      done("timeout");
+    }, TIMEOUT_S * 1000);
 
     const checkPhotoAccess = async (name, photo, auth, round) => {
       try {
@@ -406,6 +455,8 @@ function runRoom(roomIdx, fixedCode) {
       const join = () => socket.emit("join-create-game", { gameCode: isHost && !code ? null : code, username: name, ...(bot.token ? { rejoinToken: bot.token } : {}) });
       bot.join = join;
       socket.on("connect", () => {
+        // Out of the room for good (left or kicked): a reconnect planned before that (--chaos) must not come back
+        if (bot.gone) { socket.disconnect(); return; }
         socketIds.add(socket.id);
         if (isHost || code) join();
       });
@@ -478,7 +529,26 @@ function runRoom(roomIdx, fixedCode) {
         maybeStart();
       });
       socket.on("player-joined", (p) => { bot.players.push(p.username); maybeStart(); });
-      socket.on("player-left", (n) => { bot.players = bot.players.filter((x) => x !== n); });
+      // Someone left or was removed: no longer an answer option (like the app's game screen), a pick on them is redone
+      const dropPlayer = (username) => {
+        bot.players = bot.players.filter((x) => x !== username);
+        if (bot.guess === username) bot.guess = pickGuess(bot);
+      };
+      socket.on("player-left", (n) => {
+        rec("player-left", bot.round, { username: n });
+        dropPlayer(n);
+      });
+      // Removed by the host (EXP-139). If it is us, the server closes our connection next: we are out of the room
+      socket.on("player-removed", (p) => {
+        rec("player-removed", bot.round, { username: p.username });
+        if (p.username === name) { bot.gone = true; bot.kicked = true; return; }
+        dropPlayer(p.username);
+        if (bot.isHost && p.username === KICK?.name) onKickConfirmed();
+      });
+      socket.on("disconnect", (reason) => {
+        if (bot.kicked && reason === "io server disconnect") rec("kicked-out", bot.round, { reason });
+        if (bot.left || bot.kicked) endIfAllOut();
+      });
       socket.on("player-connection", (d) => rec("player-connection", 0, d));
       socket.on("new-host", (p) => {
         rec("new-host", 0, { username: p.username });
@@ -516,7 +586,7 @@ function runRoom(roomIdx, fixedCode) {
         }
         bot.inGame = true;
         bot.players = players.map((p) => p.username);
-        rec("game-started", 0, { rounds });
+        rec("game-started", 0, { rounds, players: [...bot.players] });
         if (i >= N_BOTS - NO_READY) { rec("im-ready-skipped-on-purpose", 0); return; }
         socket.emit("im-ready", { gameCode: code, username: name });
       });
@@ -575,6 +645,8 @@ function runRoom(roomIdx, fixedCode) {
         bot.round = d.round;
         bot.isOwner = d.isOwner === true;
         if (bot.isOwner) rec("owner-signal", d.round, { via: "round-start" });
+        if (KICK?.round === d.round && bot.isHost && !kick.sent) sendKick(bot, d.round);
+        if (LEAVE_ROUND === d.round && i === LEAVER && !bot.gone) { leaveRoom(d.round); return; }
         bot.guess = pickGuess(bot);
         // Photo access: a non-owner loads the photo like the app's <Image> (with credentials), and checks that it is
         // refused without them. Nobody knows who the owner is, so the first two bots check when it isn't theirs
@@ -597,6 +669,16 @@ function runRoom(roomIdx, fixedCode) {
         }, 200 + Math.random() * 400);
         setTimeout(() => sendGuess(round), 800 + Math.random() * 1200);
       });
+      // --leave-round (EXP-139): exactly like the app's Exit (WaitingRoom / FinalScoreModal): leave-room and close the
+      // socket in the same tick; this bot is out of the game. A leave the server never handles shows up as the others
+      // never getting player-left ("consistency")
+      const leaveRoom = (round) => {
+        bot.gone = true;
+        bot.left = true;
+        rec("left-room", round);
+        socket.emit("leave-room");
+        socket.disconnect();
+      };
       // Planned drop: offline for `secs`, then back on a new socket (rejoin + game-state snapshot)
       const dropFor = (secs, round, payload = {}) => {
         rec("planned-disconnect", round, { secs, ...payload });
@@ -682,10 +764,44 @@ function runRoom(roomIdx, fixedCode) {
       return bot;
     };
 
+    // --kick (EXP-139): the host removes KICK.name once (in the lobby, or at round KICK.round's round-start)
+    const kick = { scheduled: false, sent: false, confirmed: false };
+    const kickTargetMissing = () => `--kick ${KICK.name} never joined the lobby`;
+    const sendKick = (host, round) => {
+      kick.sent = true;
+      host.socket.emit("remove-player", { username: KICK.name });
+      events.push({ bot: host.name, ev: "kick-sent", round, t: now(), payload: { username: KICK.name } });
+    };
+    // The host got player-removed for KICK.name. A lobby kick that leaves nobody to play with (one bot host and the
+    // kicked device, qa/maestro/kicked-notice.yaml) ends the run: the device checks its notice
+    const onKickConfirmed = () => {
+      kick.confirmed = true;
+      if (LOBBY_KICK && WAIT_PLAYERS - 1 < 2) setTimeout(() => done("lobby-kick"), KICK_SETTLE_MS);
+      else maybeStart();
+    };
+    // Every bot of this process left (--leave-round with real devices playing on) or was kicked (by another bots
+    // process' host): nothing more for them to do
+    const endIfAllOut = () => { if (bots.every((b) => b.gone)) done("all-out"); };
+
     const maybeStart = () => {
       const host = bots.find((b) => b.isHost);
       if (!host || started || !code) return;
-      if (host.players.length >= WAIT_PLAYERS) {
+      // Lobby kick: NAME goes LOBBY_KICK_DELAY_MS after it is in, and the game starts without it once the server
+      // confirmed it
+      if (LOBBY_KICK && !kick.confirmed) {
+        // Everyone the host waits for is in, and NAME is not one of them (a wrong name): nobody to kick
+        if (!kick.scheduled && !host.players.includes(KICK.name) && host.players.length >= WAIT_PLAYERS) {
+          errors.push(kickTargetMissing());
+          done("kick-target-missing");
+          return;
+        }
+        if (!kick.scheduled && host.players.includes(KICK.name)) {
+          kick.scheduled = true;
+          setTimeout(() => sendKick(host, 0), LOBBY_KICK_DELAY_MS);
+        }
+        return;
+      }
+      if (host.players.length >= WAIT_PLAYERS - (LOBBY_KICK ? 1 : 0)) {
         // EXP-157: the host drops in the lobby for good; whoever gets new-host starts instead
         if (LOBBY_HOST_DROP && !host.gone && !bots.some((b) => b.gone)) {
           host.gone = true;
@@ -705,310 +821,20 @@ function runRoom(roomIdx, fixedCode) {
   });
 }
 
-/**
- * 2 players, planned drops in time order: each one pauses the game for the other bot and the return resumes it, until
- * the pauses are used up (GAME_FLOW.md "Pause limit"): the drop that would need a 4th counted pause or an 11th in all
- * ends the game at once (game-over, no game-paused). A pause shorter than PAUSE_GRACE_MS is refunded (not counted).
- */
-function twoPlayerDropErrors(r, drops) {
-  const out = [];
-  let counted = 0, total = 0;
-  for (const [n, d] of drops.entries()) {
-    const other = r.players.find((p) => p !== d.bot);
-    const nextDropAt = drops[n + 1]?.t ?? Infinity;
-    const otherGot = (ev) => r.events.find((e) => e.bot === other && e.ev === ev && e.t > d.t && e.t < nextDropAt);
-    const paused = otherGot("game-paused");
-    if (counted >= MAX_PAUSES || total >= MAX_TOTAL_PAUSES) {
-      const used = `pauses used up (${counted}/${MAX_PAUSES} counted, ${total}/${MAX_TOTAL_PAUSES} in all)`;
-      if (paused) out.push(`round ${d.round} drop: ${used} but ${other} got game-paused ${paused.payload.pause}/${paused.payload.maxPauses}`);
-      if (!otherGot("game-over")) out.push(`round ${d.round} drop: ${used} but the game did not end for ${other}`);
-      break; // the game is over: no later drop can happen
-    }
-    if (!paused) { out.push(`2 players: ${other} never got game-paused`); continue; }
-    const resumed = otherGot("game-resumed");
-    if (!resumed) { out.push(`2 players: ${other} never got game-resumed`); continue; }
-    total++;
-    if (resumed.t - paused.t >= PAUSE_GRACE_MS) counted++;
-  }
-  return out;
-}
-
-/** Times the busiest player received `ev` (a room-wide event counted once). */
-const perBotMax = (r, ev) => Math.max(0, ...r.players.map((n) => r.events.filter((e) => e.bot === n && e.ev === ev).length));
-
-function analyse(r) {
-  const consistency = [];
-  // The hosted game must use the requested --rounds (a server without ALLOW_QA_ROUNDS=1 ignores set-rounds 3)
-  if (args.host) {
-    const gs = r.events.find((e) => e.ev === "game-started");
-    if (gs && gs.payload?.rounds !== ROUNDS) consistency.push(`game-started with ${gs.payload?.rounds} rounds, asked for ${ROUNDS}${ROUNDS === 3 ? " (3 needs ALLOW_QA_ROUNDS=1 on the server)" : ""}`);
-  }
-  const skews = [];
-  const byKey = new Map();
-  for (const e of r.events) {
-    if (!["round-start", "round-reveal", "round-scores", "game-over", "game-started"].includes(e.ev)) continue;
-    const k = `${e.ev}#${e.round}`;
-    if (!byKey.has(k)) byKey.set(k, []);
-    byKey.get(k).push(e);
-  }
-  // waiting-photo repeats with the same round number after a skip: key each bot's n-th one (same n = same wait)
-  // (bots that went offline may have missed one, so they are left out of the alignment)
-  const waitSeen = {};
-  const wentOffline = new Set(r.events.filter((e) => e.ev === "chaos-disconnect" || e.ev === "planned-disconnect").map((e) => e.bot));
-  for (const e of r.events.filter((x) => x.ev === "waiting-photo")) {
-    const keys = Object.keys(e.payload || {}).sort().join(",");
-    if (keys !== "duration,round") consistency.push(`${e.bot}: waiting-photo payload has keys [${keys}] (owner must stay secret)`);
-    if (wentOffline.has(e.bot)) continue;
-    const n = (waitSeen[e.bot] = (waitSeen[e.bot] || 0) + 1);
-    const k = `waiting-photo#${n}`;
-    if (!byKey.has(k)) byKey.set(k, []);
-    byKey.get(k).push(e);
-  }
-  const waitSkews = [...byKey].filter(([k, es]) => k.startsWith("waiting-photo#") && es.length > 1)
-    .map(([, es]) => Math.max(...es.map((e) => e.t)) - Math.min(...es.map((e) => e.t)));
-  // photo-unavailable: the reporter gets round-skipped (reason "unavailable") right away, not after the 15 s wait
-  const unavailableSkipMs = [];
-  for (const rep of r.events.filter((e) => e.ev === "photo-unavailable-sent")) {
-    const sk = r.events.find((e) => e.bot === rep.bot && e.ev === "round-skipped" && e.t >= rep.t);
-    // A game-paused within the skip window and before the skip: the report reached a paused game, which ignores it
-    // (EXP-113); the resume re-sends the same your-turn and only a new report (paired on its own) may skip the round.
-    // A later pause excuses nothing: the skip should already have come
-    const pausedFirst = r.events.some((e) => e.bot === rep.bot && e.ev === "game-paused" && e.t >= rep.t
-      && e.t <= rep.t + UNAVAILABLE_SKIP_MAX_MS && (!sk || e.t <= sk.t));
-    if (pausedFirst) continue;
-    if (!sk) { consistency.push(`${rep.bot}: photo-unavailable (round ${rep.round}) never skipped`); continue; }
-    unavailableSkipMs.push(sk.t - rep.t);
-    if (sk.payload?.reason !== "unavailable") consistency.push(`${rep.bot}: photo-unavailable skipped with reason ${sk.payload?.reason}`);
-    if (sk.t - rep.t > UNAVAILABLE_SKIP_MAX_MS) consistency.push(`${rep.bot}: photo-unavailable took ${Math.round(sk.t - rep.t)}ms to skip`);
-  }
-  const missed = {};
-  for (const [k, es] of byKey) {
-    for (const name of r.players) {
-      // Bots that went offline are left out of the waiting-photo alignment, so those keys are not "missed" by them
-      if (k.startsWith("waiting-photo#") && wentOffline.has(name)) continue;
-      if (!es.some((e) => e.bot === name)) (missed[name] ||= []).push(k);
-    }
-    if (es.length > 1) skews.push(Math.max(...es.map((e) => e.t)) - Math.min(...es.map((e) => e.t)));
-    const sig = (e) => JSON.stringify(e.payload ?? null);
-    if (new Set(es.map(sig)).size > 1) consistency.push(`${k}: players received different payloads`);
-  }
-  const starts = r.events.filter((e) => e.ev === "round-start");
-  const reveals = r.events.filter((e) => e.ev === "round-reveal");
-  // Owner-only signal (EXP-128): whoever was told isOwner for a round is the revealed answer, and the owner's
-  // vote never counts in that round's scores
-  const answerOf = new Map(reveals.map((rv) => [rv.round, rv.payload.correctAnswer]));
-  for (const sig of r.events.filter((e) => e.ev === "owner-signal")) {
-    const answer = answerOf.get(sig.round);
-    if (answer !== undefined && answer !== sig.bot) consistency.push(`round ${sig.round}: ${sig.bot} was told isOwner (${sig.payload.via}) but the answer was ${answer}`);
-  }
-  for (const [round, answer] of answerOf) {
-    if (!r.events.some((e) => e.ev === "owner-signal" && e.round === round && e.bot === answer) && r.players.includes(answer)
-      && starts.some((s) => s.bot === answer && s.round === round)) consistency.push(`round ${round}: owner ${answer} got round-start without isOwner`);
-    const sc = r.events.find((e) => e.ev === "round-scores" && e.round === round);
-    const own = sc?.payload?.scores?.find((x) => x.username === answer);
-    if (own && (own.lastGuess || own.lastAnswerCorrect)) consistency.push(`round ${round}: the owner's vote counted (${own.lastGuess})`);
-  }
-  // Answers freeze when answering ends (EXP-148): each bot's lastGuess in round-scores is its last pick sent while
-  // answering ("" if none); a late-submit (the revealed answer, sent at round-reveal) never counts
-  const scoredRounds = new Map();
-  for (const e of r.events.filter((x) => x.ev === "round-scores")) if (!scoredRounds.has(e.round)) scoredRounds.set(e.round, e);
-  for (const [round, sc] of scoredRounds) {
-    for (const row of sc.payload?.scores ?? []) {
-      if (wentOffline.has(row.username) || !r.players.includes(row.username)) continue;
-      const sent = r.events.filter((e) => e.bot === row.username && e.ev === "guess-sent" && e.round === round && e.t <= sc.t).pop();
-      const expected = sent?.payload.guess ?? "";
-      const late = r.events.some((e) => e.bot === row.username && e.ev === "late-submit" && e.round === round);
-      if (row.lastGuess !== expected) consistency.push(`round ${round}: ${row.username} scored with "${row.lastGuess}" but its last pick while answering was "${expected}"${late ? " (a vote sent during the reveal counted)" : ""}`);
-    }
-  }
-  // No double rounds: a player never gets two round-starts for the same round number
-  const startKeys = starts.map((s) => `${s.bot}#${s.round}`);
-  const dupes = [...new Set(startKeys.filter((k, i) => startKeys.indexOf(k) !== i))];
-  if (dupes.length) consistency.push(`duplicate round-start: ${dupes.join(", ")}`);
-  // Planted rounds look like any other (EXP-126): each round-start follows a waiting-photo for that round (or a
-  // rejoin snapshot of it), whoever planted it. Bots that went offline may have missed the wait, so they are left out
-  for (const s of starts) {
-    if (wentOffline.has(s.bot)) continue;
-    const before = r.events.filter((e) => e.bot === s.bot && e.t <= s.t && e !== s
-      && ["waiting-photo", "round-start", "round-skipped", "game-state"].includes(e.ev)).pop();
-    const ok = before && ((before.ev === "waiting-photo" && before.round === s.round)
-      || (before.ev === "game-state" && before.payload?.phase === "waiting-photo"));
-    if (!ok) consistency.push(`${s.bot}: round-start for round ${s.round} without a preceding waiting-photo`);
-  }
-  // Planted rounds: the revealed owner never got your-turn for that round
-  const plantedRounds = [...answerOf].filter(([round, answer]) =>
-    !r.events.some((e) => e.ev === "your-turn" && e.bot === answer && e.round === round)).map(([round]) => round);
-  // Payload privacy: no socket ids, other players' tokens or planted photo URLs; guesses hidden until round-scores
-  for (const e of r.events.filter((x) => x.ev === "payload-leak")) consistency.push(`${e.bot}: ${e.payload.leak}`);
-  // Planned drop: the bot must come back with a snapshot; with 2 players the game must pause and resume
-  const drops = r.events.filter((e) => e.ev === "planned-disconnect");
-  for (const d of drops) {
-    if (!r.events.some((e) => e.bot === d.bot && e.ev === "game-state" && e.t > d.t)) consistency.push(`${d.bot} rejoined without a game-state snapshot`);
-    // --drop-on-turn (EXP-226): the returning owner still sends the awaited photo, and its round is not timed out
-    if (d.payload?.onTurn) {
-      const after = (ev) => r.events.filter((e) => e.ev === ev && e.round === d.round && e.t > d.t);
-      const sent = after("photo-sent").some((e) => e.bot === d.bot && e.payload?.attempt === d.payload.attempt);
-      if (!sent) consistency.push(`${d.bot}: never sent its round ${d.round} photo (attempt ${d.payload.attempt}) after returning`);
-      if (after("round-skipped").some((e) => e.payload?.reason === "timeout")) consistency.push(`round ${d.round} skipped by timeout after its owner ${d.bot} returned`);
-    }
-  }
-  if (r.players.length === 2) consistency.push(...twoPlayerDropErrors(r, drops));
-  // Dropped turns: a connected bot drops a turn only because its request ended; the server must then ask again for
-  // that round (a later your-turn) or skip it for a reason other than the 15 s timeout, or the photo was lost
-  for (const e of r.events.filter((x) => x.ev === "turn-dropped" && x.payload?.connected)) {
-    const { attempt, turnAt } = e.payload;
-    const askedAgain = r.events.some((x) => x.ev === "your-turn" && x.bot === e.bot && x.round === e.round && x.t > turnAt);
-    const skippedOtherwise = r.events.some((x) => x.ev === "round-skipped" && x.bot === e.bot && x.round === e.round
-      && x.t > turnAt && x.payload?.reason !== "timeout");
-    if (!askedAgain && !skippedOtherwise) consistency.push(`${e.bot}: dropped its round ${e.round} turn (attempt ${attempt}) and was never asked again`);
-  }
-  // Pause N of M: every game-paused says which pause it is (the would-be number), never beyond the cap.
-  // Re-sends within one pause keep the number; the next pause repeats it if the last one was refunded
-  // (resumed within PAUSE_GRACE = 10 s) and is one more if it counted. Never going back.
-  const GRACE_SLACK_MS = 500; // near PAUSE_GRACE_MS, network latency decides: accept both
-  const lastPause = {};
-  const pauseState = {}; // bot -> { number, startedAt, resumedAt }
-  for (const e of r.events.filter((x) => x.ev === "game-paused" || x.ev === "game-resumed")) {
-    const st = pauseState[e.bot] || (pauseState[e.bot] = { number: 0, startedAt: null, resumedAt: null });
-    if (e.ev === "game-resumed") { if (st.startedAt !== null && st.resumedAt === null) st.resumedAt = e.t; continue; }
-    const { pause, maxPauses } = e.payload;
-    if (!Number.isInteger(pause) || !Number.isInteger(maxPauses) || pause < 1 || pause > maxPauses) { consistency.push(`${e.bot}: bad game-paused pause ${pause}/${maxPauses}`); continue; }
-    const samePause = st.startedAt !== null && st.resumedAt === null;
-    if (samePause) {
-      if (pause !== st.number) consistency.push(`${e.bot}: pause number changed within one pause ${st.number} -> ${pause}`);
-    } else if (st.startedAt !== null) {
-      const lasted = st.resumedAt - st.startedAt;
-      const allowed = lasted < PAUSE_GRACE_MS - GRACE_SLACK_MS ? [st.number]
-        : lasted > PAUSE_GRACE_MS + GRACE_SLACK_MS ? [st.number + 1] : [st.number, st.number + 1];
-      if (pause < st.number) consistency.push(`${e.bot}: pause number went back ${st.number} -> ${pause}`);
-      else if (!allowed.includes(pause)) consistency.push(`${e.bot}: pause ${st.number} lasted ${lasted}ms, next pause should be ${allowed.join(" or ")}, got ${pause}`);
-    }
-    if (!samePause) Object.assign(st, { number: pause, startedAt: e.t, resumedAt: null });
-    lastPause[e.bot] = pause;
-  }
-  // Lobby host drop (EXP-157): after the grace, not before, the others see the host gone and get a new host who can
-  // start; the old host is not in the game
-  const hostDrop = r.events.find((e) => e.ev === "lobby-host-drop");
-  if (hostDrop) {
-    const others = r.players.filter((n) => n !== hostDrop.bot);
-    for (const n of others) {
-      const gone = r.events.find((e) => e.bot === n && e.ev === "player-connection" && e.payload.username === hostDrop.bot && e.payload.connected === false);
-      const nh = r.events.find((e) => e.bot === n && e.ev === "new-host");
-      if (!gone) consistency.push(`${n}: never got player-connection { ${hostDrop.bot}, connected: false }`);
-      if (!nh) { consistency.push(`${n}: never got new-host after the host dropped`); continue; }
-      if (nh.payload.username === hostDrop.bot) consistency.push(`${n}: new-host named the dropped host`);
-      if (nh.t - hostDrop.t < DISCONNECT_GRACE_MS - 1_000) consistency.push(`${n}: new-host ${Math.round(nh.t - hostDrop.t)}ms after the drop (grace is ${DISCONNECT_GRACE_MS}ms)`);
-      const gs = r.events.find((e) => e.bot === n && e.ev === "game-started");
-      if (!gs) consistency.push(`${n}: the new host never started the game`);
-    }
-    if (r.events.some((e) => e.bot === hostDrop.bot && e.ev === "game-started")) consistency.push(`${hostDrop.bot}: dropped host got game-started`);
-  }
-  // Play again after lingering (EXP-172): nobody went offline at game-over, so nobody is shown gone nor loses the host role
-  if (PLAY_AGAIN_LINGER_S) {
-    for (const n of r.players) {
-      const over = r.events.find((e) => e.bot === n && e.ev === "game-over");
-      if (!over) continue;
-      // Second-game events count too ("g2-" prefix)
-      const evName = (e) => e.ev.replace(/^g2-/, "");
-      for (const e of r.events.filter((x) => x.bot === n && x.t > over.t)) {
-        if (evName(e) === "player-connection" && e.payload.connected === false) consistency.push(`${n}: saw ${e.payload.username} gone after game-over`);
-        if (evName(e) === "new-host") consistency.push(`${n}: new-host ${e.payload.username} after game-over`);
-      }
-      const pa = r.events.find((e) => e.bot === n && evName(e) === "play-again-joined");
-      if (!pa) { consistency.push(`${n}: Play again join never answered`); continue; }
-      if (!pa.payload.sameToken) consistency.push(`${n}: Play again join changed the rejoin token`);
-      if (pa.payload.gone.length) consistency.push(`${n}: Play again lobby shows gone: ${pa.payload.gone.join(", ")}`);
-      if (n === r.players[0] && args.host && !pa.payload.isHost) consistency.push(`${n}: host lost the role after lingering`);
-    }
-    // A next game started while someone (bot K, or a device with --start-next-game) was still on the final screens:
-    // that player is taken into it at once (EXP-184, DEC-018 A), so its ready phase never waits for the ready timeout
-    // and no round is skipped by the 15 s photo timeout
-    const lingerer = r.players[LINGER_BOT];
-    const secondGame = (LINGER_BOT > 0 && lingerer) || (LINGER_BOT < 0 && START_NEXT_GAME_S);
-    if (secondGame) {
-      const who = lingerer ?? "the lingering device";
-      for (const n of r.players) {
-        const g2Start = r.events.find((e) => e.bot === n && (e.ev === "g2-game-started" || e.ev === "g2-game-started-while-lingering"));
-        if (!g2Start) { consistency.push(`${n}: the second game never started`); continue; }
-        const firstWait = r.events.find((e) => e.bot === n && e.ev === "g2-waiting-photo");
-        if (!firstWait) consistency.push(`${n}: the second game never asked for a photo`);
-        else if (firstWait.t - g2Start.t > NEXT_GAME_READY_MAX_MS) {
-          consistency.push(`${n}: second game's first round came ${Math.round(firstWait.t - g2Start.t)} ms after game-started (ready timeout: ${who} never sent im-ready)`);
-        }
-        if (!r.events.some((e) => e.bot === n && e.ev === "g2-game-over")) consistency.push(`${n}: the second game never ended`);
-      }
-      for (const e of r.events.filter((x) => x.ev === "g2-round-skipped" && x.payload?.reason === "timeout")) {
-        consistency.push(`${e.bot}: second game round ${e.round} skipped by timeout (${who} kept it waiting)`);
-      }
-    }
-    if (LINGER_BOT > 0 && lingerer) {
-      if (!r.events.some((e) => e.ev === "g2-game-started-while-lingering" && e.bot === lingerer)) consistency.push(`${lingerer}: the second game never started while it lingered`);
-      const pa = r.events.find((e) => e.bot === lingerer && e.ev === "g2-play-again-joined");
-      if (pa && !pa.payload.started) consistency.push(`${lingerer}: its join from the final screens did not land in the started game`);
-      if (r.events.some((e) => e.bot === lingerer && e.ev === "g2-linger-photo-unavailable")) consistency.push(`${lingerer}: declined a turn from the final screens instead of joining the game`);
-      // Played every round of the second game like the others (it saw each round-start and guessed when not the owner)
-      const g2Rounds = (n) => new Set(r.events.filter((e) => e.bot === n && e.ev === "g2-round-start").map((e) => e.round));
-      const host = r.players.find((n) => n !== lingerer);
-      const missed = [...g2Rounds(host)].filter((rd) => !g2Rounds(lingerer).has(rd));
-      if (missed.length) consistency.push(`${lingerer}: missed second game rounds ${missed.join(", ")}`);
-      const owned = new Set(r.events.filter((e) => e.bot === lingerer && e.ev === "g2-owner-signal").map((e) => e.round));
-      const toAnswer = [...g2Rounds(lingerer)].filter((rd) => !owned.has(rd));
-      if (toAnswer.length && !r.events.some((e) => e.bot === lingerer && e.ev === "g2-guess-sent")) consistency.push(`${lingerer}: never answered in the second game`);
-    }
-  }
-  const roundsSeen = [...new Set(starts.map((s) => s.round))].sort((a, b) => a - b);
-  roundsSeen.forEach((n, i) => { if (n !== i + 1) consistency.push(`round numbering gap: expected ${i + 1}, got ${n}`); });
-  const phaseGaps = [];
-  for (const s of starts) {
-    const rv = reveals.find((x) => x.bot === s.bot && x.round === s.round);
-    if (rv) phaseGaps.push(rv.t - s.t - s.payload.duration);
-  }
-  return {
-    code: r.code,
-    reason: r.reason,
-    players: r.players.length,
-    rounds_played: roundsSeen.length,
-    rounds_skipped: perBotMax(r, "round-skipped"),
-    planted_sent: r.events.filter((e) => e.ev === "planted").length,
-    planted_rounds: plantedRounds,
-    skipped_unavailable: r.events.filter((e) => e.ev === "photo-unavailable-sent").length,
-    unavailable_skip_ms: { p50: percentile(unavailableSkipMs, 50)?.toFixed(1), max: unavailableSkipMs.length ? Math.max(...unavailableSkipMs).toFixed(1) : null },
-    waiting_photo: perBotMax(r, "waiting-photo"),
-    waiting_photo_skew_ms: { p50: percentile(waitSkews, 50)?.toFixed(1), max: waitSkews.length ? Math.max(...waitSkews).toFixed(1) : null },
-    disconnects: r.events.filter((e) => e.ev === "chaos-disconnect" || e.ev === "planned-disconnect").length,
-    resyncs: r.events.filter((e) => e.ev === "game-state").length,
-    pauses: perBotMax(r, "game-paused"),
-    max_pause_number: Math.max(0, ...Object.values(lastPause)),
-    resumes: perBotMax(r, "game-resumed"),
-    linger_turns_reported: r.events.filter((e) => e.ev === "g2-linger-photo-unavailable").length,
-    // Second game (started while someone lingered on the final screens, EXP-184): rounds played and ready-phase length
-    second_game_rounds: new Set(r.events.filter((e) => e.ev === "g2-round-start").map((e) => e.round)).size,
-    second_game_ready_ms: (() => {
-      const g2s = r.events.find((e) => e.ev === "g2-game-started" || e.ev === "g2-game-started-while-lingering");
-      const w = g2s && r.events.find((e) => e.bot === g2s.bot && e.ev === "g2-waiting-photo");
-      return w ? Math.round(w.t - g2s.t) : null;
-    })(),
-    skew_ms: { p50: percentile(skews, 50)?.toFixed(1), p95: percentile(skews, 95)?.toFixed(1), max: skews.length ? Math.max(...skews).toFixed(1) : null },
-    answer_phase_overrun_ms: { p50: percentile(phaseGaps, 50)?.toFixed(1), max: phaseGaps.length ? Math.max(...phaseGaps).toFixed(1) : null },
-    upload_ms: { p50: percentile(r.uploads, 50)?.toFixed(0), max: r.uploads.length ? Math.max(...r.uploads).toFixed(0) : null },
-    uploads_rate_limited: r.rateLimited,
-    missed_events: missed, // phase events a player never received while offline (game-state resyncs them)
-    consistency_errors: consistency,
-    errors: r.errors,
-  };
-}
-
 // Which server this run plays against (the default is the shared lab server: say so before connecting)
 console.error(`bots.mjs: server ${SERVER}${args.server ? "" : process.env.SERVER_URL ? " (from $SERVER_URL)" : " (default: the shared lab server; pass --server for your own)"}`);
 const t0 = Date.now();
 const results = await Promise.all(Array.from({ length: N_ROOMS }, (_, i) => runRoom(i, FIXED_CODE)));
-const rooms = results.map(analyse);
+const rooms = results.map((r) => analyseRoom(r, ANALYSIS_OPTS));
+// How a room may end and pass: at game-over, or on purpose before it, leaving only real devices behind
+const expectedEnd = (reason) => reason === "game-over" || (LOBBY_HOST_DROP && reason === "lobby-host-drop")
+  || (LOBBY_KICK && reason === "lobby-kick") || (LEAVE_ROUND > 0 && reason === "all-out");
 const summary = {
   server: SERVER,
   rooms: rooms.length,
   bots_per_room: N_BOTS,
   duration_s: Math.round((Date.now() - t0) / 1000),
-  pass: rooms.every((r) => (r.reason === "game-over" || (LOBBY_HOST_DROP && r.reason === "lobby-host-drop")) && r.consistency_errors.length === 0 && r.errors.length === 0),
+  pass: rooms.every((r) => expectedEnd(r.reason) && r.consistency_errors.length === 0 && r.errors.length === 0),
   worst_skew_ms: Math.max(...rooms.map((r) => Number(r.skew_ms.max || 0))),
   uploads_rate_limited: rooms.reduce((n, r) => n + r.uploads_rate_limited, 0), // >0: server limit too low for this load, not a game bug
   rooms_detail: rooms,

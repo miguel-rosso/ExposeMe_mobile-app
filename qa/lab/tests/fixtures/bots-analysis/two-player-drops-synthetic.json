@@ -1,0 +1,61 @@
+{
+"scenario": "synthetic: 2 bots, a drop without game-paused, a pause number going back, a drop without a rejoin snapshot",
+"opts": {"host":true,"rounds":3,"playAgainLingerS":0,"lingerBot":0,"startNextGameS":0},
+"room": {"code":"QAROOM","reason":"timeout","players":["bot1","bot2"],"errors":[],"uploads":[],"rateLimited":0,"events": [
+{"bot":"bot1","ev":"game-started","round":0,"t":100,"payload":{"rounds":3}},
+{"bot":"bot2","ev":"game-started","round":0,"t":200,"payload":{"rounds":3}},
+{"bot":"bot2","ev":"planned-disconnect","round":1,"t":300,"payload":{"secs":3}},
+{"bot":"bot2","ev":"game-state","round":1,"t":400,"payload":{"phase":"answering","paused":false,"started":true}},
+{"bot":"bot2","ev":"planned-disconnect","round":2,"t":500,"payload":{"secs":12}},
+{"bot":"bot1","ev":"game-paused","round":2,"t":600,"payload":{"waitingFor":["bot2"],"duration":300000,"pause":2,"maxPauses":3}},
+{"bot":"bot1","ev":"game-resumed","round":2,"t":12700,"payload":{"phase":"answering"}},
+{"bot":"bot2","ev":"game-state","round":2,"t":12800,"payload":{"phase":"answering","paused":false,"started":true}},
+{"bot":"bot2","ev":"planned-disconnect","round":3,"t":12900,"payload":{"secs":12}},
+{"bot":"bot1","ev":"game-paused","round":3,"t":13000,"payload":{"waitingFor":["bot2"],"duration":300000,"pause":1,"maxPauses":3}},
+{"bot":"bot1","ev":"game-resumed","round":3,"t":25100,"payload":{"phase":"answering"}}
+]},
+"expected": {
+ "code": "QAROOM",
+ "reason": "timeout",
+ "players": 2,
+ "rounds_played": 0,
+ "rounds_skipped": 0,
+ "planted_sent": 0,
+ "planted_rounds": [],
+ "skipped_unavailable": 0,
+ "unavailable_skip_ms": {
+  "max": null
+ },
+ "waiting_photo": 0,
+ "waiting_photo_skew_ms": {
+  "max": null
+ },
+ "disconnects": 3,
+ "resyncs": 2,
+ "pauses": 2,
+ "max_pause_number": 1,
+ "resumes": 2,
+ "linger_turns_reported": 0,
+ "second_game_rounds": 0,
+ "second_game_ready_ms": null,
+ "skew_ms": {
+  "p50": "100.0",
+  "p95": "100.0",
+  "max": "100.0"
+ },
+ "answer_phase_overrun_ms": {
+  "max": null
+ },
+ "upload_ms": {
+  "max": null
+ },
+ "uploads_rate_limited": 0,
+ "missed_events": {},
+ "consistency_errors": [
+  "bot2 rejoined without a game-state snapshot",
+  "2 players: bot1 never got game-paused",
+  "bot1: pause number went back 2 -> 1"
+ ],
+ "errors": []
+}
+}

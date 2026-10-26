@@ -1,0 +1,119 @@
+{
+"scenario": "unavailable-with-devices with broken skips: never skipped, wrong reason, slow",
+"opts": {"host":true,"rounds":3,"playAgainLingerS":0,"lingerBot":0,"startNextGameS":0},
+"room": {"code":"QAROOM","reason":"game-over","players":["bot1","bot2"],"errors":["bot2 upload: upload 500"],"uploads":[],"rateLimited":0,"events": [
+{"bot":"bot1","ev":"game-started","round":0,"t":0},
+{"bot":"bot2","ev":"game-started","round":0,"t":0.789},
+{"bot":"bot1","ev":"waiting-photo","round":1,"t":1073.125,"payload":{"round":1,"duration":15000}},
+{"bot":"bot2","ev":"waiting-photo","round":1,"t":1073.238,"payload":{"round":1,"duration":15000}},
+{"bot":"bot1","ev":"round-start","round":1,"t":1284.685,"payload":{"owner":"device1","photo":"/temp/photo-1.jpg","duration":8000}},
+{"bot":"bot2","ev":"round-start","round":1,"t":1285.144,"payload":{"owner":"device1","photo":"/temp/photo-1.jpg","duration":8000}},
+{"bot":"bot1","ev":"round-reveal","round":1,"t":9285.187,"payload":{"correctAnswer":"device1"}},
+{"bot":"bot2","ev":"round-reveal","round":1,"t":9285.315,"payload":{"correctAnswer":"device1"}},
+{"bot":"bot1","ev":"round-scores","round":1,"t":12287.255,"payload":{"scores":[{"username":"bot2","points":1,"isHost":false,"lastAnswerCorrect":true,"lastGuess":"device1"},{"username":"bot1","points":0,"isHost":true,"lastAnswerCorrect":false,"lastGuess":"bot1"},{"username":"device1","points":0,"isHost":false,"lastAnswerCorrect":false,"lastGuess":"bot1"},{"username":"device2","points":0,"isHost":false,"lastAnswerCorrect":false,"lastGuess":"bot1"}]}},
+{"bot":"bot2","ev":"round-scores","round":1,"t":12287.429,"payload":{"scores":[{"username":"bot2","points":1,"isHost":false,"lastAnswerCorrect":true,"lastGuess":"device1"},{"username":"bot1","points":0,"isHost":true,"lastAnswerCorrect":false,"lastGuess":"bot1"},{"username":"device1","points":0,"isHost":false,"lastAnswerCorrect":false,"lastGuess":"bot1"},{"username":"device2","points":0,"isHost":false,"lastAnswerCorrect":false,"lastGuess":"bot1"}]}},
+{"bot":"bot1","ev":"waiting-photo","round":2,"t":17288.793,"payload":{"round":2,"duration":15000}},
+{"bot":"bot2","ev":"waiting-photo","round":2,"t":17288.922,"payload":{"round":2,"duration":15000}},
+{"bot":"bot1","ev":"your-turn","round":2,"t":17289.273,"payload":{"attempt":2}},
+{"bot":"bot1","ev":"upload-skipped-on-purpose","round":2,"t":17289.281},
+{"bot":"bot1","ev":"round-skipped","round":2,"t":32289.241,"payload":{"round":2,"reason":"timeout"}},
+{"bot":"bot1","ev":"waiting-photo","round":2,"t":32289.376,"payload":{"round":2,"duration":15000}},
+{"bot":"bot2","ev":"round-skipped","round":2,"t":32289.459,"payload":{"round":2,"reason":"timeout"}},
+{"bot":"bot2","ev":"waiting-photo","round":2,"t":32289.463,"payload":{"round":2,"duration":15000}},
+{"bot":"bot1","ev":"round-start","round":2,"t":32779.464,"payload":{"owner":"device2","photo":"/temp/photo-2.jpg","duration":8000}},
+{"bot":"bot2","ev":"round-start","round":2,"t":32779.626,"payload":{"owner":"device2","photo":"/temp/photo-2.jpg","duration":8000}},
+{"bot":"bot1","ev":"round-reveal","round":2,"t":40780.336,"payload":{"correctAnswer":"device2"}},
+{"bot":"bot2","ev":"round-reveal","round":2,"t":40780.601,"payload":{"correctAnswer":"device2"}},
+{"bot":"bot1","ev":"round-scores","round":2,"t":43781.281,"payload":{"scores":[{"username":"bot2","points":1,"isHost":false,"lastAnswerCorrect":false,"lastGuess":"bot2"},{"username":"bot1","points":0,"isHost":true,"lastAnswerCorrect":false,"lastGuess":"bot2"},{"username":"device1","points":0,"isHost":false,"lastAnswerCorrect":false,"lastGuess":"bot1"},{"username":"device2","points":0,"isHost":false,"lastAnswerCorrect":false,"lastGuess":"bot1"}]}},
+{"bot":"bot2","ev":"round-scores","round":2,"t":43781.329,"payload":{"scores":[{"username":"bot2","points":1,"isHost":false,"lastAnswerCorrect":false,"lastGuess":"bot2"},{"username":"bot1","points":0,"isHost":true,"lastAnswerCorrect":false,"lastGuess":"bot2"},{"username":"device1","points":0,"isHost":false,"lastAnswerCorrect":false,"lastGuess":"bot1"},{"username":"device2","points":0,"isHost":false,"lastAnswerCorrect":false,"lastGuess":"bot1"}]}},
+{"bot":"bot1","ev":"waiting-photo","round":3,"t":48783.263,"payload":{"round":3,"duration":15000}},
+{"bot":"bot2","ev":"waiting-photo","round":3,"t":48783.34,"payload":{"round":3,"duration":15000}},
+{"bot":"bot1","ev":"round-start","round":3,"t":49059.713,"payload":{"owner":"device1","photo":"/temp/photo-3.jpg","duration":8000}},
+{"bot":"bot2","ev":"round-start","round":3,"t":49059.929,"payload":{"owner":"device1","photo":"/temp/photo-3.jpg","duration":8000}},
+{"bot":"bot1","ev":"round-reveal","round":3,"t":57060.637,"payload":{"correctAnswer":"device1"}},
+{"bot":"bot2","ev":"round-reveal","round":3,"t":57060.746,"payload":{"correctAnswer":"device1"}},
+{"bot":"bot1","ev":"round-scores","round":3,"t":60061.732,"payload":{"scores":[{"username":"bot1","points":1,"isHost":true,"lastAnswerCorrect":true,"lastGuess":"device1"},{"username":"bot2","points":1,"isHost":false,"lastAnswerCorrect":false,"lastGuess":"bot1"},{"username":"device1","points":0,"isHost":false,"lastAnswerCorrect":false,"lastGuess":"bot1"},{"username":"device2","points":0,"isHost":false,"lastAnswerCorrect":false,"lastGuess":"(no guess)"}]}},
+{"bot":"bot2","ev":"round-scores","round":3,"t":60061.838,"payload":{"scores":[{"username":"bot1","points":1,"isHost":true,"lastAnswerCorrect":true,"lastGuess":"device1"},{"username":"bot2","points":1,"isHost":false,"lastAnswerCorrect":false,"lastGuess":"bot1"},{"username":"device1","points":0,"isHost":false,"lastAnswerCorrect":false,"lastGuess":"bot1"},{"username":"device2","points":0,"isHost":false,"lastAnswerCorrect":false,"lastGuess":"(no guess)"}]}},
+{"bot":"bot1","ev":"waiting-photo","round":4,"t":65061.398,"payload":{"round":4,"duration":15000}},
+{"bot":"bot2","ev":"waiting-photo","round":4,"t":65061.448,"payload":{"round":4,"duration":15000}},
+{"bot":"bot2","ev":"your-turn","round":4,"t":65061.455,"payload":{"attempt":5}},
+{"bot":"bot2","ev":"upload-skipped-on-purpose","round":4,"t":65061.458},
+{"bot":"bot1","ev":"round-skipped","round":4,"t":80061.534,"payload":{"round":4,"reason":"timeout"}},
+{"bot":"bot2","ev":"round-skipped","round":4,"t":80061.746,"payload":{"round":4,"reason":"timeout"}},
+{"bot":"bot2","ev":"waiting-photo","round":4,"t":80061.752,"payload":{"round":4,"duration":15000}},
+{"bot":"bot2","ev":"your-turn","round":4,"t":80061.764,"payload":{"attempt":6}},
+{"bot":"bot1","ev":"waiting-photo","round":4,"t":80062.02,"payload":{"round":4,"duration":15000}},
+{"bot":"bot2","ev":"photo-unavailable-sent","round":4,"t":80433.154,"payload":{"attempt":6}},
+{"bot":"bot1","ev":"round-skipped","round":4,"t":80433.917,"payload":{"round":4,"reason":"unavailable"}},
+{"bot":"bot1","ev":"waiting-photo","round":4,"t":80434.171,"payload":{"round":4,"duration":15000}},
+{"bot":"bot1","ev":"your-turn","round":4,"t":80434.182,"payload":{"attempt":7}},
+{"bot":"bot2","ev":"waiting-photo","round":4,"t":80434.295,"payload":{"round":4,"duration":15000}},
+{"bot":"bot1","ev":"photo-unavailable-sent","round":4,"t":80834.533,"payload":{"attempt":7}},
+{"bot":"bot1","ev":"game-over","round":3,"t":80835.573,"payload":{"finalScore":[{"username":"bot1","points":1,"isHost":true,"lastAnswerCorrect":false,"lastGuess":""},{"username":"bot2","points":1,"isHost":false,"lastAnswerCorrect":false,"lastGuess":""},{"username":"device1","points":0,"isHost":false,"lastAnswerCorrect":false,"lastGuess":""},{"username":"device2","points":0,"isHost":false,"lastAnswerCorrect":false,"lastGuess":""}]}},
+{"bot":"bot2","ev":"game-over","round":3,"t":80835.653,"payload":{"finalScore":[{"username":"bot1","points":1,"isHost":true,"lastAnswerCorrect":false,"lastGuess":""},{"username":"bot2","points":1,"isHost":false,"lastAnswerCorrect":false,"lastGuess":""},{"username":"device1","points":0,"isHost":false,"lastAnswerCorrect":false,"lastGuess":""},{"username":"device2","points":0,"isHost":false,"lastAnswerCorrect":false,"lastGuess":""}]}},
+{"bot":"bot1","ev":"round-skipped","round":4,"t":83834.533,"payload":{"round":4,"reason":"timeout"}}
+]},
+"expected": {
+ "code": "QAROOM",
+ "reason": "game-over",
+ "players": 2,
+ "rounds_played": 3,
+ "rounds_skipped": 4,
+ "planted_sent": 0,
+ "planted_rounds": [
+  1,
+  2,
+  3
+ ],
+ "skipped_unavailable": 2,
+ "unavailable_skip_ms": {
+  "p50": "3000.0",
+  "max": "3000.0"
+ },
+ "waiting_photo": 7,
+ "waiting_photo_skew_ms": {
+  "p50": "0.1",
+  "max": "0.3"
+ },
+ "disconnects": 0,
+ "resyncs": 0,
+ "pauses": 0,
+ "max_pause_number": 0,
+ "resumes": 0,
+ "linger_turns_reported": 0,
+ "second_game_rounds": 0,
+ "second_game_ready_ms": null,
+ "skew_ms": {
+  "p50": "0.1",
+  "p95": "0.8",
+  "max": "0.8"
+ },
+ "answer_phase_overrun_ms": {
+  "p50": "0.8",
+  "max": "1.0"
+ },
+ "upload_ms": {
+  "max": null
+ },
+ "uploads_rate_limited": 0,
+ "missed_events": {},
+ "consistency_errors": [
+  "game-started with undefined rounds, asked for 3 (3 needs ALLOW_QA_ROUNDS=1 on the server)",
+  "bot2: photo-unavailable (round 4) never skipped",
+  "bot1: photo-unavailable skipped with reason timeout",
+  "bot1: photo-unavailable took 3000ms to skip",
+  "round 1: the owner's vote counted (bot1)",
+  "round 2: the owner's vote counted (bot1)",
+  "round 3: the owner's vote counted (bot1)",
+  "round 1: bot2 scored with \"device1\" but its last pick while answering was \"\"",
+  "round 1: bot1 scored with \"bot1\" but its last pick while answering was \"\"",
+  "round 2: bot2 scored with \"bot2\" but its last pick while answering was \"\"",
+  "round 2: bot1 scored with \"bot2\" but its last pick while answering was \"\"",
+  "round 3: bot1 scored with \"device1\" but its last pick while answering was \"\"",
+  "round 3: bot2 scored with \"bot1\" but its last pick while answering was \"\""
+ ],
+ "errors": [
+  "bot2 upload: upload 500"
+ ]
+}
+}

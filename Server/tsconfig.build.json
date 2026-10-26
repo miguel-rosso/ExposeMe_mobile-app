@@ -1,0 +1,10 @@
+{
+  // Production build (`npm run build` -> dist/, run with `npm run start:compiled`). Tests and dev tooling are left out.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": ".",
+    "sourceMap": true
+  },
+  "include": ["server.ts", "app.ts", "controllers", "managers", "middlewares", "models", "routes"]
+}

@@ -3,8 +3,19 @@ import path from "path";
 import fs from "fs";
 import { NextFunction, Request, Response } from "express";
 
+/**
+ * Server/ root: the nearest directory above `fromDir` holding package.json. Works both from the sources
+ * (ts-node, Server/middlewares) and from the compiled build (Server/dist/middlewares).
+ */
+export function findServerRoot(fromDir: string): string {
+  for (let dir = fromDir; ; dir = path.dirname(dir)) {
+    if (fs.existsSync(path.join(dir, "package.json"))) return dir;
+    if (path.dirname(dir) === dir) throw new Error(`No package.json above ${fromDir}`);
+  }
+}
+
 // UPLOAD_DIR overrides the default Server/temp (tests use a throwaway directory)
-const uploadDir = process.env.UPLOAD_DIR || path.join(__dirname, "../temp");
+const uploadDir = process.env.UPLOAD_DIR || path.join(findServerRoot(__dirname), "temp");
 
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });

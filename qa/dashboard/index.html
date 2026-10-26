@@ -348,6 +348,19 @@
       </div>
     </div>
   </section>
+  <section id="despliegue">
+    <details class="qa-archive qa-flow">
+      <summary>Antes de desplegar (checklist)</summary>
+      <div class="qa-card qa-flow-body">
+        <p>Cosas que ya están preparadas en la rama <code>qa/loop</code> pero que solo tú puedes activar cuando decidas desplegar. Mientras no las hagas, todo sigue funcionando como ahora.</p>
+        <ol class="qa-flow-ol">
+          <li><b>Arranque compilado del servidor (EXP-075):</b> en Render, con el directorio <code>Server</code>, cambia el build a <code>npm ci --include=dev &amp;&amp; npm run build</code> y el start a <code>npm run start:compiled</code>, con Node 20.9 o superior (variable <code>NODE_VERSION</code>, por ejemplo 22). En local baja de ~275 MB a ~60 MB en reposo. Detalles en <code>Server/README.md</code>.</li>
+          <li><b>Revisar y fusionar <code>qa/loop</code> en <code>main</code></b> antes de desplegar: incluye los códigos de sala nuevos (la app y el servidor tienen que ir a la vez).</li>
+          <li><b>Comprobar en Render la IP real del cliente</b> (<code>TRUST_PROXY</code>, EXP-071) y definir <code>NODE_ENV=production</code> (EXP-105).</li>
+        </ol>
+      </div>
+    </details>
+  </section>
   <section id="flujo">
     <details class="qa-archive qa-flow">
       <summary>Cómo funciona el flujo de QA (agentes, pasos y reglas)</summary>

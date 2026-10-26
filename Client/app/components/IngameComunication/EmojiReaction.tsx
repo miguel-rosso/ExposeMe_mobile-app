@@ -53,7 +53,6 @@ const EmojiReaction: React.FC<EmojiReactionProps> = ({ username, emoji, screensh
     <Animated.View
       style={[
         tw`bg-black bg-opacity-40 rounded-full px-3 py-1 flex-row items-center justify-center mb-2`,
-        isScreenshot ? tw`mt-8` : {}, //additional margin top for screenshots
         { opacity, transform: [{ translateY }] },
       ]}
     >

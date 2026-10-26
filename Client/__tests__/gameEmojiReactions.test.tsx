@@ -2,10 +2,14 @@ import React from "react";
 import TestRenderer, { act } from "react-test-renderer";
 // Loaded with the file (jest.mock calls below are hoisted above it): a cold transform must not hit the test timeout
 import GameScreen from "../app/screens/GameScreen";
+import { StyleSheet } from "react-native";
 import EmojiReaction from "../app/components/IngameComunication/EmojiReaction";
+import EmojiReactionLane, { REACTION_LANE_GAP, REACTION_PILL_HEIGHT } from "../app/components/IngameComunication/EmojiReactionLane";
+import ProgressBar from "../app/components/ProgressBar";
 
 // EXP-166: room emoji reactions are capped on screen, only known emojis are shown, they don't replay on the next photo,
 // and the screenshot reaction is a single listener per game that sends the fixed "📸" (label translated locally).
+// EXP-201: reactions live in their own lane between the progress bar and the answer buttons, never over either.
 
 jest.mock("@react-native-async-storage/async-storage", () =>
   require("@react-native-async-storage/async-storage/jest/async-storage-mock")
@@ -107,7 +111,8 @@ describe("GameScreen: emoji reactions (EXP-166)", () => {
     act(() => { for (let i = 0; i < 100; i++) mockSocket.fire("emoji-reaction", { username: `p${i}`, emoji: "🔥" }); });
     const shown = reactions(r);
     expect(shown.length).toBeLessThanOrEqual(5);
-    expect(shown.map((n) => n.props.username)).toEqual(["p95", "p96", "p97", "p98", "p99"]);
+    // Newest on top of the lane
+    expect(shown.map((n) => n.props.username)).toEqual(["p99", "p98", "p97", "p96", "p95"]);
     act(() => r.unmount());
   });
 
@@ -121,7 +126,7 @@ describe("GameScreen: emoji reactions (EXP-166)", () => {
       mockSocket.fire("emoji-reaction", { username: "alice", emoji: "😂" });
       mockSocket.fire("emoji-reaction", { username: "alice", emoji: "📸" });
     });
-    expect(reactions(r).map((n) => n.props.emoji)).toEqual(["😂", "📸"]);
+    expect(reactions(r).map((n) => n.props.emoji)).toEqual(["📸", "😂"]); // newest first
     act(() => r.unmount());
   });
 
@@ -166,6 +171,124 @@ describe("GameScreen: screenshot reaction (EXP-166)", () => {
     act(() => r.unmount());
     expect(mockCapture.listeners.size).toBe(0);
     expect(mockCapture.removed).toBe(1);
+  });
+});
+
+describe("GameScreen: reaction lane layout (EXP-201)", () => {
+  type Node = TestRenderer.ReactTestInstance;
+  const flatStyle = (n: Node) => StyleSheet.flatten(n.props.style) ?? {};
+  const isInside = (n: Node, container: Node) => {
+    for (let p: Node | null = n.parent; p; p = p.parent) if (p === container) return true;
+    return false;
+  };
+  // Nearest ancestor positioned with an explicit top: the strip that holds the progress bar
+  const progressBarArea = (r: TestRenderer.ReactTestRenderer) => {
+    let n: Node | null = r.root.findByType(ProgressBar as React.ComponentType<any>);
+    while (n && typeof flatStyle(n).top !== "number") n = n.parent;
+    return flatStyle(n!) as { top: number; height: number };
+  };
+  const laneView = (r: TestRenderer.ReactTestRenderer) =>
+    r.root.findByType(EmojiReactionLane).findAll((n) => (n.type as unknown) === "View")[0];
+  const answersContainer = (r: TestRenderer.ReactTestRenderer) =>
+    r.root.findAll((n) => (n.type as unknown) === "View" && typeof n.props.onLayout === "function"
+      && n.findAll((c) => typeof c.props.testID === "string" && c.props.testID.startsWith("player-option-")).length > 0)[0];
+
+  it("stacks reactions in a lane that starts below the progress bar", async () => {
+    const r = await mount();
+    startRound(1);
+    act(() => { for (let i = 0; i < 5; i++) mockSocket.fire("emoji-reaction", { username: "alice", emoji: "😭" }); });
+
+    const lane = r.root.findByType(EmojiReactionLane);
+    expect(reactions(r)).toHaveLength(5);
+    reactions(r).forEach((reaction) => expect(isInside(reaction, lane)).toBe(true));
+
+    const bar = progressBarArea(r);
+    expect(flatStyle(laneView(r)).top).toBeGreaterThanOrEqual(bar.top + bar.height);
+    act(() => r.unmount());
+  });
+
+  it("ends the lane above the answer buttons and follows them when they move", async () => {
+    const r = await mount();
+    startRound(1);
+    const layoutAnswersAt = (y: number) =>
+      act(() => answersContainer(r).props.onLayout({ nativeEvent: { layout: { x: 0, y, width: 400, height: 200 } } }));
+
+    layoutAnswersAt(520);
+    expect(flatStyle(laneView(r)).top + flatStyle(laneView(r)).maxHeight).toBe(520 - REACTION_LANE_GAP);
+    // More players (or landscape): the answer grid grows upwards and the lane shrinks with it
+    layoutAnswersAt(380);
+    const lane = flatStyle(laneView(r));
+    expect(lane.overflow).toBe("hidden");
+    expect(lane.top + lane.maxHeight).toBe(380 - REACTION_LANE_GAP);
+    act(() => r.unmount());
+  });
+});
+
+describe("EmojiReactionLane", () => {
+  const reactionList = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `r${i}`, username: `p${i}`, emoji: "😭" }));
+  const renderLane = (count: number, laneHeight: number | null) => {
+    const top = 100;
+    let r!: TestRenderer.ReactTestRenderer;
+    act(() => {
+      r = TestRenderer.create(
+        <EmojiReactionLane
+          reactions={reactionList(count)}
+          top={top}
+          answersTop={laneHeight === null ? null : top + laneHeight + REACTION_LANE_GAP}
+          screenshotLabel=""
+          onReactionEnd={() => {}}
+        />
+      );
+    });
+    return r;
+  };
+
+  it("shows only the newest reactions that fit whole", () => {
+    const r = renderLane(5, REACTION_PILL_HEIGHT * 2.5);
+    expect(r.root.findAllByType(EmojiReaction).map((n) => n.props.username)).toEqual(["p4", "p3"]);
+    act(() => r.unmount());
+  });
+
+  it("shows none when not even one pill fits, and all of them before the answers are measured", () => {
+    const tooShort = renderLane(3, REACTION_PILL_HEIGHT - 1);
+    expect(tooShort.root.findAllByType(EmojiReaction)).toHaveLength(0);
+    act(() => tooShort.unmount());
+    const unmeasured = renderLane(3, null);
+    expect(unmeasured.root.findAllByType(EmojiReaction)).toHaveLength(3);
+    act(() => unmeasured.unmount());
+  });
+
+  it("never gets a negative height when the answers reach the lane", () => {
+    let r!: TestRenderer.ReactTestRenderer;
+    act(() => {
+      r = TestRenderer.create(
+        <EmojiReactionLane reactions={[]} top={100} answersTop={90} screenshotLabel="" onReactionEnd={() => {}} />
+      );
+    });
+    const lane = r.root.findAll((n) => (n.type as unknown) === "View")[0];
+    expect(StyleSheet.flatten(lane.props.style).maxHeight).toBe(0);
+    act(() => r.unmount());
+  });
+});
+
+describe("GameScreen: screenshot reaction across remounts (EXP-201)", () => {
+  it("keeps a single listener, so one screenshot sends exactly one reaction", async () => {
+    let r = await mount();
+    // Re-renders driven by room events must not subscribe again
+    startRound(1);
+    act(() => { for (let i = 0; i < 3; i++) mockSocket.fire("emoji-reaction", { username: "alice", emoji: "😂" }); });
+    act(() => r.unmount());
+    r = await mount();
+    startRound(2);
+
+    expect(mockCapture.added).toBe(2);
+    expect(mockCapture.removed).toBe(1);
+    expect(mockCapture.listeners.size).toBe(1);
+
+    act(() => [...mockCapture.listeners].forEach((fn) => fn()));
+    expect(mockSocket.emitted.filter(([ev]) => ev === "emoji-reaction")).toEqual([["emoji-reaction", { emoji: "📸" }]]);
+    act(() => r.unmount());
+    expect(mockCapture.listeners.size).toBe(0);
   });
 });
 

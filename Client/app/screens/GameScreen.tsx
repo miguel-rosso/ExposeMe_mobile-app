@@ -17,7 +17,7 @@ import ProgressBar from "@/app/components/ProgressBar";
 import FinalScoreModal from "@/app/components/modals/FinalScoreModal";
 import WinnerModal from "@/app/components/modals/WinnerModal";
 import { getWinners } from "@/app/utils/ranking";
-import EmojiReaction from "@/app/components/IngameComunication/EmojiReaction";
+import EmojiReactionLane, { EmojiReactionData } from "@/app/components/IngameComunication/EmojiReactionLane";
 import EmojisButton from "@/app/components/IngameComunication/EmojisButtons";
 import { useI18n } from "../i18n";
 import { applyRoundStart, RoundStartData } from "../utils/roundStart";
@@ -35,6 +35,9 @@ import { appendCapped, isAllowedReaction, MAX_VISIBLE_REACTIONS } from "../utils
 
 const { SERVER_URL } = getEnvVars();
 const PICK_SEND_INTERVAL = 200; // ms between submit-answer sends (server: 10 per socket, refilled 5/s)
+// Round progress bar strip at the top of the photo (bar plus its padding); emoji reactions start right below it
+const PROGRESS_BAR_AREA = { top: 60, height: 40 } as const;
+const REACTION_LANE_TOP = PROGRESS_BAR_AREA.top + PROGRESS_BAR_AREA.height;
 
 // Game events detached at game over: the socket stays open on the final screens (still in the room), and a next game
 // started meanwhile must not drive this finished one (e.g. a your-turn picking and uploading a photo behind the modal)
@@ -43,7 +46,6 @@ const GAME_EVENTS = [
   "round-skipped", "game-paused", "game-resumed", "game-state", "emoji-reaction",
 ];
 
-interface EmojiReactionData { id: string; username: string; emoji: string }
 type Phase = "waiting-photo" | "answering" | "reveal" | "scores" | null;
 
 const GameScreen = () => {
@@ -439,6 +441,8 @@ const GameScreen = () => {
   // Reactions belong to the photo they were sent on: drop them whenever it changes (waiting-photo, resume, snapshot)
   useEffect(() => { setEmojiReactions([]); }, [photo]);
   const removeEmoji = (id: string) => setEmojiReactions((c) => c.filter((r) => r.id !== id));
+  // Top edge of the answer buttons (measured): the reaction lane ends above it
+  const [answersTop, setAnswersTop] = useState<number | null>(null);
 
   // ── Render helpers ───────────────────────────────────
   const isRevealOrScores = phase === "reveal" || phase === "scores";
@@ -525,19 +529,21 @@ const GameScreen = () => {
             {/* Server photos need the room credentials: never request one without them (black until ready) */}
             {photoHeaders && <PhotoComponent photoUrl={photo} headers={photoHeaders} />}
 
-            {/* Emoji reactions */}
-            <View style={tw`absolute top-4 left-4 z-90`}>
-              {emojiReactions.map((r) => (
-                <EmojiReaction key={r.id} username={r.username} emoji={r.emoji} screenshotLabel={t.tookScreenshot} onAnimationEnd={() => removeEmoji(r.id)} />
-              ))}
-            </View>
+            {/* Emoji reactions: own lane between the progress bar and the answer buttons */}
+            <EmojiReactionLane
+              reactions={emojiReactions}
+              top={REACTION_LANE_TOP}
+              answersTop={answersTop}
+              screenshotLabel={t.tookScreenshot}
+              onReactionEnd={removeEmoji}
+            />
 
             {/* Game overlay — hidden during hold so photo is visible */}
             {!gameHeld && (
               <View style={tw`z-8 absolute w-full h-full`}>
                 {/* Progress bar during answering or scores */}
                 {(phase === "answering" || phase === "scores") && phaseDuration > 0 && pauseEndsAt === null && (
-                  <View style={tw`absolute top-15 left-0 right-0 p-4 items-center`}>
+                  <View style={[tw`absolute left-0 right-0 p-4 items-center`, PROGRESS_BAR_AREA]}>
                     <View style={tw`w-full max-w-[500px]`}>
                       <ProgressBar
                         key={phaseKey}
@@ -549,7 +555,10 @@ const GameScreen = () => {
                 )}
 
                 {/* Player selection buttons (my own photo: I can't vote, so a hint instead while the others answer) */}
-                <View style={tw`absolute z-40 bottom-22 left-0 right-0 p-2 flex-row justify-center`}>
+                <View
+                  style={tw`absolute z-40 bottom-22 left-0 right-0 p-2 flex-row justify-center`}
+                  onLayout={(e) => setAnswersTop(e.nativeEvent.layout.y)}
+                >
                   {isOwner && phase === "answering" ? (
                     <Text
                       testID={TEST_IDS.ownPhotoHint}

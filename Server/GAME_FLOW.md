@@ -100,6 +100,13 @@ After last round: game-over
 
 ## Join, rejoin and session
 
+- Connecting: every socket.io request (the handshake, each long-polling GET/POST of an open session, and the
+  WebSocket upgrade) is accepted only without an `Origin` header (Node bots, React Native's polling) or with an
+  `Origin` whose host equals the request `Host` (React Native's native WebSocket sends
+  `http(s)://<server host>[:port]`). Any other `Origin` (another website, `null`) and JSONP polling (a `j` query
+  parameter, which a cross-origin `<script>` could read) get **400** and no socket, since CORS doesn't cover
+  WebSockets or JSONP (`middlewares/socketOrigin.ts`). This stops other websites from using their visitors' browsers
+  as clients; it is not an authentication layer (any non-browser client can omit `Origin`).
 - `join-create-game { gameCode, username, rejoinToken? }`: `gameCode: null` creates a room (sender is host).
   `username` must be a string, 1–20 chars and not blank.
 - On success the server answers **only to that socket** with
@@ -502,5 +509,5 @@ base-uri 'none'; form-action 'none'`, `X-Content-Type-Options: nosniff`, `X-Fram
 are unaffected), `Strict-Transport-Security: max-age=15552000`, and no `X-Powered-By`. The `/join/<code>` invite page
 (the link the app shares) accepts a code in any case, normalizes it like a join (trim, uppercase) and answers **400**
 `Invalid game code` when it is malformed; a valid one gets a page that opens
-`myapp://screens/WaitingRoom?code=<CODE>` (canonical uppercase code; the app normalizes the `code` parameter again
+`exposeme://screens/WaitingRoom?code=<CODE>` (canonical uppercase code; the app normalizes the `code` parameter again
 and ignores a malformed one). It overrides the CSP to allow its inline style and only its inline script, by a per-response nonce.

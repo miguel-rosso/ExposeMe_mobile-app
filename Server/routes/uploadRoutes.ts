@@ -11,6 +11,9 @@ import { isRoomCode, normalizeRoomCode } from "../managers/roomCode";
 const router = express.Router();
 
 // ── Invite page helpers ──
+// The app's deep link scheme (Client/app.json `expo.scheme`)
+const APP_SCHEME = "exposeme";
+
 const escapeHtml = (value: string) =>
   value
     .replace(/&/g, "&amp;")
@@ -48,8 +51,7 @@ router.get("/join/:code", (req, res) => {
     res.status(400).type("text/plain").send("Invalid game code");
     return;
   }
-  const scheme = "myapp";
-  const deepLink = `${scheme}://screens/WaitingRoom?code=${encodeURIComponent(code)}`;
+  const deepLink = `${APP_SCHEME}://screens/WaitingRoom?code=${encodeURIComponent(code)}`;
 
   // The global deny-all CSP would block the page's inline style/script: allow them, the script by nonce only
   const nonce = crypto.randomBytes(16).toString("base64");

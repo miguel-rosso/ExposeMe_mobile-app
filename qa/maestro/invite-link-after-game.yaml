@@ -30,7 +30,7 @@ appId: com.socketNull.ExposeMe
     id: "lobby-player-bot3"
 - takeScreenshot: invite-old-lobby-${USERNAME}
 # The invite link the server's /join/<code> page redirects to (Server/routes/uploadRoutes.ts)
-- openLink: "myapp://screens/WaitingRoom?code=${NEW_CODE}"
+- openLink: "exposeme://screens/WaitingRoom?code=${NEW_CODE}"
 # iOS 26+/Xcode 27 simulators confirm custom-scheme links with a system alert
 - runFlow:
     when:

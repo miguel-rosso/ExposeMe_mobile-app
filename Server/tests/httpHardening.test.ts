@@ -97,9 +97,14 @@ describe("CORS", () => {
   });
 
   it("the socket.io polling transport sends no Access-Control headers either", async () => {
+    // A foreign Origin is refused outright (EXP-244, see socketOrigin.test.ts), still without CORS headers
     const res = await fetch(`${url}/socket.io/?EIO=4&transport=polling`, { headers: { Origin: origin } });
-    expect(res.status).toBe(200); // the handshake itself still works for non-browser clients
+    expect(res.status).toBe(400);
     expect(res.headers.get("access-control-allow-origin")).toBeNull();
+    // The handshake itself still works for non-browser clients (no Origin)
+    const native = await fetch(`${url}/socket.io/?EIO=4&transport=polling`);
+    expect(native.status).toBe(200);
+    expect(native.headers.get("access-control-allow-origin")).toBeNull();
   });
 });
 

@@ -5,7 +5,7 @@
     "version": "1.0.0",
     "orientation": "default",
     "icon": "./assets/images/adaptive-icon.png",
-    "scheme": "myapp",
+    "scheme": "exposeme",
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,

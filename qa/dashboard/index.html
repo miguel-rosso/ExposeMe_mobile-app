@@ -110,6 +110,8 @@
 #dash-root .qa-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr)); gap: 1rem; }
 #dash-root .qa-chart { position: relative; min-height: 220px; margin-top: 0.75rem; }
 #dash-root .qa-chart svg text { font-family: var(--qa-font); }
+#dash-root .qa-block { display: flex; flex-direction: column; gap: 0.6rem; min-width: 0; }
+#dash-root .qa-block > .qa-card { flex: 1; }
 #dash-root .qa-fold { cursor: pointer; user-select: none; }
 #dash-root .qa-fold::before { content: "▾"; display: inline-block; width: 1rem; margin-right: 0.3rem; color: var(--color-fg-muted); transition: transform 0.15s; }
 #dash-root .qa-folded .qa-fold::before { transform: rotate(-90deg); }
@@ -514,18 +516,27 @@
     let saved = {};
     try { saved = JSON.parse(localStorage.getItem("qa-folded") || "{}"); } catch (e) { saved = {}; }
     document.querySelectorAll(".qa h2").forEach((h2) => {
-      const box = h2.closest(".qa-card, section");
+      let box = h2.closest(".qa-card, section");
       if (!box || !box.id) return;
+      // Titles sit outside the cards so every block heading reads the same on the page background
+      if (box.classList.contains("qa-card") && h2.parentElement === box) {
+        const block = document.createElement("div");
+        block.className = "qa-block";
+        block.id = `${box.id}-block`;
+        box.before(block);
+        block.append(h2, box);
+        box = block;
+      }
       h2.classList.add("qa-fold");
       h2.setAttribute("role", "button");
       h2.tabIndex = 0;
       const set = (folded) => { box.classList.toggle("qa-folded", folded); h2.setAttribute("aria-expanded", String(!folded)); };
-      set(!!saved[box.id]);
+      set(!!saved[box.id.replace(/-block$/, '')]);
       const toggle = (ev) => {
         if (ev.target.closest("a, input")) return;
         const folded = !box.classList.contains("qa-folded");
         set(folded);
-        saved[box.id] = folded;
+        saved[box.id.replace(/-block$/, '')] = folded;
         try { localStorage.setItem("qa-folded", JSON.stringify(saved)); } catch (e) { /* private mode: fold just for now */ }
         if (!folded) window.dispatchEvent(new Event("resize"));
       };

@@ -32,7 +32,7 @@ Read `CLAUDE.md` once per session. The device lab is documented in `.claude/skil
 Run when fewer than 3 issues are `open` for the current focus, or every 4th iteration:
 - `qa-auditor` with the next focus in the rotation `sync → bugs → ux-polish → perf → resilience → code-health` and the latest `qa/runs/<RUN_ID>/` if any.
 - every 5th iteration also `qa-security` in `full` mode.
-- every 4th iteration also `qa-auditor` with focus `code-health` over the whole `git diff main..qa/loop` plus the files it touches (see step 7b).
+- every 3rd iteration, at its START, also `qa-auditor` with focus `code-health` over the whole `git diff main..qa/loop` plus the files it touches (see step 7b), so that iteration's batches can include one «Limpieza:» issue and the regression game at its END (step 7) covers the refactor too.
 Dedupe against the backlog by root cause, assign the next `EXP-NNN` ids, `found_by` = agent name, `status: open`. Bots can find sync bugs cheaply: `node qa/lab/bots.mjs --bots 5 --host --chaos 0.15 --upload-fail 0.15 --photos qa/runs/photos/bots --out qa/runs/<id>/bots.json`.
 
 ### 2. Pick (a batch of 1-3 disjoint issues)
@@ -88,10 +88,10 @@ The dashboard is **https://claude.ai/artifact/Tymg6zZ1y6Mdb1Z29eaTui** (Dashboar
 Never change the dashboard page unless the user asks or a new field needs showing. Its source is `qa/dashboard/index.html`; to publish it, wrap it as `{"text": <file>}` in `qa/dashboard/page.json` and `update` document `files/index.html` with `file_path`.
 Old JSON assets can be deleted once no dataset points at them (`Artifact` `delete` with `url` + `path` = asset id).
 
-### 7. Regression game (every 3rd iteration, and before stopping)
+### 7. Regression game (every 3rd iteration, at its end, and before stopping)
 The only full device game (DEC-019). Its scenario covers every issue marked `fixed` since the previous regression game (list their repros/flows in the prompt); on pass, mark them `verified`; on failure, bisect by issue from the evidence and revert only the culprit. `qa-device-tester` with a full game: all lab devices (2 iOS + 2 Android, `--devices all`) + 3 bots, 10 rounds, plus one bots-only chaos run. Log both as `runs` rows; anything new becomes an issue.
 
-### 7b. Clean-code pass (every 4th iteration, and before proposing a merge to main)
+### 7b. Clean-code pass (every 3rd iteration at its start — same iteration as the regression game — and before proposing a merge to main)
 Goal: a clean, maintainable codebase without regressions. The day-to-day standard lives in every fix (`qa-fixer` writes clean code and tidies what it touches; `qa-reviewer` flags maintainability problems), so this pass only targets structural debt that no single fix would address. The `code-health` audit (step 1) looks for duplication, dead code, oversized files/functions (e.g. `GameScreen.tsx`, `bots.mjs`), unclear names, inconsistent patterns and leftover workarounds, and files at most 5 findings per pass (the ones with the best payoff, deduped against open «Limpieza:» issues) as `open` issues of type `infra`, title prefixed «Limpieza:». They are picked like any other issue, at most one «Limpieza:» issue per batch so the loop never turns into a refactoring spree, with these extra rules for the fixer and reviewer:
 - **Behaviour-preserving only:** no protocol, timing, UI text or game-rule change; anything that would change behaviour becomes a separate issue (or a decision card if functional).
 - **Tests first:** if the code to refactor lacks tests, the fixer first adds characterization tests on the current code and commits nothing until they pass before AND after the refactor; the `changes` row lists them.

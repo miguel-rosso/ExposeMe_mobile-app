@@ -356,7 +356,10 @@
         <ol class="qa-flow-ol">
           <li><b>Arranque compilado del servidor (EXP-075):</b> en Render, con el directorio <code>Server</code>, cambia el build a <code>npm ci --include=dev &amp;&amp; npm run build</code> y el start a <code>npm run start:compiled</code>, con Node 20.9 o superior (variable <code>NODE_VERSION</code>, por ejemplo 22). En local baja de ~275 MB a ~60 MB en reposo. Detalles en <code>Server/README.md</code>.</li>
           <li><b>Revisar y fusionar <code>qa/loop</code> en <code>main</code></b> antes de desplegar: incluye los códigos de sala nuevos (la app y el servidor tienen que ir a la vez).</li>
-          <li><b>Comprobar en Render la IP real del cliente</b> (<code>TRUST_PROXY</code>, EXP-071) y definir <code>NODE_ENV=production</code> (EXP-105).</li>
+          <li><b>Comprobar en Render la IP real del cliente y sharp (EXP-071):</b> con un despliegue de prueba, mira en los logs que <code>req.ip</code> coincide con la IP pública del móvil (<code>TRUST_PROXY=1</code> por defecto) y que el build instala <code>sharp</code> para Linux sin errores. Si <code>req.ip</code> sale mal, todos los jugadores de una fiesta compartirían límites.</li>
+          <li><b>Definir <code>NODE_ENV=production</code> en Render (EXP-105):</b> variable de entorno del servicio; defensa extra para que Express nunca muestre trazas de error. Sin riesgo funcional.</li>
+          <li><b>Definir <code>ALLOWED_HOSTS</code> en Render (EXP-251):</b> en Environment, <code>ALLOWED_HOSTS=exposeme.onrender.com</code> (el nombre real del servicio y, si hay dominio propio, añadido separado por comas). Cierra el último hueco para que una web ajena no pueda usar el servidor. Después comprueba desde un móvil que la app conecta; si el valor no coincide, los sockets fallan. Los demás límites nuevos (conexiones por IP, fotos guardadas) ya tienen valores por defecto adecuados.</li>
+          <li><b>Nueva build de la app por el esquema <code>exposeme://</code> (EXP-168, DEC-030):</b> los enlaces de invitación dejan de usar <code>myapp://</code>; la app y el servidor tienen que publicarse a la vez.</li>
         </ol>
       </div>
     </details>
@@ -368,7 +371,7 @@
         <p>Un bucle autónomo pule el juego por iteraciones. Claude hace de <b>orquestador</b>: planifica, reparte el trabajo entre agentes especializados, decide lo técnico, integra los cambios y mantiene este panel. No escribe el código de la app; lo escriben los agentes y lo revisan otros agentes antes de entrar.</p>
 
         <figure class="qa-fig">
-          <svg viewBox="0 0 860 430" role="img" aria-label="Una iteración: descubrir y filtrar incidencias, elegir un lote (hasta 3 graves independientes, o hasta 4 paquetes de bajas), arreglarlas en paralelo en worktrees, revisarlas (código y seguridad, con hasta 2 rondas de corrección), integrarlas una a una con tests y bots, prueba rápida en iPhone y Android si cambia una pantalla, y publicar en el panel. Cada 3 iteraciones: al empezar, pasada de limpieza; al terminar, partida de regresión.">
+          <svg viewBox="0 0 860 430" role="img" aria-label="Una iteración: descubrir y filtrar incidencias, elegir un lote (hasta 3 graves independientes, o hasta 4 paquetes de bajas), arreglarlas en paralelo en worktrees, revisarlas (código y seguridad, con hasta 2 rondas de corrección), integrarlas una a una con tests y bots, prueba rápida en iPhone y Android si cambia una pantalla, y publicar en el panel. Cada 3 iteraciones, en la misma iteración: al empezar, pasada de limpieza; al terminar, partida de regresión, que también comprueba la limpieza.">
             <defs>
               <marker id="qa-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
             </defs>
@@ -384,8 +387,8 @@
               <rect x="235" y="190" width="150" height="62" rx="10"/>
               <rect x="20" y="190" width="150" height="62" rx="10"/>
               <!-- row 3 -->
-              <rect x="20" y="350" width="240" height="62" rx="10" class="qa-fig-hi"/>
-              <rect x="310" y="350" width="240" height="62" rx="10"/>
+              <rect x="20" y="350" width="240" height="62" rx="10"/>
+              <rect x="310" y="350" width="240" height="62" rx="10" class="qa-fig-hi"/>
               <rect x="600" y="350" width="240" height="62" rx="10"/>
             </g>
             <g stroke="currentColor" stroke-width="1.4" fill="none" marker-end="url(#qa-arr)">
@@ -398,6 +401,7 @@
               <line x1="235" y1="221" x2="174" y2="221"/>
               <path d="M95,190 L95,140 L95,96"/>
               <path d="M720,190 L720,140 L590,140 L590,106" stroke-dasharray="5 4"/>
+              <line x1="260" y1="381" x2="306" y2="381"/>
             </g>
             <g fill="currentColor" font-size="13" text-anchor="middle">
               <text x="95" y="56" font-weight="700">1 · Descubrir</text>
@@ -419,10 +423,10 @@
               <text x="310" y="248" font-size="11" class="qa-fig-muted">solo si cambió una pantalla</text>
               <text x="95" y="216" font-weight="700">7 · Publicar</text>
               <text x="95" y="234" font-size="11.5">backlog → este panel</text>
-              <text x="140" y="376" font-weight="700">Cada 3 iteraciones, al final</text>
-              <text x="140" y="394" font-size="11.5">partida completa: 2 iPhone + 2 Android + bots</text>
-              <text x="430" y="376" font-weight="700">Cada 3 iteraciones, al inicio</text>
-              <text x="430" y="394" font-size="11.5">pasada de limpieza (clean code)</text>
+              <text x="430" y="376" font-weight="700">Cada 3 iteraciones, al final</text>
+              <text x="430" y="394" font-size="11.5">partida completa: 2 iPhone + 2 Android + bots</text>
+              <text x="140" y="376" font-weight="700">Cada 3 iteraciones, al inicio</text>
+              <text x="140" y="394" font-size="11.5">pasada de limpieza (clean code)</text>
               <text x="720" y="376" font-weight="700">Decisiones de juego</text>
               <text x="720" y="394" font-size="11.5">tarjeta aquí → tu respuesta</text>
             </g>
@@ -430,9 +434,10 @@
               <text x="728" y="160" text-anchor="start">no → corregir</text>
               <text x="728" y="174" text-anchor="start">(máx. 2 rondas)</text>
               <text x="103" y="146" text-anchor="start">siguiente iteración</text>
+              <text x="285" y="341">misma iteración</text>
             </g>
           </svg>
-          <figcaption>Una iteración del bucle. Las flechas discontinuas son vueltas atrás: un arreglo que la revisión no aprueba vuelve a su agente, como mucho dos veces. Los dispositivos no frenan cada arreglo: la prueba rápida corre en segundo plano y la partida completa se hace cada 3 iteraciones.</figcaption>
+          <figcaption>Una iteración del bucle. Las flechas discontinuas son vueltas atrás: un arreglo que la revisión no aprueba vuelve a su agente, como mucho dos veces. Los dispositivos no frenan cada arreglo: la prueba rápida corre en segundo plano y la partida completa se hace cada 3 iteraciones. Esa misma iteración empieza con la pasada de limpieza, así la partida del final también la comprueba.</figcaption>
         </figure>
 
         <h3>Los agentes</h3>
@@ -444,6 +449,7 @@
           <dt>qa-security</dt><dd>Revisa todo cambio que toque el servidor, los sockets, las subidas de fotos o los permisos, y hace una auditoría completa cada 5 iteraciones. Intenta romperlo con pruebas reales en local.</dd>
           <dt>qa-device-tester</dt><dd>Juega partidas reales en simuladores de iPhone y emuladores de Android junto a bots, revisa capturas y logs, y mide el desfase entre jugadores.</dd>
         </dl>
+        <p><b>Nivel de razonamiento (desde el 26-10, a petición tuya):</b> fixer, revisor, seguridad y auditor trabajan en nivel <i>alto</i>, porque es donde más rinde pensar más (casos límite, verificar antes de dar algo por bueno); el de dispositivos en <i>medio</i>, porque su trabajo es mecánico; la auditoría completa de seguridad usa el nivel <i>máximo</i>. Cada ciclo tarda algo más, pero las revisiones encuentran más fallos reales antes de integrar.</p>
 
         <h3>Paso a paso</h3>
         <ol class="qa-flow-ol">
@@ -454,6 +460,7 @@
               <li><b>Medias, altas y críticas:</b> una por agente, una revisión y un commit cada una, para poder revertir exactamente la culpable si la regresión falla.</li>
               <li><b>Bajas:</b> se agrupan en <b>paquetes</b> de 2–6 de la misma zona y tema (p. ej. etiquetas de accesibilidad, dependencias sin uso, flujos de Maestro). Un agente, una revisión y un commit por paquete, y hasta 4 paquetes en paralelo cuando no hay nada más grave abierto. Si el cambio de un paquete pasa de unas 400 líneas sin contar tests, el revisor pide dividirlo: por encima de 200–400 líneas una revisión detecta peor los fallos.</li>
             </ul></li>
+          <li><b>Mantener los huecos llenos.</b> Los lotes no van a la par: cada vez que termina cualquier agente, el orquestador cuenta los fixers activos y rellena enseguida hasta 3–4 con trabajo nuevo cuyos ficheros no se crucen. Una incidencia grande que toca varias partes solo bloquea los ficheros que edita, no zonas enteras.</li>
           <li><b>Arreglar en paralelo.</b> Cada qa-fixer trabaja aislado (una incidencia o un paquete). Regla: test por incidencia en cada capa que toca (servidor → vitest, cliente → jest, protocolo → ambos + escenario de bots, flujo visible → Maestro).</li>
           <li><b>Revisar.</b> Revisor de código siempre; seguridad si toca servidor, sockets, subidas o permisos. Los hallazgos graves vuelven al mismo agente (máximo 2 rondas; si no, se bloquea). Los comentarios menores y las propuestas de los agentes ya no se convierten solos en incidencias: si es un fallo real fuera del cambio, con un caso concreto, se abre con la gravedad que merezca; si está en el código tocado, se arregla en el mismo cambio; si es deuda de mantenibilidad en código que no se ha tocado, se apunta en una lista que lee la siguiente pasada de limpieza; si es solo de estilo, se descarta.</li>
           <li><b>Integrar uno a uno.</b> Cada arreglo entra como un solo commit y después se repiten todos los tests, la comprobación de tipos y una partida de bots. Si algo falla, se revierte ese commit.</li>
@@ -465,7 +472,7 @@
         <ul class="qa-flow-ul">
           <li><b>Cada 3 iteraciones van juntas: primero limpieza, después regresión.</b> Así la partida de regresión también comprueba que la limpieza no ha roto nada.</li>
           <li><b>Pasada de limpieza</b> (al empezar esa iteración, y antes de proponer fusionar a <code>main</code>): busca deuda estructural (código duplicado o muerto, ficheros enormes, nombres poco claros) y apunta como mucho 5 incidencias «Limpieza: …». Parte de la lista de deuda que los revisores van dejando sobre código no tocado. Solo cambios que no alteran el comportamiento, con tests antes y después, y como mucho una por lote.</li>
-          <li><b>Partida de regresión</b> (al terminar esa iteración, y siempre antes de parar): 10 rondas con los 4 dispositivos y 3 bots, más una partida de caos solo con bots (cortes de red y subidas fallidas). Lo que se ve funcionar pasa de <span class="pill st-fixed">hecho</span> a <span class="pill st-verified">verificado</span>.</li>
+          <li><b>Partida de regresión</b> (al terminar esa iteración, y siempre antes de parar): 10 rondas con los 4 dispositivos y 3 bots, más una partida de caos solo con bots (cortes de red y subidas fallidas). Mide además, por móvil y fase, cuánto tarda en llegar cada fase y cuánto en pintarse. Mientras dura, los fixers siguen arreglando en sus copias; solo la integración en <code>qa/loop</code> espera a que termine. Lo que se ve funcionar pasa de <span class="pill st-fixed">hecho</span> a <span class="pill st-verified">verificado</span>.</li>
           <li><b>Calidad en cada arreglo</b>: el código nuevo debe ser limpio y dejar lo que toca igual o mejor; el revisor lo exige.</li>
         </ul>
 
@@ -606,14 +613,16 @@ dash.calc("by_type", {
   function answerForm(p, opts) {
     const form = el("form", "qa-form");
     const sent = answers[p.id];
-    const draft = drafts[p.id] || (drafts[p.id] = { choice: sent?.choice ?? null, note: sent?.note ?? "" });
+    // Re-seed from the saved answer until the user edits: the answers snapshot can arrive after the first draw
+    if (!drafts[p.id]?.edited) drafts[p.id] = { choice: sent?.choice ?? null, note: sent?.note ?? "", edited: false };
+    const draft = drafts[p.id];
     const isAction = p.kind !== "decisión";
     const choices = isAction ? ["Hecho"] : opts;
     choices.forEach((o) => {
       const lab = el("label", `opt${!isAction && p.recommendation && o.startsWith(p.recommendation + " ") ? " rec" : ""}`);
       const r = el("input");
       r.type = "radio"; r.name = `ans-${p.id}`; r.value = o; r.checked = draft.choice === o;
-      r.addEventListener("change", () => { draft.choice = o; btn.disabled = false; });
+      r.addEventListener("change", () => { draft.choice = o; draft.edited = true; btn.disabled = false; });
       lab.appendChild(r);
       lab.appendChild(el("span", null, o));
       form.appendChild(lab);
@@ -622,7 +631,7 @@ dash.calc("by_type", {
     note.placeholder = isAction ? "Comentario (opcional)" : "Comentario u otra opción (opcional)";
     note.setAttribute("aria-label", `Comentario para ${p.id}`);
     note.value = draft.note;
-    note.addEventListener("input", () => { draft.note = note.value; btn.disabled = !draft.choice && !note.value.trim(); });
+    note.addEventListener("input", () => { draft.note = note.value; draft.edited = true; btn.disabled = !draft.choice && !note.value.trim(); });
     form.appendChild(note);
     const row = el("div", "row");
     const btn = el("button", "send", sent ? "Cambiar respuesta" : "Enviar respuesta");
@@ -640,6 +649,7 @@ dash.calc("by_type", {
       status.textContent = "Enviando…";
       try {
         await answersDb.collection("answers").doc(p.id).set({ id: p.id, choice: draft.choice, note: draft.note.trim(), at: new Date().toISOString(), read: false });
+        draft.edited = false;
       } catch (err) {
         status.textContent = err?.code === "not_granted" || err?.code === "permission_denied" ? "No tienes permiso para responder aquí; usa un comentario." : "No se pudo enviar. Prueba otra vez.";
         btn.disabled = false;

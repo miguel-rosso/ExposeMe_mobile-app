@@ -210,7 +210,7 @@ async function uploadPhoto(label, auth) {
       member: "UPLOAD_INFLIGHT_PER_MEMBER_MAX", room: "UPLOAD_INFLIGHT_PER_ROOM_MAX", ip: "UPLOAD_INFLIGHT_PER_IP_MAX", server: "UPLOAD_INFLIGHT_MAX",
     }[body.scope];
     const hint = knob ? `too many uploads in progress, raise ${knob}`
-      : res.status === 503 ? "image processing queue full (SANITIZE_MAX_QUEUED in controllers/sanitizeImage.ts)"
+      : res.status === 503 ? "image processing took longer than SANITIZE_QUEUE_TIMEOUT_MS (controllers/sanitizeImage.ts)"
       : "rate-limited, raise UPLOAD_PLAYER_RATE_MAX / UPLOAD_ROOM_RATE_MAX (or the room holds 100 photos)";
     throw Object.assign(new Error(`upload ${res.status} ${hint} on the server`), { rateLimited: true });
   }

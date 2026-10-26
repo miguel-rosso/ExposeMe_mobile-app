@@ -79,9 +79,9 @@ describe("a player lingering on the final screens joins the next game (EXP-184)"
     const waiting = events("waiting-photo");
     expect(waiting).toHaveLength(1);
     expect(waiting[0].args[0]).toMatchObject({ round: 1 });
-    // 3 s after start-game: the ready timeout never had to decide (it fires no second round start either)
+    // The ready timeout never had to decide: it must not start round 1 a second time
     vi.advanceTimersByTime(READY_TIMEOUT);
-    expect(events("waiting-photo").length + events("round-start").length).toBeGreaterThanOrEqual(1);
+    expect(events("waiting-photo").filter((e) => (e.args[0] as { round: number }).round === 1)).toHaveLength(1);
     expect(events("game-over")).toHaveLength(0);
   });
 

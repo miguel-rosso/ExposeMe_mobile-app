@@ -161,6 +161,8 @@ export interface PhotoContextProps {
   onGalleryChange: (listener: () => void) => () => void;
   setPhotoUri: React.Dispatch<React.SetStateAction<string | null>>;
   handleContinue: () => Promise<void>;
+  /** New game: forget the photos already sent, which are otherwise not picked again within the game */
+  resetUsedPhotos: () => void;
 }
 
 /** player-connection (server → lobby): a player is gone (disconnected past the grace) or came back */

@@ -89,7 +89,7 @@ export const PhotoProvider: React.FC<PhotoProviderProps> = ({ children }) => {
   const pickerSubRef = useRef<{ remove: () => void } | null>(null);
   useEffect(() => () => pickerSubRef.current?.remove(), []);
 
-  /** Random photo among the ones the app can see (all of them, or the limited selection). */
+  /** Random photo among the ones the app can see (all of them, or the limited selection), not repeated within a game. */
   const pickFromGallery = useCallback(async (): Promise<GamePhotoResult> => {
     if (!pickerSubRef.current) {
       try {
@@ -126,6 +126,9 @@ export const PhotoProvider: React.FC<PhotoProviderProps> = ({ children }) => {
     console.log("Failed to select a photo after retries.");
     return { error: "failed" };
   }, [picker]);
+
+  /** A new game starts: photos sent in earlier games may come up again (no repeats within a game, EXP-162). */
+  const resetUsedPhotos = useCallback(() => picker.reset(), [picker]);
 
   const getRandomPhoto = useCallback(async (): Promise<string | null> => {
     console.log("Getting random photo...");
@@ -169,8 +172,9 @@ export const PhotoProvider: React.FC<PhotoProviderProps> = ({ children }) => {
       onGalleryChange,
       setPhotoUri,
       handleContinue,
+      resetUsedPhotos,
     }),
-    [photoUri, requestGalleryPermission, getRandomPhoto, pickGamePhoto, checkGalleryAccess, selectMorePhotos, onGalleryChange, handleContinue]
+    [photoUri, requestGalleryPermission, getRandomPhoto, pickGamePhoto, checkGalleryAccess, selectMorePhotos, onGalleryChange, handleContinue, resetUsedPhotos]
   );
 
   return <PhotoContext.Provider value={contextValue}>{children}</PhotoContext.Provider>;

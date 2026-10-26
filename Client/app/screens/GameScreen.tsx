@@ -54,7 +54,10 @@ const GameScreen = () => {
   } = useGameContext();
   const safeUsername = username ?? "";
   const safeGameCode = gameCode ?? "";
-  const { pickGamePhoto, setPhotoUri } = usePhotoContext();
+  const { pickGamePhoto, setPhotoUri, resetUsedPhotos } = usePhotoContext();
+  // One game screen per game (reconnects stay on it): a new screen is a new game, earlier photos may come up again.
+  // Optional call: screen tests mock the photo context with only what their flow needs.
+  useEffect(() => { resetUsedPhotos?.(); }, [resetUsedPhotos]);
   const router = useRouter();
   // Photo access revoked / no photos left (re-checked on foreground): blocking overlay, the game screen stays
   const galleryGuard = useGalleryAccessGuard({ watch: true });

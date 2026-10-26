@@ -1,6 +1,11 @@
+import { readFileSync } from "fs";
+import { join } from "path";
 import { describe, expect, it } from "vitest";
-import { ALLOWED_EMOJIS, createConnectionCounter, createTokenBucket, handshakeIp, ipKey } from "../managers/socketGuards";
-import { RoomManager } from "../managers/RoomManager";
+import {
+  ALLOWED_EMOJIS, createConnectionCounter, createEventLimiter, createTokenBucket, GAME_EVENT_LIMITS, handshakeIp,
+  HOLD_START_BURST, ipKey,
+} from "../managers/socketGuards";
+import { MAX_PLAYERS_PER_ROOM, RoomManager } from "../managers/RoomManager";
 import { isRoomCode } from "../managers/roomCode";
 
 const req = (remoteAddress: string, xff?: string) => ({
@@ -75,6 +80,46 @@ describe("createTokenBucket", () => {
     expect([b.take(), b.take(), b.take(), b.take()]).toEqual([true, true, true, false]);
     t = 500; // +1 token
     expect([b.take(), b.take()]).toEqual([true, false]);
+  });
+});
+
+describe("createEventLimiter (EXP-062)", () => {
+  it("keeps one bucket per event, each with its own burst and rate", () => {
+    let t = 0;
+    const limiter = createEventLimiter({ a: { burst: 2, ratePerS: 1 }, b: { burst: 1, ratePerS: 4 } }, () => t);
+    expect([limiter.take("a"), limiter.take("a"), limiter.take("a")]).toEqual([true, true, false]);
+    expect([limiter.take("b"), limiter.take("b")]).toEqual([true, false]); // "a" being empty doesn't affect "b"
+    t = 250; // +1/4 token for "a", +1 for "b"
+    expect([limiter.take("a"), limiter.take("b")]).toEqual([false, true]);
+    t = 1_000;
+    expect(limiter.take("a")).toBe(true);
+  });
+});
+
+describe("GAME_EVENT_LIMITS (EXP-062)", () => {
+  it("lets through what a legitimate client sends at once", () => {
+    // The app's bursts: the host kicks every other player of a full room, re-taps start, rejoins re-send im-ready
+    expect(GAME_EVENT_LIMITS["remove-player"].burst).toBeGreaterThanOrEqual(MAX_PLAYERS_PER_ROOM - 1);
+    expect(GAME_EVENT_LIMITS["hold-end"].burst).toBeGreaterThanOrEqual(HOLD_START_BURST);
+    for (const { burst, ratePerS } of Object.values(GAME_EVENT_LIMITS)) {
+      expect(burst).toBeGreaterThanOrEqual(3);
+      expect(ratePerS).toBeGreaterThan(0);
+    }
+  });
+
+  it("match the table in GAME_FLOW.md (Per-socket event limits)", () => {
+    const doc = readFileSync(join(__dirname, "..", "GAME_FLOW.md"), "utf8");
+    const heading = "## Per-socket event limits";
+    expect(doc).toContain(heading);
+    const section = doc.slice(doc.indexOf(heading) + heading.length).split(/\n## /)[0];
+    // `| \`event\` | burst N…, refilled R/s` or `refilled 1 every S s`
+    const documented = new Map(
+      [...section.matchAll(/^\| `([a-z-]+)` \| burst (\d+)\b.*?refilled (?:([\d.]+)\/s|1 every ([\d.]+) s)/gm)]
+        .map(([, event, burst, perS, everyS]) => [event, { burst: Number(burst), ratePerS: perS ? Number(perS) : 1 / Number(everyS) }]),
+    );
+    for (const [event, limit] of Object.entries(GAME_EVENT_LIMITS)) {
+      expect(documented.get(event), `GAME_FLOW.md limit of ${event}`).toEqual(limit);
+    }
   });
 });
 

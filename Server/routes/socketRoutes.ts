@@ -7,7 +7,8 @@ import { acceptsPlantedPhoto, setUploadRooms } from "../middlewares/uploadAccess
 import { uploadStore } from "../middlewares/uploadStore";
 import { createSlidingWindow } from "../middlewares/rateLimit";
 import {
-  ALLOWED_EMOJIS, createConnectionCounter, createJoinMissGuard, createTokenBucket, EMOJI_BURST, EMOJI_RATE_PER_S, handshakeKey,
+  ALLOWED_EMOJIS, createConnectionCounter, createEventLimiter, createJoinMissGuard, createTokenBucket, EMOJI_BURST, EMOJI_RATE_PER_S,
+  GAME_EVENT_LIMITS, handshakeKey,
   HOLD_START_BURST, HOLD_START_RATE_PER_S, JOIN_EXEMPT_MAX, JOIN_MISS_GLOBAL_MAX, JOIN_MISS_HARD_FACTOR, JOIN_MISS_MAX,
   JOIN_MISS_PREFIX_MAX, JOIN_MISS_PRESSURE_MAX, JOIN_MISS_SOCKET_INTERVAL_MS, JOIN_MISS_WINDOW_MS, MAX_CONNECTIONS_PER_IP,
 } from "../managers/socketGuards";
@@ -79,12 +80,17 @@ function session(socket: Socket): { room: Room; player: Player } | null {
   return { room, player };
 }
 
+/** The photo owner on `socketId` is holding the scores screen right now. */
+function isHolding(room: Room, socketId: string): boolean {
+  return !!room.held && room.currentPlayer?.socketId === socketId;
+}
+
 /**
  * The photo owner on `socketId` is going away (leave, kick, disconnect): end their hold of the scores screen now
  * (hold-end + hold-resume) instead of leaving everyone frozen until the hold budget runs out.
  */
 function releaseHoldOf(room: Room, socketId: string): void {
-  if (room.held && room.currentPlayer?.socketId === socketId) gameEngine.forceRelease(room);
+  if (isHolding(room, socketId)) gameEngine.forceRelease(room);
 }
 
 /**
@@ -174,6 +180,8 @@ io.on("connection", (socket: Socket) => {
     joinExemptions.hit(ip);
     return true;
   };
+  // Per-socket token buckets of the lobby/game events below (GAME_EVENT_LIMITS); excess dropped silently
+  const gameEvents = createEventLimiter(GAME_EVENT_LIMITS);
 
   // ── Lobby ──────────────────────────────────────────
 
@@ -309,6 +317,7 @@ io.on("connection", (socket: Socket) => {
   // Explicit leave — player pressed the leave button
   socket.on("leave-room", () => {
     try {
+      if (!gameEvents.take("leave-room")) return;
       // A socket replaced by a rejoin only detaches itself; the live player stays
       leaveCurrentRoom(socket);
     } catch (e) { console.error("leave-room error:", e); }
@@ -317,15 +326,17 @@ io.on("connection", (socket: Socket) => {
   // Payload gameCode is ignored: host-only, applies to the host's own room
   socket.on("set-rounds", (data: { rounds: number }) => {
     try {
+      if (!gameEvents.take("set-rounds")) return;
       const s = session(socket);
       if (!s || !s.player.isHost || s.room.started) return;
-      if (!isAllowedRounds(data?.rounds)) return;
+      if (!isAllowedRounds(data?.rounds) || data.rounds === s.room.rounds) return;
       if (roomManager.setRounds(s.room.gameCode, data.rounds)) io.to(s.room.gameCode).emit("rounds-updated", data.rounds);
     } catch (e) { console.error("set-rounds error:", e); }
   });
 
   socket.on("start-game", () => {
     try {
+      if (!gameEvents.take("start-game")) return;
       const s = session(socket);
       if (!s || !s.player.isHost || s.room.started) return;
       gameEngine.startGame(s.room);
@@ -334,6 +345,7 @@ io.on("connection", (socket: Socket) => {
 
   socket.on("im-ready", () => {
     try {
+      if (!gameEvents.take("im-ready")) return;
       const s = session(socket);
       if (!s) return;
       gameEngine.markReady(s.room, s.player);
@@ -345,6 +357,7 @@ io.on("connection", (socket: Socket) => {
   // Only the current photo owner, and only with a path this player uploaded in this room
   socket.on("photo-sent", (data: { photo: string }) => {
     try {
+      if (!gameEvents.take("photo-sent")) return;
       const s = session(socket);
       if (!s || !isOwnUpload(data?.photo, s.room, s.player)) return;
       gameEngine.onPhotoReceived(s.room, data.photo, s.player.username);
@@ -356,6 +369,7 @@ io.on("connection", (socket: Socket) => {
   // current photo request
   socket.on("photo-unavailable", (data: PhotoUnavailableData) => {
     try {
+      if (!gameEvents.take("photo-unavailable")) return;
       const s = session(socket);
       if (!s || !Number.isInteger(data?.round) || !Number.isInteger(data?.attempt)) return;
       gameEngine.onPhotoUnavailable(s.room, s.player.username, data.round, data.attempt);
@@ -395,8 +409,10 @@ io.on("connection", (socket: Socket) => {
 
   socket.on("hold-end", () => {
     try {
+      // Only a real release spends a token: there are never more than holds accepted (hold-start is limited more
+      // tightly), so a release always gets through, and a flood from a socket that holds nothing stops here
       const s = session(socket);
-      if (!s) return;
+      if (!s || !isHolding(s.room, socket.id) || !gameEvents.take("hold-end")) return;
       if (gameEngine.handleRelease(s.room, s.player.socketId)) {
         // hold-resume is emitted by doRelease in GameEngine
         // hold-end tells clients the hold is over
@@ -422,6 +438,7 @@ io.on("connection", (socket: Socket) => {
 
   socket.on("plant-photo", (data: { photoUrl: string }) => {
     try {
+      if (!gameEvents.take("plant-photo")) return;
       const s = session(socket);
       const photoUrl = data?.photoUrl;
       if (!s || !isOwnUpload(photoUrl, s.room, s.player)) return;
@@ -452,6 +469,7 @@ io.on("connection", (socket: Socket) => {
   // Host kicks a player by username (socket ids are never sent to clients); the host can't kick itself
   socket.on("remove-player", (data: { username: string }) => {
     try {
+      if (!gameEvents.take("remove-player")) return;
       const s = session(socket);
       if (!s || !s.player.isHost || typeof data?.username !== "string" || data.username === s.player.username) return;
       const { room } = s;

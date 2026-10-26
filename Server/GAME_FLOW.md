@@ -177,7 +177,8 @@ After last round: game-over
   and they join fresh with a new token and 0 points). A player disconnected for less than the grace (a socket
   reconnecting right when the host presses Start) stays in the game: they rejoin normally, and if they don't come
   back the ready timeout and the pause logic below apply as for any mid-game disconnect.
-- Host only: `set-rounds` (lobby only; 10/15/20, anything else is ignored. **QA-only:** 3 rounds is also accepted
+- Host only: `set-rounds` (lobby only; 10/15/20, anything else is ignored, and so is the value the room already
+  has: no `rounds-updated` for it. **QA-only:** 3 rounds is also accepted
   when the server runs with `ALLOW_QA_ROUNDS=1`, which `qa/lab/lab.sh server` sets for short device runs; it is off
   by default, so production rejects it, and the app never offers it), `start-game` (not while a game is running), `remove-player { username }`
   (by username, socket ids are never sent to clients; the host can't remove itself; evicts every socket bound to
@@ -316,7 +317,9 @@ that reached the lobby screen in between are covered by that snapshot.
   A hold is force-released (`hold-end` + `hold-resume`) when it reaches what is left of the budget; once the
   budget or the count is used up, `hold-start` is ignored until the next round. A pause ends an active hold and
   charges its time too.
-- `hold-start` is also rate-limited per socket (burst 3, refilled 1 every 2 s; excess dropped); `hold-end` never is
+- `hold-start` is also rate-limited per socket (burst 3, refilled 1 every 2 s; excess dropped); `hold-end` is
+  ignored from a socket that holds nothing, and only a real release counts against its limit (burst 10, refilled
+  1/s, see "Per-socket event limits"); releases never outnumber accepted holds, so a release always gets through
 
 ## Events (Server → Client)
 
@@ -369,6 +372,34 @@ All game events are **atomic** — each contains everything the client needs.
 | `qa-ack` | `{ phase, round, at }` (`phase` one of the four round phases, `round` integer, `at` device clock in ms) | **Dev/QA only**, handled only when the server runs with `QA_TELEMETRY=1` (see "QA render telemetry"); otherwise not even registered |
 
 Payload `gameCode`/`username` fields are ignored for all of the above; identity comes from the session.
+
+## Per-socket event limits
+
+Every client event is rate-limited per socket (the limits live and die with the socket); events over a limit are
+dropped silently: no answer and no broadcast (a dropped `set-rounds` sends no `rounds-updated`, so the host's
+optimistic pick would not be corrected; its limit is far beyond any human tapping). They sit well above what the
+app or the bots send, and only cap the work a flood can cause (each handler also ignores events that don't apply).
+Token buckets: burst, then refilled at the rate.
+
+| Event | Limit |
+|-------|-------|
+| `join-create-game` | 5 in any 10 s (excess answered "Too many attempts", see "Join, rejoin and session") |
+| `leave-room` | burst 5, refilled 1 every 2 s |
+| `set-rounds` | burst 30, refilled 10/s |
+| `start-game` | burst 5, refilled 1/s |
+| `remove-player` | burst 12 (a full room), refilled 2/s |
+| `im-ready` | burst 5, refilled 1/s |
+| `photo-sent` | burst 20, refilled 2/s |
+| `photo-unavailable` | burst 5, refilled 1/s |
+| `submit-answer` | burst 10, refilled 5/s |
+| `hold-start` | burst 3, refilled 1 every 2 s |
+| `hold-end` | burst 10, refilled 1/s; only real releases (from the socket holding) count, the rest is ignored |
+| `chat-message` | one every 250 ms |
+| `emoji-reaction` | burst 5, refilled 4/s |
+| `plant-photo` | burst 5, refilled 1 every 2 s |
+| `qa-ack` | burst 10, refilled 2/s (dev/QA only) |
+
+The game-event limits are `GAME_EVENT_LIMITS` in `managers/socketGuards.ts`.
 
 ## QA render telemetry (dev only)
 

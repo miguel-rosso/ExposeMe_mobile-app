@@ -1,11 +1,12 @@
 import type { IncomingMessage } from "http";
 import { ipKey } from "../middlewares/ipKey";
 import { envInt, parseTrustProxy } from "../middlewares/rateLimit";
+import { MAX_PLAYERS_PER_ROOM } from "./RoomManager";
 
 export { ipKey };
 
 // Abuse limits for socket events that are not tied to a room member (connections, join attempts with a code)
-// and per-socket limits for social events. All in memory, like the rooms.
+// and per-socket limits for game and social events. All in memory, like the rooms.
 
 // ── Client IP ──
 
@@ -210,6 +211,62 @@ export function createTokenBucket(burst: number, ratePerS: number, now: () => nu
   };
 }
 
+export interface RateLimit {
+  burst: number;
+  ratePerS: number;
+}
+
+/**
+ * One token bucket per event name, built from `limits` on first use. Create one limiter in each socket's closure so
+ * the buckets live and die with the socket. take(event) is false (and takes nothing) when that bucket is empty.
+ */
+export function createEventLimiter<E extends string>(limits: Readonly<Record<E, RateLimit>>, now: () => number = Date.now) {
+  const buckets = new Map<E, ReturnType<typeof createTokenBucket>>();
+  return {
+    take(event: E): boolean {
+      let bucket = buckets.get(event);
+      if (!bucket) {
+        const { burst, ratePerS } = limits[event];
+        bucket = createTokenBucket(burst, ratePerS, now);
+        buckets.set(event, bucket);
+      }
+      return bucket.take();
+    },
+  };
+}
+
+// ── Game events ──
+
+/**
+ * Per-socket limits for lobby and game events (EXP-062); events over them are dropped silently. The handlers already
+ * ignore events that don't apply (wrong phase, not the host, not the owner), so these only cap the work a flood can
+ * cause. They sit well above what the app and the bots ever send:
+ * - leave-room: once per room joined (join-create-game allows 5 per 10 s)
+ * - set-rounds: the host tapping through the round options. The app shows the host's pick before the server
+ *   confirms it, and a dropped event gets no answer, so this one is out of reach of any human tapping
+ * - start-game: the host taps start a few times (the next game starts on the same socket after "Play again")
+ * - remove-player: the host kicking every other player of a full room in a row
+ * - im-ready: once on the game screen, and again after each game-state snapshot (rejoin)
+ * - photo-sent / photo-unavailable: once per your-turn, plus a resend of the same photo. photo-sent gets a larger
+ *   burst so a valid path still gets through after a handful of rejected ones (cheap to check: session + path)
+ * - plant-photo: once from the lobby, plus a retry from the game screen
+ * - hold-end: only a real release (from the socket holding) spends a token, one per accepted hold; holds are
+ *   limited more tightly (HOLD_START_BURST, HOLD_START_RATE_PER_S), so a release always gets through
+ */
+export const GAME_EVENT_LIMITS = {
+  "leave-room": { burst: 5, ratePerS: 0.5 },
+  "set-rounds": { burst: 30, ratePerS: 10 },
+  "start-game": { burst: 5, ratePerS: 1 },
+  "remove-player": { burst: MAX_PLAYERS_PER_ROOM, ratePerS: 2 },
+  "im-ready": { burst: 5, ratePerS: 1 },
+  "photo-sent": { burst: 20, ratePerS: 2 },
+  "photo-unavailable": { burst: 5, ratePerS: 1 },
+  "plant-photo": { burst: 5, ratePerS: 0.5 },
+  "hold-end": { burst: 10, ratePerS: 1 },
+} as const satisfies Record<string, RateLimit>;
+
+export type LimitedGameEvent = keyof typeof GAME_EVENT_LIMITS;
+
 // ── Emoji reactions ──
 
 /**
@@ -223,7 +280,7 @@ export const EMOJI_RATE_PER_S = 4;
 
 // ── Hold ──
 
-// hold-start per socket (hold-end is never limited, so a release always gets through). The engine also caps holds
-// per round (GameEngine MAX_HOLDS_PER_ROUND / HOLD_BUDGET_PER_ROUND).
+// hold-start per socket (hold-end has a looser limit, see GAME_EVENT_LIMITS). The engine also caps holds per round
+// (GameEngine MAX_HOLDS_PER_ROUND / HOLD_BUDGET_PER_ROUND).
 export const HOLD_START_BURST = 3;
 export const HOLD_START_RATE_PER_S = 0.5;

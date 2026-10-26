@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
-import { View, Text, TouchableOpacity, StatusBar, FlatList, BackHandler } from "react-native";
+import { View, Text, TouchableOpacity, StatusBar, FlatList, BackHandler, useWindowDimensions } from "react-native";
 import { useFocusEffect } from "expo-router";
 import tw from "twrnc";
 import { useGameContext } from "../providers/GameContext";
@@ -34,12 +34,20 @@ import { useGalleryAccessGuard } from "@/app/hooks/useGalleryAccessGuard";
 import { useQaRenderAck } from "../hooks/useQaRenderAck";
 import { useScreenshotReaction } from "../hooks/useScreenshotReaction";
 import { appendCapped, isAllowedReaction, MAX_VISIBLE_REACTIONS } from "../utils/reactions";
+import { answerOptionsLayout } from "../utils/answerOptionsLayout";
 
 const { SERVER_URL } = getEnvVars();
 const PICK_SEND_INTERVAL = 200; // ms between submit-answer sends (server: 10 per socket, refilled 5/s)
 // Round progress bar strip at the top of the photo (bar plus its padding); emoji reactions start right below it
 const PROGRESS_BAR_AREA = { top: 60, height: 40 } as const;
 const REACTION_LANE_TOP = PROGRESS_BAR_AREA.top + PROGRESS_BAR_AREA.height;
+// Answer option cards: compact ones keep a 44 dp touch target (py-3 + a text-sm line) for crowded rooms. Their names
+// are cut in the middle: the end stays, so names sharing a long prefix ("Maria_01" / "Maria_02") still differ
+const OPTION_CARD = {
+  regular: { card: "p-3 mb-2", text: "text-base", ellipsize: "tail" },
+  compact: { card: "py-3 px-2 mb-1.5", text: "text-sm", ellipsize: "middle" },
+} as const;
+const OPTION_BASIS = { 2: "flex-basis-[48%]", 3: "flex-basis-[30%]" } as const;
 
 // Game events detached at game over: the socket stays open on the final screens (still in the room), and a next game
 // started meanwhile must not drive this finished one (e.g. a your-turn picking and uploading a photo behind the modal)
@@ -378,6 +386,15 @@ const GameScreen = () => {
   const removeEmoji = (id: string) => setEmojiReactions((c) => c.filter((r) => r.id !== id));
   // Top edge of the answer buttons (measured): the reaction lane ends above it
   const [answersTop, setAnswersTop] = useState<number | null>(null);
+  // Denser options in crowded rooms, in a bounded area that scrolls: the photo and the timer stay visible (EXP-250)
+  const { height: windowHeight } = useWindowDimensions();
+  const answersLayout = answerOptionsLayout(playersProvider.length, windowHeight);
+  const optionCard = answersLayout.compact ? OPTION_CARD.compact : OPTION_CARD.regular;
+  const answersListRef = useRef<FlatList<Player>>(null);
+  // iOS only draws the scroll indicator while scrolling: flash it when some options are out of view
+  const hintMoreAnswers = (_width: number, contentHeight: number) => {
+    if (contentHeight > answersLayout.maxHeight) answersListRef.current?.flashScrollIndicators();
+  };
 
   // ── Render helpers ───────────────────────────────────
   // The options are drawn while answering and in the reveal (not in scores: the scoreboard covers the photo)
@@ -400,12 +417,12 @@ const GameScreen = () => {
     return (
       <TouchableOpacity
         testID={playerOptionId(item.username)}
-        style={tw`p-3 rounded-lg mb-2 mx-1 flex-grow flex-basis-[48%] ${bg}`}
+        style={tw`${optionCard.card} rounded-lg mx-1 flex-grow ${OPTION_BASIS[answersLayout.columns]} ${bg}`}
         onPress={() => phase === "answering" && !answersClosed && !isOwner && item.username !== mySelection && pickGuess(item.username)}
         disabled={isReveal || isOwner || answersClosed}
       >
         <View style={tw`flex-row items-center justify-between`}>
-          <Text style={tw`text-white text-base flex-1 ${isMe ? "font-bold" : ""}`} numberOfLines={1} ellipsizeMode="tail">
+          <Text style={tw`text-white ${optionCard.text} flex-1 ${isMe ? "font-bold" : ""}`} numberOfLines={1} ellipsizeMode={optionCard.ellipsize}>
             {item.username}
           </Text>
           <View style={tw`flex-row items-center`}>
@@ -479,7 +496,7 @@ const GameScreen = () => {
               <View style={tw`z-8 absolute w-full h-full`}>
                 {/* Progress bar during answering or scores */}
                 {(phase === "answering" || phase === "scores") && phaseDuration > 0 && pauseEndsAt === null && (
-                  <View style={[tw`absolute left-0 right-0 p-4 items-center`, PROGRESS_BAR_AREA]}>
+                  <View testID={TEST_IDS.roundProgress} style={[tw`absolute left-0 right-0 p-4 items-center`, PROGRESS_BAR_AREA]}>
                     <View style={tw`w-full max-w-[500px]`}>
                       <ProgressBar
                         key={phaseKey}
@@ -505,13 +522,21 @@ const GameScreen = () => {
                       </Text>
                     ) : (
                       <FlatList
+                        // numColumns can't change on a mounted list (players may leave mid-game): remount instead
+                        key={`answers-${answersLayout.columns}`}
+                        ref={answersListRef}
+                        testID={TEST_IDS.answerOptions}
                         data={playersProvider}
                         renderItem={renderPlayer}
                         keyExtractor={(item) => item.username}
-                        numColumns={2}
+                        numColumns={answersLayout.columns}
                         columnWrapperStyle={tw`justify-between`}
-                        style={tw`w-full max-w-[500px] px-2`}
+                        style={[tw`w-full max-w-[500px] px-2`, { maxHeight: answersLayout.maxHeight }]}
                         contentContainerStyle={tw`w-full`}
+                        showsVerticalScrollIndicator
+                        persistentScrollbar
+                        indicatorStyle="white"
+                        onContentSizeChange={hintMoreAnswers}
                       />
                     )}
                   </View>

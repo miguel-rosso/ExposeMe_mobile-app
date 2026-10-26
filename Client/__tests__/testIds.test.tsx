@@ -81,6 +81,9 @@ describe("E2E testIDs (EXP-008)", () => {
       ...Object.values(TEST_IDS),
       playerOptionId(".*"),
       playerOptionId("bot1"),
+      // EXP-250 many-players flow: a late bot and the device's own (last) option
+      playerOptionId("bot10"),
+      playerOptionId("${USERNAME}"),
       lobbyPlayerId(".*"),
       // EXP-157 lobby-host-drop flow: the bot host's row
       lobbyPlayerId("bot1"),

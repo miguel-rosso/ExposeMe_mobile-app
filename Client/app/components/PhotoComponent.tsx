@@ -7,6 +7,7 @@ import ImageBlur from "./ImageBlur/ImageBlur";
 import { ImageBlurView } from "./ImageBlur";
 import { PhotoComponentProps } from "../models/interfaces";
 import { getImageSource } from "../utils/image";
+import { TEST_IDS } from "../utils/testIds";
 
 const PhotoComponent: React.FC<PhotoComponentProps> = ({ photoUrl, headers, onLongPress, onPressOut }) => {
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -49,7 +50,7 @@ const PhotoComponent: React.FC<PhotoComponentProps> = ({ photoUrl, headers, onLo
           />
         </View>
       )}
-      <View style={tw`flex-1 justify-center items-center`}>
+      <View testID={TEST_IDS.photoView} style={tw`flex-1 justify-center items-center`}>
         <TouchableOpacity style={tw`w-full h-full`} activeOpacity={1} onLongPress={onLongPress} onPressOut={onPressOut}>
           <Animated.Image source={source} style={[tw`w-full h-full`, { opacity: fadeAnim }]} resizeMode="contain" />
         </TouchableOpacity>

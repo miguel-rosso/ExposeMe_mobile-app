@@ -1,0 +1,66 @@
+# EXP-250: with a full room (12 players) the answer options must not cover the photo and the timer bar: they are
+# compacted and capped to ~40% of the window, scrolling inside that area. Fill the room to 12 (the server's cap):
+#   qa/lab/lab.sh play --flow many-players --devices pair --bots 10 --rounds 3
+#   qa/lab/lab.sh play --flow many-players --devices <label> --bots 11 --rounds 3
+# Options follow the join order and the bots join first, so the devices' own options are the last ones.
+# env: GAME_CODE, USERNAME, METRO_URL (url-encoded)
+# Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
+appId: com.socketNull.ExposeMe
+---
+- runFlow: open-app.yaml
+- runFlow: join-room.yaml
+# Answering is the only phase with the timer bar and the options together (reveal: options only; scores: timer only)
+- extendedWaitUntil:
+    visible:
+      id: "round-progress"
+    timeout: 180000
+# My own photo: answering shows a hint instead of the options. Let that round end (its scoreboard comes and goes)
+# and wait for the next answering phase
+- runFlow:
+    when:
+      visible:
+        id: "own-photo-hint"
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: "score-modal"
+          timeout: 60000
+      - extendedWaitUntil:
+          notVisible:
+            id: "score-modal"
+          timeout: 120000
+      - extendedWaitUntil:
+          visible:
+            id: "round-progress"
+          timeout: 60000
+- extendedWaitUntil:
+    visible:
+      id: "answer-options"
+    timeout: 3000
+# The answer window is short (8 s): checks only, no settle waits, and the screenshot before anything else
+- assertVisible:
+    id: "round-progress"
+- assertVisible:
+    id: "photo-view"
+- takeScreenshot: many-players-answers-${USERNAME}
+# Reach the last option. scrollUntilVisible swipes the middle of the screen (the photo, which doesn't scroll), so
+# swipe inside the options list itself until the last one shows
+- repeat:
+    times: 3
+    while:
+      notVisible:
+        id: "player-option-${USERNAME}"
+    commands:
+      - swipe:
+          from:
+            id: "answer-options"
+          direction: UP
+          duration: 300
+- assertVisible:
+    id: "player-option-${USERNAME}"
+- tapOn:
+    id: "player-option-bot10"
+    waitToSettleTimeoutMs: 500
+- assertVisible:
+    id: "photo-view"
+- runFlow: play-rounds.yaml

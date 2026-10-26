@@ -55,6 +55,7 @@
           "photosPermission": "Expose Me picks random photos from your gallery and shows them to the other players in your game room. You can also choose a photo to plant in the game.",
           "savePhotosPermission": false,
           "isAccessMediaLocationEnabled": false,
+          "preventAutomaticLimitedAccessAlert": true,
           "granularPermissions": ["photo"]
         }
       ],

@@ -84,6 +84,12 @@ describe("iOS usage strings (EXP-056)", () => {
     expect(plist).not.toHaveProperty("NSPhotoLibraryAddUsageDescription");
   });
 
+  it("only shows the limited-library picker when the player asks for it (EXP-134)", () => {
+    // Without this key iOS offers "Select More Photos / Keep Current Selection" on every launch
+    // the first time the app reads the library; the app opens the picker from its own button.
+    expect(exp.ios.infoPlist.PHPhotoLibraryPreventAutomaticLimitedAccessAlert).toBe(true);
+  });
+
   it("ships a Spanish translation of the photo usage string", () => {
     expect(exp.locales).toEqual({ en: "./locales/en.json", es: "./locales/es.json" });
     expect(exp.ios.infoPlist.CFBundleAllowMixedLocalizations).toBe(true);

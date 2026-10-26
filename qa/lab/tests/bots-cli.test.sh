@@ -56,6 +56,11 @@ SERVER_URL="$URL" node "$BOTS" --bots 1 --code k7mq4x --timeout 1 >/dev/null 2>"
 err="$(cat "$TMP/err")"
 [[ "$err" != *"not a room code"* ]] && ok "lowercase --code is accepted" || ko "lowercase --code is accepted" "$err"
 
+# ── --drop-on-turn is a known flag (EXP-226) ──
+SERVER_URL="$URL" node "$BOTS" --bots 2 --host --drop-round 1 --drop-secs 3 --drop-on-turn --timeout 1 >/dev/null 2>"$TMP/err"; rc=$?
+err="$(cat "$TMP/err")"
+[[ "$rc" != 2 && "$err" != *"unknown option"* ]] && ok "--drop-on-turn is accepted" || ko "--drop-on-turn is accepted" "rc=$rc err=$err"
+
 # ── A valid run says which server it uses before connecting ──
 SERVER_URL="$URL" node "$BOTS" --bots 1 --host --timeout 1 >/dev/null 2>"$TMP/err"
 err="$(cat "$TMP/err")"

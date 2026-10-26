@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ANSWER_GRACE, GameEngine, MAX_PAUSES, MAX_TOTAL_PAUSES, PAUSE_GRACE, PAUSE_MIN_DURATION, PAUSE_TIMEOUT } from "../managers/GameEngine";
 import { DISCONNECT_GRACE, RoomManager } from "../managers/RoomManager";
 import { GameStateSnapshot, Player, Room } from "../models/interfaces";
-import { CapturedEmit, createFakeIo } from "./helpers";
+import { CapturedEmit, createFakeIo, receivedBy } from "./helpers";
 
 // EXP-006 / DEC-009: short absences are silent (rejoin + game-state snapshot); with fewer than 2 players
 // connected the game pauses with a server-driven 5 min countdown, resumes when someone returns, or ends.
@@ -261,6 +261,46 @@ describe("pause with fewer than 2 connected players", () => {
     expect(() => JSON.stringify(safe)).not.toThrow();
     expect(safe).not.toHaveProperty("_pauseTimer");
     expect(safe.paused).toBe(true);
+  });
+});
+
+// EXP-226: the app drops a turn in flight when a game-state arrives, so the photo owner whose return resumes the game
+// must get its snapshot before the your-turn of that resume, or its photo is never sent and the round is skipped
+describe("the photo owner's return resumes the game (2 players)", () => {
+  /** Events the owner's new socket got since the rejoin, by name. */
+  const ownerEventsSince = (from: number, socketId: string) =>
+    receivedBy(emits.slice(from), socketId, room.gameCode).map((e) => e.event);
+
+  it("sends the owner's snapshot before its your-turn; the photo it sends then is played, not skipped", () => {
+    room = startedRoom(["alice", "bob"]);
+    const owner = room.currentPlayer!;
+    drop(owner.username);
+    vi.advanceTimersByTime(PAUSE_MIN_DURATION + 1_000);
+
+    const from = emits.length;
+    rejoin(owner.username);
+    expect(ownerEventsSince(from, owner.socketId)).toEqual(["game-resumed", "game-state", "your-turn"]);
+    expect(snapshotFor(owner.socketId)).toMatchObject({ phase: "waiting-photo", pause: null });
+    expect(last("your-turn")).toEqual({ target: owner.socketId, event: "your-turn", args: [{ round: 1, attempt: 1 }] });
+
+    vi.advanceTimersByTime(1_000); // upload
+    engine.onPhotoReceived(room, PHOTO, owner.username);
+    expect(last("round-start")!.args[0]).toMatchObject({ round: 1, isOwner: true });
+    vi.advanceTimersByTime(PHOTO_WAIT_TIMEOUT);
+    expect(events("round-skipped")).toHaveLength(0);
+  });
+
+  it("a return within PAUSE_MIN_DURATION: the snapshot comes first, your-turn with the scheduled resume", () => {
+    room = startedRoom(["alice", "bob"]);
+    const owner = room.currentPlayer!;
+    drop(owner.username);
+    vi.advanceTimersByTime(500);
+
+    const from = emits.length;
+    rejoin(owner.username);
+    expect(ownerEventsSince(from, owner.socketId)).toEqual(["game-state"]);
+    vi.advanceTimersByTime(PAUSE_MIN_DURATION - 500);
+    expect(ownerEventsSince(from, owner.socketId)).toEqual(["game-state", "game-resumed", "your-turn"]);
   });
 });
 

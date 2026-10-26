@@ -271,7 +271,9 @@ that reached the lobby screen in between are covered by that snapshot.
   The client renders that phase; in `answering` it re-sends its current pick of that round, if any (never in
   `reveal`: answers are frozen by then); with `phase: null` (ready phase) it sends `im-ready` again.
 - The photo owner who rejoins while their photo is awaited gets `your-turn` again (same `round` and `attempt`);
-  the client re-sends the photo it already uploaded for that request instead of uploading a new one.
+  the client re-sends the photo it already uploaded for that request instead of uploading a new one. That
+  `your-turn` always comes **after** the owner's `game-state` (also when their return resumes the game:
+  `game-resumed`, `game-state`, `your-turn`), because the client drops a turn in flight on `game-state`.
 - **Pause**: mid-game (after the ready phase), when fewer than 2 players are connected (on a disconnect,
   leave or removal, or at a round boundary) and someone who dropped could still return, the server
   **pauses**: the phase timer is frozen (an active hold ends with `hold-end`; no hold while paused), photos

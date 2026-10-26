@@ -282,13 +282,13 @@ export class GameEngine {
    * Call after a player disconnects, rejoins, leaves or is removed. Mid-game (after the ready phase):
    * fewer than 2 connected → pause, or game over if nobody who is gone can come back (they all left);
    * 2 or more connected while paused → resume (not before PAUSE_MIN_DURATION). Ready phase: checkReady.
-   * Lobby: reviewLobby.
+   * Lobby: reviewLobby. `rejoined`: the player whose rejoin this is (see onPlayerRejoined).
    */
-  onConnectionChange(room: Room): void {
+  onConnectionChange(room: Room, rejoined?: Player): void {
     if (!room.started) { this.reviewLobby(room); return; }
     if (room.phase === null) return;
     const connected = room.players.filter((p) => p.connected).length;
-    if (connected >= 2) { this.resumeGame(room); return; }
+    if (connected >= 2) { this.resumeGame(room, rejoined); return; }
     if (room.players.length === connected) { this.endGame(room); return; } // nobody can come back
     if (!room.paused) { this.pauseGame(room); return; }
     // Still paused: a resume scheduled by a rejoin is off, and the others learn who is still missing
@@ -331,16 +331,15 @@ export class GameEngine {
     }
   }
 
-  /** A player rejoined on a new socket: resume if they were awaited, then send them a state snapshot. */
+  /**
+   * A player rejoined on a new socket: resume if they were awaited, then send them a state snapshot, and your-turn
+   * after it if their photo is awaited. The app drops a turn in flight on game-state (EXP-226), so a resume this
+   * rejoin causes leaves the rejoiner's your-turn to this method, which sends it after the snapshot.
+   */
   onPlayerRejoined(room: Room, player: Player): void {
-    const wasPaused = room.paused;
-    this.onConnectionChange(room);
+    this.onConnectionChange(room, player);
     this.io.to(player.socketId).emit("game-state", this.snapshot(room, player));
-    if (!room.started) return;
-    // Resuming re-sends your-turn itself; otherwise the returning owner still has to send the photo
-    if (!wasPaused && !room.paused && room.phase === "waiting-photo" && room.currentPlayer === player) {
-      this.io.to(player.socketId).emit("your-turn", this.yourTurn(room));
-    }
+    this.sendAwaitedTurn(room, player);
   }
 
   /**
@@ -350,7 +349,12 @@ export class GameEngine {
   resendState(room: Room, player: Player): void {
     if (!room.started) return;
     this.io.to(player.socketId).emit("game-state", this.snapshot(room, player));
-    if (!room.paused && room.phase === "waiting-photo" && room.currentPlayer === player) {
+    this.sendAwaitedTurn(room, player);
+  }
+
+  /** your-turn to `player` if the running (not paused) game awaits their photo. */
+  private sendAwaitedTurn(room: Room, player: Player): void {
+    if (room.started && !room.paused && room.phase === "waiting-photo" && room.currentPlayer === player) {
       this.io.to(player.socketId).emit("your-turn", this.yourTurn(room));
     }
   }
@@ -422,7 +426,8 @@ export class GameEngine {
     this.io.to(room.gameCode).emit("game-paused", this.pauseInfo(room));
   }
 
-  private resumeGame(room: Room): void {
+  /** `rejoined`: a rejoining owner gets its your-turn from onPlayerRejoined, after its snapshot. */
+  private resumeGame(room: Room, rejoined?: Player): void {
     if (!room.paused || room._resumeTimer) return;
     // A pause lasts at least PAUSE_MIN_DURATION, so a flapping connection can't spam pause/resume
     const early = PAUSE_MIN_DURATION - (Date.now() - room._pauseStartedAt);
@@ -449,7 +454,7 @@ export class GameEngine {
     console.log(`[${room.gameCode}] RESUMED "${room.phase}" with ${room._timerDuration}ms (${room._pauseCount}/${MAX_PAUSES} pauses counted)`);
     this.io.to(room.gameCode).emit("game-resumed", { phase: room.phase, duration: this.clientDuration(room, room._timerDuration) });
     // A photo sent while paused was ignored: ask the owner again
-    if (room.phase === "waiting-photo" && room.currentPlayer?.connected) {
+    if (room.phase === "waiting-photo" && room.currentPlayer?.connected && room.currentPlayer !== rejoined) {
       this.io.to(room.currentPlayer.socketId).emit("your-turn", this.yourTurn(room));
     }
     this.resumeTimer(room);

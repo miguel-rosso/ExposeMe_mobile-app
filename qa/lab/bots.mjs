@@ -21,6 +21,11 @@
 //                           10 pauses in all per game.
 //   node qa/lab/bots.mjs --bots 3 --host --drop-round 2 --drop-secs 3     # drop mid-round, game goes on
 //   node qa/lab/bots.mjs --bots 2 --host --drop-round 2 --drop-secs 8     # 2 players: pause → resume
+//            --drop-on-turn the planned drop happens instead on the first your-turn from round R on, by whichever bot
+//                           gets it (--drop-bot is ignored): the photo owner drops during waiting-photo before sending
+//                           its photo and returns S seconds later. Its photo must still be played (EXP-226): it sends
+//                           it after its return and that round is not skipped by timeout ("consistency").
+//   node qa/lab/bots.mjs --bots 2 --host --drop-round 1 --drop-secs 3 --drop-on-turn   # owner's return resumes
 //            --app-resync   after a rejoin snapshot of a started game, ignore it (and your-turn) and re-send the join
 //                           on the same socket, like the app going from its lobby to the game screen (EXP-097)
 //   node qa/lab/bots.mjs --bots 2 --host --drop-round 2 --drop-secs 8 --app-resync
@@ -85,13 +90,17 @@
 //   none) ("consistency"; bots that went offline are left out). round-start's duration is the answer time minus a
 //   300 ms grace (answers are taken until the real end); bots send at most 3 picks per round (server limit: 10 per
 //   socket, refilled 5/s), and there are no correct-answer / incorrect-answer aliases.
+//   Turns: like the app, a bot drops the photo (or photo-unavailable) of a your-turn whose request ended before it was
+//   ready (waiting-photo, round-start, round-skipped, game-paused, game-state, game-over in between): "turn-dropped".
+//   A turn dropped while connected must be asked again (a later your-turn for that round) or skipped for a reason
+//   other than timeout ("consistency").
 import { io } from "socket.io-client";
 import fs from "node:fs";
 import path from "node:path";
 
 // ── Command line ──
 // Parsed and validated before anything touches the network (EXP-197): --help and bad arguments never connect
-const BOOL_FLAGS = new Set(["host", "no-answer", "app-resync", "lobby-host-drop", "help"]);
+const BOOL_FLAGS = new Set(["host", "no-answer", "app-resync", "lobby-host-drop", "drop-on-turn", "help"]);
 const VALUE_FLAGS = new Set([
   "server", "bots", "rooms", "rounds", "wait-players", "code", "code-file", "photos", "out", "chaos", "upload-fail",
   "timeout", "no-ready", "drop-round", "drop-secs", "drop-bot", "photo-unavailable", "plant", "play-again-linger",
@@ -113,7 +122,7 @@ Headless ExposeMe players (see the header of qa/lab/bots.mjs for every scenario)
   --photos DIR  --out FILE   photos to upload (*.jpg) / write the summary + events as JSON
   --timeout S                give up after S seconds (default 900)
   --chaos P  --upload-fail P  --photo-unavailable P  --no-ready K  --no-answer  --plant K
-  --drop-round R --drop-secs S [--drop-bot K]  --app-resync  --lobby-host-drop
+  --drop-round R --drop-secs S [--drop-bot K | --drop-on-turn]  --app-resync  --lobby-host-drop
   --play-again-linger S [--play-again-linger-bot K] [--start-next-game D]
   --help, -h                 print this help and exit (no network)
 
@@ -174,6 +183,9 @@ const TIMEOUT_S = Number(args.timeout || 900);
 const DROP_ROUND = Number(args["drop-round"] || 0);
 const DROP_SECS = Number(args["drop-secs"] || 5);
 const DROP_BOT = Number(args["drop-bot"] || N_BOTS) - 1;
+const DROP_ON_TURN = !!args["drop-on-turn"];
+// Events that end the photo request in force, as GAME_FLOW.md lists them: the app drops the result of a turn in flight
+const TURN_ENDING_EVENTS = new Set(["waiting-photo", "round-start", "round-skipped", "game-paused", "game-state", "game-over"]);
 // Like the app rejoining from its lobby screen ("Join" after closing it): the first snapshot of a started game
 // (and any your-turn with it) is missed while switching screens, then the join is re-sent on the same socket,
 // which answers with a fresh game-state (and your-turn for an awaited photo)
@@ -285,6 +297,7 @@ function runRoom(roomIdx, fixedCode) {
     let code = fixedCode || null;
     let finished = 0;
     let started = false;
+    let turnDropDone = false; // --drop-on-turn: one planned drop per room
     const bots = [];
     const socketIds = new Set(); // every socket id of this room's bots (they change on reconnect)
 
@@ -335,6 +348,7 @@ function runRoom(roomIdx, fixedCode) {
         const tokens = new Map(bots.map((b) => [b.name, b.token]));
         for (const leak of payloadLeaks(name, ev, payload, socketIds, tokens, priv)) rec("payload-leak", bot.round, { leak });
         const d = payload[0];
+        if (TURN_ENDING_EVENTS.has(ev)) bot.turn = null;
         if (ev === "game-started") { priv.phase = null; priv.baseline = new Map((d ?? []).map((p) => [p.username, 0])); }
         else if (ev === "waiting-photo") priv.phase = "waiting-photo";
         else if (ev === "round-start") priv.phase = "answering";
@@ -447,13 +461,26 @@ function runRoom(roomIdx, fixedCode) {
         if (bot.resyncing) { rec("your-turn-missed-on-purpose", d.round); return; }
         rec("your-turn", d.round, { attempt: d.attempt });
         if (!Number.isInteger(d.attempt)) errors.push(`${name}: your-turn without an integer attempt`);
+        if (DROP_ON_TURN && !turnDropDone && d.round >= DROP_ROUND) {
+          turnDropDone = true;
+          dropFor(DROP_SECS, d.round, { onTurn: true, attempt: d.attempt });
+          return;
+        }
+        // This request, until an event ends it (TURN_ENDING_EVENTS): its result is sent only while it is in force
+        const turn = { round: d.round, attempt: d.attempt };
+        const turnAt = now(); // after its own your-turn record: a later your-turn re-asks for the round
+        bot.turn = turn;
+        const stillInForce = (result) => {
+          if (bot.turn === turn) return true;
+          rec("turn-dropped", d.round, { attempt: d.attempt, result, turnAt, connected: socket.connected });
+          return false;
+        };
         // One report per photo request (a re-sent your-turn of the same attempt doesn't report again)
         if (bot.reportedAttempt !== d.attempt && Math.random() < PHOTO_UNAVAILABLE) {
           bot.reportedAttempt = d.attempt;
-          const pauses = bot.pauses;
           await sleep(100 + Math.random() * 300); // permission check / empty gallery on a phone
           // Like the app: a game-paused meanwhile ends this request; the server asks again on resume
-          if (bot.pauses !== pauses) { rec("photo-unavailable-dropped-by-pause", d.round, { attempt: d.attempt }); return; }
+          if (!stillInForce("photo-unavailable")) return;
           rec("photo-unavailable-sent", d.round, { attempt: d.attempt });
           socket.emit("photo-unavailable", { round: d.round, attempt: d.attempt });
           return;
@@ -463,7 +490,9 @@ function runRoom(roomIdx, fixedCode) {
           await sleep(200 + Math.random() * 800); // gallery pick on a phone
           const up = await uploadPhoto(name, photoAuth(code, bot.token));
           uploads.push(up.ms);
+          if (!stillInForce("photo")) return;
           socket.emit("photo-sent", { photo: up.url });
+          rec("photo-sent", d.round, { attempt: d.attempt });
         } catch (e) {
           if (e.rateLimited) rateLimited++;
           errors.push(`${name} upload: ${e.message}`);
@@ -481,11 +510,9 @@ function runRoom(roomIdx, fixedCode) {
         // Photo access: a non-owner loads the photo like the app's <Image> (with credentials), and checks that it is
         // refused without them. Nobody knows who the owner is, so the first two bots check when it isn't theirs
         if (!bot.isOwner && i < 2) checkPhotoAccess(name, d.photo, photoAuth(code, bot.token), d.round);
-        if (DROP_ROUND && i === DROP_BOT && d.round === DROP_ROUND && !bot.dropped) {
+        if (DROP_ROUND && !DROP_ON_TURN && i === DROP_BOT && d.round === DROP_ROUND && !bot.dropped) {
           bot.dropped = true;
-          rec("planned-disconnect", d.round, { secs: DROP_SECS });
-          socket.disconnect();
-          setTimeout(() => { socket.connect(); }, DROP_SECS * 1000);
+          dropFor(DROP_SECS, d.round);
           return;
         }
         if (CHAOS && Math.random() < CHAOS) {
@@ -501,6 +528,12 @@ function runRoom(roomIdx, fixedCode) {
         }, 200 + Math.random() * 400);
         setTimeout(() => sendGuess(round), 800 + Math.random() * 1200);
       });
+      // Planned drop: offline for `secs`, then back on a new socket (rejoin + game-state snapshot)
+      const dropFor = (secs, round, payload = {}) => {
+        rec("planned-disconnect", round, { secs, ...payload });
+        socket.disconnect();
+        setTimeout(() => { socket.connect(); }, secs * 1000);
+      };
       // Pick sent during answering only (EXP-148): the last one before the reveal is the one that counts
       const sendGuess = (round) => {
         if (!bot.guess || bot.round !== round || bot.phase !== "answering" || !socket.connected) return;
@@ -546,7 +579,6 @@ function runRoom(roomIdx, fixedCode) {
         // The server ignores photo-unavailable while paused and re-sends the same your-turn on resume (EXP-113):
         // that one must be answered again, so the attempt no longer counts as reported
         bot.reportedAttempt = undefined;
-        bot.pauses = (bot.pauses ?? 0) + 1;
         rec("game-paused", bot.round, { waitingFor: d.waitingFor, duration: d.duration, pause: d.pause, maxPauses: d.maxPauses });
         console.error(`[room ${roomIdx}] ${name}: game-paused ${d.pause}/${d.maxPauses} (${Math.round(d.duration / 1000)}s), waiting for ${d.waitingFor.join(", ")}`);
       });
@@ -720,6 +752,22 @@ function analyse(r) {
       if (!r.events.some((e) => e.bot === other && e.ev === "game-paused" && e.t > d.t)) consistency.push(`2 players: ${other} never got game-paused`);
       if (!r.events.some((e) => e.bot === other && e.ev === "game-resumed" && e.t > d.t)) consistency.push(`2 players: ${other} never got game-resumed`);
     }
+    // --drop-on-turn (EXP-226): the returning owner still sends the awaited photo, and its round is not timed out
+    if (d.payload?.onTurn) {
+      const after = (ev) => r.events.filter((e) => e.ev === ev && e.round === d.round && e.t > d.t);
+      const sent = after("photo-sent").some((e) => e.bot === d.bot && e.payload?.attempt === d.payload.attempt);
+      if (!sent) consistency.push(`${d.bot}: never sent its round ${d.round} photo (attempt ${d.payload.attempt}) after returning`);
+      if (after("round-skipped").some((e) => e.payload?.reason === "timeout")) consistency.push(`round ${d.round} skipped by timeout after its owner ${d.bot} returned`);
+    }
+  }
+  // Dropped turns: a connected bot drops a turn only because its request ended; the server must then ask again for
+  // that round (a later your-turn) or skip it for a reason other than the 15 s timeout, or the photo was lost
+  for (const e of r.events.filter((x) => x.ev === "turn-dropped" && x.payload?.connected)) {
+    const { attempt, turnAt } = e.payload;
+    const askedAgain = r.events.some((x) => x.ev === "your-turn" && x.bot === e.bot && x.round === e.round && x.t > turnAt);
+    const skippedOtherwise = r.events.some((x) => x.ev === "round-skipped" && x.bot === e.bot && x.round === e.round
+      && x.t > turnAt && x.payload?.reason !== "timeout");
+    if (!askedAgain && !skippedOtherwise) consistency.push(`${e.bot}: dropped its round ${e.round} turn (attempt ${attempt}) and was never asked again`);
   }
   // Pause N of M: every game-paused says which pause it is (the would-be number), never beyond the cap.
   // Re-sends within one pause keep the number; the next pause repeats it if the last one was refunded

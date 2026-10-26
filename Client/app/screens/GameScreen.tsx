@@ -4,7 +4,7 @@ import { useFocusEffect } from "expo-router";
 import tw from "twrnc";
 import { useGameContext } from "../providers/GameContext";
 import {
-  GamePausedData, GameResumedData, GameStateSnapshot, HoldResumeData, PhotoUnavailableReason, Player, RoundRevealData,
+  GamePausedData, GameResumedData, GameStateSnapshot, HoldResumeData, Player, RoundRevealData,
   RoundScoresData, RoundSkippedData, RoundStartData, ScoreRound, WaitingPhotoData, YourTurnData,
 } from "../models/interfaces";
 import { usePhotoContext } from "../providers/PhotoContext";
@@ -22,10 +22,11 @@ import EmojisButton from "@/app/components/IngameComunication/EmojisButtons";
 import { useI18n } from "../i18n";
 import { uploadPhoto } from "@/app/utils/uploadPhoto";
 import { photoAuthHeaders, resolvePhotoAuth } from "@/app/utils/photoAuth";
-import { turnUploadAction, TurnUpload } from "../utils/gameState";
+import { uploadWithRetry } from "../utils/uploadRetry";
 import { SkipNotice, skipNoticeFor, skipNoticeText } from "../utils/waitingPhoto";
 import { gameStateFollowUps, initialRoundView, RoundAction, roundReducer, RoundView } from "../utils/roundState";
 import { useGameConnection } from "../hooks/useGameConnection";
+import { useTurnRequest } from "../hooks/useTurnRequest";
 import { withHost, withoutPlayer } from "../utils/roomPlayers";
 import PausedModal from "@/app/components/modals/PausedModal";
 import GalleryAccessModal from "@/app/components/modals/GalleryAccessModal";
@@ -119,16 +120,11 @@ const GameScreen = () => {
   const playersRef = useRef<Player[]>(playersProvider);
   playersRef.current = playersProvider;
   const setPlayers = (next: Player[]) => { playersRef.current = next; setPlayersProvider(next); };
-  // Photo uploaded for my turn: re-sent if the server asks again (after a reconnect or a pause)
-  const turnUploadRef = useRef<TurnUpload | null>(null);
 
   // ── Waiting for the photo ────────────────────────────
-  const [turnUploading, setTurnUploading] = useState(false); // my turn: picking/uploading my photo
+  // My own photo request (your-turn): ended by every TURN_ENDING_EVENTS handler below
+  const turnRequest = useTurnRequest(socket);
   const [skipNotice, setSkipNotice] = useState<SkipNotice | null>(null); // last skipped round, until round-start
-  // Why I reported photo-unavailable this turn, for my own round-skipped notice
-  const ownUnavailableRef = useRef<PhotoUnavailableReason | null>(null);
-  // Photo request of mine in force (last your-turn), null once it is over (next wait, round, skip, pause, snapshot)
-  const currentTurnRef = useRef<YourTurnData | null>(null);
 
   // ── Pause (fewer than 2 players connected) ───────────
   const [pauseEndsAt, setPauseEndsAt] = useState<number | null>(null);
@@ -225,69 +221,36 @@ const GameScreen = () => {
   useEffect(() => {
     if (!socket) return;
 
-    // A your-turn flow (gallery pick, upload retries) can outlive its request: only the request in force may
-    // send or report anything
-    const isCurrentTurn = (turn: YourTurnData) => currentTurnRef.current?.attempt === turn.attempt;
-
-    // No photo to send for my turn: tell the server so it skips now instead of making everyone wait
-    const reportUnavailable = (reason: PhotoUnavailableReason, turn: YourTurnData) => {
-      if (turnUploadRef.current?.attempt === turn.attempt) turnUploadRef.current = null;
-      if (!isCurrentTurn(turn)) { console.log(`[GAME] stale turn ${turn.attempt} ended without a photo (${reason})`); return; }
-      console.log(`[GAME] photo-unavailable (${reason})`);
-      ownUnavailableRef.current = reason;
-      setTurnUploading(false);
-      socket.emit("photo-unavailable", { round: turn.round, attempt: turn.attempt });
-    };
-
     // Whole room: a photo is awaited (the owner is not revealed). Comes right before my own your-turn.
     socket.on("waiting-photo", (data: WaitingPhotoData) => {
       console.log(`[GAME] waiting-photo: round ${data.round}, ${data.duration}ms`);
-      currentTurnRef.current = null; // any earlier request of mine is over
-      setTurnUploading(false);
-      ownUnavailableRef.current = null; // a report of mine was answered by the round-skipped before this
+      turnRequest.endTurn(); // any earlier request of mine is over
+      turnRequest.takeReportedReason(); // a report of mine was answered by the round-skipped before this
       dispatchRound({ type: "waiting-photo", data });
     });
 
     // My turn: pick photo → upload → send (or report photo-unavailable)
     socket.on("your-turn", async (data: YourTurnData) => {
-      currentTurnRef.current = data;
+      const needsUpload = turnRequest.start(data); // a re-sent request re-sends or awaits its photo
       dispatchRound({ type: "your-turn", round: data.round });
-      setTurnUploading(true);
-      ownUnavailableRef.current = null;
-      const action = turnUploadAction(turnUploadRef.current, data.attempt);
-      if (action === "resend") { socket.emit("photo-sent", { photo: turnUploadRef.current!.url }); return; }
-      if (action === "wait") return; // the upload in flight sends it
-      turnUploadRef.current = { attempt: data.attempt };
+      if (!needsUpload) return;
       try {
         const picked = await pickGamePhoto();
-        if ("error" in picked) { reportUnavailable(picked.error, data); return; }
-        for (let i = 1; i <= 3; i++) {
-          try {
-            console.log(`Upload attempt ${i}...`);
-            const url = await uploadImage(picked.uri);
-            console.log("Photo uploaded");
-            setPhotoUri(null);
-            // Kept for a re-sent your-turn of this request (e.g. it finished while paused)
-            if (turnUploadRef.current?.attempt === data.attempt) turnUploadRef.current = { attempt: data.attempt, url };
-            if (isCurrentTurn(data)) socket.emit("photo-sent", { photo: url });
-            return;
-          } catch (e) {
-            console.error(`Attempt ${i} failed:`, e);
-            if (i < 3) await new Promise((r) => setTimeout(r, 1000 * i));
-          }
-        }
-        console.error("All upload attempts failed");
-        reportUnavailable("upload", data);
+        if ("error" in picked) { turnRequest.reportUnavailable(picked.error, data); return; }
+        let url: string;
+        try { url = await uploadWithRetry(picked.uri, uploadImage); }
+        catch { turnRequest.reportUnavailable("upload", data); return; }
+        setPhotoUri(null);
+        turnRequest.sendPhoto(data, url);
         return;
       } catch (e) { console.error("your-turn error:", e); }
-      reportUnavailable("failed", data);
+      turnRequest.reportUnavailable("failed", data);
     });
 
     // Atomic: new round — photo + answer timer
     socket.on("round-start", (data: RoundStartData) => {
       console.log(`[GAME] round-start: round=${data.round}, mine=${data.isOwner}`);
-      currentTurnRef.current = null;
-      setTurnUploading(false);
+      turnRequest.endTurn();
       setSkipNotice(null);
       dispatchRound({ type: "round-start", data, serverUrl: SERVER_URL });
     });
@@ -325,10 +288,8 @@ const GameScreen = () => {
     // No photo for this round: say why on the waiting screen until the next round starts
     socket.on("round-skipped", (data: RoundSkippedData) => {
       console.log(`[GAME] round-skipped: round ${data.round} (${data.reason})`);
-      setSkipNotice(skipNoticeFor(data, ownUnavailableRef.current));
-      ownUnavailableRef.current = null;
-      currentTurnRef.current = null;
-      setTurnUploading(false);
+      setSkipNotice(skipNoticeFor(data, turnRequest.takeReportedReason()));
+      turnRequest.endTurn();
     });
 
     // Fewer than 2 players connected: the server froze the game and shows its countdown
@@ -338,7 +299,7 @@ const GameScreen = () => {
       dispatchRound({ type: "game-paused" });
       // The server ignores photos while paused and sends your-turn again on resume (an upload that finishes
       // meanwhile is kept and re-sent then)
-      currentTurnRef.current = null;
+      turnRequest.endTurn({ keepUploading: true });
     });
 
     socket.on("game-resumed", (data: GameResumedData) => {
@@ -352,8 +313,7 @@ const GameScreen = () => {
       console.log(`[GAME] game-state: ${snap.phase} round ${snap.round}, paused=${!!snap.pause}`);
       setPlayers(snap.players);
       // An awaited photo of mine is asked again with your-turn right after this snapshot
-      currentTurnRef.current = null;
-      setTurnUploading(false);
+      turnRequest.endTurn();
       if (snap.phase !== "waiting-photo") setSkipNotice(null);
       dispatchRound({ type: "game-state", snap, serverUrl: SERVER_URL, username: safeUsername });
       const result = gameStateFollowUps(snap);
@@ -365,7 +325,7 @@ const GameScreen = () => {
 
     socket.on("game-over", (data: { finalScore: ScoreRound[] }) => {
       console.log("[GAME] game-over");
-      currentTurnRef.current = null;
+      turnRequest.endTurn({ keepUploading: true });
       showGameOver(data.finalScore);
     });
 
@@ -479,7 +439,7 @@ const GameScreen = () => {
               </Text>
             )}
             <Text testID={TEST_IDS.waitingPhotoText} style={tw`text-xl text-white font-bold text-center mb-6`}>
-              {turnUploading ? t.uploadingYourPhoto : t.someoneChoosingPhoto}
+              {turnRequest.uploading ? t.uploadingYourPhoto : t.someoneChoosingPhoto}
             </Text>
             {phaseDuration > 0 && pauseEndsAt === null && (
               <View style={tw`w-full max-w-[500px]`}>

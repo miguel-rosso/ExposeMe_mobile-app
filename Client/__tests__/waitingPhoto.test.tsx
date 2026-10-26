@@ -279,6 +279,59 @@ describe("GameScreen while a photo is awaited", () => {
     expect(mockUploadPhoto).toHaveBeenCalledTimes(1);
   });
 
+  // EXP-232: every event that ends my photo request drops the result of an upload still in flight
+  describe.each([
+    ["waiting-photo", { round: 2, duration: 15_000 }],
+    ["round-start", { photo: "/temp/x.jpg", round: 1, duration: 8_000, isOwner: false }],
+    ["round-skipped", { round: 1, reason: "timeout" }],
+    ["game-state", {
+      started: true, phase: "waiting-photo", round: 1, totalRounds: 10, isOwner: false, photo: null, correctAnswer: null,
+      duration: 6_000, held: false, pause: null, scores: [], players: [],
+    }],
+  ])("my turn ended by %s", (event, payload) => {
+    it("an upload finishing afterwards sends no photo-sent and the screen stops saying 'uploading your photo'", async () => {
+      let resolveUpload!: (url: string) => void;
+      mockPickGamePhoto.mockResolvedValue({ uri: "file:///p1.jpg" });
+      mockUploadPhoto.mockReturnValue(new Promise((res) => { resolveUpload = res; }));
+      act(() => mockSocket.fire("waiting-photo", { round: 1, duration: 15_000 }));
+      act(() => mockSocket.fire("your-turn", { round: 1, attempt: 1 }));
+      await flush();
+      act(() => mockSocket.fire(event, payload));
+      mockSocket.emitted = []; // only what the late upload does matters (game-state answers with im-ready)
+      await act(async () => { resolveUpload("/temp/" + "e".repeat(32) + ".jpg"); });
+      await flush();
+      expect(mockSocket.emitted).toEqual([]);
+      if (has(r.root, TEST_IDS.waitingPhotoText)) {
+        expect(textOf(r.root, TEST_IDS.waitingPhotoText)).toBe(en.someoneChoosingPhoto);
+      }
+    });
+  });
+
+  it("a pause keeps showing 'uploading your photo' while my upload goes on", async () => {
+    mockPickGamePhoto.mockResolvedValue({ uri: "file:///p1.jpg" });
+    mockUploadPhoto.mockReturnValue(new Promise(() => {}));
+    act(() => mockSocket.fire("waiting-photo", { round: 1, duration: 15_000 }));
+    act(() => mockSocket.fire("your-turn", { round: 1, attempt: 1 }));
+    await flush();
+    act(() => mockSocket.fire("game-paused", { duration: 300_000, waitingFor: ["carol"], pause: 1, maxPauses: 3 }));
+    expect(textOf(r.root, TEST_IDS.waitingPhotoText)).toBe(en.uploadingYourPhoto);
+  });
+
+  it("an upload failing for good during a pause reports nothing (the resume's your-turn asks again)", async () => {
+    mockPickGamePhoto.mockResolvedValue({ uri: "file:///p1.jpg" });
+    mockUploadPhoto.mockRejectedValue(new Error("Upload failed: 500"));
+    act(() => mockSocket.fire("waiting-photo", { round: 1, duration: 15_000 }));
+    act(() => mockSocket.fire("your-turn", { round: 1, attempt: 1 }));
+    await flush();
+    act(() => mockSocket.fire("game-paused", { duration: 300_000, waitingFor: ["carol"], pause: 1, maxPauses: 3 }));
+    await act(async () => { jest.advanceTimersByTime(1_000); });
+    await flush();
+    await act(async () => { jest.advanceTimersByTime(2_000); });
+    await flush();
+    expect(mockUploadPhoto).toHaveBeenCalledTimes(3);
+    expect(mockSocket.emitted).toEqual([]);
+  });
+
   it("a rejoin snapshot in waiting-photo shows the waiting screen with the remaining wait", () => {
     act(() => mockSocket.fire("game-state", {
       started: true, phase: "waiting-photo", round: 2, totalRounds: 10, isOwner: false, photo: null, correctAnswer: null,

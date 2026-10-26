@@ -44,10 +44,10 @@ const OwnPhotos = () => {
 
     checkPermissions();
 
-    // Add hardware back button handler
+    // Hardware back returns to the same home the explorer was opened from (see handleClose)
     const backHandler = BackHandler.addEventListener("hardwareBackPress", () => {
-      router.replace("/");
-      return true; // Prevents default back button behavior
+      handleClose();
+      return true;
     });
 
     return () => {
@@ -69,8 +69,10 @@ const OwnPhotos = () => {
     }
   };
 
+  // Pop back to the home underneath (replace would stack a second home over it); home if there is none (deep link)
   const handleClose = () => {
-    router.replace("/");
+    if (router.canGoBack()) router.back();
+    else router.replace("/");
   };
 
   const handleLongPress = () => {

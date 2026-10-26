@@ -1,0 +1,112 @@
+# EXP-243: leaving the photo explorer returns to the same home it was opened from, with all its elements back.
+# Before the fix it stacked a second home, so a second back showed the original one with only the background and the
+# language flag. Now a back on the home itself keeps its default (Android leaves the app).
+# No server or bots needed:
+#   ~/.maestro/bin/maestro --device <id> test qa/maestro/own-photos-back.yaml -e METRO_URL=<url-encoded>
+# env: METRO_URL (url-encoded)
+# Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
+appId: com.socketNull.ExposeMe
+---
+- runFlow: open-app.yaml
+# Close button (both platforms): back to a home with every element visible, and it can be opened again.
+# assertVisible ignores opacity on Android, so these steps can't tell animated-out elements from shown ones: that
+# restoration is covered by Client/__tests__/homeOwnPhotosReturn.test.tsx. The flow checks the navigation (one home,
+# alive and interactive) and that the second Android back leaves the app.
+- tapOn:
+    id: "own-photos-button"
+- extendedWaitUntil:
+    visible:
+      id: "close-button"
+    timeout: 10000
+- tapOn:
+    id: "close-button"
+- extendedWaitUntil:
+    visible:
+      id: "create-game-button"
+    timeout: 10000
+- assertVisible:
+    id: "join-game-button"
+- assertVisible:
+    id: "username-input"
+- assertVisible:
+    id: "own-photos-button"
+- takeScreenshot: own-photos-back-close
+- tapOn:
+    id: "own-photos-button"
+- extendedWaitUntil:
+    visible:
+      id: "close-button"
+    timeout: 10000
+- tapOn:
+    id: "close-button"
+- extendedWaitUntil:
+    visible:
+      id: "create-game-button"
+    timeout: 10000
+- assertVisible:
+    id: "own-photos-button"
+# Home is alive (not a stale screen left over under a second home): Join game swaps in the room-code field
+- tapOn:
+    id: "join-game-button"
+- extendedWaitUntil:
+    visible:
+      id: "game-code-input"
+    timeout: 5000
+# Cancel the join to get the normal home back: hardware back on Android (first press may only close the keyboard),
+# tapping outside the field on iOS (left side, clear of the centred dice button)
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - repeat:
+          while:
+            notVisible:
+              id: "create-game-button"
+          times: 3
+          commands:
+            - pressKey: Back
+            - waitForAnimationToEnd:
+                timeout: 2000
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      # The room-code field doesn't auto-focus, so no keyboard is in the way
+      - tapOn:
+          point: "20%,80%"
+- extendedWaitUntil:
+    visible:
+      id: "create-game-button"
+    timeout: 10000
+# Android hardware back: first back returns home with its elements; second back leaves the app (never a home with
+# only the background and the language flag left)
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - tapOn:
+          id: "own-photos-button"
+      - extendedWaitUntil:
+          visible:
+            id: "close-button"
+          timeout: 10000
+      - pressKey: Back
+      - extendedWaitUntil:
+          visible:
+            id: "create-game-button"
+          timeout: 10000
+      - assertVisible:
+          id: "join-game-button"
+      - assertVisible:
+          id: "own-photos-button"
+      - takeScreenshot: own-photos-back-hardware
+      - pressKey: Back
+      - waitForAnimationToEnd:
+          timeout: 3000
+      # The app went to the background: neither the menu buttons nor the language flag are on screen
+      - assertNotVisible:
+          id: "language-toggle"
+      - assertNotVisible:
+          id: "create-game-button"
+      - assertNotVisible:
+          id: "close-button"

@@ -28,6 +28,7 @@ import { useFonts } from "expo-font";
 import * as SplashScreen from "expo-splash-screen";
 import { useBackgroundContext } from "./providers/BackgroundContext";
 import { useGalleryAccessGuard } from "@/app/hooks/useGalleryAccessGuard";
+import { useExitAnimationNavigation } from "@/app/hooks/useExitAnimationNavigation";
 import GalleryAccessModal from "@/app/components/modals/GalleryAccessModal";
 import { Ionicons } from "@expo/vector-icons";
 import { useI18n } from "./i18n";
@@ -294,18 +295,15 @@ const Index = () => {
     router.push("/screens/WaitingRoom");
   };
 
-  // Manejar la navegación a otra pantalla con animación
-  const NavigateOwnPhotos = (path: string) => {
-    (buttonRef.current as any)?.slideOutDownFar?.(500);
-    (textRef.current as any)?.slideOutDownFar?.(500);
-    (usernameInputRef.current as any)?.fadeOut(500);
-    (createGameButtonRef.current as any)?.fadeOut(500);
-    (JoingameButtonRef.current as any)?.fadeOut(500);
-    (topLogoRef.current as any)?.slideOutUpFar(500);
-    setTimeout(() => {
-      router.push(path as any);
-    }, 500);
-  };
+  // Leave for the photo explorer with an exit animation; the elements come back when home is focused again
+  const navigateWithExit = useExitAnimationNavigation([
+    { ref: buttonRef, exit: "slideOutDownFar", enter: "slideInUp" },
+    { ref: textRef, exit: "slideOutDownFar", enter: "slideInUp" },
+    { ref: usernameInputRef, exit: "fadeOut", enter: "fadeIn" },
+    { ref: createGameButtonRef, exit: "fadeOut", enter: "fadeIn" },
+    { ref: JoingameButtonRef, exit: "fadeOut", enter: "fadeIn" },
+    { ref: topLogoRef, exit: "slideOutUpFar", enter: "slideInDownFar" },
+  ]);
 
   // Manejar la acción de cancelar unirse a un juego
   const handleCancelJoinGame = () => {
@@ -509,7 +507,7 @@ const Index = () => {
         </View>
         {/* Botón para navegar a la pantalla de fotos propias */}
         <Animatable.View ref={buttonRef} animation="slideInUp" duration={600} style={tw`absolute bottom-22 items-center`}>
-          <TouchableOpacity testID={TEST_IDS.ownPhotosButton} style={tw`bg-white/50 p-3  rounded-3xl`} onPress={() => NavigateOwnPhotos("/screens/OwnPhotos")}>
+          <TouchableOpacity testID={TEST_IDS.ownPhotosButton} style={tw`bg-white/50 p-3  rounded-3xl`} onPress={() => navigateWithExit("/screens/OwnPhotos")}>
             <Ionicons name="dice" size={44} color="white" />
           </TouchableOpacity>
         </Animatable.View>

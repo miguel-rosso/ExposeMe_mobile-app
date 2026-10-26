@@ -108,6 +108,8 @@ grep -q "device render skew" <<<"$out" && grep -q '"answering"' <<<"$out" \
 # Flags: the lab server records telemetry, Metro builds QA clients (bg_start/curl stubbed: nothing is started)
 bg_start() { echo "$*" >"$TMP/bg_start.args"; }
 curl() { echo "packager-status:running"; }
+port_listeners() { :; }   # the real :8081/:3101 (a running lab Metro) must not trip the port-in-use guard
+bg_pid_is() { kill -0 "$1" 2>/dev/null; }   # stand-in pids (this shell) are not real lab processes
 cmd_server --port 3101 >/dev/null 2>&1
 grep -q "QA_TELEMETRY=1 QA_TELEMETRY_FILE=$RUNS/telemetry-3101.jsonl" "$TMP/bg_start.args" \
   && ok "server runs with QA_TELEMETRY and its file" || ko "server runs with QA_TELEMETRY and its file" "$(cat "$TMP/bg_start.args")"

@@ -7,8 +7,10 @@
 #   setup                       One-time: install Maestro, create AVDs, npm deps for qa/
 #   up [--ios N] [--android N]  Boot devices (default 2+2), grant perms, adb reverse, write devices.json
 #   down                        Shut down all lab devices and background processes
-#   status                      Show devices, server, metro
-#   server [--restart] [--port N] [--stop]  Local Server on :3000 (log: qa/runs/server.log); --port for a worktree's own server
+#   status                      Show devices, every lab server by port (this checkout and its git worktrees), metro
+#   server [--restart] [--port N] [--stop --port N]  Local Server on :3000 (log: qa/runs/server.log); --port for a
+#                               worktree's own server. Stop/restart only touch the server this checkout started on that
+#                               port (its pidfile), never another checkout's: --stop needs an explicit --port
 #                               QA render telemetry on: qa-ack lines in qa/runs/telemetry.jsonl (telemetry-<port>.jsonl)
 #   metro  [--restart]          Start Metro with EXPO_PUBLIC_SERVER_URL=http://localhost:3000 and EXPO_PUBLIC_QA=1
 #   photos [N] [--reset]        Seed N labelled photos per device gallery (default 12); idempotent: replaces the
@@ -59,32 +61,50 @@ die() { printf '\033[1;31m[lab] %s\033[0m\n' "$*" >&2; exit 1; }
 warn() { printf '\033[1;33m[lab] %s\033[0m\n' "$*" >&2; }
 run_id() { echo "${RUN_ID:-$(date +%Y%m%d-%H%M%S)}"; }
 # ── Toolchain checks (sourceable: qa/lab/tests/lab-functions.test.sh) ──
-# Client commands (Metro, native builds) must run on the Node major pinned in Client/.nvmrc.
-# Uses the default node when it matches, else the newest matching nvm/Homebrew install;
-# fails loudly (non-zero + message on stderr) when none is found.
-client_node_major() { # prints the major version pinned in Client/.nvmrc ("24", "v24.3.0" → 24)
+# Client commands (Metro, native builds) must run on the Node major pinned in Client/.nvmrc, and on Expo's own
+# major at least EXPO_NODE_MIN (Expo SDK 58 rejects older 24.x). Uses the default node when it fits, else the
+# newest fitting nvm/Homebrew install; fails loudly (non-zero + message on stderr) when none is found.
+EXPO_NODE_MIN=24.3.0
+nvmrc_version() { # prints Client/.nvmrc without spaces or a leading "v" ("v24.3.0" → 24.3.0)
   local f="$ROOT/Client/.nvmrc" v
   [ -f "$f" ] || { echo "[lab] missing $f" >&2; return 1; }
-  v="$(tr -d ' \r\n' <"$f")"; v="${v#v}"; v="${v%%.*}"
-  [[ "$v" =~ ^[0-9]+$ ]] || { echo "[lab] cannot parse a Node major from $f ('$(cat "$f")')" >&2; return 1; }
+  v="$(tr -d ' \r\n' <"$f")"; echo "${v#v}"
+}
+client_node_major() { # prints the major version pinned in Client/.nvmrc ("24", "v24.3.0" → 24)
+  local v; v="$(nvmrc_version)" || return 1; v="${v%%.*}"
+  [[ "$v" =~ ^[0-9]+$ ]] || { echo "[lab] cannot parse a Node major from $ROOT/Client/.nvmrc ('$(cat "$ROOT/Client/.nvmrc")')" >&2; return 1; }
   echo "$v"
 }
+version_ge() { [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1)" = "$2" ]; } # a, b: exit 0 when a >= b
+client_node_min() { # prints the oldest Node the Client accepts: Client/.nvmrc ("24" → 24.0.0), raised to EXPO_NODE_MIN
+  local major min
+  major="$(client_node_major)" || return 1
+  min="$(nvmrc_version)"
+  [[ "$min" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]] || min=$major
+  until [[ "$min" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; do min="$min.0"; done
+  # Expo's floor only applies on its own major: a future .nvmrc major brings its own minimum
+  if [ "${EXPO_NODE_MIN%%.*}" = "$major" ] && ! version_ge "$min" "$EXPO_NODE_MIN"; then min=$EXPO_NODE_MIN; fi
+  echo "$min"
+}
+node_fits() { [ "${1%%.*}" = "$2" ] && version_ge "$1" "$3"; } # version, major, min: on that major and >= min
 client_path() {
-  local want cur bin
+  local want min cur bin p candidates=()
   want="$(client_node_major)" || return 1
-  cur="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
-  [ "$cur" = "$want" ] && { echo "$PATH"; return 0; }
-  bin="$(ls -d "${NVM_DIR:-$HOME/.nvm}"/versions/node/v"$want".*/bin 2>/dev/null | sort -V | tail -1)"
-  # LAB_BREW_PREFIXES: space-separated Homebrew prefixes to search (overridable for tests)
-  [ -n "$bin" ] || for p in ${LAB_BREW_PREFIXES:-${HOMEBREW_PREFIX:-/opt/homebrew} /usr/local}; do
-    [ -x "$p/opt/node@$want/bin/node" ] && { bin="$p/opt/node@$want/bin"; break; }
+  min="$(client_node_min)" || return 1
+  cur="$(node -p 'process.versions.node' 2>/dev/null || echo none)"
+  node_fits "$cur" "$want" "$min" && { echo "$PATH"; return 0; }
+  # Newest nvm install of the major first, then Homebrew's node@<major>
+  # (LAB_BREW_PREFIXES: space-separated Homebrew prefixes to search, overridable for tests)
+  while IFS= read -r bin; do candidates+=("$bin"); done \
+    < <(ls -d "${NVM_DIR:-$HOME/.nvm}"/versions/node/v"$want".*/bin 2>/dev/null | sort -rV)
+  for p in ${LAB_BREW_PREFIXES:-${HOMEBREW_PREFIX:-/opt/homebrew} /usr/local}; do candidates+=("$p/opt/node@$want/bin"); done
+  for bin in "${candidates[@]}"; do
+    [ -x "$bin/node" ] && node_fits "$("$bin/node" -p 'process.versions.node' 2>/dev/null)" "$want" "$min" \
+      && { echo "$bin:$PATH"; return 0; }
   done
-  if [ -z "$bin" ] || [ ! -x "$bin/node" ]; then
-    printf '\033[1;31m[lab] Client needs Node %s (Client/.nvmrc) but found node %s and no v%s install in nvm or Homebrew. Run: nvm install %s\033[0m\n' \
-      "$want" "$cur" "$want" "$want" >&2
-    return 1
-  fi
-  echo "$bin:$PATH"
+  printf '\033[1;31m[lab] Client needs Node %s >= %s (Client/.nvmrc, Expo SDK 58) but found node %s and no such install in nvm or Homebrew. Run: nvm install %s\033[0m\n' \
+    "$want" "$min" "$cur" "$want" >&2
+  return 1
 }
 # Pods need `pod install` when missing, when Podfile.lock and Pods/Manifest.lock differ, or when the
 # Podfile or the npm deps changed after the last install (autolinking only picks up new native
@@ -198,7 +218,11 @@ cmd_down() {
   log "Lab down"
 }
 
-bg_running() { [ -f "$STATE/$1.pid" ] && kill -0 "$(cat "$STATE/$1.pid")" 2>/dev/null; } # name
+bg_command_of() { case $1 in metro) echo "expo start";; *) echo "ts-node server.ts";; esac; } # name: what it runs
+bg_pid_is() { # pid, name: exit 0 when that pid is alive and runs that lab process (a pidfile's pid may be reused)
+  [ -n "$1" ] && [[ "$(ps -o command= -p "$1" 2>/dev/null)" == *"$(bg_command_of "$2")"* ]]
+}
+bg_running() { [ -f "$STATE/$1.pid" ] && bg_pid_is "$(cat "$STATE/$1.pid")" "$1"; } # name
 bg_start() { # name, logfile, cwd, cmd...
   local name=$1 logf=$2 cwd=$3; shift 3
   if bg_running "$name"; then log "$name already running"; return 0; fi
@@ -206,24 +230,54 @@ bg_start() { # name, logfile, cwd, cmd...
   echo $! >"$STATE/$name.pid"
   log "$name started (pid $!, log $logf)"
 }
+# ── Stopping background processes (sourceable: qa/lab/tests/lab-server.test.sh) ──
+# Only ever through this checkout's pidfile, never by port or by name: the port may belong to another checkout's lab
+# (the shared :3000 seen from a git worktree) or to another agent's server (EXP-067)
+BG_STOP_GRACE_TICKS=25   # x 0.2 s: how long the stopped processes get to exit before SIGKILL
+process_tree() { # pid: prints the pid and all its descendants (npx → node, expo → metro workers...)
+  local child; for child in $(pgrep -P "$1" 2>/dev/null); do process_tree "$child"; done; echo "$1"
+}
+port_listeners() { { lsof -ti "tcp:$1" -sTCP:LISTEN 2>/dev/null || true; } | tr '\n' ' ' | sed 's/ $//'; } # port: pids listening on it
 bg_stop() { # name, port
-  if [ -f "$STATE/$1.pid" ]; then
-    local pid; pid="$(cat "$STATE/$1.pid")"
-    pkill -P "$pid" 2>/dev/null || true; kill "$pid" 2>/dev/null || true; rm -f "$STATE/$1.pid"
+  local pidfile="$STATE/$1.pid" pid pids others
+  if [ -f "$pidfile" ]; then
+    pid="$(cat "$pidfile")"
+    if bg_pid_is "$pid" "$1"; then
+      pids="$(process_tree "$pid" | tr '\n' ' ')"
+      kill $pids 2>/dev/null || true
+      for _ in $(seq 1 $BG_STOP_GRACE_TICKS); do kill -0 $pids 2>/dev/null || break; sleep 0.2; done
+      kill -9 $pids 2>/dev/null || true
+    else
+      warn "stale $1 pidfile: pid $pid is gone or no longer runs '$(bg_command_of "$1")', removed without killing it"
+    fi
+    rm -f "$pidfile"
   fi
-  lsof -ti "tcp:$2" -sTCP:LISTEN 2>/dev/null | xargs kill 2>/dev/null || true
-  sleep 1; return 0
+  others="$(port_listeners "$2")"
+  [ -z "$others" ] || warn "port :$2 is still in use by pid(s) $others, which this lab checkout didn't start" \
+    "(another checkout's lab server?): left running"
+  return 0
+}
+in_linked_worktree() { [ -f "$ROOT/.git" ]; } # a linked git worktree has a .git file, the main checkout a .git dir
+ensure_port_free() { # port, hint for a worktree: dies when something this checkout didn't start listens on the port
+  local others; others="$(port_listeners "$1")"
+  [ -n "$others" ] || return 0
+  in_linked_worktree && die "port :$1 is already in use by pid(s) $others, which this worktree didn't start" \
+    "(the main checkout's lab?). $2"
+  die "port :$1 is already in use by pid(s) $others, which this lab checkout didn't start. Check it: ps -p ${others// /,};" \
+    "if it is an orphaned lab process (its pidfile was lost), stop it by hand (kill $others) and run this again"
 }
 
 cmd_server() {
   # --port N runs a separate server (e.g. from a git worktree, for parallel fixers); --stop stops it
-  local port=$SERVER_PORT restart=0 stop=0
+  local port=$SERVER_PORT port_given=0 restart=0 stop=0 others
   while [ $# -gt 0 ]; do case $1 in
-    --restart) restart=1; shift;; --stop) stop=1; shift;; --port) port=$2; shift 2;; *) die "bad arg $1";; esac; done
+    --restart) restart=1; shift;; --stop) stop=1; shift;; --port) port=$2; port_given=1; shift 2;; *) die "bad arg $1";; esac; done
+  [ $stop = 1 ] && [ $port_given = 0 ] && die "server --stop needs the port it stops: --port N (--port $SERVER_PORT for the shared lab server)"
   local name=server logf="$RUNS/server.log" telemetry; telemetry="$(telemetry_file "$port")"
   [ "$port" != "$SERVER_PORT" ] && { name="server-$port"; logf="$RUNS/server-$port.log"; }
   if [ $stop = 1 ]; then bg_stop "$name" "$port"; log "$name stopped"; return 0; fi
   [ $restart = 1 ] && bg_stop "$name" "$port"
+  bg_running "$name" || ensure_port_free "$port" "Run your own: server --port N"
   # Bots/load tests: lift the per-player and per-room /upload rate limits, the /upload in-flight caps (including the
   # per-IP cap of a busy server) and the per-IP socket limits (every bot shares one IP) (override with
   # UPLOAD_PLAYER_RATE_MAX=... / UPLOAD_ROOM_RATE_MAX=... /
@@ -249,6 +303,8 @@ cmd_server() {
 
 cmd_metro() {
   [ "${1:-}" = --restart ] && bg_stop metro $METRO_PORT
+  # A Metro this checkout didn't start (e.g. without EXPO_PUBLIC_QA) would otherwise pass as "metro ready"
+  bg_running metro || ensure_port_free "$METRO_PORT" "Metro is shared: run it from the main checkout"
   local cpath; cpath="$(client_path)" || exit 1
   bg_start metro "$RUNS/metro.log" "$ROOT/Client" env PATH="$cpath" EXPO_PUBLIC_SERVER_URL="http://localhost:$SERVER_PORT" \
     EXPO_PUBLIC_QA=1 npx expo start --dev-client --port $METRO_PORT
@@ -691,11 +747,35 @@ cmd_play() {
   [ $fail = 0 ] && log "RUN $RUN_ID PASS ($dir)" || { log "RUN $RUN_ID had failures ($dir)"; exit 1; }
 }
 
-cmd_status() {
-  log "devices:"; [ -f "$DEVICES_JSON" ] && jq -r '.[] | "  \(.label)\t\(.id)\t\(.model)"' "$DEVICES_JSON" || echo "  (none — run up)"
-  for s in server metro; do
-    if [ -f "$STATE/$s.pid" ] && kill -0 "$(cat "$STATE/$s.pid")" 2>/dev/null; then log "$s: running"; else log "$s: stopped"; fi
+# ── Status (sourceable: qa/lab/tests/lab-server.test.sh) ──
+lab_state_dirs() { # this checkout's lab state dir, then the other git worktrees' (one path per line)
+  local here wt
+  echo "$STATE"
+  here="$(cd "$ROOT" && pwd -P)"
+  git -C "$ROOT" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p' | while IFS= read -r wt; do
+    [ "$(cd "$wt" 2>/dev/null && pwd -P)" = "$here" ] || echo "$wt/qa/runs/.lab"
   done
+}
+server_port_of() { case $1 in server) echo "$SERVER_PORT";; *) echo "${1#server-}";; esac; } # pidfile name: its port
+servers_status() { # one line per lab server pidfile (server.pid, server-<port>.pid) of every lab state dir, by port
+  local dir f name pid state where
+  lab_state_dirs | while IFS= read -r dir; do
+    for f in "$dir"/server.pid "$dir"/server-*.pid; do
+      [ -f "$f" ] || continue
+      name="$(basename "$f" .pid)"; pid="$(cat "$f")"; where=""
+      [ "$dir" = "$STATE" ] || where="  (${dir%/qa/runs/.lab})"
+      if bg_pid_is "$pid" "$name"; then state="running (pid $pid)"; else state="stopped (stale pidfile)"; fi
+      printf '  :%s\t%s%s\n' "$(server_port_of "$name")" "$state" "$where"
+    done
+  done
+}
+
+cmd_status() {
+  local servers
+  log "devices:"; [ -f "$DEVICES_JSON" ] && jq -r '.[] | "  \(.label)\t\(.id)\t\(.model)"' "$DEVICES_JSON" || echo "  (none — run up)"
+  log "lab servers by port (this checkout first, then its git worktrees):"
+  servers="$(servers_status)"; echo "${servers:-  (none)}"
+  if bg_running metro; then log "metro: running"; else log "metro: stopped"; fi
 }
 
 # Sourced (tests): define functions only

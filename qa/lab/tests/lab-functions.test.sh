@@ -15,8 +15,8 @@ set +e
 
 # ── Fake environment ──
 REAL_PATH="$PATH"
-fake_node() { # dir, version: a `node` stub answering `node -p ...` with the major of version
-  mkdir -p "$1"; printf '#!/bin/sh\necho %s\n' "${2%%.*}" >"$1/node"; chmod +x "$1/node"
+fake_node() { # dir, version: a `node` stub answering `node -p process.versions.node` (or anything) with version
+  mkdir -p "$1"; printf '#!/bin/sh\necho %s\n' "$2" >"$1/node"; chmod +x "$1/node"
 }
 ROOT="$TMP/repo"; mkdir -p "$ROOT/Client"
 # Only fake install locations are searched, so results don't depend on this machine
@@ -59,6 +59,40 @@ err="$(client_path 2>&1 >/dev/null)"; rc=$?
   && ok "no Node 24 anywhere -> non-zero + clear message" || ko "no Node 24 anywhere -> fails loudly" "rc=$rc err=$err"
 # Old behaviour silently accepted v22 here; make sure it is not picked
 [[ "$(client_path 2>/dev/null)" != *v22* ]] && ok "does not settle for v22" || ko "does not settle for v22"
+PATH="$REAL_PATH"
+
+# ── client_node_min / client_path: Expo SDK 58 needs Node >= 24.3 even though .nvmrc only pins 24 (EXP-087) ──
+[ "$(client_node_min)" = 24.3.0 ] && ok "nvmrc '24' -> minimum raised to Expo's 24.3.0" || ko "nvmrc '24' -> 24.3.0" "$(client_node_min)"
+echo 24.5 >"$ROOT/Client/.nvmrc"
+[ "$(client_node_min)" = 24.5.0 ] && ok "nvmrc '24.5' -> minimum 24.5.0 (above Expo's)" || ko "nvmrc '24.5' -> 24.5.0" "$(client_node_min)"
+echo v24.1.0 >"$ROOT/Client/.nvmrc"
+[ "$(client_node_min)" = 24.3.0 ] && ok "nvmrc 'v24.1.0' -> still Expo's 24.3.0" || ko "nvmrc 'v24.1.0' -> 24.3.0" "$(client_node_min)"
+echo 26 >"$ROOT/Client/.nvmrc"
+[ "$(client_node_min)" = 26.0.0 ] && ok "nvmrc '26' -> 26.0.0 (Expo's 24.x floor doesn't apply)" || ko "nvmrc '26' -> 26.0.0" "$(client_node_min)"
+echo 24 >"$ROOT/Client/.nvmrc"
+version_ge 24.10.0 24.3.0 && ok "version_ge compares numerically (24.10 >= 24.3)" || ko "version_ge 24.10.0 24.3.0"
+version_ge 24.2.9 24.3.0 && ko "version_ge 24.2.9 < 24.3.0" || ok "version_ge 24.2.9 < 24.3.0"
+
+fake_node "$TMP/sys2420" 24.2.0
+for v in 24.1.0 24.2.1 24.3.0 24.6.0; do fake_node "$NVM_DIR/versions/node/v$v/bin" "$v"; done
+PATH="$TMP/sys2420:$REAL_PATH"
+out="$(client_path 2>/dev/null)"; rc=$?
+[ $rc = 0 ] && [ "${out%%:*}" = "$NVM_DIR/versions/node/v24.6.0/bin" ] \
+  && ok "default node 24.2.0 (too old for Expo) -> newest nvm 24.x >= 24.3" || ko "default 24.2.0 -> nvm 24.6.0" "rc=$rc out=${out%%:*}"
+fake_node "$TMP/sys2430" 24.3.0
+PATH="$TMP/sys2430:$REAL_PATH"
+[ "$(client_path 2>/dev/null)" = "$PATH" ] && ok "default node exactly 24.3.0 -> PATH unchanged" || ko "default 24.3.0 accepted"
+PATH="$TMP/sys2420:$REAL_PATH"
+rm -rf "$NVM_DIR/versions/node/v24.3.0" "$NVM_DIR/versions/node/v24.6.0"
+fake_node "$TMP/brew/opt/node@24/bin" 24.2.5    # 1st Homebrew prefix too old: skipped for the 2nd one
+fake_node "$TMP/usrlocal/opt/node@24/bin" 24.4.0
+out="$(client_path 2>/dev/null)"
+[ "${out%%:*}" = "$TMP/usrlocal/opt/node@24/bin" ] && ok "too-old nvm and Homebrew 24.x skipped for one >= 24.3" || ko "skips too-old installs" "${out%%:*}"
+rm -rf "$TMP/usrlocal"
+err="$(client_path 2>&1 >/dev/null)"; rc=$?
+[ $rc != 0 ] && [[ "$err" == *"needs Node 24 >= 24.3.0"* ]] && [[ "$err" == *"found node 24.2.0"* ]] \
+  && ok "only Node 24.x < 24.3 installed -> non-zero, names the minimum and the node found" || ko "only too-old 24.x -> fails loudly" "rc=$rc err=$err"
+rm -rf "$TMP/brew" "$NVM_DIR/versions/node"/v24.*
 PATH="$REAL_PATH"
 
 # ── pods_stale ──
@@ -170,7 +204,7 @@ run_build android
   && [ "$(cat "$TMP/builds.log")" = "$(printf 'build_android\ninstall')" ] \
   && ok "build android without a lab prebuild -> warns with the command, still builds" || ko "build: unknown prebuild warns" "rc=$rc $out"
 run_build android --prebuild
-[ $rc = 0 ] && [ "$(cat "$TMP/npx.log")" = "$ROOT/Client CI=1 node=24 expo prebuild --no-install --platform android" ] \
+[ $rc = 0 ] && [ "$(cat "$TMP/npx.log")" = "$ROOT/Client CI=1 node=24.18.0 expo prebuild --no-install --platform android" ] \
   && [ "$(cat "$TMP/builds.log")" = "$(printf 'build_android\ninstall')" ] \
   && ok "build android --prebuild -> CI=1 expo prebuild --no-install on the Client's Node, then builds" || ko "build --prebuild runs prebuild" "rc=$rc $out $(cat "$TMP/npx.log" 2>/dev/null)"
 run_build android
@@ -179,7 +213,7 @@ echo '{"expo":{"name":"ExposeMe","version":"3"}}' >"$ROOT/Client/app.json"
 run_build android
 grep -q "Client/android may be out of date" <<<"$out" && ok "app.json changed after the prebuild -> warns" || ko "app.json changed -> warns" "$out"
 run_build --prebuild
-[ "$(cat "$TMP/npx.log" 2>/dev/null)" = "$ROOT/Client CI=1 node=24 expo prebuild --no-install --platform all" ] \
+[ "$(cat "$TMP/npx.log" 2>/dev/null)" = "$ROOT/Client CI=1 node=24.18.0 expo prebuild --no-install --platform all" ] \
   && ! prebuild_stale ios && ! prebuild_stale android && [ "$(cat "$TMP/builds.log")" = "$(printf 'build_ios\nbuild_android\ninstall')" ] \
   && ok "build --prebuild (all) -> one prebuild for both platforms, both recorded" || ko "build --prebuild all" "$out"
 rm -rf "$ROOT/Client/ios"

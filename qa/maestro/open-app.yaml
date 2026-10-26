@@ -71,15 +71,7 @@ appId: com.socketNull.ExposeMe
       visible:
         id: "initial-screen"
     commands:
-      # The dev client's floating dev-menu button sits on top of the language toggle (top right) and a tap
-      # there opens the dev menu instead: drag the button away first (it snaps to the screen edge lower down)
-      - swipe:
-          from:
-            id: "language-toggle"
-          direction: DOWN
-          duration: 800
-      - waitForAnimationToEnd:
-          timeout: 2000
+      # The dev client's floating Tools button is hidden by the app on launch (EXP-200), so the toggle is tappable
       # EXP-122: the onboarding offers the language toggle. Tap it twice (net no change, so later
       # flows keep the device language) and check the warning header switches language each time.
       - runFlow:

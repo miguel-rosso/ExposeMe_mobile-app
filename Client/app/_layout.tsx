@@ -10,8 +10,10 @@ import { PhotoProvider } from "@/app/providers/PhotoContext";
 import { GameProvider } from "./providers/GameContext";
 import { BackgroundProvider } from "./providers/BackgroundContext";
 import { I18nProvider } from "./i18n";
+import { hideDevToolsButton } from "./utils/devToolsButton";
 
 SplashScreen.preventAutoHideAsync();
+hideDevToolsButton();
 
 export default function RootLayout() {
   const [loaded] = useFonts({
@@ -23,6 +25,11 @@ export default function RootLayout() {
       SplashScreen.hideAsync();
     }
   }, [loaded]);
+
+  // Retry after the first render: the dev menu may not have been ready at module load
+  useEffect(() => {
+    hideDevToolsButton();
+  }, []);
 
   useEffect(() => {
     (async () => {

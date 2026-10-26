@@ -864,14 +864,9 @@ dash.calc("by_type", {
       (v) => !!issueSev && issueSev.includes(v),
       (v) => { const cur = issueSev || []; const next = cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v]; issueSev = next.length ? next : null; },
       (v) => `g-sev-${v}`);
-    // No type chips: a type filter only comes from clicking the chart, shown as a removable chip
-    if (issueType) {
-      const t = el("button", "qa-chip qa-x", `${issueType} ✕`);
-      t.type = "button";
-      t.setAttribute("aria-label", `Quitar filtro ${issueType}`);
-      t.addEventListener("click", () => { issueType = null; drawIssues(); });
-      extra.appendChild(t);
-    }
+    // Type chips (also set by clicking the chart); single choice, like Área
+    group("Tipo", uniq((i) => i.type_es).map((v) => [v, v, count((i) => i.type_es, v)]),
+      (v) => issueType === v, (v) => { issueType = issueType === v ? null : v; });
     group("Área", uniq((i) => i.area_es).map((v) => [v, v, count((i) => i.area_es, v)]),
       (v) => issueArea === v, (v) => { issueArea = issueArea === v ? null : v; });
     if (issueSev) rows = rows.filter((i) => issueSev.includes(i.severity));

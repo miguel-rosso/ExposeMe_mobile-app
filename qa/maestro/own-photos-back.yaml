@@ -2,8 +2,8 @@
 # Before the fix it stacked a second home, so a second back showed the original one with only the background and the
 # language flag. Now a back on the home itself keeps its default (Android leaves the app).
 # No server or bots needed:
-#   ~/.maestro/bin/maestro --device <id> test qa/maestro/own-photos-back.yaml -e METRO_URL=<url-encoded>
-# env: METRO_URL (url-encoded)
+#   ~/.maestro/bin/maestro --device <id> test qa/maestro/own-photos-back.yaml -e USERNAME=<label> -e METRO_URL=<url-encoded>
+# env: USERNAME, METRO_URL (url-encoded)
 # Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
 appId: com.socketNull.ExposeMe
 ---
@@ -45,7 +45,22 @@ appId: com.socketNull.ExposeMe
     timeout: 10000
 - assertVisible:
     id: "own-photos-button"
-# Home is alive (not a stale screen left over under a second home): Join game swaps in the room-code field
+# Home is alive (not a stale screen left over under a second home): Join game swaps in the room-code field.
+# Join only opens the form with a username (an empty one just shakes the field), so type it first; submit with Enter
+# instead of hideKeyboard (see join-room.yaml) and retype once if the name was lost.
+- tapOn:
+    id: "username-input"
+- inputText: ${USERNAME}
+- runFlow:
+    when:
+      notVisible:
+        id: "username-input"
+        text: "${USERNAME}"
+    commands:
+      - tapOn:
+          id: "username-input"
+      - inputText: ${USERNAME}
+- pressKey: Enter
 - tapOn:
     id: "join-game-button"
 - extendedWaitUntil:

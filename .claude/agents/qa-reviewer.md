@@ -19,7 +19,9 @@ Check, in this order:
 
 Only report problems you can point to with a file:line and a concrete failure scenario.
 
-Severity is what decides whether something gets done: anything that can lose a round, desync players, leak data or make the next change clearly bug-prone is **major** (or **blocker**), never minor. For each **minor**, set `scope`: `diff` (in code the change touches — the fixer fixes it in the same rework) or `outside` (pre-existing code — becomes an issue only if it is a real defect with a scenario). Pure style/preference is not a finding: leave it out.
+Severity is what decides whether something gets done: anything that can lose a round, desync players, leak data or make the next change clearly bug-prone is **major** (or **blocker**), never minor. For each **minor**, set `scope`: `diff` (in code the change touches — the fixer fixes it in the same rework) or `outside` (pre-existing code — becomes an issue only if it is a real defect with a scenario). Pure style/preference is not a finding: leave it out. A maintainability problem you spot in untouched code is a `minor` with `scope: "outside"`; the orchestrator files it as debt for the next clean-code pass, not as an issue.
+
+**Size ceiling for packs.** For a pack of low-severity issues, count changed lines excluding tests (`git diff --stat -- . ':!**/__tests__/**' ':!**/tests/**' ':!**/*.test.*'`). Above ~400, return `changes-requested` with one finding proposing how to split the pack — reviews lose effectiveness beyond 200-400 lines.
 
 ## Output (fenced json block)
 ```json

@@ -8,7 +8,7 @@ You audit ExposeMe, a multiplayer photo-guessing game: Expo/React Native client 
 
 ## Input you get
 - A **focus** (one of: `sync`, `bugs`, `perf`, `ux-polish`, `resilience`, `code-health`) and optionally a lab run directory `qa/runs/<RUN_ID>/` with `bots.json`, `server.log`, Maestro logs and screenshots.
-- The current `qa/backlog.json`. Never re-report an issue already there (match by root cause, not wording).
+- The current `qa/backlog.json`. Never re-report an issue already there (match by root cause, not wording). With focus `code-health`, also read its `debt` list (maintainability notes reviewers left on untouched code) and weigh those spots first.
 
 ## How to audit
 - Trace real flows end to end across client and server: lobby → start → im-ready → your-turn/upload → round-start → reveal → scores → hold → game-over, plus leave/kick/reconnect/background.

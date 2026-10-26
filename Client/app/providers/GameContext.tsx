@@ -5,6 +5,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { GameContextProps, GameProviderProps, Player } from "@/app/models/interfaces";
 import getEnvVars from "@/config";
 import { uploadPhoto } from "@/app/utils/uploadPhoto";
+import { leaveAndClose } from "@/app/utils/leaveRoom";
 
 const { SERVER_URL } = getEnvVars();
 const REJOIN_TOKEN_KEY = "rejoinToken";
@@ -85,17 +86,32 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     setSocket(newSocket);
   };
 
+  /**
+   * Leaving the game flow (Exit, back home, kicked, room gone): the socket is no longer the app's and none of its
+   * listeners runs again. A planted photo is for one game only. Game over keeps the socket open; "Play again" drops
+   * the planted photo itself. Returns the detached socket (still open) for the caller to close.
+   */
+  const detachSocket = (): Socket | null => {
+    setPlantedPhotoUri(null);
+    const detached = socketRef.current;
+    detached?.removeAllListeners();
+    socketRef.current = null;
+    setSocket(null);
+    return detached;
+  };
+
   const endSocket = () => {
     console.log("Ending socket");
-    // Leaving the game flow (Exit, back home, kicked, room gone): a planted photo is for one game only. Game over
-    // keeps the socket open; "Play again" drops the planted photo itself.
-    setPlantedPhotoUri(null);
-    if (socketRef.current) {
-      socketRef.current.removeAllListeners();
-      socketRef.current.disconnect();
-      socketRef.current = null;
-    }
-    setSocket(null);
+    detachSocket()?.disconnect();
+  };
+
+  // Exit (and an invite link to another room): the server removes us and hands the host role over, and the rejoin
+  // token for this room is forgotten. The app moves on at once; the old socket closes once the server confirms.
+  const leaveRoom = () => {
+    console.log("Leaving room");
+    clearRejoinToken();
+    const leaving = detachSocket();
+    if (leaving) leaveAndClose(leaving);
   };
 
   // Handle app going to background/foreground
@@ -151,6 +167,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
         roundsOfGame,
         startSocket,
         endSocket,
+        leaveRoom,
         setGameCode,
         setUsername,
         setPlayersProvider,

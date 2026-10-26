@@ -43,7 +43,7 @@ class FakeSocket {
 const mockSocket = new FakeSocket();
 const mockReplace = jest.fn();
 const mockCtx = {
-  startSocket: jest.fn(), endSocket: jest.fn(), setGameCode: jest.fn(), setPlayersProvider: jest.fn(),
+  startSocket: jest.fn(), endSocket: jest.fn(), leaveRoom: jest.fn(), setGameCode: jest.fn(), setPlayersProvider: jest.fn(),
   setRoundsOfGame: jest.fn(), setPlantedPhotoUri: jest.fn(), plantPhoto: jest.fn(), saveRejoinToken: jest.fn(),
   getRejoinToken: jest.fn(async (..._a: unknown[]) => "tok-123" as string | null), clearRejoinToken: jest.fn(),
 };
@@ -234,16 +234,16 @@ describe("WaitingRoom: ways out (EXP-063)", () => {
     expect(mockCtx.clearRejoinToken).toHaveBeenCalledTimes(1);
     expect(mockCtx.endSocket).toHaveBeenCalledTimes(1);
     expect(mockReplace).toHaveBeenCalledWith({ pathname: "/", params: { message: KICKED_BY_HOST_MESSAGE } });
+    expect(mockCtx.leaveRoom).not.toHaveBeenCalled();
     expect(emitted("leave-room")).toHaveLength(0);
     act(() => r.unmount());
   });
 
-  it("the close button leaves the room, forgets the token, ends the socket and goes home", async () => {
+  it("the close button leaves the room (GameContext's leave, EXP-254) and goes home", async () => {
     const r = await mount([player("alice", true), player("bob")]);
     act(() => mockClose.onPress!());
-    expect(emitted("leave-room")).toHaveLength(1);
-    expect(mockCtx.clearRejoinToken).toHaveBeenCalledTimes(1);
-    expect(mockCtx.endSocket).toHaveBeenCalledTimes(1);
+    expect(mockCtx.leaveRoom).toHaveBeenCalledTimes(1);
+    expect(mockCtx.endSocket).not.toHaveBeenCalled(); // the leave closes the socket itself, once acked
     expect(mockReplace).toHaveBeenCalledWith("/");
     act(() => r.unmount());
   });

@@ -4,7 +4,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 // EXP-063: the session kept by GameContext. The rejoin token survives an app restart (AsyncStorage) and is only
 // handed out for the same room and username; the socket is reused while connected, replaced (old listeners
-// dropped) once it is dead, and endSocket closes it for good.
+// dropped) once it is dead, and endSocket closes it for good. leaveRoom (EXP-254) closes it only once the server acks
+// the leave-room.
 
 jest.mock("@react-native-async-storage/async-storage", () =>
   require("@react-native-async-storage/async-storage/jest/async-storage-mock")
@@ -17,6 +18,7 @@ const mockIo = jest.fn(() => { const s = makeSocket(); mockSockets.push(s); retu
 jest.mock("socket.io-client", () => ({ io: () => mockIo() }));
 
 import { GameProvider, useGameContext } from "../app/providers/GameContext";
+import { LEAVE_ACK_TIMEOUT_MS } from "../app/utils/leaveRoom";
 
 let ctx!: ReturnType<typeof useGameContext>;
 const Probe = () => { ctx = useGameContext(); return null; };
@@ -104,6 +106,60 @@ describe("GameContext socket lifecycle (EXP-063)", () => {
 
     act(() => ctx.startSocket()); // next game: a brand new socket
     expect(mockIo).toHaveBeenCalledTimes(3);
+    act(() => r.unmount());
+  });
+});
+
+describe("GameContext leaveRoom (EXP-254)", () => {
+  afterEach(() => jest.useRealTimers());
+
+  /** The ack callback sent with the socket's leave-room. */
+  const leaveAck = (socket: MockSocket): (() => void) => {
+    const call = socket.emit.mock.calls.find(([ev]: unknown[]) => ev === "leave-room");
+    expect(call).toBeDefined();
+    return call![1] as () => void;
+  };
+
+  it("sends leave-room, forgets the token and drops the socket at once, closing it only on the server's ack", async () => {
+    const r = mount();
+    act(() => ctx.saveRejoinToken("ABC123", "bob", "tok-1"));
+    act(() => ctx.startSocket());
+    const leaving = mockSockets[0];
+
+    act(() => ctx.leaveRoom());
+    expect(ctx.socket).toBeNull();
+    expect(leaving.removeAllListeners).toHaveBeenCalled();
+    await expect(ctx.getRejoinToken("ABC123", "bob")).resolves.toBeNull();
+    expect(leaving.disconnect).not.toHaveBeenCalled(); // closed in the same tick as the emit, the leave could be lost
+
+    act(() => ctx.startSocket()); // an invite link joins another room on a new socket meanwhile
+    expect(ctx.socket).toBe(mockSockets[1]);
+
+    leaveAck(leaving)();
+    expect(leaving.disconnect).toHaveBeenCalledTimes(1);
+    expect(mockSockets[1].disconnect).not.toHaveBeenCalled();
+    act(() => r.unmount());
+  });
+
+  it("closes the socket anyway when the ack doesn't come in time", () => {
+    jest.useFakeTimers();
+    const r = mount();
+    act(() => ctx.startSocket());
+    const leaving = mockSockets[0];
+    act(() => ctx.leaveRoom());
+    expect(leaving.emit).toHaveBeenCalledWith("leave-room", expect.any(Function));
+
+    act(() => { jest.advanceTimersByTime(LEAVE_ACK_TIMEOUT_MS); });
+    expect(leaving.disconnect).toHaveBeenCalledTimes(1);
+    act(() => r.unmount());
+  });
+
+  it("without a socket only forgets the token", async () => {
+    const r = mount();
+    act(() => ctx.saveRejoinToken("ABC123", "bob", "tok-1"));
+    act(() => ctx.leaveRoom());
+    await expect(ctx.getRejoinToken("ABC123", "bob")).resolves.toBeNull();
+    expect(mockIo).not.toHaveBeenCalled();
     act(() => r.unmount());
   });
 });

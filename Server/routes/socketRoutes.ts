@@ -314,12 +314,14 @@ io.on("connection", (socket: Socket) => {
     } catch (e) { console.error("disconnect error:", e); }
   });
 
-  // Explicit leave — player pressed the leave button
-  socket.on("leave-room", () => {
+  // Explicit leave — player pressed the leave button. Acked once handled: the app closes the socket only then, since
+  // an event that socket.io dispatches after the disconnect is dropped (the leave would look like a lost connection)
+  socket.on("leave-room", (ack?: unknown) => {
     try {
       if (!gameEvents.take("leave-room")) return;
       // A socket replaced by a rejoin only detaches itself; the live player stays
       leaveCurrentRoom(socket);
+      if (typeof ack === "function") ack();
     } catch (e) { console.error("leave-room error:", e); }
   });
 

@@ -154,6 +154,8 @@ export interface GameContextProps {
   setPlayersProvider: (players: Player[]) => void;
   startSocket: () => void;
   endSocket: () => void;
+  /** Leave the room for good: leave-room (socket closed once the server acks it), rejoin token forgotten */
+  leaveRoom: () => void;
   setRoundsOfGame: (rounds: number) => void;
   /** Photo picked to plant in this game (cleared when the game socket ends) */
   plantedPhotoUri: string | null;

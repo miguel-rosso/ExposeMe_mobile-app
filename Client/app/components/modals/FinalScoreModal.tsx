@@ -28,7 +28,7 @@ const BRONZE = "#D97706";
 const FinalScoreModal: React.FC<FinalScoreModalProps> = ({ visible, finalScore }) => {
   const { t } = useI18n();
   const navigation = useRouter();
-  const { socket, setRoundsOfGame, setPlayersProvider, endSocket, clearRejoinToken, setPlantedPhotoUri } = useGameContext();
+  const { setRoundsOfGame, setPlayersProvider, leaveRoom, setPlantedPhotoUri } = useGameContext();
   const slideAnim = useRef(new Animated.Value(300)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const confettiRef = useRef<LottieView>(null);
@@ -62,11 +62,10 @@ const FinalScoreModal: React.FC<FinalScoreModalProps> = ({ visible, finalScore }
     }
   }, [visible]);
 
-  // Exit leaves the room for good (the socket stayed open through game over, so the others see it at once)
+  // Exit leaves the room for good (the socket stayed open through game over, so the others see it at once); "play
+  // again" keeps the rejoin token to rejoin the same room
   const onClose = () => {
-    socket?.emit("leave-room");
-    clearRejoinToken(); // leaving for good; "play again" keeps it to rejoin the same room
-    endSocket();
+    leaveRoom();
     setRoundsOfGame(0);
     setPlayersProvider([]);
     navigation.replace("/");

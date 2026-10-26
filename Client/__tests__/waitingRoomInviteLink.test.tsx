@@ -4,7 +4,7 @@ import TestRenderer, { act } from "react-test-renderer";
 import WaitingRoom from "../app/screens/WaitingRoom";
 
 // EXP-206: an invite link to another room must win over the room code left from a previous game: leave the old
-// room (leave-room, forget its rejoin token, close the socket) and join the linked one. A link to the room we are
+// room (GameContext's leave: leave-room, forget its rejoin token, drop the socket) and join the linked one. A link to the room we are
 // already in, and no link at all, behave as before.
 
 // ── Fake socket ──────────────────────────────────────────
@@ -80,12 +80,18 @@ jest.mock("../app/providers/GameContext", () => {
     mockStore.state.socket?.removeAllListeners().disconnect();
     mockStore.set({ socket: null });
   };
+  // Like GameProvider: the old socket is dropped at once (it closes later, once the server acks the leave)
+  const leaveRoom = () => {
+    mockStore.state.socket?.removeAllListeners().emit("leave-room");
+    mockLog.push("leaveRoom");
+    mockStore.set({ socket: null, token: null });
+  };
   return {
     useGameContext: () => {
       const state: MockState = useSyncExternalStore(subscribe, () => mockStore.state);
       return {
         socket: state.socket, gameCode: state.gameCode, username: "bob", roundsOfGame: 10,
-        startSocket, endSocket,
+        startSocket, endSocket, leaveRoom,
         setGameCode: (gameCode: string | null) => mockStore.set({ gameCode }),
         setPlayersProvider: jest.fn(), setRoundsOfGame: jest.fn(), setPlantedPhotoUri: jest.fn(), plantPhoto: jest.fn(),
         saveRejoinToken: (gameCode: string, _name: string, token: string) => mockStore.set({ token: { gameCode, token } }),
@@ -188,8 +194,7 @@ describe("WaitingRoom: invite link after a previous game (EXP-206)", () => {
     mockDeepLinkCode = LINKED_ROOM.toLowerCase(); // any case, like the shared link
     await mount();
 
-    expect(mockLog).toEqual(["old:leave-room", "clearRejoinToken", "endSocket", "startSocket"]);
-    expect(oldSocket.connected).toBe(false);
+    expect(mockLog).toEqual(["old:leave-room", "leaveRoom", "startSocket"]);
     expect(joins(oldSocket)).toEqual([]);
     expect(mockStore.state.gameCode).toBe(LINKED_ROOM);
     expect(mockStore.state.token).toBeNull();
@@ -259,7 +264,7 @@ describe("WaitingRoom: invite link after a previous game (EXP-206)", () => {
     await act(async () => { r.update(<WaitingRoom />); });
     await flush();
 
-    expect(mockLog).toEqual(["old:leave-room", "clearRejoinToken", "endSocket", "startSocket"]);
+    expect(mockLog).toEqual(["old:leave-room", "leaveRoom", "startSocket"]);
     expect(chatShown(r)).toEqual([]);
     expect(hasTestId(r, "lobby-player-alice")).toBe(false);
 

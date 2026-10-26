@@ -6,13 +6,14 @@ import WinnerModal from "../app/components/modals/WinnerModal";
 import FinalScoreModal from "../app/components/modals/FinalScoreModal";
 
 // EXP-172: the winner and final screens keep the socket (the player is still in the room). "Play again" goes to the
-// lobby on the same socket and drops the planted photo of the game that ended (EXP-035); Exit leaves the room and
-// ends the socket.
+// lobby on the same socket and drops the planted photo of the game that ended (EXP-035); Exit leaves the room (the
+// shared leave of GameContext, EXP-254).
 
 const mockReplace = jest.fn();
 const mockEndSocket = jest.fn();
 const mockSetPlanted = jest.fn();
 const mockClearToken = jest.fn();
+const mockLeaveRoom = jest.fn();
 const mockSocket = { emit: jest.fn(), disconnect: jest.fn() };
 jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/en").default }) }));
 jest.mock("lottie-react-native", () => "LottieView");
@@ -22,7 +23,7 @@ jest.mock("expo-router", () => ({ useRouter: () => ({ replace: mockReplace }) })
 jest.mock("../app/providers/GameContext", () => ({
   useGameContext: () => ({
     socket: mockSocket, endSocket: mockEndSocket, setRoundsOfGame: jest.fn(), setPlayersProvider: jest.fn(),
-    clearRejoinToken: mockClearToken, setPlantedPhotoUri: mockSetPlanted,
+    clearRejoinToken: mockClearToken, setPlantedPhotoUri: mockSetPlanted, leaveRoom: mockLeaveRoom,
   }),
 }));
 
@@ -37,7 +38,7 @@ const press = (root: ReactTestInstance, id: string) =>
   act(() => root.find((n) => n.props.testID === id && typeof n.props.onPress === "function").props.onPress());
 
 beforeEach(() => {
-  [mockReplace, mockEndSocket, mockSetPlanted, mockClearToken, mockSocket.emit, mockSocket.disconnect].forEach((m) => m.mockClear());
+  [mockReplace, mockEndSocket, mockSetPlanted, mockClearToken, mockLeaveRoom, mockSocket.emit, mockSocket.disconnect].forEach((m) => m.mockClear());
 });
 
 describe("final screens keep the socket (EXP-172)", () => {
@@ -61,16 +62,18 @@ describe("final screens keep the socket (EXP-172)", () => {
     expect(mockReplace).toHaveBeenCalledWith("/screens/WaitingRoom");
     expect(mockEndSocket).not.toHaveBeenCalled();
     expect(mockClearToken).not.toHaveBeenCalled();
+    expect(mockLeaveRoom).not.toHaveBeenCalled();
     expect(mockSocket.emit).not.toHaveBeenCalledWith("leave-room");
     act(() => r.unmount());
   });
 
-  it("Exit: leaves the room, forgets the rejoin token and ends the socket", () => {
+  it("Exit: leaves the room (leave-room, rejoin token forgotten, socket closed once acked) and goes home", () => {
     const r = render(<FinalScoreModal visible finalScore={scores} />);
     press(r.root, TEST_IDS.finalExitButton);
-    expect(mockSocket.emit).toHaveBeenCalledWith("leave-room");
-    expect(mockClearToken).toHaveBeenCalled();
-    expect(mockEndSocket).toHaveBeenCalled();
+    expect(mockLeaveRoom).toHaveBeenCalledTimes(1);
+    // Not closed here: closing in the same tick as the leave-room could lose it (EXP-254)
+    expect(mockEndSocket).not.toHaveBeenCalled();
+    expect(mockSocket.disconnect).not.toHaveBeenCalled();
     expect(mockReplace).toHaveBeenCalledWith("/");
     act(() => r.unmount());
   });

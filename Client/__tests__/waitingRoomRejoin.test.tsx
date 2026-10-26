@@ -43,6 +43,7 @@ const mockReplace = jest.fn();
 const mockSetPlayersProvider = jest.fn();
 const mockSetRoundsOfGame = jest.fn();
 const mockSaveRejoinToken = jest.fn();
+const mockLeaveRoom = jest.fn();
 
 jest.mock("expo-router", () => ({
   useRouter: () => ({ replace: mockReplace }),
@@ -50,7 +51,7 @@ jest.mock("expo-router", () => ({
 }));
 jest.mock("../app/providers/GameContext", () => ({
   useGameContext: () => ({
-    startSocket: jest.fn(), endSocket: jest.fn(), gameCode: "ABC123", setGameCode: jest.fn(),
+    startSocket: jest.fn(), endSocket: jest.fn(), leaveRoom: mockLeaveRoom, gameCode: "ABC123", setGameCode: jest.fn(),
     setPlayersProvider: mockSetPlayersProvider, socket: mockSocket, username: "bob",
     setRoundsOfGame: mockSetRoundsOfGame, roundsOfGame: 10, setPlantedPhotoUri: jest.fn(),
     saveRejoinToken: mockSaveRejoinToken, getRejoinToken: async () => "tok-123", clearRejoinToken: jest.fn(),
@@ -186,7 +187,7 @@ describe("WaitingRoom: gallery access guard (EXP-118)", () => {
     expect(has(r, TEST_IDS.galleryAccessModal)).toBe(true);
 
     act(() => r.root.find((n) => n.props.testID === TEST_IDS.galleryBackButton && typeof n.props.onPress === "function").props.onPress());
-    expect(mockSocket.emitted.map(([ev]) => ev)).toContain("leave-room");
+    expect(mockLeaveRoom).toHaveBeenCalledTimes(1);
     expect(mockReplace).toHaveBeenCalledWith("/");
     act(() => r.unmount());
   });

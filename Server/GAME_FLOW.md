@@ -141,6 +141,12 @@ After last round: game-over
   Events from sockets that never joined, or that were replaced by a rejoin on another socket, are ignored
   (a replaced socket's `leave-room` only detaches that socket; the live player stays). After `leave-room`
   the username is free again, so joining with it needs no token.
+- **Leaving** (Exit in the lobby or on the final screens, or an invite link to another room): the app sends
+  `leave-room` with an ack callback and closes the socket **only once the server acks it** (it acks after removing
+  the player), or after 1 s without an answer (`LEAVE_ACK_TIMEOUT_MS`, offline) so leaving never hangs; the app moves
+  on at once. Closing in the same tick as the emit can lose the leave: socket.io dispatches an event on the next tick
+  and drops it if the socket disconnected meanwhile, and the player would then be treated as a lost connection
+  (lobby: shown as gone for 15 s with the name taken; mid-game: the game pauses for them instead of ending).
 - **One socket = one player in one room.** The same live socket re-sending `join-create-game` for the room
   and username it is already bound to (e.g. the WaitingRoom effect re-running, a duplicate join) is a no-op:
   same `room-of-game` answer with the same token, no token needed, no broadcast. If the game has started it
@@ -223,8 +229,9 @@ After last round: game-over
   `lastAnswerCorrect` ("Play again" in the same room starts from zero).
   The app keeps its socket open through `game-over` and the winner / final screens (the player stays connected
   and in the room, so lingering there never makes it "gone" nor hands the host role over): "Play again" re-sends
-  `join-create-game` on that same socket (the no-op rejoin above), "Exit" sends `leave-room` and closes it. The
-  finished game screen stops listening to game events. **A next game started meanwhile takes the player in at once**
+  `join-create-game` on that same socket (the no-op rejoin above), "Exit" sends `leave-room` and closes it (see
+  "Leaving" above). The finished game screen stops listening to game events. **A next game started meanwhile takes
+  the player in at once**
   (DEC-018 A): on `game-started` (or a `game-state` with `started: true`, e.g. after a reconnect) the final screens do
   what "Play again" does: back to the lobby, which re-sends `join-create-game` on the same socket, gets the snapshot
   of the started game and opens a fresh game screen that sends `im-ready`, so the ready phase is not left waiting the
@@ -389,7 +396,7 @@ All game events are **atomic** — each contains everything the client needs.
 | `set-rounds` | `{ rounds }` (10/15/20; 3 only with `ALLOW_QA_ROUNDS=1`, QA-only) | Host only, lobby only |
 | `start-game` | - | Host only |
 | `remove-player` | `{ username }` | Host only: removes that player (not the host) and evicts their sockets |
-| `leave-room` | - | Explicit leave (Exit button): player removed, host handed over, `player-left` to the room; from a socket replaced by a rejoin it only detaches that socket |
+| `leave-room` | - (with an ack callback) | Explicit leave (Exit button): player removed, host handed over, `player-left` to the room; from a socket replaced by a rejoin it only detaches that socket. Acked (no data) once handled, also from a socket bound to no room; not acked when dropped by the rate limit |
 | `im-ready` | - | Player ready to start (session player; payload ignored) |
 | `photo-sent` | `{ photo }` | Photo uploaded; only from the current owner, `photo` must be a path the owner got from `/upload` in this room (`/temp/<32 hex>.jpg\|png\|webp`) |
 | `photo-unavailable` | `{ round, attempt }` (from its `your-turn`) | The awaited owner has no photo to send (no access, no photos, upload failed): skip the round now |

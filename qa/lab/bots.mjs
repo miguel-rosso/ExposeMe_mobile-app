@@ -79,7 +79,7 @@
 //                           shorter than 8 s, no timeout skips); the run ends with the second game's game-over.
 //   node qa/lab/bots.mjs --bots 2 --host --rounds 3 --play-again-linger 1 --play-again-linger-bot 0 --start-next-game 15
 //            --leave-round R  the last bot leaves at round R's round-start exactly like the app's Exit (leave-room and
-//                           closes its socket in the same tick; EXP-139; a "never got player-left" failure is app bug EXP-254). Every other bot gets player-left and drops it
+//                           closes its socket once the server acks it, EXP-139 / EXP-254). Every other bot gets player-left and drops it
 //                           from its answer options; it is in no later round-scores nor answer, and the game goes on while
 //                           2 players remain (with 2 bots the other one gets game-over at once) ("consistency").
 //   node qa/lab/bots.mjs --bots 3 --host --rounds 3 --leave-round 2
@@ -305,6 +305,8 @@ function plannedKick() {
 }
 const LEAVE_ROUND = plannedLeaveRound();
 const LEAVER = N_BOTS - 1; // the bot that leaves with --leave-round
+// Like the app (Client/app/utils/leaveRoom.ts): the leaver closes its socket once leave-room is acked, or after this
+const LEAVE_ACK_TIMEOUT_MS = 1_000;
 // A lobby kick waits this long after NAME joined, like a host reading the list (and so a device's flow sees its lobby)
 const LOBBY_KICK_DELAY_MS = 5_000;
 const KICK_SETTLE_MS = 1_000; // after a lobby kick that ends the run: time for the kicked player to get its notice
@@ -677,15 +679,14 @@ function runRoom(roomIdx, fixedCode) {
         }, 200 + Math.random() * 400);
         setTimeout(() => sendGuess(round), 800 + Math.random() * 1200);
       });
-      // --leave-round (EXP-139): exactly like the app's Exit (WaitingRoom / FinalScoreModal): leave-room and close the
-      // socket in the same tick; this bot is out of the game. A leave the server never handles shows up as the others
-      // never getting player-left ("consistency")
+      // --leave-round (EXP-139): exactly like the app's Exit (GameContext.leaveRoom, EXP-254): leave-room, and close
+      // the socket once the server acks it (or after LEAVE_ACK_TIMEOUT_MS); this bot is out of the game. A leave the
+      // server never handles shows up as the others never getting player-left ("consistency")
       const leaveRoom = (round) => {
         bot.gone = true;
         bot.left = true;
         rec("left-room", round);
-        socket.emit("leave-room");
-        socket.disconnect();
+        socket.timeout(LEAVE_ACK_TIMEOUT_MS).emit("leave-room", () => socket.disconnect());
       };
       // Planned drop: offline for `secs`, then back on a new socket (rejoin + game-state snapshot)
       const dropFor = (secs, round, payload = {}) => {

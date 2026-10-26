@@ -15,6 +15,7 @@ import {
 import tw from "twrnc";
 import { useGameContext } from "@/app/providers/GameContext";
 import { useRouter, useLocalSearchParams } from "expo-router";
+import type { Socket } from "socket.io-client";
 import { RoomOfGameResponse, Player, GameStateSnapshot, PlayerConnectionData } from "@/app/models/interfaces";
 import ImageBlur from "@/app/components/ImageBlur/ImageBlur";
 import { ImageBlurView } from "@/app/components/ImageBlur";
@@ -59,6 +60,7 @@ const WaitingRoom = ({}) => {
   const {
     startSocket,
     endSocket,
+    leaveRoom,
     gameCode,
     setGameCode,
     setPlayersProvider,
@@ -234,14 +236,9 @@ const WaitingRoom = ({}) => {
   const bindingRef = useRef<{ gameCode: string; rejoinToken?: string } | null>(null);
   // Set when we enter a game that was already running (rejoin via "Join" after closing the app)
   const resyncOnLeaveRef = useRef(false);
-
-  // Leave the current room for good (Exit, or an invite link to another room): the server removes us and hands the
-  // host role over, and the rejoin token for that room is forgotten
-  const leaveRoom = () => {
-    if (socket) socket.emit("leave-room");
-    clearRejoinToken();
-    endSocket();
-  };
+  // Socket of the room an invite link made us leave: still open until the server acks the leave, it must not join
+  // the linked room (the join effect of this same commit still sees it as the context's socket)
+  const leftSocketRef = useRef<Socket | null>(null);
 
   // Forget everything this lobby showed for the previous room (an invite link can switch rooms in place)
   const resetLobbyState = () => {
@@ -260,7 +257,10 @@ const WaitingRoom = ({}) => {
     const linkedCode = parseRoomCodeParam(deepLinkCode);
     if (linkedCode && linkedCode !== gameCodeRef.current) {
       console.log("Deep link code:", linkedCode);
-      if (gameCodeRef.current && socket) leaveRoom();
+      if (gameCodeRef.current && socket) {
+        leftSocketRef.current = socket;
+        leaveRoom();
+      }
       resetLobbyState();
       // Set synchronously: the join below may run in this same commit, before the state update lands
       gameCodeRef.current = linkedCode;
@@ -271,7 +271,7 @@ const WaitingRoom = ({}) => {
 
   // Single effect: setup listeners, join room, handle reconnect
   useEffect(() => {
-    if (!socket || !username) return;
+    if (!socket || !username || socket === leftSocketRef.current) return;
 
     const doJoin = async () => {
       const code = gameCodeRef.current;

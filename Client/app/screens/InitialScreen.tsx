@@ -1,106 +1,151 @@
 import React from "react";
-import { View, Text, TouchableOpacity, Image, Dimensions, Platform, StatusBar, ScrollView } from "react-native";
+import { View, Text, TouchableOpacity, Image, StatusBar, ScrollView } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { LinearGradient } from "expo-linear-gradient";
+import * as Haptics from "expo-haptics";
+import { Ionicons } from "@expo/vector-icons";
 import tw from "twrnc";
-import GalleryPermissionIMG from "@/assets/images/galleryPermissionIMG.jpg";
-import PermissionRequestIOS from "@/assets/images/PermissionRequestIOS.jpg";
-import FingerAnimation from "@/assets/animations/FingerAnimation.json";
 import { useRouter } from "expo-router";
-import { usePhotoContext } from "@/app/providers/PhotoContext";
-import LottieView from "lottie-react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import backdropImage from "@/assets/images/bg1.jpg";
+import { usePhotoContext } from "@/app/providers/PhotoContext";
 import { useI18n } from "../i18n";
 import LanguageToggle from "../components/LanguageToggle";
+import PhotoFanHero, { HERO_HEIGHT } from "../components/PhotoFanHero";
+import { useReduceMotionSetting } from "../hooks/useReduceMotion";
 import { TEST_IDS } from "../utils/testIds";
+import { BRAND_DISPLAY_FONT, BRAND_GRADIENT, brandTitleShadow } from "../theme/brand";
 
-const { width: screenWidth, height: screenHeight } = Dimensions.get("window");
+// ── Look ──
+const BACKDROP_BLUR_RADIUS = 12;
+const BACKDROP_FADE = ["transparent", "#000"] as const;
+const POINT_ICON_BG = "rgba(233, 4, 46, 0.2)";
+const POINT_ICON_COLOR = "#ff4d6a";
+const POINT_ICON_SIZE = 18;
+
+// ── Layout ──
+const TITLE_FONT_SIZE = 36;
+const TITLE_LINE_HEIGHT = 42;
+const TITLE_SHADOW = brandTitleShadow(TITLE_FONT_SIZE);
+/** The accents of «GALERÍA» rise above the font's ascender: room so they are not clipped */
+const TITLE_ACCENT_ROOM = 6;
+/** The language toggle floats at top-12 (48 px) and is about 40 px tall: the content starts below it */
+const LANGUAGE_TOGGLE_CLEARANCE = 96;
+/** Space between the fixed footer and the bottom inset (Android gesture bar / iOS home indicator) */
+const FOOTER_BOTTOM_GAP = 16;
+
+type Translations = ReturnType<typeof useI18n>["t"];
+
+/** What happens with the photos, one row each */
+const REASSURANCE_POINTS: { icon: React.ComponentProps<typeof Ionicons>["name"]; text: (t: Translations) => string }[] = [
+  { icon: "shuffle", text: (t) => t.initialPointRandom },
+  { icon: "people", text: (t) => t.initialPointRoom },
+  { icon: "time-outline", text: (t) => t.initialPointDeleted },
+];
 
 const InitialScreen: React.FC = () => {
   const { t } = useI18n();
   const router = useRouter();
   const { handleContinue } = usePhotoContext();
-  // The bottom inset (Android gesture bar / iOS home indicator) pads the scroll content, not the frame,
-  // so the hint under "Continue" can always be scrolled above it
+  // Undefined until the system answers: the hero waits for it so it never starts animating and then jumps
+  const reduceMotion = useReduceMotionSetting();
+  // "Continue" lives in a fixed footer outside the ScrollView, padded by the bottom inset: on short gesture-nav
+  // phones a button at the end of the scroll content could be left as a sliver above the gesture bar (EXP-196)
   const insets = useSafeAreaInsets();
 
-  // Maneja el evento de presionar el botón de continuar
+  // Asks for photo access (whatever the answer, the home gate handles it) and goes home
   const handleContinuePress = async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     await AsyncStorage.setItem("hasSeenInitialScreen", "true");
     await handleContinue();
-    // Navega a la pantalla home
     router.replace("/");
   };
 
-  // The app only asks for photos (audio/video are blocked in app.json): one system dialog per platform
-  const permissionDialogImage = Platform.OS === "android" ? GalleryPermissionIMG : PermissionRequestIOS;
-
-  // Calculate responsive dimensions for images
-  const imageWidth = screenWidth * 0.7;
-  const imageHeight = screenHeight * 0.3;
-
   return (
-    <SafeAreaView testID={TEST_IDS.initialScreen} edges={["top", "left", "right"]} style={tw`flex-1 bg-gray-900`}>
+    <View style={tw`flex-1 bg-black`}>
       <StatusBar barStyle="light-content" />
-      <ScrollView
-        contentContainerStyle={[tw`flex-grow`, { paddingBottom: insets.bottom + 16 }]}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={tw`flex-1 px-4 pt-4 pb-6 max-w-[500px] w-full self-center`}>
-          {/* Language (the onboarding carries the privacy notice: let users read it in their language) */}
-          <View style={tw`items-end mb-2`}>
-            <LanguageToggle />
-          </View>
 
-          {/* Header */}
-          <View style={tw`items-center mb-5`}>
-            <View style={tw`bg-amber-900/50 px-4 py-2 rounded-full mb-2`}>
-              <Text testID={TEST_IDS.initialWarning} style={tw`text-xl font-bold text-amber-400`}>{t.warning}</Text>
-            </View>
-            <Text style={tw`text-sm text-gray-300 text-center`}>
-              {t.permissionExplanation}
-            </Text>
-          </View>
+      {/* Backdrop: a blurred photo, darkened and fading to black at the bottom */}
+      <Image source={backdropImage} blurRadius={BACKDROP_BLUR_RADIUS} resizeMode="cover" style={tw`absolute inset-0 w-full h-full`} />
+      <View style={tw`absolute inset-0 bg-black/70`} />
+      <LinearGradient colors={BACKDROP_FADE} style={tw`absolute inset-x-0 bottom-0 h-1/2`} />
 
-          {/* Permission highlight box */}
-          <View style={tw`bg-indigo-900/30 border border-indigo-700/50 rounded-xl p-4 mb-5`}>
-            <Text style={tw`text-sm font-medium text-center text-indigo-300 mb-1`}>{t.requiredPermission}</Text>
-            <Text style={tw`text-lg font-bold text-center text-indigo-200`}>{t.allowAll}</Text>
-          </View>
+      <SafeAreaView testID={TEST_IDS.initialScreen} edges={["left", "right"]} style={tw`flex-1`}>
+        <ScrollView
+          style={tw`flex-1`}
+          contentContainerStyle={[
+            tw`flex-grow justify-center px-6 pb-4`,
+            { paddingTop: Math.max(insets.top, LANGUAGE_TOGGLE_CLEARANCE) },
+          ]}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={tw`w-full max-w-[500px] self-center items-center`}>
+            {reduceMotion === undefined ? (
+              <View style={{ height: HERO_HEIGHT }} />
+            ) : (
+              <PhotoFanHero animate={!reduceMotion} />
+            )}
 
-          {/* Permission instructions */}
-          <View style={tw`bg-gray-800 rounded-xl shadow-lg overflow-hidden mb-5 border border-gray-700`}>
-            <View style={tw`bg-gray-700 py-2 px-4 border-b border-gray-600`}>
-              <Text style={tw`text-base font-medium text-gray-100`}>
-                {Platform.OS === "android" ? t.howToEnableAndroid : t.howToEnableIOS}
-              </Text>
-            </View>
-
-            <View style={tw`p-3 items-center`}>
-              <View style={tw`bg-gray-700 rounded-lg overflow-hidden shadow-lg mb-3 p-1 border border-gray-600`}>
-                <Image source={permissionDialogImage} style={{ width: imageWidth, height: imageHeight }} resizeMode="contain" />
-              </View>
-              <Text style={tw`text-sm text-gray-300 text-center`}>
-                {t.tapAllowAll}
-              </Text>
-            </View>
-          </View>
-
-          {/* Continue button and animation */}
-          <View style={tw`items-center mt-6`}>
-            <TouchableOpacity
-              testID={TEST_IDS.initialContinueButton}
-              style={tw`bg-blue-600 w-56 py-3 px-5 rounded-full shadow-lg flex-row justify-center items-center border border-blue-500`}
-              onPress={handleContinuePress}
-              activeOpacity={0.7}
+            <Text
+              testID={TEST_IDS.initialTitle}
+              accessibilityRole="header"
+              style={[
+                tw`text-white text-center mt-6`,
+                {
+                  fontFamily: BRAND_DISPLAY_FONT,
+                  fontSize: TITLE_FONT_SIZE,
+                  lineHeight: TITLE_LINE_HEIGHT,
+                  paddingTop: TITLE_ACCENT_ROOM,
+                },
+                TITLE_SHADOW,
+              ]}
             >
-              <Text style={tw`text-white text-base font-medium mr-2`}>{t.continue_}</Text>
-            </TouchableOpacity>
-            <Text style={tw`text-gray-400 text-xs mt-2 mb-2`}>{t.tapToProceed}</Text>
-            <LottieView source={FingerAnimation} autoPlay loop style={{ width: 48, height: 48 }} />
+              {t.initialTitle}
+            </Text>
+            <Text style={tw`text-base leading-6 text-white/70 text-center mt-4`}>{t.initialSubtitle}</Text>
+
+            {/* Reassurance */}
+            <View style={tw`w-full bg-white/10 border border-white/10 rounded-2xl p-4 mt-8`}>
+              {REASSURANCE_POINTS.map((point, i) => (
+                <View key={point.icon} style={tw`flex-row items-center ${i > 0 ? "mt-3" : ""}`}>
+                  <View style={[tw`w-8 h-8 rounded-full items-center justify-center`, { backgroundColor: POINT_ICON_BG }]}>
+                    <Ionicons name={point.icon} size={POINT_ICON_SIZE} color={POINT_ICON_COLOR} />
+                  </View>
+                  <Text style={tw`flex-1 ml-3 text-[15px] text-white/90`}>{point.text(t)}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        </ScrollView>
+
+        {/* The only action, fixed above the bottom inset: ask for photo access */}
+        <View style={[tw`px-6 pt-4`, { paddingBottom: insets.bottom + FOOTER_BOTTOM_GAP }]}>
+          <View style={tw`w-full max-w-[500px] self-center`}>
+            <LinearGradient
+              colors={BRAND_GRADIENT}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={tw`w-full h-15 rounded-2xl`}
+            >
+              <TouchableOpacity
+                testID={TEST_IDS.initialContinueButton}
+                accessibilityRole="button"
+                style={tw`flex-1 items-center justify-center`}
+                onPress={handleContinuePress}
+                activeOpacity={0.8}
+              >
+                <Text style={tw`text-white text-lg font-bold`}>{t.continue_}</Text>
+              </TouchableOpacity>
+            </LinearGradient>
+            <Text style={tw`text-[13px] text-white/50 text-center mt-4`}>{t.initialFootnote}</Text>
           </View>
         </View>
-      </ScrollView>
-    </SafeAreaView>
+      </SafeAreaView>
+
+      <View style={tw`absolute top-12 left-4 z-20`}>
+        <LanguageToggle />
+      </View>
+    </View>
   );
 };
 

@@ -110,18 +110,16 @@ export default {
   tapToContinue: "Toca para continuar",
 
   // InitialScreen
-  warning: "⚠️ Aviso ⚠️",
-  permissionExplanation: "ExposeMe necesita acceso a tus fotos: en tus turnos se sube una foto aleatoria de tu galería (o de las que hayas seleccionado), se muestra a los demás jugadores de tu sala y se borra al terminar la partida.",
-  requiredPermission: "Permiso necesario:",
-  allowAll: '"Permitir todo" (o selecciona algunas fotos)',
-  howToEnableAndroid: "Cómo activar en Android:",
-  howToEnableIOS: "Cómo activar en iOS:",
+  initialTitle: "TU GALERÍA\nES EL JUEGO",
+  initialSubtitle: "En tu turno sale una foto al azar de tu galería. Los demás adivinan de quién es.",
+  initialPointRandom: "Una foto al azar, solo en tus turnos",
+  initialPointRoom: "Solo la ve tu sala",
+  initialPointDeleted: "Se borra al acabar la partida",
+  initialFootnote: "Puedes compartir todas tus fotos o solo algunas.",
   step1: "Paso 1",
   step2: "Paso 2",
   step3: "Paso 3",
-  tapAllowAll: "Permite el acceso a todas tus fotos o solo a las que selecciones.",
   continue_: "Continuar",
-  tapToProceed: "Pulsa para continuar tras configurar los permisos",
 
   // SettingsInstructionsScreen
   careful: "⚠️ Cuidado ⚠️",

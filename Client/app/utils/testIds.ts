@@ -4,6 +4,7 @@ export const TEST_IDS = {
   // ── First run ──
   initialScreen: "initial-screen",
   initialContinueButton: "initial-continue-button",
+  initialTitle: "initial-title",
   // ── Home ──
   usernameInput: "username-input",
   usernameClearButton: "username-clear-button",
@@ -68,7 +69,6 @@ export const TEST_IDS = {
   playAgainButton: "play-again-button",
   // ── Language ──
   languageToggle: "language-toggle",
-  initialWarning: "initial-warning",
 } as const;
 
 export const playerOptionId = (username: string) => `player-option-${username}`;

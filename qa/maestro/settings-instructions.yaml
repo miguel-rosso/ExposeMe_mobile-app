@@ -22,9 +22,9 @@ appId: com.socketNull.ExposeMe
       visible:
         id: "initial-screen"
     commands:
-      - scrollUntilVisible:
-          element:
-            id: "initial-continue-button"
+      # Fixed footer above the bottom inset: on screen without scrolling (a scroll would hide a sliver regression)
+      - assertVisible:
+          id: "initial-continue-button"
       - tapOn:
           id: "initial-continue-button"
       - runFlow:

@@ -17,50 +17,50 @@ appId: com.socketNull.ExposeMe
     commands:
       # The dev client's floating Tools button is hidden by the app on launch (EXP-200), so the toggle is tappable
       # EXP-122: the onboarding offers the language toggle. Tap it twice (net no change, so later
-      # flows keep the device language) and check the warning header switches language each time.
+      # flows keep the device language) and check the title switches language each time ((?s): it spans two lines).
       - runFlow:
           when:
             visible:
-              id: "initial-warning"
-              text: ".*Warning.*"
+              id: "initial-title"
+              text: "(?s)YOUR GALLERY.*"
           commands:
             - tapOn:
                 id: "language-toggle"
             - extendedWaitUntil:
                 visible:
-                  id: "initial-warning"
-                  text: ".*Aviso.*"
+                  id: "initial-title"
+                  text: "(?s)TU GALER.*"
                 timeout: 5000
             - tapOn:
                 id: "language-toggle"
             - extendedWaitUntil:
                 visible:
-                  id: "initial-warning"
-                  text: ".*Warning.*"
+                  id: "initial-title"
+                  text: "(?s)YOUR GALLERY.*"
                 timeout: 5000
       - runFlow:
           when:
             visible:
-              id: "initial-warning"
-              text: ".*Aviso.*"
+              id: "initial-title"
+              text: "(?s)TU GALER.*"
           commands:
             - tapOn:
                 id: "language-toggle"
             - extendedWaitUntil:
                 visible:
-                  id: "initial-warning"
-                  text: ".*Warning.*"
+                  id: "initial-title"
+                  text: "(?s)YOUR GALLERY.*"
                 timeout: 5000
             - tapOn:
                 id: "language-toggle"
             - extendedWaitUntil:
                 visible:
-                  id: "initial-warning"
-                  text: ".*Aviso.*"
+                  id: "initial-title"
+                  text: "(?s)TU GALER.*"
                 timeout: 5000
-      - scrollUntilVisible:
-          element:
-            id: "initial-continue-button"
+      # Fixed footer above the bottom inset: on screen without scrolling (a scroll would hide a sliver regression)
+      - assertVisible:
+          id: "initial-continue-button"
       - tapOn:
           id: "initial-continue-button"
 # iOS photo-library alert (shown even when simctl/launchApp pre-granted photos)

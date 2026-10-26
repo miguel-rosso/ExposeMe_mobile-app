@@ -11,7 +11,7 @@ jest.mock("@react-native-async-storage/async-storage", () =>
 jest.mock("expo-router", () => ({ useRouter: () => ({ replace: jest.fn(), push: jest.fn() }) }));
 jest.mock("@/app/providers/PhotoContext", () => ({ usePhotoContext: () => ({ handleContinue: jest.fn() }) }));
 jest.mock("@/app/components/CustomCarousel/CustomCarousel", () => () => null);
-jest.mock("lottie-react-native", () => () => null);
+jest.mock("@expo/vector-icons", () => ({ Ionicons: "Ionicons" }));
 jest.mock("react-native-safe-area-context", () => {
   const { View } = require("react-native");
   return { SafeAreaView: View, useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) };
@@ -94,11 +94,11 @@ describe("InitialScreen", () => {
     expect(r.root.findAllByType(LanguageToggle)).toHaveLength(1);
     const toggle = r.root.find((n) => n.props.testID === TEST_IDS.languageToggle && !!n.props.onPress);
     expect(toggle.props.accessibilityLabel).toBe("Cambiar idioma");
-    const warning = () => r.root.find((n) => n.props.testID === TEST_IDS.initialWarning && n.type === Text);
-    expect(warning().props.children).toBe("⚠️ Aviso ⚠️");
+    const title = () => r.root.find((n) => n.props.testID === TEST_IDS.initialTitle && n.type === Text);
+    expect(title().props.children).toBe("TU GALERÍA\nES EL JUEGO");
 
     await act(async () => toggle.props.onPress());
-    expect(warning().props.children).toBe("⚠️ Warning ⚠️");
+    expect(title().props.children).toBe("YOUR GALLERY\nIS THE GAME");
     expect(await AsyncStorage.getItem("app-lang")).toBe("en");
     act(() => r.unmount());
   });

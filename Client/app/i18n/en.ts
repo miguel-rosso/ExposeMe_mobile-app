@@ -110,18 +110,16 @@ export default {
   tapToContinue: "Tap anywhere to continue",
 
   // InitialScreen
-  warning: "⚠️ Warning ⚠️",
-  permissionExplanation: "ExposeMe needs access to your photos: on your turns a random photo from your gallery (or from the ones you selected) is uploaded and shown to the other players in your room, and deleted when the game ends.",
-  requiredPermission: "Required Permission Setting:",
-  allowAll: '"Allow all" (or select some photos)',
-  howToEnableAndroid: "How to enable on Android:",
-  howToEnableIOS: "How to enable on iOS:",
+  initialTitle: "YOUR GALLERY\nIS THE GAME",
+  initialSubtitle: "On your turn a random photo from your gallery appears. Everyone else guesses whose it is.",
+  initialPointRandom: "One random photo, only on your turns",
+  initialPointRoom: "Only your room sees it",
+  initialPointDeleted: "Deleted when the game ends",
+  initialFootnote: "You can share all your photos or just some.",
   step1: "Step 1",
   step2: "Step 2",
   step3: "Step 3",
-  tapAllowAll: "Allow access to all your photos or only to the ones you select.",
   continue_: "Continue",
-  tapToProceed: "Tap to proceed after setting permissions",
 
   // SettingsInstructionsScreen
   careful: "⚠️ Careful ⚠️",

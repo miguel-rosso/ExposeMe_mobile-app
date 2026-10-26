@@ -8,6 +8,7 @@
 //   node qa/lab/bots.mjs --bots 3 --code 123456          # join an existing room
 //   node qa/lab/bots.mjs --rooms 20 --bots 4 --host       # load: 20 parallel rooms
 //            (all bots share one IP: use a server started by lab.sh, which lifts the per-IP socket limits)
+//   --help prints the options (no network); unknown options exit 2. The server in use is printed at start.
 //   options: --server URL  --photos DIR  --out FILE  --chaos 0.1  --upload-fail 0.2  --timeout 600
 //            --no-ready K   the last K bots never send im-ready (game must start via the server's ready timeout)
 //            --no-answer    bots always submit an empty guess (everyone ends on 0 points: final tie, see qa/maestro/tie-game.yaml)
@@ -88,12 +89,58 @@ import { io } from "socket.io-client";
 import fs from "node:fs";
 import path from "node:path";
 
-const args = Object.fromEntries(
-  process.argv.slice(2).reduce((acc, a, i, arr) => {
-    if (a.startsWith("--")) acc.push([a.slice(2), arr[i + 1] && !arr[i + 1].startsWith("--") ? arr[i + 1] : true]);
-    return acc;
-  }, [])
-);
+// ── Command line ──
+// Parsed and validated before anything touches the network (EXP-197): --help and bad arguments never connect
+const BOOL_FLAGS = new Set(["host", "no-answer", "app-resync", "lobby-host-drop", "help"]);
+const VALUE_FLAGS = new Set([
+  "server", "bots", "rooms", "rounds", "wait-players", "code", "code-file", "photos", "out", "chaos", "upload-fail",
+  "timeout", "no-ready", "drop-round", "drop-secs", "drop-bot", "photo-unavailable", "plant", "play-again-linger",
+  "play-again-linger-bot", "start-next-game",
+]);
+const USAGE = `usage: node qa/lab/bots.mjs [options]
+
+Headless ExposeMe players (see the header of qa/lab/bots.mjs for every scenario).
+
+  --server URL               server to play against (default: $SERVER_URL, else http://localhost:3000,
+                             the SHARED lab server: pass your own when you run your own server)
+  --bots N                   bots per room (default 3)
+  --host                     the first bot creates the room and starts the game
+  --code CODE                join an existing room instead
+  --rooms N                  parallel rooms (load test, default 1)
+  --rounds R                 3 (QA servers only), 10, 15 or 20 (default 10)
+  --wait-players N           host starts once N players are in (default --bots)
+  --code-file FILE           write the created room code here
+  --photos DIR  --out FILE   photos to upload (*.jpg) / write the summary + events as JSON
+  --timeout S                give up after S seconds (default 900)
+  --chaos P  --upload-fail P  --photo-unavailable P  --no-ready K  --no-answer  --plant K
+  --drop-round R --drop-secs S [--drop-bot K]  --app-resync  --lobby-host-drop
+  --play-again-linger S [--play-again-linger-bot K] [--start-next-game D]
+  --help, -h                 print this help and exit (no network)
+
+Exit codes: 0 pass, 1 fail, 2 bad arguments.`;
+
+/** argv (without node and script) -> { args } or { error }; { help: true } for --help / -h. */
+function parseCli(argv) {
+  const args = {};
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "-h" || a === "--help") return { help: true };
+    if (!a.startsWith("--")) return { error: `unexpected argument "${a}"` };
+    const name = a.slice(2);
+    if (BOOL_FLAGS.has(name)) { args[name] = true; continue; }
+    if (!VALUE_FLAGS.has(name)) return { error: `unknown option "${a}"` };
+    const v = argv[i + 1];
+    if (v === undefined || v.startsWith("--")) return { error: `option "${a}" needs a value` };
+    args[name] = v;
+    i++;
+  }
+  return { args };
+}
+
+const cli = parseCli(process.argv.slice(2));
+if (cli.help) { console.log(USAGE); process.exit(0); }
+if (cli.error) { console.error(`bots.mjs: ${cli.error} (see --help)`); process.exit(2); }
+const args = cli.args;
 const SERVER = args.server || process.env.SERVER_URL || "http://localhost:3000";
 const N_BOTS = Number(args.bots || 3);
 const N_ROOMS = Number(args.rooms || 1);
@@ -393,7 +440,10 @@ function runRoom(roomIdx, fixedCode) {
         // One report per photo request (a re-sent your-turn of the same attempt doesn't report again)
         if (bot.reportedAttempt !== d.attempt && Math.random() < PHOTO_UNAVAILABLE) {
           bot.reportedAttempt = d.attempt;
+          const pauses = bot.pauses;
           await sleep(100 + Math.random() * 300); // permission check / empty gallery on a phone
+          // Like the app: a game-paused meanwhile ends this request; the server asks again on resume
+          if (bot.pauses !== pauses) { rec("photo-unavailable-dropped-by-pause", d.round, { attempt: d.attempt }); return; }
           rec("photo-unavailable-sent", d.round, { attempt: d.attempt });
           socket.emit("photo-unavailable", { round: d.round, attempt: d.attempt });
           return;
@@ -462,6 +512,8 @@ function runRoom(roomIdx, fixedCode) {
       // Rejoin snapshot: catch up like the app does (pick again in answering, im-ready in the ready phase)
       socket.on("game-state", (d) => {
         rec("game-state", d.round, { phase: d.phase, paused: !!d.pause, pause: d.pause?.pause, maxPauses: d.pause?.maxPauses, started: d.started });
+        // Offline when game-over was sent (EXP-092): the rejoin snapshot of our game says it is no longer started
+        if (!d.started && bot.inGame) { rec("game-over-missed", bot.round); onGameOver(); return; }
         if (!d.started) return;
         if (APP_RESYNC && !bot.resyncing) {
           bot.resyncing = true;
@@ -481,6 +533,10 @@ function runRoom(roomIdx, fixedCode) {
         if (d.phase === null && i < N_BOTS - NO_READY) socket.emit("im-ready");
       });
       socket.on("game-paused", (d) => {
+        // The server ignores photo-unavailable while paused and re-sends the same your-turn on resume (EXP-113):
+        // that one must be answered again, so the attempt no longer counts as reported
+        bot.reportedAttempt = undefined;
+        bot.pauses = (bot.pauses ?? 0) + 1;
         rec("game-paused", bot.round, { waitingFor: d.waitingFor, duration: d.duration, pause: d.pause, maxPauses: d.maxPauses });
         console.error(`[room ${roomIdx}] ${name}: game-paused ${d.pause}/${d.maxPauses} (${Math.round(d.duration / 1000)}s), waiting for ${d.waitingFor.join(", ")}`);
       });
@@ -489,6 +545,11 @@ function runRoom(roomIdx, fixedCode) {
       socket.on("hold-resume", (d) => rec("hold-resume", bot.round, d));
       socket.on("game-over", (d) => {
         rec("game-over", bot.round, { finalScore: d.finalScore });
+        onGameOver();
+      });
+      // game-over, received or learnt from a rejoin snapshot
+      const onGameOver = () => {
+        bot.inGame = false;
         if (PLAY_AGAIN_LINGER_S && !bot.gone) {
           if (bot.game2) {
             // The second game (started while someone lingered) ends the run
@@ -506,7 +567,7 @@ function runRoom(roomIdx, fixedCode) {
           return;
         }
         if (++finished === bots.filter((b) => !b.gone).length) done("game-over");
-      });
+      };
       return bot;
     };
 
@@ -570,6 +631,12 @@ function analyse(r) {
   const unavailableSkipMs = [];
   for (const rep of r.events.filter((e) => e.ev === "photo-unavailable-sent")) {
     const sk = r.events.find((e) => e.bot === rep.bot && e.ev === "round-skipped" && e.t >= rep.t);
+    // A game-paused within the skip window and before the skip: the report reached a paused game, which ignores it
+    // (EXP-113); the resume re-sends the same your-turn and only a new report (paired on its own) may skip the round.
+    // A later pause excuses nothing: the skip should already have come
+    const pausedFirst = r.events.some((e) => e.bot === rep.bot && e.ev === "game-paused" && e.t >= rep.t
+      && e.t <= rep.t + UNAVAILABLE_SKIP_MAX_MS && (!sk || e.t <= sk.t));
+    if (pausedFirst) continue;
     if (!sk) { consistency.push(`${rep.bot}: photo-unavailable (round ${rep.round}) never skipped`); continue; }
     unavailableSkipMs.push(sk.t - rep.t);
     if (sk.payload?.reason !== "unavailable") consistency.push(`${rep.bot}: photo-unavailable skipped with reason ${sk.payload?.reason}`);
@@ -780,6 +847,8 @@ function analyse(r) {
   };
 }
 
+// Which server this run plays against (the default is the shared lab server: say so before connecting)
+console.error(`bots.mjs: server ${SERVER}${args.server ? "" : process.env.SERVER_URL ? " (from $SERVER_URL)" : " (default: the shared lab server; pass --server for your own)"}`);
 const t0 = Date.now();
 const results = await Promise.all(Array.from({ length: N_ROOMS }, (_, i) => runRoom(i, args.code || null)));
 const rooms = results.map(analyse);

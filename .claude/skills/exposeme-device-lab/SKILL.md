@@ -51,6 +51,7 @@ node qa/lab/bots.mjs --bots 4 --host --rounds 10 --photos qa/runs/photos/bots --
 node qa/lab/bots.mjs --bots 5 --host --chaos 0.15 --upload-fail 0.15     # reconnects + skipped uploads
 node qa/lab/bots.mjs --rooms 20 --bots 4 --host                            # load: 20 parallel games
 node qa/lab/bots.mjs --bots 3 --code 123456                                # join a room a device created
+node qa/lab/bots.mjs --help                                                # every option (no network); unknown options exit 2
 ```
 Summary fields: `pass`, `skew_ms` (spread between players receiving the same phase event), `answer_phase_overrun_ms` (server timer accuracy), `upload_ms`, `rounds_skipped`, `consistency_errors` (different payloads per player, owner ≠ revealed answer, round gaps).
 
@@ -68,5 +69,5 @@ Summary fields: `pass`, `skew_ms` (spread between players receiving the same pha
 - iOS simulators are shown in DeviceHub (Xcode 27 replaced Simulator.app; `lab.sh up` opens it). `lab.sh shot` takes screenshots.
 - `metro`/`build`/`doctor` fail with "Client needs Node N": install the major pinned in `Client/.nvmrc` (`nvm install N`); the lab picks it from nvm or Homebrew `node@N` when the default node differs.
 - iOS "Cannot find native module …": `lab.sh build ios` re-runs `pod install` whenever `Client/ios/Podfile.lock` differs from `Pods/Manifest.lock` or `Client/package*.json`/`Podfile` changed after the last install. Config-plugin/`app.json` changes still need a manual `npx expo prebuild` in `Client/` first.
-- Lab helper tests (no devices): `qa/lab/tests/lab-functions.test.sh`.
+- Lab helper tests (no devices): `qa/lab/tests/lab-functions.test.sh`, `qa/lab/tests/bots-cli.test.sh` (bots.mjs command line: `--help` and bad arguments exit before any network activity).
 - Machine is slow: `up --ios 1 --android 1` and use more bots.

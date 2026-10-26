@@ -314,28 +314,25 @@
     </div>
   </section>
 
-  <section class="qa-card" id="actividad">
-    <h2>Actividad</h2>
-    <p class="qa-hint">Qué ha hecho cada agente, lo más reciente arriba.</p>
-    <div class="qa-tbl">
+  <section class="qa-card" id="historial">
+    <h2>Historial</h2>
+    <p class="qa-hint" id="history-hint">Todo lo que han hecho los agentes, lo más reciente arriba.</p>
+    <div class="qa-tools" id="history-filter" data-source="activity"></div>
+    <div class="qa-tbl" id="history-all">
       <table id="activity-table" data-source="activity" data-row-key="id">
         <thead><tr><th data-field="at">Hora</th><th data-field="agent">Agente</th><th data-field="task">Tarea</th><th data-field="state">Estado</th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
+    <div class="qa-tbl" id="history-merged" hidden>
+      <table id="changes-table" data-source="changes" data-row-key="id">
+        <thead><tr><th data-field="issue">Incidencia</th><th data-field="title">Cambio</th><th data-field="commit" class="hide-narrow">Commit</th><th data-field="tests" class="hide-narrow">Pruebas</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
   </section>
 
-  <section class="qa-grid">
-    <div class="qa-card" id="changelog">
-      <h2>Cambios</h2>
-      <p class="qa-hint">Un commit por incidencia en la rama qa/loop.</p>
-      <div class="qa-tbl">
-        <table id="changes-table" data-source="changes" data-row-key="id">
-          <thead><tr><th data-field="issue">Incidencia</th><th data-field="title">Cambio</th><th data-field="commit" class="hide-narrow">Commit</th><th data-field="tests" class="hide-narrow">Pruebas</th></tr></thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </div>
+  <section>
     <div class="qa-card" id="runs">
       <h2>Partidas y pruebas</h2>
       <p class="qa-hint">Bots, móviles y baterías de tests.</p>
@@ -546,7 +543,7 @@ dash.calc("by_type", {
 (() => {
   const sevColor = { critical: "#b0102a", high: "var(--qa-red)", medium: "var(--qa-amber)", low: "#9ca3af" };
   let issueFilter = "active";
-  let issueSev = null, issueType = null, issueArea = null, featFilter = null, runKind = null;
+  let issueSev = null, issueType = null, issueArea = null, featFilter = null, runKind = null, historyMerged = false;
   let issueSort = { key: "severity_rank", dir: 1 };
 
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined && text !== null) e.textContent = text; return e; };
@@ -932,6 +929,23 @@ dash.calc("by_type", {
     drawRows("changes", "changes-table", 4, true, (tr, d) => {
       td(tr, d.issue, "mono"); td(tr, d.title, "wrap"); td(tr, d.commit || "sin commit", "hide-narrow mono"); td(tr, d.tests, "hide-narrow");
     });
+    // Historial: one card, "Todo" = agent activity, "Solo lo integrado" = commits on qa/loop
+    const hf = document.getElementById("history-filter");
+    const act = dash.data("activity"), chg = dash.data("changes");
+    hf.innerHTML = "";
+    [[false, "Todo", act.status === "ok" ? act.data.length : "…"], [true, "Solo lo integrado", chg.status === "ok" ? chg.data.length : "…"]]
+      .forEach(([merged, text, n]) => {
+        const b = el("button", "qa-chip qa-g", `${text} · ${n}`);
+        b.type = "button";
+        b.setAttribute("aria-pressed", String(historyMerged === merged));
+        b.addEventListener("click", () => { historyMerged = merged; drawTables(); });
+        hf.appendChild(b);
+      });
+    document.getElementById("history-all").hidden = historyMerged;
+    document.getElementById("history-merged").hidden = !historyMerged;
+    document.getElementById("history-hint").textContent = historyMerged
+      ? "Solo lo que ha entrado en el código (rama qa/loop): un commit por incidencia, con sus pruebas."
+      : "Todo lo que han hecho los agentes, lo más reciente arriba.";
     drawRows("runs", "runs-table", 4, true, (tr, d) => {
       td(tr, d.id, "mono"); td(tr, d.devices); pill(tr, d.result_es, `res-${d.result}`); td(tr, d.notes, "hide-narrow wrap");
     }, (d) => !runKind || d.kind === runKind);

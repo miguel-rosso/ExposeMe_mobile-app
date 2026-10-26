@@ -14,6 +14,7 @@ describe("isQaAck", () => {
       expect(isQaAck({ phase, round: 1, at: Date.now() })).toBe(true);
     }
     expect(isQaAck({ phase: "scores", round: 0, at: 0 })).toBe(true);
+    expect(isQaAck({ phase: "scores", round: 1, at: 10, handledAt: 4 })).toBe(true); // EXP-223: handler time
   });
 
   it("rejects anything else", () => {
@@ -28,6 +29,9 @@ describe("isQaAck", () => {
       { phase: "answering", round: 1, at: Number.NaN },
       { phase: "answering", round: 1, at: Number.POSITIVE_INFINITY },
       { phase: "answering", round: 1 },
+      { phase: "answering", round: 1, at: 1, handledAt: "now" },
+      { phase: "answering", round: 1, at: 1, handledAt: Number.NaN },
+      { phase: "answering", round: 1, at: 1, handledAt: null },
     ];
     for (const data of bad) expect(isQaAck(data), JSON.stringify(data)).toBe(false);
   });

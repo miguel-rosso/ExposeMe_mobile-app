@@ -292,6 +292,22 @@ describe("GameScreen: qa-ack render telemetry (EXP-012)", () => {
     ]);
   });
 
+  it("each phase's ack carries the device time its socket handler got the event, taken before the paint (EXP-223)", async () => {
+    let clock = 1_000;
+    jest.spyOn(Date, "now").mockImplementation(() => ++clock); // every reading is later than the one before
+    try {
+      await playRound("1");
+    } finally {
+      (Date.now as jest.Mock).mockRestore();
+    }
+    const acks = emitted("qa-ack").map(([, d]) => d);
+    expect(acks).toHaveLength(4);
+    acks.forEach((ack) => {
+      expect(ack.handledAt).toEqual(expect.any(Number));
+      expect(ack.handledAt).toBeLessThan(ack.at);
+    });
+  });
+
   it("sends no qa-ack in regular builds", async () => {
     await playRound(undefined);
     expect(emitted("qa-ack")).toHaveLength(0);

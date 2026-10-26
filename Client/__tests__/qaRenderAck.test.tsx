@@ -1,7 +1,7 @@
 import React from "react";
 import TestRenderer, { act } from "react-test-renderer";
 import type { Socket } from "socket.io-client";
-import { useQaRenderAck } from "../app/hooks/useQaRenderAck";
+import { MarkPhaseHandled, useQaRenderAck } from "../app/hooks/useQaRenderAck";
 import type { ServerPhase } from "../app/models/interfaces";
 
 // EXP-012: QA builds (development bundle + EXPO_PUBLIC_QA=1) send qa-ack once per rendered phase start; other builds
@@ -53,6 +53,32 @@ describe("useQaRenderAck", () => {
       { phase: "reveal", round: 1, at: 1_234 },
       { phase: "scores", round: 1, at: 1_234 },
       { phase: "scores", round: 1, at: 1_234 },
+    ]);
+    jest.restoreAllMocks();
+  });
+
+  it("adds handledAt to the ack of the phase whose handler marked it, only once (EXP-223)", () => {
+    process.env.EXPO_PUBLIC_QA = "1";
+    let mark!: MarkPhaseHandled;
+    const Marker = (p: Props) => {
+      mark = useQaRenderAck(socket as unknown as Socket, p.phase, p.round, p.phaseKey);
+      return null;
+    };
+    const now = jest.spyOn(Date, "now");
+    let r!: TestRenderer.ReactTestRenderer;
+    act(() => { r = TestRenderer.create(<Marker phase={null} round={0} phaseKey={0} />); });
+    now.mockReturnValue(100);
+    mark("waiting-photo"); // the handler runs...
+    now.mockReturnValue(130);
+    act(() => r.update(<Marker phase="waiting-photo" round={1} phaseKey={1} />)); // ...then the screen commits
+    mark("reveal"); // a mark for another phase is not this phase's
+    act(() => r.update(<Marker phase="answering" round={1} phaseKey={2} />));
+    act(() => r.update(<Marker phase="answering" round={1} phaseKey={3} />)); // resumed: no handler ran
+    act(() => r.unmount());
+    expect(acks()).toEqual([
+      { phase: "waiting-photo", round: 1, at: 130, handledAt: 100 },
+      { phase: "answering", round: 1, at: 130 },
+      { phase: "answering", round: 1, at: 130 },
     ]);
     jest.restoreAllMocks();
   });

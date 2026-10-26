@@ -86,6 +86,32 @@ describe("qa-ack with QA_TELEMETRY=1", () => {
     expect(entries[0].receivedAt).toBeGreaterThanOrEqual(before);
   });
 
+  it("records the device handler time and, for the room's current phase, the server emit time (EXP-223)", async () => {
+    const url = await startServer({ QA_TELEMETRY: "1", QA_TELEMETRY_FILE: file });
+    const { sock: host, gameCode } = await joinedClient(url, "alice");
+    const guest = connect(url, { transports: ["websocket"], forceNew: true, reconnection: false });
+    clients.push(guest);
+    await roundTrip(guest, "join-create-game", { gameCode, username: "bob" }, "room-of-game");
+    await roundTrip(host, "start-game", undefined, "game-started");
+    const waiting = new Promise((resolve) => host.once("waiting-photo", resolve));
+    const before = Date.now();
+    host.emit("im-ready");
+    guest.emit("im-ready");
+    await waiting;
+    host.emit("qa-ack", { phase: "waiting-photo", round: 1, at: 2_000, handledAt: 1_990 });
+    host.emit("qa-ack", { phase: "answering", round: 1, at: 3_000 }); // not the room's phase: no serverAt
+    // No barrier mid-game (set-rounds is refused once started): wait for both lines
+    await vi.waitFor(() => expect(records()).toHaveLength(2));
+    const [current, other] = records();
+    expect(current).toEqual({
+      gameCode, username: "alice", phase: "waiting-photo", round: 1, at: 2_000, handledAt: 1_990,
+      receivedAt: expect.any(Number), serverAt: expect.any(Number),
+    });
+    expect(current.serverAt).toBeGreaterThanOrEqual(before);
+    expect(current.serverAt).toBeLessThanOrEqual(current.receivedAt);
+    expect(other).toEqual({ gameCode, username: "alice", phase: "answering", round: 1, at: 3_000, receivedAt: expect.any(Number) });
+  });
+
   it("drops invalid payloads and acks from sockets without a session", async () => {
     const url = await startServer({ QA_TELEMETRY: "1", QA_TELEMETRY_FILE: file });
     const stranger = connect(url, { transports: ["websocket"], forceNew: true, reconnection: false });
@@ -97,6 +123,7 @@ describe("qa-ack with QA_TELEMETRY=1", () => {
     sock.emit("qa-ack", { phase: "lobby", round: 1, at: 1 });
     sock.emit("qa-ack", { phase: "answering", round: "1", at: 1 });
     sock.emit("qa-ack", null);
+    sock.emit("qa-ack", { ...ack(1), handledAt: "earlier" });
     sock.emit("qa-ack", ack(2)); // the only valid one
     await barrier(sock);
     expect(records().map((r) => r.round)).toEqual([2]);

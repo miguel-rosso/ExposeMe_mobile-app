@@ -78,8 +78,9 @@ const GameScreen = () => {
   const {
     photo, isOwner, round, phase, phaseDuration, phaseKey, correctAnswer, scores, mySelection, gameHeld, pressing,
   } = roundView;
-  // QA builds only: tells the server when this device rendered each phase (lab render-skew metrics)
-  useQaRenderAck(socket, phase, round, phaseKey);
+  // QA builds only: tells the server when this device rendered each phase (lab render-skew metrics); the phase
+  // handlers below call markPhaseHandled first, so the ack also says when their event arrived
+  const markPhaseHandled = useQaRenderAck(socket, phase, round, phaseKey);
   // My pick goes to the server as soon as it changes: answers are only taken while answering (EXP-148), the last counts.
   // Rapid taps are coalesced: at most one send per PICK_SEND_INTERVAL, then a trailing send of the latest pick, so the
   // server's per-socket rate limit never drops the pick that counts. When the answer bar ends, a pick still waiting
@@ -223,6 +224,7 @@ const GameScreen = () => {
 
     // Whole room: a photo is awaited (the owner is not revealed). Comes right before my own your-turn.
     socket.on("waiting-photo", (data: WaitingPhotoData) => {
+      markPhaseHandled("waiting-photo");
       console.log(`[GAME] waiting-photo: round ${data.round}, ${data.duration}ms`);
       turnRequest.endTurn(); // any earlier request of mine is over
       turnRequest.takeReportedReason(); // a report of mine was answered by the round-skipped before this
@@ -249,6 +251,7 @@ const GameScreen = () => {
 
     // Atomic: new round — photo + answer timer
     socket.on("round-start", (data: RoundStartData) => {
+      markPhaseHandled("answering");
       console.log(`[GAME] round-start: round=${data.round}, mine=${data.isOwner}`);
       turnRequest.endTurn();
       setSkipNotice(null);
@@ -257,12 +260,14 @@ const GameScreen = () => {
 
     // Atomic: answer revealed (the server froze answers before this: only a pick already sent can have counted)
     socket.on("round-reveal", (data: RoundRevealData) => {
+      markPhaseHandled("reveal");
       console.log(`[GAME] round-reveal: ${data.correctAnswer}, my guess: ${roundRef.current.sentGuess}`);
       dispatchRound({ type: "round-reveal", data });
     });
 
     // Atomic: scores displayed
     socket.on("round-scores", (data: RoundScoresData) => {
+      markPhaseHandled("scores");
       console.log(`[GAME] round-scores: round ${data.round}/${data.totalRounds}`);
       dispatchRound({ type: "round-scores", data, username: safeUsername });
     });

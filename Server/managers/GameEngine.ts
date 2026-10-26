@@ -1,6 +1,6 @@
 import { Server } from "socket.io";
 import {
-  GameStateSnapshot, PauseInfo, Player, PlayerConnectionData, Room, RoundSkippedData, RoundStartData, ScoreRound, WaitingPhotoData, YourTurnData,
+  GameStateSnapshot, PauseInfo, Player, PlayerConnectionData, Room, RoundPhase, RoundSkippedData, RoundStartData, ScoreRound, WaitingPhotoData, YourTurnData,
 } from "../models/interfaces";
 import { DISCONNECT_GRACE, RoomManager } from "./RoomManager";
 import { uploadStore } from "../middlewares/uploadStore";
@@ -71,6 +71,12 @@ export class GameEngine {
   private plantedWaits = new WeakMap<Room, PlantedWait>();
   /** How long this room's real photo waits took (ms, waiting-photo → accepted photo-sent), newest last */
   private waitHistory = new WeakMap<Room, number[]>();
+  /**
+   * Last phase broadcast to each room: phase, round (as clients see it) and server clock (QA telemetry `serverAt`).
+   * `at` is undefined when that phase of that round was broadcast more than once (a skipped photo wait re-sends
+   * waiting-photo with the same round): an ack can't tell which broadcast it answers.
+   */
+  private phaseEmits = new WeakMap<Room, { phase: RoundPhase; round: number; at: number | undefined }>();
 
   constructor(private io: Server, private roomManager: RoomManager) {}
 
@@ -111,6 +117,16 @@ export class GameEngine {
     return true;
   }
 
+  /**
+   * Server clock (ms) when `phase` of `round` was broadcast to `room`, until its next phase broadcast (dev/QA render
+   * telemetry, Server/GAME_FLOW.md "QA render telemetry"); undefined for any other phase or round, and for one broadcast
+   * more than once.
+   */
+  phaseEmittedAt(room: Room, phase: RoundPhase, round: number): number | undefined {
+    const last = this.phaseEmits.get(room);
+    return last && last.phase === phase && last.round === round ? last.at : undefined;
+  }
+
   /** Game start: drop gone players like a leave (uploads released, host handed over, room notified). */
   private removeDisconnected(room: Room): void {
     if (room._lobbyTimer) { clearTimeout(room._lobbyTimer); room._lobbyTimer = null; }
@@ -149,6 +165,7 @@ export class GameEngine {
     room.currentPlayer = null; // Picked by startRound; a stale owner from a previous game can't send a photo
     this.plantedWaits.delete(room);
     this.holdUsage.delete(room); // a new game: round numbers start over
+    this.phaseEmits.delete(room);
     this.assignPlantedSlots(room);
     console.log(`[${room.gameCode}] All ready, planted slots: [${[...room.plantedSlots].join(",")}]`);
     this.setTimer(room, GAME_START_DELAY, () => this.startRound(room));
@@ -179,10 +196,19 @@ export class GameEngine {
    */
   private emitRoundStart(room: Room, owner: Player, photo: string): void {
     const data: Omit<RoundStartData, "isOwner"> = { photo, round: room.round, duration: ANSWER_TIME - ANSWER_GRACE };
+    this.markPhaseEmitted(room, room.round);
     // Relies on a rejoin evicting/disconnecting the owner's replaced socket, so only owner.socketId is the owner's
 
     this.io.to(room.gameCode).except(owner.socketId).emit("round-start", { ...data, isOwner: false } satisfies RoundStartData);
     this.io.to(owner.socketId).emit("round-start", { ...data, isOwner: true } satisfies RoundStartData);
+  }
+
+  /** Remembers that the room's current phase of `round` is being broadcast now (see phaseEmittedAt). */
+  private markPhaseEmitted(room: Room, round: number): void {
+    if (!room.phase) return;
+    const last = this.phaseEmits.get(room);
+    const repeated = last?.phase === room.phase && last.round === round;
+    this.phaseEmits.set(room, { phase: room.phase, round, at: repeated ? undefined : Date.now() });
   }
 
   /** `your-turn` payload for the current photo request (re-sent unchanged on rejoin/resume). */
@@ -525,6 +551,7 @@ export class GameEngine {
 
       console.log(`[${room.gameCode}] Planted photo from ${planted.username} in ${delay}ms`);
       const waiting: WaitingPhotoData = { round: room.round + 1, duration: PHOTO_WAIT_TIMEOUT };
+      this.markPhaseEmitted(room, waiting.round);
       this.io.to(room.gameCode).emit("waiting-photo", waiting);
 
       this.setTimer(room, delay, () => this.startPlantedRound(room));
@@ -540,6 +567,7 @@ export class GameEngine {
       console.log(`[${room.gameCode}] Waiting photo from ${room.currentPlayer.username}`);
       // Room-wide (owner included, same payload): everyone shows the wait, nobody learns whose turn it is
       const waiting: WaitingPhotoData = { round: room.round + 1, duration: PHOTO_WAIT_TIMEOUT };
+      this.markPhaseEmitted(room, waiting.round);
       this.io.to(room.gameCode).emit("waiting-photo", waiting);
       this.io.to(room.currentPlayer.socketId).emit("your-turn", this.yourTurn(room));
 
@@ -664,6 +692,7 @@ export class GameEngine {
     room.phase = "reveal";
     const answer = room.currentPlayer?.username ?? "";
     console.log(`[${room.gameCode}] Reveal: ${answer}`);
+    this.markPhaseEmitted(room, room.round);
 
     this.io.to(room.gameCode).emit("round-reveal", {
       correctAnswer: answer,
@@ -677,6 +706,7 @@ export class GameEngine {
     room.phase = "scores";
     const scores = this.buildScores(room);
     console.log(`[${room.gameCode}] Scores`);
+    this.markPhaseEmitted(room, room.round);
 
     this.io.to(room.gameCode).emit("round-scores", {
       scores,

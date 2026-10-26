@@ -42,6 +42,45 @@ out="$(node "$SKEW" "$TMP/telemetry.jsonl" ROOM1)"; rc=$?
 [ "$(jget phases.scores.max <<<"$out")" = 0 ] && ok "simultaneous render is 0 ms skew" || ko "simultaneous render is 0 ms skew" "$out"
 [ "$(jget phases.waiting-photo <<<"$out")" = undefined ] && ok "a phase seen by one device has no skew" || ko "a phase seen by one device has no skew" "$out"
 [ "$(node "$SKEW" "$TMP/telemetry.jsonl" NOPE | jget phases)" = '{}' ] && ok "unknown room: empty phases" || ko "unknown room: empty phases"
+[ "$(jget latency <<<"$out")" = '{}' ] && ok "acks without handledAt: no device latency" || ko "acks without handledAt: no device latency" "$out"
+
+# ── render-skew.mjs: per-device latency (EXP-223) ──
+lack() { # game, user, phase, round, serverAt (- = none), handledAt, at, receivedAt
+  local server=""; [ "$5" = - ] || server=",\"serverAt\":$5"
+  printf '{"gameCode":"%s","username":"%s","phase":"%s","round":%s%s,"handledAt":%s,"at":%s,"receivedAt":%s}\n' \
+    "$1" "$2" "$3" "$4" "$server" "$6" "$7" "$8"
+}
+{
+  # ios-a, clock in sync with the server: delivery 10 / 50, handler→paint 20 / 10 (round 1 has the shortest round trip)
+  lack LAT ios-a answering 1 1000 1010 1030 1040
+  lack LAT ios-a answering 2 5000 5050 5060 5080
+  # a serverAt that can't be the broadcast this ack answers (negative round trip): never the clock-offset sample
+  lack LAT ios-a scores 1 9000 8900 8910 8920
+  # android-a, clock 3000 ms behind the server: delivery 20 / 200 (server clock), handler→paint 300 / 500
+  lack LAT android-a answering 1 1000 -1980 -1680 1340
+  lack LAT android-a answering 2 5000 2200 2700 5730
+  # an ack without serverAt (the room had moved on): handler→paint only
+  lack LAT android-a reveal 1 - 5000 5100 8200
+  # a resumed phase (no handledAt) doesn't count
+  ack LAT android-a scores 1 9000
+  # a device that never had a serverAt: no clock offset, no delivery
+  lack LAT bot-x reveal 1 - 100 160 4000
+} >"$TMP/latency.jsonl"
+out="$(node "$SKEW" "$TMP/latency.jsonl" LAT)"
+[ "$(jget latency.ios-a.clockOffset <<<"$out")" = 0 ] && ok "clock offset of a device in sync" || ko "clock offset of a device in sync" "$out"
+[ "$(jget latency.android-a.clockOffset <<<"$out")" = -3000 ] \
+  && ok "clock offset from the shortest round trip" || ko "clock offset from the shortest round trip" "$out"
+[ "$(jget latency.ios-a.phases.answering <<<"$out")" = '{"delivery":{"n":2,"p50":10,"p95":50},"handlerToPaint":{"n":2,"p50":10,"p95":20}}' ] \
+  && ok "ios delivery and handler→paint p50/p95" || ko "ios delivery and handler→paint p50/p95" "$out"
+[ "$(jget latency.android-a.phases.answering <<<"$out")" = '{"delivery":{"n":2,"p50":20,"p95":200},"handlerToPaint":{"n":2,"p50":300,"p95":500}}' ] \
+  && ok "android delivery corrected by its clock offset" || ko "android delivery corrected by its clock offset" "$out"
+[ "$(jget latency.android-a.phases.reveal <<<"$out")" = '{"handlerToPaint":{"n":1,"p50":100,"p95":100}}' ] \
+  && ok "no serverAt: handler→paint only" || ko "no serverAt: handler→paint only" "$out"
+[ "$(jget latency.android-a.phases.scores <<<"$out")" = undefined ] \
+  && ok "resumed phase (no handledAt) ignored" || ko "resumed phase (no handledAt) ignored" "$out"
+[ "$(jget latency.bot-x <<<"$out")" = '{"clockOffset":null,"phases":{"reveal":{"handlerToPaint":{"n":1,"p50":60,"p95":60}}}}' ] \
+  && ok "no serverAt at all: no clock offset" || ko "no serverAt at all: no clock offset" "$out"
+
 node "$SKEW" "$TMP/telemetry.jsonl" >/dev/null 2>&1; rc=$?
 [ $rc = 2 ] && ok "missing room code: usage error" || ko "missing room code: usage error" "rc=$rc"
 

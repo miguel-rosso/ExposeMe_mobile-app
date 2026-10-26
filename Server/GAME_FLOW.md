@@ -369,7 +369,7 @@ All game events are **atomic** — each contains everything the client needs.
 | `chat-message` | `{ message }` (≤100 chars) | Broadcast as `{ username, message }` with the session username |
 | `emoji-reaction` | `{ emoji }`, exactly one of 😂 😍 ❓ 😳 🔥 😭 🤡 😡 (the app's picker) or 📸 (the app sends it when a screenshot is taken) | Broadcast as `{ username, emoji }` with the session username. Anything else is dropped; at most 5 per socket, refilled 4/s (excess dropped silently) |
 | `plant-photo` | `{ photoUrl }` | Applies to the session player (replaces their earlier one); `photoUrl` must be the player's own `/upload` path in this room; accepted until the first round is played |
-| `qa-ack` | `{ phase, round, at }` (`phase` one of the four round phases, `round` integer, `at` device clock in ms) | **Dev/QA only**, handled only when the server runs with `QA_TELEMETRY=1` (see "QA render telemetry"); otherwise not even registered |
+| `qa-ack` | `{ phase, round, at, handledAt? }` (`phase` one of the four round phases, `round` integer, `at` device clock in ms when the phase was painted, optional `handledAt` device clock in ms when the socket handler of the event that started it ran) | **Dev/QA only**, handled only when the server runs with `QA_TELEMETRY=1` (see "QA render telemetry"); otherwise not even registered |
 
 Payload `gameCode`/`username` fields are ignored for all of the above; identity comes from the session.
 
@@ -407,16 +407,20 @@ Bot metrics only show when the server *sent* a phase; this shows when each phone
 
 - QA builds of the app (development bundles from a Metro started with `EXPO_PUBLIC_QA=1`, as `qa/lab/lab.sh metro`
   does; a release bundle never sends it) send
-  **`qa-ack { phase, round, at }`** right after the game screen commits a new phase (once per phase start: every
-  `waiting-photo`, `round-start`, `round-reveal`, `round-scores`, and a resumed/rejoined phase). Regular builds never
-  send it.
+  **`qa-ack { phase, round, at, handledAt? }`** right after the game screen commits a new phase (once per phase start:
+  every `waiting-photo`, `round-start`, `round-reveal`, `round-scores`, and a resumed/rejoined phase). `handledAt` is
+  the device time the socket handler of that `waiting-photo` / `round-start` / `round-reveal` / `round-scores` started
+  (absent for a phase started by a resume, rejoin or hold). Regular builds never send it.
 - The server handles it only with **`QA_TELEMETRY=1`** (`qa/lab/lab.sh server` sets it; production never does, so the
   event is ignored there). Accepted only from a session player, with a valid payload, at most 10 per socket refilled
-  2/s; it appends one JSON line `{ gameCode, username, phase, round, at, receivedAt }` (server clock on receipt) to
-  `QA_TELEMETRY_FILE` (written synchronously, so lines keep arrival order), or logs it when no file is set. Nothing is
-  ever sent back. Each lab server start moves the previous file to `<file>.prev`.
+  2/s; it appends one JSON line `{ gameCode, username, phase, round, at, handledAt?, receivedAt, serverAt? }`
+  (`receivedAt`: server clock on receipt; `serverAt`: server clock when that phase of that round was broadcast,
+  if no later phase has been broadcast since and it was broadcast only once in that round) to `QA_TELEMETRY_FILE` (written synchronously, so lines keep arrival order), or logs
+  it when no file is set. Nothing is ever sent back. Each lab server start moves the previous file to `<file>.prev`.
 - After `lab.sh play`, the lab prints the per-phase device render skew (spread of `receivedAt` across devices for the
-  same round and phase: p50/p95/max) next to the bots summary.
+  same round and phase: p50/p95/max) next to the bots summary, and per device and phase (`latency`) the delivery delay
+  (`serverAt` → `handledAt`, the device clock corrected by its offset to the server's, estimated NTP-style from its ack
+  with the shortest round trip) and the handler → paint cost (`at − handledAt`), p50/p95.
 
 ## Photo upload (HTTP)
 

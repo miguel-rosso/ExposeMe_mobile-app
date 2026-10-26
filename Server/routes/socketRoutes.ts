@@ -496,9 +496,10 @@ io.on("connection", (socket: Socket) => {
       try {
         const s = session(socket);
         if (!s || !isQaAck(data) || !qaAckBucket.take()) return;
-        const { phase, round, at } = data;
+        const { phase, round, at, handledAt } = data;
         qaTelemetry.record({
-          gameCode: s.room.gameCode, username: s.player.username, phase, round, at, receivedAt: Date.now(),
+          gameCode: s.room.gameCode, username: s.player.username, phase, round, at, handledAt, receivedAt: Date.now(),
+          serverAt: gameEngine.phaseEmittedAt(s.room, phase, round),
         });
       } catch (e) { console.error("qa-ack error:", e); }
     });

@@ -112,6 +112,11 @@
 #dash-root .qa-chart svg text { font-family: var(--qa-font); }
 #dash-root .qa-tip { position: absolute; pointer-events: none; background: var(--cds-surface-popover); border: 1px solid var(--cds-border); border-radius: 10px; box-shadow: var(--cds-shadow-popover); padding: 0.4rem 0.6rem; font-size: 0.9rem; white-space: nowrap; z-index: 2; }
 #dash-root .qa-tip .k { color: var(--color-fg-muted); }
+#dash-root .qa-pace-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem; margin-top: 0.5rem; }
+#dash-root .qa-pace-kpis div { border: 1px solid var(--cds-border); border-radius: 10px; padding: 0.45rem 0.6rem; }
+#dash-root .qa-pace-kpis b { display: block; font-size: 1.4rem; line-height: 1.2; }
+#dash-root .qa-pace-kpis span { font-size: 0.8rem; color: var(--color-fg-muted); }
+#dash-root .qa-pace-kpis .down b { color: var(--qa-red); }
 #dash-root .qa-legend { display: flex; flex-wrap: wrap; gap: 1rem; font-size: 0.9rem; margin-top: 0.5rem; }
 #dash-root .qa-legend i { display: inline-block; width: 0.8rem; height: 0.8rem; border-radius: 3px; margin-right: 0.4rem; vertical-align: -1px; }
 
@@ -306,11 +311,12 @@
       <div class="qa-chart" id="chart-types" data-source="by_type"></div>
       <div class="qa-legend" id="legend-types" data-source="by_type"></div>
     </div>
-    <div class="qa-card" id="skew">
-      <h2>Sincronización por partida</h2>
-      <p class="qa-hint">Diferencia en ms entre jugadores al recibir la misma fase. Cuanto más baja, mejor.</p>
-      <div class="qa-chart" id="chart-skew" data-source="runs"></div>
-      <div class="qa-legend" id="legend-skew" data-source="runs"></div>
+    <div class="qa-card" id="pace">
+      <h2>Ritmo de trabajo</h2>
+      <p class="qa-hint">Tareas de agentes lanzadas por hora en las últimas 24 h. Si las barras bajan con el tiempo, el flujo está perdiendo ritmo.</p>
+      <div class="qa-pace-kpis" id="pace-kpis" data-source="activity"></div>
+      <div class="qa-chart" id="chart-pace" data-source="activity"></div>
+      <div class="qa-legend" id="legend-pace" data-source="activity"></div>
     </div>
   </section>
 
@@ -797,51 +803,77 @@ dash.calc("by_type", {
     legend(lg, SEVS.map((s) => [SEV_ES[s], sevColor[s], s]), (s) => focusIssues({ sev: [s] }));
   }
 
-  function drawSkew() {
-    const box = document.getElementById("chart-skew");
-    const lg = document.getElementById("legend-skew");
-    const r = dash.data("runs");
-    if (r.status === "error") { failLine(box); lg.innerHTML = ""; return; }
+  // Work pace: agent tasks started per hour over the last 24 h, stacked by kind
+  function drawPace() {
+    const box = document.getElementById("chart-pace");
+    const lg = document.getElementById("legend-pace");
+    const kp = document.getElementById("pace-kpis");
+    const r = dash.data("activity");
+    if (r.status === "error") { failLine(box); lg.innerHTML = ""; kp.innerHTML = ""; return; }
     if (r.status !== "ok") { box.innerHTML = ""; return; }
-    const rows = r.data.filter((d) => d.max_skew_ms !== null && d.max_skew_ms !== undefined && d.max_skew_ms !== "");
+    const KINDS = [
+      ["fix", "Arreglos", "var(--qa-blue)"],
+      ["review", "Revisiones", "var(--qa-violet)"],
+      ["device", "Móviles", "var(--qa-green)"],
+      ["other", "Integración y otros", "var(--qa-amber)"],
+    ];
+    const kindOf = (a) => a === "qa-fixer" ? "fix" : a === "qa-reviewer" || a === "qa-security" || a === "qa-auditor" ? "review" : a === "qa-device-tester" ? "device" : "other";
+    const HOUR = 3600e3, now = Date.now(), end = Math.ceil(now / HOUR) * HOUR;
+    const hours = d3.range(24).map((i) => end - (24 - i) * HOUR);
+    const buckets = hours.map((h) => ({ h, fix: 0, review: 0, device: 0, other: 0, total: 0 }));
+    let live = 0;
+    r.data.forEach((d) => {
+      if (d.state === "en curso") live++;
+      const t = Date.parse(d.at);
+      if (!Number.isFinite(t) || t < hours[0]) return;
+      const b = buckets[Math.min(23, Math.floor((t - hours[0]) / HOUR))];
+      b[kindOf(d.agent)]++; b.total++;
+    });
+    const last = buckets[23].total, prev = buckets[22].total;
+    const avg = d3.mean(buckets.slice(0, 23), (b) => b.total) || 0;
+    const fmt = d3.format(".1f");
+    kp.innerHTML = "";
+    [[String(live), "agentes trabajando ahora", false],
+     [String(last), `tareas en la última hora (antes: ${prev})`, last < avg / 2],
+     [fmt(avg), "media por hora (24 h)", false]].forEach(([v, label, down]) => {
+      const c = el("div", down ? "down" : null); c.appendChild(el("b", null, v)); c.appendChild(el("span", null, label)); kp.appendChild(c);
+    });
     box.innerHTML = "";
-    if (!rows.length) { box.appendChild(el("p", "qa-empty", "Aún no hay partidas con medida de sincronización.")); legend(lg, []); return; }
-    const W = box.clientWidth || 400, H = 230, m = { t: 12, r: 8, b: 28, l: 8 };
+    if (!d3.sum(buckets, (b) => b.total)) { box.appendChild(el("p", "qa-empty", "Sin actividad en las últimas 24 h.")); legend(lg, []); return; }
+    const W = box.clientWidth || 400, H = 200, m = { t: 10, r: 8, b: 24, l: 28 };
     const svg = d3.select(box).append("svg").attr("width", "100%").attr("viewBox", `0 0 ${W} ${H}`);
-    const g = svg.append("g").attr("font-size", "13px");
-    const max = d3.max(rows, (d) => Number(d.max_skew_ms)) || 1;
-    const yScale = d3.scaleLinear([0, max * 1.15], [H - m.b, m.t]).nice();
-    const ticks = yScale.ticks(4);
-    const tl = g.append("text").text(d3.format(",")(ticks[ticks.length - 1]));
-    m.l = tl.node().getComputedTextLength() + 12; tl.remove();
-    const x0 = d3.scaleBand(rows.map((d) => d.id), [m.l, W - m.r]).padding(0.3);
-    const x1 = d3.scaleBand(["p95", "max"], [0, x0.bandwidth()]).padding(0.12);
-    const colors = { p95: "var(--qa-blue)", max: "var(--qa-amber)" };
-    ticks.forEach((t) => {
-      g.append("line").attr("x1", m.l).attr("x2", W - m.r).attr("y1", yScale(t)).attr("y2", yScale(t)).attr("stroke", "var(--cds-chart-grid)");
-      g.append("text").attr("x", m.l - 6).attr("y", yScale(t)).attr("dy", "0.35em").attr("text-anchor", "end").attr("fill", "var(--color-fg-muted)").text(d3.format(",")(t));
+    const g = svg.append("g").attr("font-size", "12px");
+    const max = d3.max(buckets, (b) => b.total) || 1;
+    const y = d3.scaleLinear([0, max], [H - m.b, m.t]).nice();
+    const x = d3.scaleBand(hours, [m.l, W - m.r]).padding(0.18);
+    y.ticks(4).filter(Number.isInteger).forEach((t) => {
+      g.append("line").attr("x1", m.l).attr("x2", W - m.r).attr("y1", y(t)).attr("y2", y(t)).attr("stroke", "var(--cds-chart-grid)");
+      g.append("text").attr("x", m.l - 6).attr("y", y(t)).attr("dy", "0.35em").attr("text-anchor", "end").attr("fill", "var(--color-fg-muted)").text(t);
     });
     const tip = el("div", "qa-tip"); tip.hidden = true; box.appendChild(tip);
-    const every = Math.ceil(rows.length / Math.max(1, Math.floor((W - m.l) / 60)));
-    rows.forEach((d, idx) => {
-      const gx = x0(d.id);
-      [["p95", Number(d.p95_skew_ms)], ["max", Number(d.max_skew_ms)]].forEach(([k, v]) => {
-        if (!Number.isFinite(v)) return;
-        g.append("rect").attr("x", gx + x1(k)).attr("y", yScale(v)).attr("width", Math.min(32, x1.bandwidth())).attr("height", Math.max(1, yScale(0) - yScale(v))).attr("rx", 4).attr("fill", colors[k]);
+    const hh = (d) => `${String(d.getHours()).padStart(2, "0")}:00`;
+    buckets.forEach((b, i) => {
+      let acc = 0;
+      KINDS.forEach(([k, , color]) => {
+        if (!b[k]) return;
+        g.append("rect").attr("x", x(b.h)).attr("y", y(acc + b[k])).attr("width", x.bandwidth()).attr("height", Math.max(1, y(acc) - y(acc + b[k]))).attr("fill", color).attr("rx", 2);
+        acc += b[k];
       });
-      if (idx % every === 0) g.append("text").attr("x", gx + x0.bandwidth() / 2).attr("y", H - 8).attr("text-anchor", "middle").attr("fill", "var(--color-fg-muted)").text(d.id.replace("RUN-", "#"));
-      g.append("rect").attr("x", gx).attr("y", m.t).attr("width", x0.bandwidth()).attr("height", H - m.t - m.b).attr("fill", "transparent")
+      if (i % 4 === 3) g.append("text").attr("x", x(b.h) + x.bandwidth() / 2).attr("y", H - 6).attr("text-anchor", "middle").attr("fill", "var(--color-fg-muted)").text(hh(new Date(b.h)));
+      g.append("rect").attr("x", x(b.h)).attr("y", m.t).attr("width", x.bandwidth()).attr("height", H - m.t - m.b).attr("fill", "transparent")
         .on("mousemove", (ev) => {
           tip.hidden = false; tip.innerHTML = "";
-          tip.appendChild(el("div", "k", `${d.id} · ${d.devices}`));
-          tip.appendChild(el("div", null, `p95: ${d.p95_skew_ms ?? "—"} ms · máx: ${d.max_skew_ms} ms`));
+          tip.appendChild(el("div", "k", `${hh(new Date(b.h))}–${hh(new Date(b.h + HOUR))}`));
+          tip.appendChild(el("div", null, `${b.total} tareas · ${KINDS.map(([k, label]) => `${label.toLowerCase()} ${b[k]}`).join(" · ")}`));
           const [px, py] = d3.pointer(ev, box);
           tip.style.left = `${Math.max(0, Math.min(box.clientWidth - tip.offsetWidth, px + 12))}px`;
           tip.style.top = `${Math.max(0, py - 44)}px`;
         })
         .on("mouseleave", () => { tip.hidden = true; });
     });
-    legend(lg, [["p95", colors.p95], ["máximo", colors.max]]);
+    // Dashed line: 24 h average, the reference for "is the pace dropping?"
+    g.append("line").attr("x1", m.l).attr("x2", W - m.r).attr("y1", y(avg)).attr("y2", y(avg)).attr("stroke", "var(--color-fg-muted)").attr("stroke-dasharray", "4 4");
+    legend(lg, KINDS.map(([, label, color]) => [label, color]).concat([["media 24 h (línea)", "var(--color-fg-muted)"]]));
   }
 
   function drawIssues() {
@@ -993,7 +1025,7 @@ dash.calc("by_type", {
   let linked = false;
   dash.onData(() => {
     // One failing section must not blank the rest of the page
-    [drawKpis, drawNow, drawPending, drawFeatures, drawTypes, drawSkew, drawIssues, drawTables].forEach((f) => {
+    [drawKpis, drawNow, drawPending, drawFeatures, drawTypes, drawPace, drawIssues, drawTables].forEach((f) => {
       try { f(); } catch (e) { console.error(`${f.name} failed`, e); }
     });
     if (!linked && dash.data("pending").status === "ok") {

@@ -10,6 +10,7 @@ const UPLOAD_DIR = vi.hoisted(() => {
   for (const name of [
     "UPLOAD_INFLIGHT_MAX",
     "UPLOAD_INFLIGHT_PER_IP_MAX",
+    "UPLOAD_INFLIGHT_PER_IP_BUSY_MAX",
     "UPLOAD_INFLIGHT_PER_ROOM_MAX",
     "UPLOAD_INFLIGHT_PER_MEMBER_MAX",
     "UPLOAD_REQUEST_TIMEOUT_MS",
@@ -28,5 +29,10 @@ describe("default upload concurrency caps", () => {
     expect(caps.UPLOAD_INFLIGHT_PER_MEMBER_MAX).toBe(2);
     expect(caps.UPLOAD_INFLIGHT_MAX).toBe(32);
     expect(caps.UPLOAD_REQUEST_TIMEOUT_MS).toBe(20_000);
+  });
+
+  it("EXP-261: hold each IP to 4 once half the server-wide slots are taken", () => {
+    expect(caps.UPLOAD_INFLIGHT_PER_IP_BUSY_MAX).toBe(4);
+    expect(caps.UPLOAD_INFLIGHT_BUSY_SHARE).toBe(0.5);
   });
 });

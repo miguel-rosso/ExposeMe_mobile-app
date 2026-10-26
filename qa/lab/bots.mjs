@@ -401,7 +401,9 @@ async function uploadPhoto(label, auth) {
     // Server limit, not a game bug: name the knob from the body's `scope` (in-flight caps, storage limits) or the error
     const body = await res.json().catch(() => ({}));
     const knob = {
-      member: "UPLOAD_INFLIGHT_PER_MEMBER_MAX", room: "UPLOAD_INFLIGHT_PER_ROOM_MAX", ip: "UPLOAD_INFLIGHT_PER_IP_MAX", server: "UPLOAD_INFLIGHT_MAX",
+      member: "UPLOAD_INFLIGHT_PER_MEMBER_MAX", room: "UPLOAD_INFLIGHT_PER_ROOM_MAX",
+      ip: "UPLOAD_INFLIGHT_PER_IP_MAX / UPLOAD_INFLIGHT_PER_IP_BUSY_MAX (once the server is half full)",
+      server: "UPLOAD_INFLIGHT_MAX",
     }[body.scope];
     const storageKnob = { storage: "UPLOAD_STORED_MAX", "lobby-ip": "UPLOAD_LOBBY_PER_IP_MAX" }[body.scope];
     const hint = knob ? `too many uploads in progress, raise ${knob}`

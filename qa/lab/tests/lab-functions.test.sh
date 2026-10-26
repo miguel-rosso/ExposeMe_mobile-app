@@ -195,5 +195,10 @@ build_android() { echo "build_android" >>"$TMP/builds.log"; return 1; }
 run_build
 [ $rc != 0 ] && grep -q install "$TMP/builds.log" && ok "build: a failed platform build -> non-zero, still installs the rest" || ko "build: failed platform" "rc=$rc"
 
+# ── server: lifts every /upload in-flight cap for bots (they all share one IP) ──
+for knob in $(grep -o 'envInt("UPLOAD_INFLIGHT_[A-Z_]*"' "$HERE/../../../Server/middlewares/uploadInFlight.ts" | cut -d'"' -f2); do
+  grep -q "$knob=\"\${$knob:-10000}\"" "$HERE/../lab.sh" && ok "server: lifts $knob" || ko "server: lifts $knob"
+done
+
 echo "# $pass passed, $fail failed"
 [ $fail = 0 ]

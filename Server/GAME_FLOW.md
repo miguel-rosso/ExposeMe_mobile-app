@@ -180,7 +180,7 @@ After last round: game-over
   for those 3 s after a miss its joins with a code answer `"Too many attempts"` without looking the code up (same
   exemptions), so every `"Game not found"` is a recorded miss (the app opens a new socket after a failed join anyway).
   Two coarser layers stop rotation across many addresses; both only tighten the limit of IPs that have misses of
-  their own, so an IP with no misses in the window is never locked by others:
+  their own, so an IP with no misses in the window is never locked by others (except in a saturated /48, below):
   - every IPv6 miss also counts against its **/48**: while the /48 has **300 misses in the window** (env
     `JOIN_MISS_PREFIX_MAX`), each /64 in it is locked at **2 misses of its own** (and loses the same-network exemption
     at 6 own misses once the /48 has 3 × `JOIN_MISS_PREFIX_MAX`). IPv4 has no prefix layer.
@@ -191,7 +191,13 @@ After last round: game-over
     never IPs without misses, and token rejoins and same-network joins keep their exemptions.
 
   Misses are tracked for at most 50,000 IPs and 50,000 /48s (env `JOIN_MISS_MAX_TRACKED`; the least recently missing
-  one is forgotten first), so rotating addresses can't grow memory without bound. Creating a room (`gameCode: null`) is
+  one is forgotten first), so rotating addresses can't grow memory without bound. A /48 with 300 misses in the window
+  that itself holds at least 500 of the tracked IPs (the larger of `JOIN_MISS_PREFIX_MAX` and 1% of
+  `JOIN_MISS_MAX_TRACKED`) when one of them is forgotten is rotating more addresses than are tracked (a /48 with fewer
+  tracked IPs pushed out by someone else's rotation is not): it is **saturated** for one
+  window (restarted each time another of its IPs is forgotten), and every join with a code from any IP in it answers
+  `"Too many attempts"`, misses of its own or not (token rejoins and same-network joins keep their exemptions), so
+  forgetting an IP never gives it its attempts back. Creating a room (`gameCode: null`) is
   not affected. `"Username already taken"`, `"Game already started"` and `"Room is full"` therefore only reach
   someone who already has a valid code. The client IP follows the same `TRUST_PROXY` hop count as Express (`req.ip`);
   per-IP limits count IPv4-mapped IPv6 (any notation) as IPv4 and IPv6 by its /64 prefix.
@@ -504,7 +510,9 @@ unknown room or a token that is not a current member of it → **403**.
   limits; then the room's acceptance (403) and the body. In-flight caps limit how many uploads are in progress (being
   received or processed) *at once* (concurrency, not rate; `middlewares/uploadInFlight.ts`): per member (env `UPLOAD_INFLIGHT_PER_MEMBER_MAX`,
   default 2), per room (`UPLOAD_INFLIGHT_PER_ROOM_MAX`, 12) and per IP (`UPLOAD_INFLIGHT_PER_IP_MAX`, 12; a full party shares one IP) → **429**, and
-  server-wide (`UPLOAD_INFLIGHT_MAX`, 32) → **503**. The refusal carries `Retry-After` and
+  server-wide (`UPLOAD_INFLIGHT_MAX`, 32) → **503**. Once half the server-wide slots are taken, an IP only gets a new
+  slot while it holds fewer than `UPLOAD_INFLIGHT_PER_IP_BUSY_MAX` (default 4) → **429** `scope: "ip"`, so a few IPs
+  can't take every slot (filling them needs 6 IPs by default) and a party gets its full 12 back as the server drains. The refusal carries `Retry-After` and
   `{ error, scope: "member" | "room" | "ip" | "server" }`. An admitted upload must be fully received within
   `UPLOAD_REQUEST_TIMEOUT_MS` (default 20 s) → **408** and the connection is closed (only reception is timed: a complete
   body that waits for processing is not cut); the slot is freed with the response, or if the client aborts. `qa/lab/lab.sh server` raises the in-flight caps for bot load tests (all bots share one IP).
@@ -521,7 +529,7 @@ unknown room or a token that is not a current member of it → **403**.
 | 408 | Upload not fully received within `UPLOAD_REQUEST_TIMEOUT_MS` (20 s) |
 | 413 | File over 5MB (refused before reading the body when `Content-Length` already says so), or image over 24 megapixels |
 | 415 | Not JPEG/PNG/WebP (e.g. HEIC) |
-| 429 | Room already holds 100 photos, a lobby photo from an IP that already has `UPLOAD_LOBBY_PER_IP_MAX` lobby photos stored (150, `scope: "lobby-ip"`, see the storage limits above), or rate limit (`Retry-After`). Credentials are checked first: only **rejected** requests (the 401/403 above) count per IP, default 30/min (env `UPLOAD_REJECTED_MAX`), and once over it that IP's missing/malformed credentials get 429 instead of 401 (well-formed but wrong or expired ones always get 403, so a client re-authenticates instead of waiting). Members are never rate-limited per minute by IP (a party shares one public IP); only concurrent uploads per IP are capped (12, below). Per minute: per member, default 20/min (env `UPLOAD_PLAYER_RATE_MAX`; counted per seat, so someone joining under a departed player's name starts afresh), and per room, default 12 × the member limit (env `UPLOAD_ROOM_RATE_MAX`; only counted once the game has started, since in the lobby one person could leave and rejoin under new names to use it up), so neither a stranger on the Wi-Fi nor a member over their own limit can make another member's upload fail. Same window for all, env `UPLOAD_RATE_WINDOW_MS` (60 s); `qa/lab/lab.sh server` raises the member and room limits for bot load tests. Also too many uploads **in progress at once** (concurrency, not rate) for this member (2), room (12) or IP (12), with `scope` `member`/`room`/`ip` (see the order of checks above). Every per-IP count here uses the same key as the socket limits (IPv4-mapped IPv6 as IPv4, IPv6 by its /64) |
+| 429 | Room already holds 100 photos, a lobby photo from an IP that already has `UPLOAD_LOBBY_PER_IP_MAX` lobby photos stored (150, `scope: "lobby-ip"`, see the storage limits above), or rate limit (`Retry-After`). Credentials are checked first: only **rejected** requests (the 401/403 above) count per IP, default 30/min (env `UPLOAD_REJECTED_MAX`), and once over it that IP's missing/malformed credentials get 429 instead of 401 (well-formed but wrong or expired ones always get 403, so a client re-authenticates instead of waiting). Members are never rate-limited per minute by IP (a party shares one public IP); only concurrent uploads per IP are capped (12, or 4 once the server is half full, below). Per minute: per member, default 20/min (env `UPLOAD_PLAYER_RATE_MAX`; counted per seat, so someone joining under a departed player's name starts afresh), and per room, default 12 × the member limit (env `UPLOAD_ROOM_RATE_MAX`; only counted once the game has started, since in the lobby one person could leave and rejoin under new names to use it up), so neither a stranger on the Wi-Fi nor a member over their own limit can make another member's upload fail. Same window for all, env `UPLOAD_RATE_WINDOW_MS` (60 s); `qa/lab/lab.sh server` raises the member and room limits for bot load tests. Also too many uploads **in progress at once** (concurrency, not rate) for this member (2), room (12) or IP (12), with `scope` `member`/`room`/`ip` (see the order of checks above). Every per-IP count here uses the same key as the socket limits (IPv4-mapped IPv6 as IPv4, IPv6 by its /64) |
 | 503 | Server busy: too many uploads in progress server-wide (32, `scope: "server"`), a lobby photo while the server already stores `UPLOAD_STORED_MAX` photos (3000, `scope: "storage"`), or an image stuck in processing longer than `SANITIZE_QUEUE_TIMEOUT_MS` (`Retry-After`) |
 
 Behind a reverse proxy, env `TRUST_PROXY` is the number of proxy hops used to read the client IP (default 1 when `RENDER` is set, otherwise 0). Env `UPLOAD_DIR` overrides the storage directory (default `Server/temp`); it must be a dedicated directory: if it is the OS temp dir, the filesystem root or the home directory the sweep refuses to run (one warning in the log).

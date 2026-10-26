@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import sharp from "sharp";
 import { createLimiter, headerSize, ImageRejected, MAX_INPUT_PIXELS, sanitizeImage, sniffFormat } from "../controllers/sanitizeImage";
 
@@ -85,6 +85,10 @@ describe("sanitizeImage", () => {
 });
 
 describe("createLimiter", () => {
+  // EXP-077: fake timers, so job durations and the queue timeout don't depend on how loaded the machine is
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
   it("runs at most maxConcurrent jobs, queues maxQueued and refuses the rest with 503 + Retry-After", async () => {
     const run = createLimiter({ maxConcurrent: 1, maxQueued: 1, queueTimeoutMs: 5_000 });
     const order: string[] = [];
@@ -101,19 +105,35 @@ describe("createLimiter", () => {
     expect(err).toBeInstanceOf(ImageRejected);
     expect(err).toMatchObject({ status: 503 });
     expect((err as ImageRejected).retryAfterS).toBeGreaterThan(0);
+    await vi.advanceTimersByTimeAsync(99);
+    expect(order).toEqual([]); // a still holds the only slot, b waits
+    await vi.advanceTimersByTimeAsync(1);
+    expect(order).toEqual(["a"]);
+    await vi.advanceTimersByTimeAsync(10);
     expect(await Promise.all([a, b])).toEqual(["a", "b"]);
     expect(order).toEqual(["a", "b"]);
     expect(maxActive).toBe(1);
-    await expect(run(job("d", 1))).resolves.toBe("d"); // free again
+    const d = run(job("d", 1)); // free again
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(d).resolves.toBe("d");
   });
 
   it("gives up with 503 when a queued job waits longer than queueTimeoutMs", async () => {
     const run = createLimiter({ maxConcurrent: 1, maxQueued: 4, queueTimeoutMs: 50 });
     const a = run(() => sleep(300).then(() => "a"));
-    const t0 = Date.now();
-    await expect(run(async () => "b")).rejects.toMatchObject({ status: 503 });
-    expect(Date.now() - t0).toBeLessThan(250);
+    let ranB = false;
+    const b = run(async () => { ranB = true; return "b"; });
+    const bSettled = vi.fn();
+    b.catch(bSettled);
+    await vi.advanceTimersByTimeAsync(49);
+    expect(bSettled).not.toHaveBeenCalled();
+    expect(run.stats()).toEqual({ running: 1, queued: 1 });
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(b).rejects.toMatchObject({ status: 503 });
+    expect(run.stats()).toEqual({ running: 1, queued: 0 });
+    await vi.advanceTimersByTimeAsync(250);
     await expect(a).resolves.toBe("a");
+    expect(ranB).toBe(false);
   });
 
   it("EXP-178: a waiting job whose signal aborts leaves the queue without running and frees its place", async () => {

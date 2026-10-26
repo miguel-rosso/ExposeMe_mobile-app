@@ -98,6 +98,10 @@ mirrors managers/RoomManager.ts "$BOTS" ROUND_OPTIONS ROUND_OPTIONS
 mirrors managers/RoomManager.ts "$BOTS" QA_ROUNDS QA_ROUNDS
 mirrors managers/GameEngine.ts "$ANALYSIS" MAX_PAUSES MAX_PAUSES
 mirrors managers/GameEngine.ts "$ANALYSIS" MAX_TOTAL_PAUSES MAX_TOTAL_PAUSES
+# Every /upload in-flight cap the server reads from the environment is named by bots.mjs's 429/503 hint
+for knob in $(grep -o 'envInt("UPLOAD_INFLIGHT_[A-Z_]*"' "$SERVER_SRC/middlewares/uploadInFlight.ts" | cut -d'"' -f2); do
+  grep -qw "$knob" "$BOTS" && ok "upload refusal hint names $knob" || ko "upload refusal hint names $knob"
+done
 mirrors managers/GameEngine.ts "$ANALYSIS" PAUSE_GRACE_MS PAUSE_GRACE
 mirrors managers/GameEngine.ts "$ANALYSIS" ANSWER_GRACE_MS ANSWER_GRACE
 mirrors routes/socketRoutes.ts "$BOTS" MAX_USERNAME_LENGTH MAX_USERNAME_LENGTH

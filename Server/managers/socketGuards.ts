@@ -85,7 +85,7 @@ export const JOIN_EXEMPT_MAX = envInt("JOIN_EXEMPT_MAX", 24, 1, 100_000);
 /**
  * Coarser layers on top of the per-key limit (an IPv6 key is a /64, and one subscriber or attacker often holds a
  * whole /48 = 65,536 /64s). They only ever tighten the limit of keys that have misses of their own: a key with no
- * misses in the window is never locked by what others did.
+ * misses in the window is never locked by what others did (save in a saturated /48, see JOIN_MISS_MAX_TRACKED).
  * - every IPv6 miss also counts against its /48: while the /48 has JOIN_MISS_PREFIX_MAX misses in the window, each
  *   /64 in it is locked at JOIN_MISS_TIGHT_MAX own misses (hard ceiling: JOIN_MISS_HARD_FACTOR × both). IPv4 keys
  *   have no prefix layer.
@@ -99,8 +99,15 @@ export const JOIN_MISS_PREFIX_MAX = envInt("JOIN_MISS_PREFIX_MAX", 300, 1, 1_000
 export const JOIN_MISS_GLOBAL_MAX = envInt("JOIN_MISS_GLOBAL_MAX", 600, 1, 100_000_000);
 export const JOIN_MISS_PRESSURE_MAX = envInt("JOIN_MISS_PRESSURE_MAX", 5, 1, 100_000);
 export const JOIN_MISS_TIGHT_MAX = 2;
-/** Keys (IPs and /48s) tracked at most; the least recently missing one is forgotten past it. */
+/**
+ * Keys (IPs and /48s) tracked at most; the least recently missing one is forgotten past it. A /48 with
+ * JOIN_MISS_PREFIX_MAX misses that holds at least max(JOIN_MISS_PREFIX_MAX, JOIN_MISS_SATURATION_SHARE of this cap)
+ * tracked /64s when one of them is forgotten is rotating more of them than we track, so it is marked saturated for a
+ * window (restarted by every /64 of it forgotten): all its /64s are then locked, misses of their own or not (soft
+ * lock: the exemptions still apply). A /48 with fewer tracked /64s is never saturated by others' rotation.
+ */
 export const JOIN_MISS_MAX_TRACKED = envInt("JOIN_MISS_MAX_TRACKED", 50_000, 100, 10_000_000);
+export const JOIN_MISS_SATURATION_SHARE = 0.01;
 
 /** "a:b:c::/48" for an IPv6 /64 key from ipKey ("a:b:c:d::/64"), else null (IPv4 and anything else). */
 export function prefix48(key: string): string | null {
@@ -111,15 +118,31 @@ export function prefix48(key: string): string | null {
 
 /**
  * Recent timestamps per key in a sliding window of `windowMs`: at most `perKeyCap` per key (no recording past it)
- * and at most `maxKeys` keys (least recently hit dropped first), so rotating keys can't grow memory without bound.
+ * and at most `maxKeys` keys (least recently hit dropped first, reported to `onEvict` once gone), so rotating keys
+ * can't grow memory without bound. With `groupOf`, it also counts the keys it holds per group (trackedIn).
  */
-export function createMissLog({ windowMs, perKeyCap, maxKeys }: { windowMs: number; perKeyCap: number; maxKeys: number }) {
+export function createMissLog({ windowMs, perKeyCap, maxKeys, onEvict, groupOf }: {
+  windowMs: number; perKeyCap: number; maxKeys: number; onEvict?: (key: string) => void;
+  groupOf?: (key: string) => string | null;
+}) {
   const log = new Map<string, number[]>();
+  const perGroup = new Map<string, number>();
+  const countInGroup = (key: string, delta: 1 | -1): void => {
+    const group = groupOf?.(key);
+    if (!group) return;
+    const n = (perGroup.get(group) ?? 0) + delta;
+    if (n > 0) perGroup.set(group, n);
+    else perGroup.delete(group);
+  };
+  const forget = (key: string): void => {
+    log.delete(key);
+    countInGroup(key, -1);
+  };
   const fresh = (key: string, now: number): number[] | undefined => {
     const times = log.get(key);
     if (!times) return undefined;
     while (times.length && now - times[0] >= windowMs) times.shift();
-    if (!times.length) log.delete(key);
+    if (!times.length) forget(key);
     return times.length ? times : undefined;
   };
   const sweep = setInterval(() => {
@@ -133,11 +156,39 @@ export function createMissLog({ windowMs, perKeyCap, maxKeys }: { windowMs: numb
       const now = Date.now();
       const times = fresh(key, now) ?? [];
       if (times.length < perKeyCap) times.push(now);
-      log.delete(key); // re-insert: Map order = least recently hit first
+      // re-insert: Map order = least recently hit first
+      if (log.has(key)) log.delete(key);
+      else countInGroup(key, 1);
       log.set(key, times);
-      while (log.size > maxKeys) log.delete(log.keys().next().value!);
+      while (log.size > maxKeys) {
+        const oldest = log.keys().next().value!;
+        forget(oldest);
+        onEvict?.(oldest);
+      }
     },
     tracked: () => log.size,
+    /** Keys held in `group` (see groupOf), whether or not their misses are still in the window. */
+    trackedIn: (group: string): number => perGroup.get(group) ?? 0,
+  };
+}
+
+/** Keys marked in the last `ttlMs` (marking again restarts it); at most `maxKeys`, least recently marked dropped first. */
+export function createRecentMarks({ ttlMs, maxKeys }: { ttlMs: number; maxKeys: number }) {
+  const markedAt = new Map<string, number>();
+  return {
+    mark(key: string): void {
+      markedAt.delete(key); // re-insert: Map order = least recently marked first
+      markedAt.set(key, Date.now());
+      while (markedAt.size > maxKeys) markedAt.delete(markedAt.keys().next().value!);
+    },
+    has(key: string): boolean {
+      const at = markedAt.get(key);
+      if (at === undefined) return false;
+      if (Date.now() - at < ttlMs) return true;
+      markedAt.delete(key);
+      return false;
+    },
+    tracked: () => markedAt.size,
   };
 }
 
@@ -154,16 +205,30 @@ export function createJoinMissGuard(opts: {
   const { max, windowMs, hardFactor, prefixMax, globalMax, pressureMax } = opts;
   const tightMax = opts.tightMax ?? JOIN_MISS_TIGHT_MAX;
   const maxKeys = opts.maxTracked ?? JOIN_MISS_MAX_TRACKED;
-  const keys = createMissLog({ windowMs, perKeyCap: hardFactor * max, maxKeys });
   const prefixes = createMissLog({ windowMs, perKeyCap: hardFactor * prefixMax, maxKeys });
+  const saturated = createRecentMarks({ ttlMs: windowMs, maxKeys });
+  const saturationKeys = Math.max(prefixMax, Math.ceil(maxKeys * JOIN_MISS_SATURATION_SHARE));
+  /**
+   * A full /48 that itself holds a large share of the key log while its /64s fall out of it rotates more of them than
+   * we track: lock the whole /48 instead. A /48 with only a few tracked /64s pushed out by others' rotation is not.
+   */
+  const onKeyEvicted = (key: string): void => {
+    const p = prefix48(key);
+    if (p && keys.trackedIn(p) >= saturationKeys && prefixes.count(p) >= prefixMax) saturated.mark(p);
+  };
+  const keys = createMissLog({ windowMs, perKeyCap: hardFactor * max, maxKeys, onEvict: onKeyEvicted, groupOf: prefix48 });
   const global = createMissLog({ windowMs, perKeyCap: globalMax, maxKeys: 1 });
 
   const underPressure = (): boolean => global.count(GLOBAL_KEY) >= globalMax;
-  /** Joins with a code from this key answer "Too many attempts" (save the exemptions). Never for a key with no misses. */
+  /**
+   * Joins with a code from this key answer "Too many attempts" (save the exemptions). Never for a key with no misses,
+   * except in a saturated /48 (its /64s' own misses may have been forgotten).
+   */
   const locked = (key: string): boolean => {
+    const p = prefix48(key);
+    if (p && saturated.has(p)) return true;
     const own = keys.count(key);
     if (!own) return false;
-    const p = prefix48(key);
     const inPrefix = p ? prefixes.count(p) : 0;
     let limit = max;
     if (p && inPrefix >= prefixMax) limit = Math.min(limit, tightMax);
@@ -190,7 +255,10 @@ export function createJoinMissGuard(opts: {
   };
   /** Misses recorded for `key` in the window (capped at the hard ceiling). */
   const count = (key: string): number => keys.count(key);
-  return { record, locked, hardLocked, underPressure, count, tracked: () => keys.tracked() + prefixes.tracked() };
+  return {
+    record, locked, hardLocked, underPressure, count,
+    tracked: () => keys.tracked() + prefixes.tracked() + saturated.tracked(),
+  };
 }
 
 // ── Token bucket (per socket) ──

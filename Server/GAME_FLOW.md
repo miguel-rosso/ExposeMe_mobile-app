@@ -329,7 +329,8 @@ Payload `gameCode`/`username` fields are ignored for all of the above; identity 
 
 ## Photo upload (HTTP)
 
-`POST /upload` (multipart, one file in field `image`, ≤10MB) → `200 { url: "/temp/<32 random hex>.<jpg|png|webp>" }`.
+`POST /upload` (multipart, one file in field `image`, ≤5MB) → `200 { url: "/temp/<32 random hex>.<jpg|png|webp>" }`.
+The app sends JPEGs of at most 1600 px (~300–600 KB), far below the limit.
 
 **Room members only.** Both `POST /upload` and `GET/HEAD /temp/<photo>` need the player's session credential from
 `room-of-game`, as headers: `X-Game-Code: <room code>` and `Authorization: Bearer <rejoinToken>` (the token never
@@ -365,6 +366,17 @@ unknown room or a token that is not a current member of it → **403**.
 - Accepted formats: JPEG, PNG, WebP, detected from the file contents (the file name and declared MIME type are ignored). The app is expected to send JPEG; HEIC and anything else is refused.
 - The stored image is re-encoded: orientation applied, scaled down to fit 2048×2048, all metadata (EXIF incl. GPS, XMP, ICC) removed, same format as the input.
 - Images are processed one at a time with a short bounded queue (`controllers/sanitizeImage.ts`).
+- **Order of checks** (nothing reads the body before multer): a `Content-Length` over the limit → **413** at once (no
+  slot taken); then the credentials (401/403); then the member takes an **in-flight slot**; then the per-minute rate
+  limits; then the room's acceptance (403) and the body. In-flight caps limit how many uploads are in progress (being
+  received or processed) *at once* (concurrency, not rate; `middlewares/uploadInFlight.ts`): per member (env `UPLOAD_INFLIGHT_PER_MEMBER_MAX`,
+  default 2), per room (`UPLOAD_INFLIGHT_PER_ROOM_MAX`, 12) and per IP (`UPLOAD_INFLIGHT_PER_IP_MAX`, 12; a full party shares one IP) → **429**, and
+  server-wide (`UPLOAD_INFLIGHT_MAX`, 32) → **503**. The refusal carries `Retry-After` and
+  `{ error, scope: "member" | "room" | "ip" | "server" }`. An admitted upload must be fully received within
+  `UPLOAD_REQUEST_TIMEOUT_MS` (default 20 s) → **408** and the connection is closed (only reception is timed: a complete
+  body that waits for processing is not cut); the slot is freed with the response, or if the client aborts. `qa/lab/lab.sh server` raises the in-flight caps for bot load tests (all bots share one IP).
+- **HTTP timeouts** (all routes): the whole request must arrive within `HTTP_REQUEST_TIMEOUT_MS` (default 60 s) and its
+  headers within `HTTP_HEADERS_TIMEOUT_MS` (default 20 s); WebSocket connections are not affected.
 - Errors are JSON `{ error }`:
 
 | Status | When |
@@ -373,12 +385,15 @@ unknown room or a token that is not a current member of it → **403**.
 | 403 | Not a member of that room, or the room isn't accepting a photo from this player now |
 | 409 | The game ended / room closed / player left while the upload was processed (nothing stored) |
 | 400 | No file, malformed multipart, more than one file, wrong field, undecodable image |
-| 413 | File over 10MB, or image over 24 megapixels |
+| 408 | Upload not fully received within `UPLOAD_REQUEST_TIMEOUT_MS` (20 s) |
+| 413 | File over 5MB (refused before reading the body when `Content-Length` already says so), or image over 24 megapixels |
 | 415 | Not JPEG/PNG/WebP (e.g. HEIC) |
-| 429 | Room already holds 100 photos, or rate limit (`Retry-After`). Credentials are checked first: only **rejected** requests (the 401/403 above) count per IP, default 30/min (env `UPLOAD_REJECTED_MAX`), and once over it that IP's unauthenticated requests get 429 instead of 401/403. Members are never limited by IP (a party shares one public IP): per member, default 20/min (env `UPLOAD_PLAYER_RATE_MAX`), and per room, default 12 × the member limit (env `UPLOAD_ROOM_RATE_MAX`), so neither a stranger on the Wi-Fi nor a member over their own limit can make another member's upload fail. Same window for all, env `UPLOAD_RATE_WINDOW_MS` (60 s); `qa/lab/lab.sh server` raises the member and room limits for bot load tests |
-| 503 | Server busy processing other uploads (`Retry-After`) |
+| 429 | Room already holds 100 photos, or rate limit (`Retry-After`). Credentials are checked first: only **rejected** requests (the 401/403 above) count per IP, default 30/min (env `UPLOAD_REJECTED_MAX`), and once over it that IP's unauthenticated requests get 429 instead of 401/403. Members are never rate-limited per minute by IP (a party shares one public IP); only concurrent uploads per IP are capped (12, below). Per minute: per member, default 20/min (env `UPLOAD_PLAYER_RATE_MAX`), and per room, default 12 × the member limit (env `UPLOAD_ROOM_RATE_MAX`), so neither a stranger on the Wi-Fi nor a member over their own limit can make another member's upload fail. Same window for all, env `UPLOAD_RATE_WINDOW_MS` (60 s); `qa/lab/lab.sh server` raises the member and room limits for bot load tests. Also too many uploads **in progress at once** (concurrency, not rate) for this member (2), room (12) or IP (12), with `scope` `member`/`room`/`ip` (see the order of checks above) |
+| 503 | Server busy: too many uploads in progress server-wide (32, `scope: "server"`), or processing other uploads (`Retry-After`) |
 
 Behind a reverse proxy, env `TRUST_PROXY` is the number of proxy hops used to read the client IP (default 1 when `RENDER` is set, otherwise 0). Env `UPLOAD_DIR` overrides the storage directory (default `Server/temp`); it must be a dedicated directory: if it is the OS temp dir, the filesystem root or the home directory the sweep refuses to run (one warning in the log).
+
+`GET /health` → `200 { "status": "ok" }` (liveness only: no uptime, memory or other process details).
 
 Any other HTTP route answers **404** JSON `{ "error": "Not found" }` (the path is never echoed), and other errors
 are handled by the final JSON error handler (`{ error }`, a 4xx only for integer 400–499 statuses, otherwise 500).

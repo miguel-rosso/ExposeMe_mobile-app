@@ -10,13 +10,18 @@ if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-export const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+/**
+ * The app re-encodes every photo as a JPEG of at most 1600 px (q0.8, ~300-600 KB; Client/app/utils/uploadPhoto.ts),
+ * so 5 MB leaves ample headroom while bounding what each in-flight upload can buffer (middlewares/uploadInFlight).
+ */
+export const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 
 // Kept in memory: UploadController checks the real format from the bytes (the declared MIME type is not
 // trusted, so it is not filtered here), re-encodes the image and writes it under a random name.
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: MAX_FILE_SIZE, files: 1 },
+  // Text fields are not used: a few tiny ones at most, so they can't add buffered memory either
+  limits: { fileSize: MAX_FILE_SIZE, files: 1, fields: 4, fieldSize: 1024 },
 });
 
 /** multer.single(field) with JSON errors: 413 for a file over MAX_FILE_SIZE, 400 for any other malformed upload. */
@@ -24,6 +29,8 @@ export function singleImage(field: string) {
   const handler = upload.single(field);
   return (req: Request, res: Response, next: NextFunction) => {
     handler(req, res, (err?: unknown) => {
+      // Already answered (the upload timed out, see middlewares/uploadInFlight): don't process or answer twice
+      if (res.headersSent) return;
       if (!err) return next();
       if (err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE") {
         res.status(413).json({ error: "File too large" });

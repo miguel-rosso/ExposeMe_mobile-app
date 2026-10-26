@@ -211,12 +211,15 @@ cmd_server() {
   [ "$port" != "$SERVER_PORT" ] && { name="server-$port"; logf="$RUNS/server-$port.log"; }
   if [ $stop = 1 ]; then bg_stop "$name" "$port"; log "$name stopped"; return 0; fi
   [ $restart = 1 ] && bg_stop "$name" "$port"
-  # Bots/load tests: lift the per-player and per-room /upload rate limits and the per-IP socket limits (every bot
-  # shares one IP) (override with UPLOAD_PLAYER_RATE_MAX=... / UPLOAD_ROOM_RATE_MAX=... / SOCKET_MAX_CONNECTIONS_PER_IP=...
-  # / JOIN_MISS_MAX=...).
+  # Bots/load tests: lift the per-player and per-room /upload rate limits, the /upload in-flight caps and the per-IP
+  # socket limits (every bot shares one IP) (override with UPLOAD_PLAYER_RATE_MAX=... / UPLOAD_ROOM_RATE_MAX=... /
+  # UPLOAD_INFLIGHT_*=... / SOCKET_MAX_CONNECTIONS_PER_IP=... / JOIN_MISS_MAX=...).
   # ALLOW_QA_ROUNDS=1: accept QA-only 3-round games (play --rounds 3); production never sets it
   bg_start "$name" "$logf" "$ROOT/Server" env PORT="$port" ALLOW_QA_ROUNDS=1 UPLOAD_ROOM_RATE_MAX="${UPLOAD_ROOM_RATE_MAX:-100000}" \
-    UPLOAD_PLAYER_RATE_MAX="${UPLOAD_PLAYER_RATE_MAX:-100000}" SOCKET_MAX_CONNECTIONS_PER_IP="${SOCKET_MAX_CONNECTIONS_PER_IP:-100000}" \
+    UPLOAD_PLAYER_RATE_MAX="${UPLOAD_PLAYER_RATE_MAX:-100000}" \
+    UPLOAD_INFLIGHT_MAX="${UPLOAD_INFLIGHT_MAX:-10000}" UPLOAD_INFLIGHT_PER_IP_MAX="${UPLOAD_INFLIGHT_PER_IP_MAX:-10000}" \
+    UPLOAD_INFLIGHT_PER_ROOM_MAX="${UPLOAD_INFLIGHT_PER_ROOM_MAX:-10000}" UPLOAD_INFLIGHT_PER_MEMBER_MAX="${UPLOAD_INFLIGHT_PER_MEMBER_MAX:-10000}" \
+    SOCKET_MAX_CONNECTIONS_PER_IP="${SOCKET_MAX_CONNECTIONS_PER_IP:-100000}" \
     JOIN_MISS_MAX="${JOIN_MISS_MAX:-100000}" npx ts-node server.ts
   for _ in $(seq 1 30); do curl -fs "http://localhost:$port/health" >/dev/null && { log "$name healthy on :$port"; return 0; }; sleep 1; done
   die "$name did not become healthy — see $logf"

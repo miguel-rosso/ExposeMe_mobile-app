@@ -26,6 +26,8 @@ export const UploadRouter = async (req: Request, res: Response) => {
 
   // Bound to the uploader's room (requireRoomMember / requireUploadAllowed ran before). The game may have ended, the
   // room closed or the player left while the image was processed: then nothing is stored.
+  // Already answered or the client is gone (upload timeout / abort, see middlewares/uploadInFlight): store nothing
+  if (res.headersSent || req.socket.destroyed) return;
   const member = res.locals.member as Member;
   if (!stillMember(member)) return refuseStale(res);
 

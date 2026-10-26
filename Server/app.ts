@@ -55,7 +55,17 @@ export function envMs(name: string, fallback: number): number {
 export const PING_INTERVAL = envMs("SOCKET_PING_INTERVAL_MS", 10_000);
 export const PING_TIMEOUT = envMs("SOCKET_PING_TIMEOUT_MS", 15_000);
 
-const server = createServer(app);
+// ── HTTP timeouts ──
+// Slow requests can't hold a connection for long: the whole request, body included, must arrive within
+// HTTP_REQUEST_TIMEOUT_MS and its headers within HTTP_HEADERS_TIMEOUT_MS; Node checks both every 5 s. POST /upload
+// has its own, shorter limit (UPLOAD_REQUEST_TIMEOUT_MS, middlewares/uploadInFlight). WebSocket upgrades are not
+// affected, and long-polling only has to send its (tiny) request within the limit.
+export const HTTP_REQUEST_TIMEOUT_MS = envMs("HTTP_REQUEST_TIMEOUT_MS", 60_000);
+export const HTTP_HEADERS_TIMEOUT_MS = Math.min(envMs("HTTP_HEADERS_TIMEOUT_MS", 20_000), HTTP_REQUEST_TIMEOUT_MS);
+
+const server = createServer({ connectionsCheckingInterval: Math.min(5_000, HTTP_HEADERS_TIMEOUT_MS) }, app);
+server.requestTimeout = HTTP_REQUEST_TIMEOUT_MS;
+server.headersTimeout = HTTP_HEADERS_TIMEOUT_MS;
 const io = new Server(server, {
   cors: {
     origin: "*",

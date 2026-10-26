@@ -3,6 +3,7 @@ import express from "express";
 import { UploadRouter } from "../controllers/UploadController";
 import { singleImage } from "../middlewares/upload";
 import { uploadPlayerRateLimit, uploadRoomRateLimit } from "../middlewares/rateLimit";
+import { uploadDeclaredSize, uploadInFlightLimit } from "../middlewares/uploadInFlight";
 import { requireUploadAllowed, requireUploadMember } from "../middlewares/uploadAccess";
 import { joinPageCsp } from "../middlewares/securityHeaders";
 
@@ -28,9 +29,12 @@ const toScriptString = (value: string) =>
     .replace(/\u2028/g, "\\u2028")
     .replace(/\u2029/g, "\\u2029");
 
-// Room members only (session credential in headers), and only when the room accepts a photo from them
-// Rejected requests are rate limited per IP, members per member and per room (see middlewares/rateLimit)
-const uploadLimits = [requireUploadMember, uploadPlayerRateLimit, uploadRoomRateLimit];
+// Room members only (session credential in headers), and only when the room accepts a photo from them.
+// Nothing reads the body before multer: a declared oversize body is refused first (413, no slot taken); then the
+// credentials (rejected requests rate limited per IP); then only members take an in-flight slot (concurrency caps per
+// member, room, IP and server-wide, plus the upload timeout; see middlewares/uploadInFlight); then the per-member and
+// per-room rate limits (see middlewares/rateLimit).
+const uploadLimits = [uploadDeclaredSize, requireUploadMember, uploadInFlightLimit, uploadPlayerRateLimit, uploadRoomRateLimit];
 router.post("/upload", ...uploadLimits, requireUploadAllowed, singleImage("image"), (req, res, next) => {
   UploadRouter(req, res).catch(next);
 });
@@ -82,13 +86,9 @@ router.get("/join/:code", (req, res) => {
   `);
 });
 
+// Liveness only: no uptime, memory or other process details for anonymous callers
 router.get("/health", (_req, res) => {
-  res.json({
-    status: "ok",
-    uptime: Math.floor(process.uptime()),
-    memory: Math.floor(process.memoryUsage().heapUsed / 1024 / 1024) + "MB",
-    timestamp: new Date().toISOString(),
-  });
+  res.json({ status: "ok" });
 });
 
 export default router;

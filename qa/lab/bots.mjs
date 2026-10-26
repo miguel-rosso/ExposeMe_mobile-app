@@ -174,7 +174,17 @@ async function uploadPhoto(label, auth) {
   const form = new FormData();
   form.append("image", blob, `${label}.jpg`);
   const res = await fetch(`${SERVER}/upload`, { method: "POST", body: form, headers: auth });
-  if (res.status === 429) throw Object.assign(new Error("upload 429 rate-limited (raise UPLOAD_PLAYER_RATE_MAX / UPLOAD_ROOM_RATE_MAX on the server)"), { rateLimited: true });
+  if (res.status === 429 || res.status === 503) {
+    // Server limit, not a game bug: name the knob from the body's `scope` (in-flight caps) or the error
+    const body = await res.json().catch(() => ({}));
+    const knob = {
+      member: "UPLOAD_INFLIGHT_PER_MEMBER_MAX", room: "UPLOAD_INFLIGHT_PER_ROOM_MAX", ip: "UPLOAD_INFLIGHT_PER_IP_MAX", server: "UPLOAD_INFLIGHT_MAX",
+    }[body.scope];
+    const hint = knob ? `too many uploads in progress, raise ${knob}`
+      : res.status === 503 ? "image processing queue full (SANITIZE_MAX_QUEUED in controllers/sanitizeImage.ts)"
+      : "rate-limited, raise UPLOAD_PLAYER_RATE_MAX / UPLOAD_ROOM_RATE_MAX (or the room holds 100 photos)";
+    throw Object.assign(new Error(`upload ${res.status} ${hint} on the server`), { rateLimited: true });
+  }
   if (!res.ok) throw new Error(`upload ${res.status}`);
   return { url: (await res.json()).url, ms: now() - t0 };
 }
@@ -185,7 +195,7 @@ function runRoom(roomIdx, fixedCode) {
     const events = []; // {bot, ev, round, t, payload}
     const errors = [];
     const uploads = [];
-    let rateLimited = 0; // uploads refused with 429 (server rate limit, not a game bug)
+    let rateLimited = 0; // uploads refused with 429/503 (server limits, not a game bug)
     let code = fixedCode || null;
     let finished = 0;
     let started = false;

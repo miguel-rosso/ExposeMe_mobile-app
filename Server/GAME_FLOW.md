@@ -58,6 +58,10 @@ After last round: game-over
   absent owner: no photo, `round-skipped { reason: "timeout" }` when the 15 s run out, then the next
   `waiting-photo`. The planted photo (`plantedPhoto`, `hasPlantedPhoto`) is cleared when its wait starts, so it is
   never shown twice.
+- **Only connected planters are drawn.** A planted round draws among the planted photos of connected players (like
+  the owners of uploaded photos). With none (every planter left is disconnected, within their grace), the round is
+  played as a normal one, and a disconnected planter keeps their photo: it gets a random free later round (if one is
+  left), where it is drawn if they are back by then. Nothing is sent about it.
 
 ## Whose photo it is (secret until the reveal)
 

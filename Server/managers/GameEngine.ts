@@ -55,8 +55,6 @@ interface PlantedWait {
 }
 
 export class GameEngine {
-  /** Pauses started in each room's current game, refunded or not (capped by MAX_TOTAL_PAUSES) */
-  private totalPauses = new WeakMap<Room, number>();
   /** Holds of the current round: round number, holds started, ms held so far, start of the active hold */
   private holdUsage = new WeakMap<Room, { round: number; count: number; usedMs: number; since: number | null }>();
   /**
@@ -101,7 +99,7 @@ export class GameEngine {
     room.plantedPhotosShown = 0;
     room._consecutiveSkips = 0;
     room._pauseCount = 0;
-    this.totalPauses.set(room, 0);
+    room._totalPauses = 0;
     this.plantedWaits.delete(room);
     // "Play again" reuses the room: drop scores and answers from the previous game
     room.players.forEach((p) => { p.points = 0; p.lastGuess = ""; p.lastAnswerCorrect = false; });
@@ -425,9 +423,8 @@ export class GameEngine {
     if (!room.started || room.paused) return;
     // Each pause gets the full PAUSE_TIMEOUT, but only MAX_PAUSES counted (and MAX_TOTAL_PAUSES in all) per game:
     // repeated drops can't keep a game frozen
-    const total = this.totalPauses.get(room) ?? 0;
-    if (room._pauseCount >= MAX_PAUSES || total >= MAX_TOTAL_PAUSES) {
-      console.log(`[${room.gameCode}] Pauses used up (${room._pauseCount}/${MAX_PAUSES} counted, ${total}/${MAX_TOTAL_PAUSES} in all) — ending game`);
+    if (room._pauseCount >= MAX_PAUSES || room._totalPauses >= MAX_TOTAL_PAUSES) {
+      console.log(`[${room.gameCode}] Pauses used up (${room._pauseCount}/${MAX_PAUSES} counted, ${room._totalPauses}/${MAX_TOTAL_PAUSES} in all) — ending game`);
       this.endGame(room);
       return;
     }
@@ -445,7 +442,7 @@ export class GameEngine {
     room.paused = true;
     // Counted up front (the payload shows the would-be number); resumeGame refunds it if the pause was short
     room._pauseCount++;
-    this.totalPauses.set(room, total + 1);
+    room._totalPauses++;
     room._pauseStartedAt = Date.now();
     room._pauseTimer = setTimeout(() => {
       room._pauseTimer = null;
@@ -667,11 +664,21 @@ export class GameEngine {
    */
   onLatePlantedPhoto(room: Room): void {
     if (!room.started || room.phase === null) return; // still drawn by onAllPlayersReady
+    this.reserveFreePlantedSlots(room);
+  }
+
+  /**
+   * Reserves random free rounds after the next one as planted slots until there is one per unused planted photo
+   * (or no free round is left).
+   */
+  private reserveFreePlantedSlots(room: Room): void {
     const planted = room.players.filter((p) => p.plantedPhoto).length;
-    if (room.plantedSlots.size >= planted) return;
     const free: number[] = [];
     for (let r = room.round + 2; r <= room.rounds; r++) if (!room.plantedSlots.has(r)) free.push(r);
-    if (free.length) room.plantedSlots.add(free[Math.floor(Math.random() * free.length)]);
+    while (room.plantedSlots.size < planted && free.length > 0) {
+      const [slot] = free.splice(Math.floor(Math.random() * free.length), 1);
+      room.plantedSlots.add(slot);
+    }
   }
 
   /** The awaited photo won't be played: announce it, then the next round (same number) or game over. */
@@ -824,21 +831,22 @@ export class GameEngine {
       .sort((a, b) => b.points - a.points);
   }
 
-  /** Pick a planted photo if this round is a planted slot */
+  /**
+   * The planter whose photo is shown next, if the next round is a planted slot. Only connected planters are drawn
+   * (like owners of uploaded photos); with none, the slot is played as a normal round and a disconnected planter keeps
+   * their photo, which gets a later free slot so it can still be shown once they are back.
+   */
   private pickPlantedPhoto(room: Room): Player | null {
-    // Next round number would be room.round + 1
     const nextRound = room.round + 1;
     if (!room.plantedSlots.has(nextRound)) return null;
+    room.plantedSlots.delete(nextRound);
 
     this.dropExpiredPlantedPhotos(room);
-    const candidates = room.players.filter((p) => p.plantedPhoto);
+    const candidates = room.players.filter((p) => p.plantedPhoto && p.connected);
     if (candidates.length === 0) {
-      // Slot reserved but no planted photos left — skip, play normal round
-      room.plantedSlots.delete(nextRound);
+      this.reserveFreePlantedSlots(room);
       return null;
     }
-
-    room.plantedSlots.delete(nextRound);
     return candidates[Math.floor(Math.random() * candidates.length)];
   }
 

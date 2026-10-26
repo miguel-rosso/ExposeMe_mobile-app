@@ -262,6 +262,18 @@ describe("pause with fewer than 2 connected players", () => {
     expect(safe).not.toHaveProperty("_pauseTimer");
     expect(safe.paused).toBe(true);
   });
+
+  it("pause counters stay on the server: room-of-game data never carries them (EXP-095)", () => {
+    room = startedRoom(["alice", "bob"]);
+    drop("bob");
+    vi.advanceTimersByTime(PAUSE_MIN_DURATION);
+    rejoin("bob");
+    drop("bob");
+    expect(room._pauseCount).toBe(1);
+    expect(room._totalPauses).toBe(2);
+    const safe = rm.safeRoomData(room) as unknown as Record<string, unknown>;
+    expect(Object.keys(safe).sort()).toEqual(["gameCode", "held", "paused", "phase", "players", "round", "rounds", "started"]);
+  });
 });
 
 // EXP-226: the app drops a turn in flight when a game-state arrives, so the photo owner whose return resumes the game
@@ -603,6 +615,26 @@ describe("short pauses are refunded (EXP-093)", () => {
     expect(vi.getTimerCount()).toBe(1);
     vi.advanceTimersByTime(DISCONNECT_GRACE);
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("play again resets the total pause count: a game that used up MAX_TOTAL_PAUSES can pause again (EXP-095)", () => {
+    room = startedRoom(["alice", "bob"]);
+    const other = otherOf();
+    for (let n = 1; n <= MAX_TOTAL_PAUSES; n++) {
+      drop(other);
+      vi.advanceTimersByTime(PAUSE_MIN_DURATION);
+      rejoin(other);
+    }
+    drop(other);
+    expect(room.started).toBe(false);
+    rejoin(other);
+    emits.length = 0;
+    engine.startGame(room);
+    room.players.forEach((p) => engine.markReady(room, p));
+    vi.advanceTimersByTime(GAME_START_DELAY);
+    drop(other);
+    expect(events("game-over")).toHaveLength(0);
+    expect(last("game-paused")!.args[0]).toMatchObject({ duration: PAUSE_TIMEOUT, pause: 1 });
   });
 
   it("the snapshot on rejoin matches the game-paused number, also after a refund", () => {

@@ -89,6 +89,8 @@ export interface Room {
   _pauseStartedAt: number;
   /** Pauses started in this game (each gets PAUSE_TIMEOUT; at most MAX_PAUSES, then game over) */
   _pauseCount: number;
+  /** Pauses started in this game, refunded or not (at most MAX_TOTAL_PAUSES, then game over) */
+  _totalPauses: number;
   /** Resume scheduled for when the pause reaches its minimum length */
   _resumeTimer: NodeJS.Timeout | null;
   /** Usernames the current pause is waiting for (as last announced) */

@@ -47,6 +47,7 @@ export class RoomManager {
       _pauseTimer: null,
       _pauseStartedAt: 0,
       _pauseCount: 0,
+      _totalPauses: 0,
       _resumeTimer: null,
       _pauseWaitingFor: [],
       _consecutiveSkips: 0,

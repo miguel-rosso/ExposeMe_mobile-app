@@ -368,7 +368,7 @@
         <p>Un bucle autónomo pule el juego por iteraciones. Claude hace de <b>orquestador</b>: planifica, reparte el trabajo entre agentes especializados, decide lo técnico, integra los cambios y mantiene este panel. No escribe el código de la app; lo escriben los agentes y lo revisan otros agentes antes de entrar.</p>
 
         <figure class="qa-fig">
-          <svg viewBox="0 0 860 430" role="img" aria-label="Una iteración: descubrir incidencias, elegir un lote de hasta 3 independientes, arreglarlas en paralelo en worktrees, revisarlas (código y seguridad, con hasta 2 rondas de corrección), integrarlas una a una con tests y bots, prueba rápida en iPhone y Android si cambia una pantalla, y publicar en el panel. Cada 3 iteraciones: al empezar, pasada de limpieza; al terminar, partida de regresión.">
+          <svg viewBox="0 0 860 430" role="img" aria-label="Una iteración: descubrir y filtrar incidencias, elegir un lote (hasta 3 graves independientes, o hasta 4 paquetes de bajas), arreglarlas en paralelo en worktrees, revisarlas (código y seguridad, con hasta 2 rondas de corrección), integrarlas una a una con tests y bots, prueba rápida en iPhone y Android si cambia una pantalla, y publicar en el panel. Cada 3 iteraciones: al empezar, pasada de limpieza; al terminar, partida de regresión.">
             <defs>
               <marker id="qa-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
             </defs>
@@ -401,11 +401,11 @@
             </g>
             <g fill="currentColor" font-size="13" text-anchor="middle">
               <text x="95" y="56" font-weight="700">1 · Descubrir</text>
-              <text x="95" y="74" font-size="11.5">auditor · seguridad · bots</text>
+              <text x="95" y="74" font-size="11.5">y filtrar el backlog</text>
               <text x="310" y="56" font-weight="700">2 · Elegir lote</text>
-              <text x="310" y="74" font-size="11.5">≤3, sin ficheros comunes</text>
+              <text x="310" y="74" font-size="11.5">bajas en paquetes</text>
               <text x="535" y="46" font-weight="700">3 · Arreglar</text>
-              <text x="535" y="64" font-size="11.5">qa-fixer × 3 en paralelo</text>
+              <text x="535" y="64" font-size="11.5">qa-fixer × 3–4 en paralelo</text>
               <text x="535" y="80" font-size="11.5">cada uno en su worktree</text>
               <text x="535" y="94" font-size="11.5">test primero</text>
               <text x="765" y="56" font-weight="700">4 · Revisar</text>
@@ -448,9 +448,14 @@
         <h3>Paso a paso</h3>
         <ol class="qa-flow-ol">
           <li><b>Descubrir.</b> Cuando quedan pocas incidencias abiertas, el auditor busca nuevas; cada 5, también seguridad. Se agrupan por causa para no duplicar.</li>
-          <li><b>Elegir un lote.</b> Hasta 3 incidencias, las más graves primero, y solo si no tocan los mismos ficheros (zonas: núcleo del servidor, HTTP/subidas, pantalla de partida, sala de espera, resto del cliente, laboratorio). Un cambio de dependencias va siempre solo.</li>
-          <li><b>Arreglar en paralelo.</b> Cada qa-fixer trabaja aislado. Regla: test en cada capa que toca (servidor → vitest, cliente → jest, protocolo → ambos + escenario de bots, flujo visible → Maestro).</li>
-          <li><b>Revisar.</b> Revisor de código siempre; seguridad si toca servidor, sockets, subidas o permisos. Los hallazgos graves vuelven al mismo agente (máximo 2 rondas; si no, se bloquea). Los menores se arreglan o quedan como incidencias.</li>
+          <li><b>Filtrar el backlog</b> (todas las gravedades). Se cierra una incidencia solo si se demuestra que ya no ocurre (otro cambio la arregló, el código ya no existe o un test lo prueba); la antigüedad nunca es motivo. Las duplicadas se juntan. Lo que depende de ti (cómo se juega, o una acción en Render o en las tiendas) pasa a tarjeta en «Necesito tu respuesta». Lo demás sigue abierto.</li>
+          <li><b>Elegir un lote.</b> Las más graves primero, y solo trabajos que no tocan los mismos ficheros (zonas: núcleo del servidor, HTTP/subidas, pantalla de partida, sala de espera, resto del cliente, laboratorio). Un cambio de dependencias va siempre solo.
+            <ul>
+              <li><b>Medias, altas y críticas:</b> una por agente, una revisión y un commit cada una, para poder revertir exactamente la culpable si la regresión falla.</li>
+              <li><b>Bajas:</b> se agrupan en <b>paquetes</b> de 2–6 de la misma zona y tema (p. ej. etiquetas de accesibilidad, dependencias sin uso, flujos de Maestro). Un agente, una revisión y un commit por paquete, y hasta 4 paquetes en paralelo cuando no hay nada más grave abierto.</li>
+            </ul></li>
+          <li><b>Arreglar en paralelo.</b> Cada qa-fixer trabaja aislado (una incidencia o un paquete). Regla: test por incidencia en cada capa que toca (servidor → vitest, cliente → jest, protocolo → ambos + escenario de bots, flujo visible → Maestro).</li>
+          <li><b>Revisar.</b> Revisor de código siempre; seguridad si toca servidor, sockets, subidas o permisos. Los hallazgos graves vuelven al mismo agente (máximo 2 rondas; si no, se bloquea). Los comentarios menores y las propuestas de los agentes ya no se convierten solos en incidencias: si es un fallo real fuera del cambio, con un caso concreto, se abre con la gravedad que merezca; si está en el código tocado, se arregla en el mismo cambio; si es solo de estilo, se descarta.</li>
           <li><b>Integrar uno a uno.</b> Cada arreglo entra como un solo commit y después se repiten todos los tests, la comprobación de tipos y una partida de bots. Si algo falla, se revierte ese commit.</li>
           <li><b>Prueba rápida en dispositivos</b> solo si cambió una pantalla: un iPhone y un Android a la vez con el flujo de esa incidencia, en segundo plano, sin parar el resto.</li>
           <li><b>Publicar.</b> Estado, actividad, cambios y ejecuciones se exportan desde el backlog local a este panel en cada paso.</li>

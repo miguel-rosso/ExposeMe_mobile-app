@@ -11,11 +11,11 @@ Read `CLAUDE.md` once per session. The device lab is documented in `.claude/skil
 
 ## Ground rules
 - **Language: Spanish.** Everything the user reads is in Spanish (Spain): reports to the user, issue `title`/`summary`, `changes`/`runs` text in `qa/backlog.json`, and the dashboard. Code, code comments, commit messages and identifiers stay in English. Subagents may answer in English; translate their findings when writing them to the backlog.
-- Work on branch `qa/loop` (create from `main` if missing). One commit per issue: `[FIX] EXP-NNN <title>` / `[FEAT] ...` / `[TEST] ...`. **Never add a Co-Authored-By trailer or any Claude/AI attribution** to commits or PRs. **Never push, never merge to main, never touch the production server URL or deploy.** The user reviews and merges.
+- Work on branch `qa/loop` (create from `main` if missing). One commit per issue (or per low-severity pack, see step 2): `[FIX] EXP-NNN <title>` / `[FEAT] ...` / `[TEST] ...`. **Never add a Co-Authored-By trailer or any Claude/AI attribution** to commits or PRs. **Never push, never merge to main, never touch the production server URL or deploy.** The user reviews and merges.
 - **Public repo.** Follow "Repositorio público" in `CLAUDE.md`. `qa/backlog.json` and the dashboard exports are git-ignored (they describe unfixed vulnerabilities) — never force-add them. Before each commit run `git diff --cached --stat` and `git diff --cached | grep -nEi "secret|token|password|api[_-]?key|BEGIN .*PRIVATE|192\.168\.|/Users/"` and drop anything sensitive. Security fixes get neutral commit messages.
 - Only the orchestrator edits `qa/backlog.json` and commits. Subagents return JSON; parse it, don't trust prose.
 - Evidence before status: an issue is `fixed` only with a passing test **in every layer the change touches** (server → vitest, client → jest, protocol → both + bots scenario, user-visible flow → Maestro flow); `verified` only after a device run shows it (normally the batched regression game, step 7). Tests are the gate; devices are a periodic net, never a per-issue blocker. Tests stay in the repo as the permanent record of each fix; the `changes` row lists them.
-- **Parallel fixes in git worktrees, up to 3 at a time**, only for issues whose changes won't touch the same files (see step 2). Each fixer works in its own worktree; merges into `qa/loop` happen one at a time with tests re-run after each. Device runs are serial (one shared lab). When no disjoint set exists, run one issue at a time — that is normal, not a failure.
+- **Parallel fixes in git worktrees, up to 3 at a time (up to 4 when the batch is made of low-severity packs)**, only for work units whose changes won't touch the same files (see step 2). Each fixer works in its own worktree; merges into `qa/loop` happen one at a time with tests re-run after each. Device runs are serial (one shared lab). When no disjoint set exists, run one issue at a time — that is normal, not a failure.
 - **Who decides.** Technical questions (architecture, libraries, upgrades, implementation, tests) and minor low-visibility parameters (e.g. how long an abandoned solo room lives): decide yourself with your recommended option and record a resolved "Decidido por Claude" card. **Functional questions — how the game should behave for players** (rules, scoring, what each player sees, what happens when someone leaves/disconnects mid-game, adding/removing features) — and anything irreversible, costly, outward-facing (deploys, store submissions, pushing) or touching the user's machine/accounts: ask via a `pending` decision card with options and your recommendation, then keep working on other issues until answered.
 
 ## One iteration
@@ -35,7 +35,16 @@ Run when fewer than 3 issues are `open` for the current focus, or every 4th iter
 - every 3rd iteration, at its START, also `qa-auditor` with focus `code-health` over the whole `git diff main..qa/loop` plus the files it touches (see step 7b), so that iteration's batches can include one «Limpieza:» issue and the regression game at its END (step 7) covers the refactor too.
 Dedupe against the backlog by root cause, assign the next `EXP-NNN` ids, `found_by` = agent name, `status: open`. Bots can find sync bugs cheaply: `node qa/lab/bots.mjs --bots 5 --host --chaos 0.15 --upload-fail 0.15 --photos qa/runs/photos/bots --out qa/runs/<id>/bots.json`.
 
-### 2. Pick (a batch of 1-3 disjoint issues)
+### 1b. Triage (every discovery pass, and before the first low-pack batch)
+Applies to every severity. A clean backlog makes picking and grouping honest. For each `open` issue (on a discovery pass: only the new ones plus any `open` issue not triaged in the last 6 iterations — record `triaged_at` on the issue):
+- **Close as obsolete** only with proof that it no longer happens: another change fixed it (`wontfix`, summary note «Obsoleta: resuelta por CHG-0xx»), the code it refers to no longer exists, or it no longer reproduces (name the test/command that shows it). Age alone is never a reason to close — an old issue stays open until proven obsolete.
+- **Merge duplicates** that share a root cause: keep the clearest one, add the other's evidence to it, set the other `wontfix` with «Duplicada de EXP-NNN».
+- **Move to a dashboard card** what code can't settle: functional questions (how the game behaves for players) → `decisión` card; something only the user can do (Render/production config, store consoles, accounts) → `acción` card. Set the issue `blocked` with the card id in its summary until answered.
+- Re-check the severity: an issue that can lose a round, desync players or leak data is not `low`.
+- **Everything else stays `open`**, however old.
+Triage itself is cheap: you can check most items with grep/tests; for a large set, split it among up to 3 read-only `qa-auditor` runs (one per conflict zone) that return a verdict + proof per issue, and apply the verdicts yourself.
+
+### 2. Pick (a batch of 1-3 disjoint issues, or of up to 4 low packs)
 Priority order: highest severity first; on ties prefer `sync` > `bug` > `security` > `perf` > `ux` > `test` > `infra` > `cleanup`, and anything that unblocks testing early. Take the top issue, then add up to 2 more **only if they cannot touch the same files**. Estimate each issue's file set from its `evidence`/`summary` and these conflict zones — at most ONE issue per zone in a batch:
 - `server-core`: `Server/routes/socketRoutes.ts`, `Server/managers/*`, `Server/models/*`, `Server/GAME_FLOW.md`
 - `server-http`: `Server/app.ts`, `Server/routes/uploadRoutes.ts`, `Server/middlewares/*`, `Server/controllers/*`
@@ -44,26 +53,37 @@ Priority order: highest severity first; on ties prefer `sync` > `bug` > `securit
 - `client-other`: the rest of `Client/app/` (i18n, other screens/components)
 - `deps`: any `package.json`/lockfile change or SDK upgrade (e.g. EXP-038) — **always runs alone**, nothing else in the batch
 - `lab`: `qa/**` tooling
-An issue that changes the socket protocol spans `server-core` + a client zone (+ `qa/lab/bots.mjs`). When unsure whether two issues overlap, don't batch them. Set each picked issue `in-progress` and add one "en curso" activity row per fixer.
+An issue that changes the socket protocol spans `server-core` + a client zone (+ `qa/lab/bots.mjs`). When unsure whether two issues overlap, don't batch them.
 
-### 3. Fix (each issue in its own worktree, in parallel)
-For every issue in the batch, in a single message, spawn `qa-fixer` with `isolation: "worktree"` and a prompt containing: the full issue object, its conflict zone, the line "You are in a git worktree: first run `git reset --hard qa/loop` (the harness branches worktrees from `main`, which lacks the QA tooling and recent fixes) and `qa/lab/worktree-setup.sh .` from your worktree root; never cd into or edit the main checkout", and a unique server port for bots (`3101`, `3102`, `3103`; `qa/lab/lab.sh server --port <p>` from the worktree, `--server http://localhost:<p>` for bots, stop it when done). With a batch of one, you may skip the worktree and work in the main checkout as before.
-The Agent result names the worktree path and branch. If a fixer returns `blocked`, record why and drop that issue from the batch (`git worktree remove --force <path>`, `git branch -D <branch>`).
+**Low-severity packs.** Issues with severity ≥ medium are always fixed one per fixer, one review, one commit (they touch game logic/sync, and the regression game must be able to revert exactly the culprit). `low` issues are grouped instead:
+- A **pack** = 2-6 `low` issues in the **same conflict zone** that share a theme (e.g. accessibility labels + testIDs, unused dependencies, Maestro flows, small fixes in one file), expected under ~300 changed lines in total. A `low` with no natural partner is a pack of one. At most one «Limpieza:» issue per pack, and `deps` packs still run alone.
+- A batch is either the top ≥ medium issue plus up to 2 disjoint low packs, or — when no ≥ medium issue is `open` — up to **4 disjoint low packs**, one per zone.
+- Pick packs by their highest-priority member (same priority order as above).
+Set each picked issue `in-progress` and add one "en curso" activity row per fixer (one per pack, listing its issues).
+
+### 3. Fix (each issue or pack in its own worktree, in parallel)
+For every issue or pack in the batch, in a single message, spawn `qa-fixer` with `isolation: "worktree"` and a prompt containing: the full issue object (for a pack: every issue object, and the line "This is a pack: fix all of them in one diff, one test per issue per layer; if one member turns out bigger or riskier than expected, return it in `skipped` and finish the rest"), its conflict zone, the line "You are in a git worktree: first run `git reset --hard qa/loop` (the harness branches worktrees from `main`, which lacks the QA tooling and recent fixes) and `qa/lab/worktree-setup.sh .` from your worktree root; never cd into or edit the main checkout", and a unique server port for bots (`3101`, `3102`, `3103`; `qa/lab/lab.sh server --port <p>` from the worktree, `--server http://localhost:<p>` for bots, stop it when done). With a batch of one, you may skip the worktree and work in the main checkout as before.
+The Agent result names the worktree path and branch. If a fixer returns `blocked`, record why and drop that issue from the batch (pack members listed in `skipped` go back to `open` (`git worktree remove --force <path>`, `git branch -D <branch>`).
 
 ### 4. Review (parallel, per worktree)
-For each fixed issue, in parallel: `qa-reviewer` and, if it touches `Server/`, sockets, uploads, deep links or permissions, `qa-security` (`diff` mode) — both told the worktree path (they review `git -C <path> diff` and run tests there). Blocker/major findings → send back to that issue's `qa-fixer` (same worktree; max 2 rework rounds, then drop it as `blocked`). Minor findings become new `open` low-severity issues.
+For each fixed issue or pack (one review per pack, covering all its issues), in parallel: `qa-reviewer` and, if it touches `Server/`, sockets, uploads, deep links or permissions, `qa-security` (`diff` mode) — both told the worktree path (they review `git -C <path> diff` and run tests there). Blocker/major findings → send back to that issue's `qa-fixer` (same worktree; max 2 rework rounds, then drop it as `blocked`; for a pack, drop only the members the findings point at and merge the rest).
+
+**Follow-up filter** (every severity; applies to reviewer/security `minor` findings AND to the fixer's `follow_ups`). Nothing becomes an issue automatically; classify each one:
+1. A real defect **outside the scope of the change**, with a concrete scenario (state/inputs → wrong result) → new `open` issue, with the severity it deserves (not `low` by default); dedupe against the backlog first.
+2. A problem **in the code the diff touches** → fix it in the same rework round (counts as one of the 2 rounds only if it was a blocker/major; minors ride along with any round, or with a short extra pass by the same fixer if there was none).
+3. Style or preference with no consequence → discard; mention it in the `changes` row's `review` text if useful.
 
 ### 4b. Merge one at a time, then verify the integrated code
 For each approved issue, in priority order:
 1. Commit inside the worktree: `git -C <path> add -A && git -C <path> commit -m "<final message>"` (run the sensitive-content check from Ground rules on that diff first).
-2. In the main checkout (`git status` must be clean apart from ignored files): `git merge --squash <branch> && git commit -m "<same message>"` — one commit per issue on `qa/loop`. On a textual conflict: `git merge --abort` (or `git reset --merge`), keep that issue `in-progress`, and re-run it alone in the next iteration on top of the new `qa/loop`.
+2. In the main checkout (`git status` must be clean apart from ignored files): `git merge --squash <branch> && git commit -m "<same message>"` — one commit per issue (per pack for low packs: `[FIX] EXP-a, EXP-b, EXP-c <theme>`) on `qa/loop`. On a textual conflict: `git merge --abort` (or `git reset --merge`), keep that issue `in-progress`, and re-run it alone in the next iteration on top of the new `qa/loop`.
 3. Re-run on the merged result: `cd Server && npx vitest run && npx tsc --noEmit`, `cd Client && npx tsc --noEmit` (baseline errors only) `&& npx jest --ci`, `qa/lab/lab.sh server --restart` + a bots smoke run. A failure here is a semantic conflict: `git revert --no-edit HEAD`, keep the issue `in-progress` and re-run it alone next iteration.
 4. Remove the worktree and branch: `git worktree remove --force <path> && git branch -D <branch>`.
 After all merges, **no per-issue device game** (DEC-019): tests + bots are the gate, and the next batch starts right away. Only if the batch changed a screen (`Client/app/screens/*`, `Client/app/components/*`), run one quick smoke with `qa-device-tester`: first iOS + first Android at the same time (`--devices pair`, both run the flow in parallel so it costs the same wall-clock as one), the issue's own Maestro flow (or `play --devices pair --bots 2 --rounds 3 --flow <flow>` when the flow needs bots), no full game, `RUN_ID=it<N>-smoke`, budget ~2 min. Never wait on it: launch it in the background and keep fixing; the smoke and the next batch's fixers run at the same time (fixers never touch devices). Server-only or test-only batches skip devices entirely. A failing smoke → identify the culprit issue, `git revert` its commit and send it back to rework. Issues stay `fixed` until the regression game (step 7) shows them, then become `verified`.
 
 ### 5. Commit and record
 - Commits happen in step 4b (one per issue, on `qa/loop`).
-- Backlog: issue → `fixed` (or `verified` if a device run covered it), `fixed_at`, `commit` (short sha). Append a `changes` row `{id: CHG-NNN, date, issue, title, commit, tests, review}` and, for every lab/bot run, a `runs` row `{id: RUN-NNN, date, kind: unit|bots|devices, devices, players, rounds, result, p95_skew_ms, max_skew_ms, rounds_skipped, notes}`. Add follow-ups from the fixer/reviewer as new issues.
+- Backlog: issue → `fixed` (or `verified` if a device run covered it), `fixed_at`, `commit` (short sha). Append a `changes` row `{id: CHG-NNN, date, issue, title, commit, tests, review}` and, for every lab/bot run, a `runs` row `{id: RUN-NNN, date, kind: unit|bots|devices, devices, players, rounds, result, p95_skew_ms, max_skew_ms, rounds_skipped, notes}`. Only follow-ups that passed the follow-up filter (step 4) become new issues. A pack gets one `changes` row with `issue: "EXP-a, EXP-b"`; every member gets the same `commit`.
 - The backlog is local only (ignored): update it, don't commit it.
 
 ### 5b. The user follows progress in the dashboard, not the chat
@@ -104,4 +124,4 @@ End the iteration with 3-5 lines to the user (in Spanish): what was fixed, evide
 
 ## Running it continuously
 - One iteration: `/exposeme-qa-loop`.
-- Autonomous: `/loop /exposeme-qa-loop` (self-paced). Stop the loop when: no `open` issues with severity ≥ medium remain after a discovery pass, or 3 consecutive iterations end `blocked`, or the lab is broken and can't be repaired. Report why you stopped.
+- Autonomous: `/loop /exposeme-qa-loop` (self-paced). Stop the loop when: no `open` issues remain after a discovery + triage pass (issues waiting on a user card don't count), or 3 consecutive iterations end `blocked`, or the lab is broken and can't be repaired. Report why you stopped.

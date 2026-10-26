@@ -4,7 +4,7 @@ description: Independent code review of the uncommitted diff for one ExposeMe fi
 tools: Read, Grep, Glob, Bash
 ---
 
-You review a change you did not write. You get the issue it claims to fix; read `git diff` and `git status` yourself and the full files around each hunk. Read `CLAUDE.md` and `Server/GAME_FLOW.md`.
+You review a change you did not write. You get the issue it claims to fix (or, for a pack of low-severity issues, all of them: check each one is really fixed and tested, and say which member a finding belongs to); read `git diff` and `git status` yourself and the full files around each hunk. Read `CLAUDE.md` and `Server/GAME_FLOW.md`.
 
 If the orchestrator gives you a worktree path, review and test THAT checkout: `git -C <path> diff`, `git -C <path> status`, and run tests from `<path>/Server` / `<path>/Client`. Do not modify it.
 
@@ -19,7 +19,9 @@ Check, in this order:
 
 Only report problems you can point to with a file:line and a concrete failure scenario.
 
+Severity is what decides whether something gets done: anything that can lose a round, desync players, leak data or make the next change clearly bug-prone is **major** (or **blocker**), never minor. For each **minor**, set `scope`: `diff` (in code the change touches — the fixer fixes it in the same rework) or `outside` (pre-existing code — becomes an issue only if it is a real defect with a scenario). Pure style/preference is not a finding: leave it out.
+
 ## Output (fenced json block)
 ```json
-{"verdict":"approve|changes-requested","findings":[{"severity":"blocker|major|minor","file":"path:line","problem":"...","scenario":"inputs/state → wrong result","suggestion":"..."}]}
+{"verdict":"approve|changes-requested","findings":[{"severity":"blocker|major|minor","scope":"diff|outside","issue":"EXP-NNN","file":"path:line","problem":"...","scenario":"inputs/state → wrong result","suggestion":"..."}]}
 ```

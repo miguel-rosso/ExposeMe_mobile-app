@@ -77,6 +77,14 @@ function session(socket: Socket): { room: Room; player: Player } | null {
 }
 
 /**
+ * The photo owner on `socketId` is going away (leave, kick, disconnect): end their hold of the scores screen now
+ * (hold-end + hold-resume) instead of leaving everyone frozen until the hold budget runs out.
+ */
+function releaseHoldOf(room: Room, socketId: string): void {
+  if (room.held && room.currentPlayer?.socketId === socketId) gameEngine.forceRelease(room);
+}
+
+/**
  * Drop a room binding of this socket, as an explicit leave. If `owned` (the socket still is that player's
  * current socket) the player is removed, host handed over and the room notified; a socket replaced by a
  * rejoin only detaches. Always leaves the socket.io room. Does not touch socket.data.
@@ -84,7 +92,7 @@ function session(socket: Socket): { room: Room; player: Player } | null {
 function leaveBinding(socket: Socket, gameCode: string, username: string, owned: boolean): void {
   const room = roomManager.getRoom(gameCode);
   if (owned && room) {
-    if (room.held && room.currentPlayer?.socketId === socket.id) gameEngine.forceRelease(room);
+    releaseHoldOf(room, socket.id);
 
     console.log(`[${gameCode}] ${username} left voluntarily`);
     const result = roomManager.removePlayer(gameCode, username);
@@ -275,8 +283,7 @@ io.on("connection", (socket: Socket) => {
       const room = roomManager.getRoom(gameCode);
       if (!room) return;
 
-      // Release hold if this player was holding
-      if (room.held && room.currentPlayer?.socketId === socket.id) gameEngine.forceRelease(room);
+      releaseHoldOf(room, socket.id);
 
       chatCooldowns.delete(socket.id);
 
@@ -447,6 +454,8 @@ io.on("connection", (socket: Socket) => {
       const { room } = s;
       const removed = roomManager.removePlayerByUsername(room.gameCode, data.username);
       if (removed) {
+        // Here, not on its disconnect: the eviction below clears the socket's session, so that handler skips it
+        releaseHoldOf(room, removed.socketId);
         io.to(room.gameCode).emit("player-removed", roomManager.publicPlayer(removed, room));
         // The kicked player's current socket and any other socket still bound to them in this room
         const target = io.sockets.sockets.get(removed.socketId);

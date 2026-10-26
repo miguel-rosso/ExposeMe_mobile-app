@@ -307,6 +307,8 @@ that reached the lobby screen in between are covered by that snapshot.
   other phase (`waiting-photo`, `answering`, `reveal`), while paused or already held is ignored
 - Press: game pauses for everyone (server stops timer)
 - Release: game resumes from where it paused
+- An owner who goes away while holding (`leave-room`, removed by the host, connection lost) releases the hold at once:
+  `hold-end` + `hold-resume`, as a force-release
 - Limits per round: at most **3 holds**, **30 s held in total** (`MAX_HOLDS_PER_ROUND`, `HOLD_BUDGET_PER_ROUND`).
   A hold is force-released (`hold-end` + `hold-resume`) when it reaches what is left of the budget; once the
   budget or the count is used up, `hold-start` is ignored until the next round. A pause ends an active hold and

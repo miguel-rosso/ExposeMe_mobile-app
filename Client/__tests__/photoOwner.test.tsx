@@ -1,10 +1,10 @@
 import React from "react";
 import { StyleSheet } from "react-native";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
-import tw from "twrnc";
 import { TEST_IDS, playerOptionId } from "../app/utils/testIds";
 // Loaded with the file (jest.mock calls below are hoisted above it): a cold transform must not hit the test timeout
 import GameScreen from "../app/screens/GameScreen";
+import { ANSWER_STATE_BORDER } from "../app/components/AnswerOption";
 
 // EXP-128 / EXP-252: round-start / game-state never tell anyone, the owner included, whose photo it is before
 // round-reveal: everyone votes the same way. From the reveal on (correctAnswer) the owner's screen knows the photo was
@@ -81,14 +81,15 @@ afterAll(() => jest.restoreAllMocks());
 const has = (root: ReactTestInstance, id: string) => root.findAll((n) => n.props.testID === id, { deep: true }).length > 0;
 const option = (root: ReactTestInstance, name: string) =>
   root.findAll((n) => n.props.testID === playerOptionId(name) && typeof n.type === "string")[0];
-const bgOf = (root: ReactTestInstance, name: string) => StyleSheet.flatten(option(root, name).props.style).backgroundColor;
+// An option shows its state in its border colour (EXP-253)
+const markOf = (root: ReactTestInstance, name: string) => StyleSheet.flatten(option(root, name).props.style).borderColor;
 const press = (root: ReactTestInstance, name: string) =>
   act(() => root.find((n) => n.props.testID === playerOptionId(name) && typeof n.props.onPress === "function").props.onPress());
 const answers = () => mockSocket.emitted.filter(([ev]) => ev === "submit-answer").map(([, d]) => d);
 
-const GREEN = tw`bg-green-500`.backgroundColor;
-const RED = tw`bg-red-500`.backgroundColor;
-const BLUE = tw`bg-blue-500`.backgroundColor;
+const GREEN = ANSWER_STATE_BORDER.correct;
+const RED = ANSWER_STATE_BORDER.wrong;
+const BLUE = ANSWER_STATE_BORDER.selected;
 const START = { photo: "/temp/x.jpg", round: 1, duration: 8_000 };
 
 describe("GameScreen: whose photo it is (EXP-128)", () => {
@@ -112,15 +113,15 @@ describe("GameScreen: whose photo it is (EXP-128)", () => {
   it("a non-owner votes, sees no hold button, and the reveal marks the right answer", () => {
     act(() => mockSocket.fire("round-start", START));
     // Nothing on screen tells whose photo it is: no option is highlighted
-    for (const n of ["alice", "bob", "carol"]) expect(bgOf(r.root, n)).not.toBe(GREEN);
+    for (const n of ["alice", "bob", "carol"]) expect(markOf(r.root, n)).not.toBe(GREEN);
     press(r.root, "alice");
-    expect(bgOf(r.root, "alice")).toBe(BLUE);
+    expect(markOf(r.root, "alice")).toBe(BLUE);
     // EXP-148: the pick is sent when tapped, during answering (the server ignores answers once the reveal is out)
     expect(answers()).toEqual([{ guess: "alice" }]);
 
     act(() => mockSocket.fire("round-reveal", { correctAnswer: "alice", duration: 3_000 }));
     expect(answers()).toEqual([{ guess: "alice" }]); // nothing sent at the reveal
-    expect(bgOf(r.root, "alice")).toBe(GREEN);
+    expect(markOf(r.root, "alice")).toBe(GREEN);
     act(() => mockSocket.fire("round-scores", { scores: [], round: 1, totalRounds: 10, duration: 5_000 }));
     expect(r.root.find((n) => n.props.testID === "score-correct-answer").props.children).toBe("alice");
     expect(has(r.root, TEST_IDS.holdButton)).toBe(false);
@@ -133,7 +134,7 @@ describe("GameScreen: whose photo it is (EXP-128)", () => {
     act(() => { jest.advanceTimersByTime(250); });
     press(r.root, "alice");
     expect(answers()).toEqual([{ guess: "carol" }, { guess: "alice" }]);
-    expect(bgOf(r.root, "alice")).toBe(BLUE);
+    expect(markOf(r.root, "alice")).toBe(BLUE);
     act(() => mockSocket.fire("round-reveal", { correctAnswer: "alice", duration: 3_000 }));
     act(() => { jest.advanceTimersByTime(1_000); });
     expect(answers()).toEqual([{ guess: "carol" }, { guess: "alice" }]);
@@ -147,7 +148,7 @@ describe("GameScreen: whose photo it is (EXP-128)", () => {
     press(r.root, "bob");
     press(r.root, "alice");
     expect(answers()).toEqual([{ guess: "carol" }]);
-    expect(bgOf(r.root, "alice")).toBe(BLUE); // the screen follows every tap at once
+    expect(markOf(r.root, "alice")).toBe(BLUE); // the screen follows every tap at once
     act(() => { jest.advanceTimersByTime(199); });
     expect(answers()).toEqual([{ guess: "carol" }]);
     act(() => { jest.advanceTimersByTime(1); });
@@ -173,7 +174,7 @@ describe("GameScreen: whose photo it is (EXP-128)", () => {
     press(r.root, "alice");
     act(() => { jest.advanceTimersByTime(500); });
     expect(answers()).toEqual([]);
-    expect(bgOf(r.root, "alice")).not.toBe(BLUE);
+    expect(markOf(r.root, "alice")).not.toBe(BLUE);
     expect(option(r.root, "alice").props.accessibilityState?.disabled ?? option(r.root, "alice").props.disabled).toBe(true);
     // A new round opens them again
     act(() => mockSocket.fire("round-start", { ...START, round: 2 }));
@@ -195,7 +196,7 @@ describe("GameScreen: whose photo it is (EXP-128)", () => {
     press(r.root, "bob"); // after the close: ignored
     expect(answers()).toHaveLength(2);
     act(() => mockSocket.fire("round-reveal", { correctAnswer: "alice", duration: 3_000 }));
-    expect(bgOf(r.root, "alice")).toBe(GREEN);
+    expect(markOf(r.root, "alice")).toBe(GREEN);
   });
 
   // EXP-227: the reveal and scores colour the pick the server can have counted, not a later local tap
@@ -204,8 +205,8 @@ describe("GameScreen: whose photo it is (EXP-128)", () => {
     press(r.root, "carol");
     press(r.root, "alice"); // waits for its throttle slot; the reveal arrives first
     act(() => mockSocket.fire("round-reveal", { correctAnswer: "alice", duration: 3_000 }));
-    expect(bgOf(r.root, "carol")).toBe(RED);
-    expect(bgOf(r.root, "alice")).not.toBe(GREEN);
+    expect(markOf(r.root, "carol")).toBe(RED);
+    expect(markOf(r.root, "alice")).not.toBe(GREEN);
     act(() => { jest.advanceTimersByTime(1_000); });
     expect(answers()).toEqual([{ guess: "carol" }]); // too late: never sent in reveal
   });
@@ -217,7 +218,7 @@ describe("GameScreen: whose photo it is (EXP-128)", () => {
     act(() => { jest.advanceTimersByTime(250); });
     press(r.root, "alice"); // sent, but it reached the server after the close
     act(() => mockSocket.fire("round-reveal", { correctAnswer: "alice", duration: 3_000 }));
-    expect(bgOf(r.root, "alice")).toBe(GREEN);
+    expect(markOf(r.root, "alice")).toBe(GREEN);
     const score = (username: string, lastGuess: string) =>
       ({ username, points: 0, isHost: false, lastAnswerCorrect: false, lastGuess });
     act(() => mockSocket.fire("round-scores", {
@@ -230,8 +231,8 @@ describe("GameScreen: whose photo it is (EXP-128)", () => {
     act(() => mockSocket.fire("round-start", START));
     press(r.root, "carol");
     act(() => mockSocket.fire("round-reveal", { correctAnswer: "alice", duration: 3_000 }));
-    expect(bgOf(r.root, "carol")).toBe(RED);
-    expect(bgOf(r.root, "alice")).not.toBe(GREEN); // only my own selection is coloured
+    expect(markOf(r.root, "carol")).toBe(RED);
+    expect(markOf(r.root, "alice")).not.toBe(GREEN); // only my own selection is coloured
   });
 
   // EXP-252: nobody is told whose photo it is before the reveal, the owner included (they may not recognise it)
@@ -242,12 +243,12 @@ describe("GameScreen: whose photo it is (EXP-128)", () => {
       expect(option(r.root, n).props.accessibilityState?.disabled ?? option(r.root, n).props.disabled).toBeFalsy();
     }
     press(r.root, "bob");
-    expect(bgOf(r.root, "bob")).toBe(BLUE);
+    expect(markOf(r.root, "bob")).toBe(BLUE);
     expect(answers()).toEqual([{ guess: "bob" }]);
     expect(has(r.root, TEST_IDS.holdButton)).toBe(false);
 
     act(() => mockSocket.fire("round-reveal", { correctAnswer: "bob", duration: 3_000 }));
-    expect(bgOf(r.root, "bob")).toBe(GREEN);
+    expect(markOf(r.root, "bob")).toBe(GREEN);
     expect(has(r.root, TEST_IDS.holdButton)).toBe(false); // the server takes holds in scores only
     act(() => mockSocket.fire("round-scores", { scores: [], round: 1, totalRounds: 10, duration: 5_000 }));
     expect(has(r.root, TEST_IDS.holdButton)).toBe(true);

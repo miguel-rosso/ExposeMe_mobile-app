@@ -1,7 +1,6 @@
 import React from "react";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import { StyleSheet } from "react-native";
-import tw from "twrnc";
 import { formatCountdown, turnUploadAction } from "../app/utils/gameState";
 import { useGameConnection } from "../app/hooks/useGameConnection";
 import { GameStateSnapshot } from "../app/models/interfaces";
@@ -9,6 +8,7 @@ import { TEST_IDS, playerOptionId } from "../app/utils/testIds";
 // Loaded with the file (jest.mock calls below are hoisted above it), not inside a test: a cold transform of
 // the screen and its imports must not count against the 5 s per-test timeout
 import GameScreen from "../app/screens/GameScreen";
+import { ANSWER_STATE_BORDER } from "../app/components/AnswerOption";
 
 // EXP-006 / DEC-009: losing the socket mid-game keeps the game screen, rejoins on reconnect and renders the
 // server's game-state snapshot; a server pause shows its countdown.
@@ -271,13 +271,13 @@ describe("GameScreen reconnect handling", () => {
     await act(async () => { r = TestRenderer.create(<GameScreen />); });
     act(() => mockSocket.fire("game-state", snapshot({ players })));
     const option = () => r.root.findAll((n) => n.props.testID === playerOptionId("alice") && typeof n.type === "string")[0];
-    const bg = () => StyleSheet.flatten(option().props.style).backgroundColor;
+    const mark = () => StyleSheet.flatten(option().props.style).borderColor;
     act(() => { mockSocket.connected = false; mockSocket.fire("disconnect", "transport close"); });
     act(() => r.root.find((n) => n.props.testID === playerOptionId("alice") && typeof n.props.onPress === "function").props.onPress());
-    expect(bg()).toBe(tw`bg-blue-500`.backgroundColor);
+    expect(mark()).toBe(ANSWER_STATE_BORDER.selected);
     mockSocket.connected = true;
     act(() => mockSocket.fire("game-state", snapshot({ players, phase: "reveal", correctAnswer: "alice" })));
-    expect(bg()).toBe(tw`bg-gray-700`.backgroundColor); // never reached the server: neither green nor red
+    expect(mark()).toBe(ANSWER_STATE_BORDER.idle); // never reached the server: neither green nor red
     act(() => r.unmount());
     mockPlayersProvider.current = [];
   });

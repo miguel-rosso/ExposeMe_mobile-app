@@ -22,7 +22,7 @@ import WinnerModal from "@/app/components/modals/WinnerModal";
 import { getWinners } from "@/app/utils/ranking";
 import EmojiReactionLane, { EmojiReactionData } from "@/app/components/IngameComunication/EmojiReactionLane";
 import EmojisButton from "@/app/components/IngameComunication/EmojisButtons";
-import AnswerOption, { answerOptionState } from "@/app/components/AnswerOption";
+import AnswerOption, { ANSWER_GRID, answerOptionState } from "@/app/components/AnswerOption";
 import DeferredMount from "@/app/components/DeferredMount";
 import { useI18n } from "../i18n";
 import { uploadPhoto } from "@/app/utils/uploadPhoto";
@@ -41,6 +41,8 @@ import { useQaRenderAck } from "../hooks/useQaRenderAck";
 import { useScreenshotReaction } from "../hooks/useScreenshotReaction";
 import { appendCapped, isAllowedReaction, MAX_VISIBLE_REACTIONS } from "../utils/reactions";
 import { answerOptionsLayout } from "../utils/answerOptionsLayout";
+import { usePlayerColors } from "../hooks/usePlayerColors";
+import { useReduceMotion } from "../hooks/useReduceMotion";
 import { attachHandlers, SocketHandlers } from "../utils/socketHandlers";
 
 const { SERVER_URL } = getEnvVars();
@@ -434,19 +436,28 @@ const GameScreen = () => {
     if (phase === "answering" && !answersClosed && username !== mySelection) pickGuess(username);
   };
   const onPickOption = useCallback((username: string) => pickOptionRef.current(username), []);
+  // Each player's colour, fixed for the game and the same on every device (EXP-253)
+  const optionColors = usePlayerColors(playersProvider);
+  const reduceMotion = useReduceMotion();
 
-  const renderAnswerOption = useCallback(({ item }: ListRenderItemInfo<Player>) => (
+  const renderAnswerOption = useCallback(({ item, index }: ListRenderItemInfo<Player>) => (
     <AnswerOption
       username={item.username}
+      index={index}
       state={answerOptionState(item.username, { mySelection, correctAnswer, isReveal })}
+      color={optionColors.get(item.username)!}
       isMe={item.username === safeUsername}
       youLabel={t.you}
       columns={answersLayout.columns}
       compact={answersLayout.compact}
       disabled={isReveal || answersClosed}
+      animate={!reduceMotion}
       onPick={onPickOption}
     />
-  ), [mySelection, correctAnswer, isReveal, safeUsername, t.you, answersLayout.columns, answersLayout.compact, answersClosed, onPickOption]);
+  ), [
+    mySelection, correctAnswer, isReveal, optionColors, safeUsername, t.you, answersLayout.columns, answersLayout.compact,
+    answersClosed, reduceMotion, onPickOption,
+  ]);
 
   // ── Main render ──────────────────────────────────────
   return (
@@ -537,9 +548,9 @@ const GameScreen = () => {
                       renderItem={renderAnswerOption}
                       keyExtractor={answerOptionKey}
                       numColumns={answersLayout.columns}
-                      columnWrapperStyle={tw`justify-between`}
+                      columnWrapperStyle={ANSWER_GRID.row}
                       style={[tw`w-full max-w-[500px] px-2`, { maxHeight: answersLayout.maxHeight }]}
-                      contentContainerStyle={tw`w-full`}
+                      contentContainerStyle={ANSWER_GRID.content}
                       showsVerticalScrollIndicator
                       persistentScrollbar
                       indicatorStyle="white"

@@ -119,6 +119,12 @@ describe("GameScreen: round-start mount cost on Android (EXP-225)", () => {
   let commits: { options: number; emojiButtons: number }[] = [];
   const onRender = () => { commits.push({ options: mockOptionRenders.count, emojiButtons: mockEmojiButtonsRenders.count }); };
   const resetCounts = () => { commits = []; mockOptionRenders.count = 0; mockEmojiButtonsRenders.count = 0; };
+  // The main photo's image finished loading (the native onLoad)
+  const photoLoaded = () => {
+    const photo = r.root.find((n) =>
+      typeof n.props.onLoad === "function" && n.props.resizeMode === "contain" && typeof n.type !== "string");
+    act(() => photo.props.onLoad());
+  };
   const startRound = (round: number) =>
     act(() => mockSocket.fire("round-start", { photo: `/temp/${round}.jpg`, round, duration: 8_000 }));
   // The native layout pass after a mount, then the list's own batched updates settle
@@ -160,10 +166,15 @@ describe("GameScreen: round-start mount cost on Android (EXP-225)", () => {
     startRound(1);
     const laidOut = new Set<unknown>();
     layOut(laidOut);
-    expect(blurredImages(r.root)).toHaveLength(1);
     // Measuring the options' top (for the reaction lane) re-renders the screen once, but no option
     expect(mockOptionRenders.count).toBe(PLAYER_COUNT);
     expect(commits.length).toBeLessThanOrEqual(4);
+    // The backdrop comes with the loaded photo (EXP-131): one commit of the photo alone, no option re-rendered
+    const commitsBeforeLoad = commits.length;
+    photoLoaded();
+    expect(blurredImages(r.root)).toHaveLength(1);
+    expect(commits).toHaveLength(commitsBeforeLoad + 1);
+    expect(mockOptionRenders.count).toBe(PLAYER_COUNT);
 
     // Later rounds: the options' top is already known, the layout pass costs no commit of the screen
     act(() => mockSocket.fire("waiting-photo", { round: 2, duration: 10_000 }));

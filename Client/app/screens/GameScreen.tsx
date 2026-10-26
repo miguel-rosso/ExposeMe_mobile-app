@@ -27,6 +27,7 @@ import DeferredMount from "@/app/components/DeferredMount";
 import { useI18n } from "../i18n";
 import { uploadPhoto } from "@/app/utils/uploadPhoto";
 import { photoAuthHeaders, resolvePhotoAuth } from "@/app/utils/photoAuth";
+import { prefetchImage } from "@/app/utils/image";
 import { uploadWithRetry } from "../utils/uploadRetry";
 import { SkipNotice, skipNoticeFor, skipNoticeText } from "../utils/waitingPhoto";
 import { gameStateFollowUps, initialRoundView, isRevealedOwner, RoundAction, roundReducer, RoundView } from "../utils/roundState";
@@ -72,14 +73,20 @@ const GameScreen = () => {
   // roundRef always holds the latest state, updated on dispatch: socket listeners and timers read it (their closures
   // would see stale state), and back-to-back events build on each other. The screen renders roundView.
   const roundRef = useRef<RoundView>(initialRoundView);
+  // Room photo credentials for the round-photo prefetch (set with photoHeaders, below)
+  const photoHeadersRef = useRef<Record<string, string> | undefined>(undefined);
   const [roundView, setRoundView] = useState<RoundView>(initialRoundView);
   const dispatchRound = (action: RoundAction) => {
     const previousPhoto = roundRef.current.photo;
     roundRef.current = roundReducer(roundRef.current, action);
     setRoundView(roundRef.current);
+    const { photo: currentPhoto } = roundRef.current;
+    if (currentPhoto === previousPhoto) return;
     // Reactions belong to the photo they were sent on: dropped in the same render that changes it (waiting-photo,
     // resume, snapshot), not in an extra one after it
-    if (roundRef.current.photo !== previousPhoto) setEmojiReactions(NO_REACTIONS);
+    setEmojiReactions(NO_REACTIONS);
+    // A new round photo (round-start, snapshot) starts downloading now, while the screen renders and mounts (EXP-119)
+    if (currentPhoto && photoHeadersRef.current) prefetchImage(currentPhoto, photoHeadersRef.current);
   };
   const {
     photo, round, phase, phaseDuration, phaseKey, correctAnswer, scores, mySelection, gameHeld, pressing,
@@ -166,7 +173,11 @@ const GameScreen = () => {
   useEffect(() => {
     let live = true;
     resolvePhotoAuth(getRejoinToken, gameCode, username)
-      .then((auth) => { if (live) setPhotoHeaders(photoAuthHeaders(auth)); })
+      .then((auth) => {
+        if (!live) return;
+        photoHeadersRef.current = photoAuthHeaders(auth);
+        setPhotoHeaders(photoHeadersRef.current);
+      })
       .catch(() => console.warn("[GAME] no session token: room photos can't be loaded"));
     return () => { live = false; };
   }, [gameCode, username]);

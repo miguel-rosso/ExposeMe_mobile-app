@@ -31,6 +31,7 @@ export const TEST_IDS = {
   roundSkippedNotice: "round-skipped-notice",
   holdButton: "hold-button",
   photoView: "photo-view", // PhotoComponent: the game photo (also the own-photos viewer)
+  photoLoading: "photo-loading", // PhotoComponent: shown until the photo has loaded
   roundProgress: "round-progress",
   answerOptions: "answer-options",
   reconnectingBanner: "reconnecting-banner",

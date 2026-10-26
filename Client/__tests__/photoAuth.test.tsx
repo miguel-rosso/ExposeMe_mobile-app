@@ -68,8 +68,10 @@ describe("PhotoComponent", () => {
     it("every Image of a server photo carries the auth headers", async () => {
       let r!: TestRenderer.ReactTestRenderer;
       await act(async () => { r = TestRenderer.create(<PhotoComponent photoUrl="http://s/temp/a.jpg" headers={HEADERS} />); });
+      // The blurred backdrop is drawn once the main photo has loaded (EXP-131)
+      const main = r.root.find((n) => typeof n.props.onLoad === "function" && typeof n.type !== "string");
+      act(() => main.props.onLoad());
       const images = r.root.findAll((n) => n.type === Image);
-      // Blurred backdrop and main photo, both drawn on mount (EXP-225: no layout round trip)
       expect(images).toHaveLength(2);
       expect(images.filter((img) => img.props.blurRadius > 0)).toHaveLength(1);
       for (const img of images) expect(img.props.source).toEqual({ uri: "http://s/temp/a.jpg", headers: HEADERS });

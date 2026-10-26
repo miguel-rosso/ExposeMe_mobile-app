@@ -1,0 +1,264 @@
+import React from "react";
+import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
+import { TEST_IDS, playerOptionId } from "../app/utils/testIds";
+// Loaded with the file (jest.mock calls below are hoisted above it): a cold transform must not hit the test timeout
+import GameScreen from "../app/screens/GameScreen";
+
+// EXP-063: the game screen only paints the server's phases with the `duration` it receives (GAME_FLOW.md): one
+// progress bar per phase (a fresh one for every phase, hold-resume and game-resumed), none in reveal or while
+// paused, the score modal in scores, and the owner's hold button driving hold-start / hold-end.
+
+type Handler = (...args: any[]) => void;
+class FakeSocket {
+  connected = true;
+  handlers = new Map<string, Set<Handler>>();
+  emitted: [string, ...any[]][] = [];
+  connect = jest.fn(() => this);
+  disconnect = jest.fn(() => this);
+  on(ev: string, fn: Handler) {
+    if (!this.handlers.has(ev)) this.handlers.set(ev, new Set());
+    this.handlers.get(ev)!.add(fn);
+    return this;
+  }
+  off(ev: string, fn?: Handler) {
+    if (fn) this.handlers.get(ev)?.delete(fn);
+    else this.handlers.delete(ev);
+    return this;
+  }
+  emit(ev: string, ...args: any[]) {
+    this.emitted.push([ev, ...args]);
+    return this;
+  }
+  fire(ev: string, ...args: any[]) {
+    [...(this.handlers.get(ev) ?? [])].forEach((fn) => fn(...args));
+  }
+}
+
+const mockSocket = new FakeSocket();
+const mockPlayers = ["alice", "bob", "carol"].map((username) => ({
+  username, points: 0, isHost: username === "alice", connected: true, lastGuess: "", lastAnswerCorrect: false,
+}));
+jest.mock("expo-router", () => ({ useRouter: () => ({ replace: jest.fn() }), useFocusEffect: () => {} }));
+jest.mock("../app/providers/GameContext", () => ({
+  useGameContext: () => ({
+    username: "bob", gameCode: "123456", socket: mockSocket, endSocket: jest.fn(),
+    playersProvider: mockPlayers, setPlayersProvider: jest.fn(), roundsOfGame: 10, plantedPhotoUri: null,
+    plantedPhotoSent: false, plantPhoto: jest.fn(), getRejoinToken: async () => "tok-123", saveRejoinToken: jest.fn(),
+  }),
+}));
+jest.mock("../app/providers/PhotoContext", () => ({
+  usePhotoContext: () => ({ pickGamePhoto: jest.fn(), setPhotoUri: jest.fn() }),
+}));
+jest.mock("@/app/hooks/useGalleryAccessGuard", () => ({
+  useGalleryAccessGuard: () => ({ blocked: null, check: jest.fn(), selectMore: jest.fn() }),
+}));
+jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/en").default }) }));
+jest.mock("@/app/components/PhotoComponent", () => () => null);
+// The score modal's props, as the screen passes them
+jest.mock("@/app/components/modals/ScoreModal", () => (p: any) => {
+  const { View } = require("react-native");
+  return <View testID="score-modal-probe" {...p} />;
+});
+jest.mock("@/app/components/modals/FinalScoreModal", () => () => null);
+jest.mock("@/app/components/modals/WinnerModal", () => () => null);
+jest.mock("@/app/components/IngameComunication/EmojiReaction", () => () => null);
+jest.mock("@/app/components/IngameComunication/EmojisButtons", () => () => null);
+// Each mounted bar gets its own id, so a restarted bar (new key) is told apart from a re-render of the same one
+let mockBarSeq = 0;
+jest.mock("@/app/components/ProgressBar", () => (p: { duration: number }) => {
+  const React = require("react");
+  const { View } = require("react-native");
+  const [id] = React.useState(() => ++mockBarSeq);
+  return <View testID="progress-bar" duration={p.duration} barId={id} />;
+});
+
+beforeAll(() => {
+  jest.spyOn(console, "log").mockImplementation(() => {});
+  jest.spyOn(console, "error").mockImplementation(() => {});
+});
+afterAll(() => jest.restoreAllMocks());
+
+const byId = (root: ReactTestInstance, id: string) => root.findAll((n) => n.props.testID === id && typeof n.type === "string");
+const has = (root: ReactTestInstance, id: string) => byId(root, id).length > 0;
+const bar = (root: ReactTestInstance) => {
+  const bars = byId(root, "progress-bar");
+  expect(bars.length).toBeLessThanOrEqual(1);
+  return bars[0] ? { duration: bars[0].props.duration as number, id: bars[0].props.barId as number } : null;
+};
+const scoreModal = (root: ReactTestInstance) => byId(root, "score-modal-probe")[0]?.props;
+const emitted = (ev: string) => mockSocket.emitted.filter(([e]) => e === ev);
+
+const START = { photo: "/temp/x.jpg", round: 1, duration: 7_700, isOwner: false };
+const SCORES = [
+  { username: "alice", points: 1, lastAnswerCorrect: true, lastGuess: "carol" },
+  { username: "bob", points: 0, lastAnswerCorrect: false, lastGuess: "alice" },
+];
+
+describe("GameScreen: server phases drawn with the received duration (EXP-063)", () => {
+  let r: TestRenderer.ReactTestRenderer;
+  beforeEach(async () => {
+    jest.useFakeTimers();
+    mockSocket.emitted = [];
+    await act(async () => { r = TestRenderer.create(<GameScreen />); });
+  });
+  afterEach(() => {
+    act(() => r.unmount());
+    jest.clearAllTimers();
+    jest.useRealTimers();
+  });
+
+  it("says im-ready once on mount and waits on the ready screen until the first round", () => {
+    expect(emitted("im-ready")).toHaveLength(1);
+    expect(has(r.root, TEST_IDS.gameWaitingReady)).toBe(true);
+    expect(bar(r.root)).toBeNull();
+  });
+
+  it("answering -> reveal -> scores -> next wait: each phase with its own bar of the server's duration", () => {
+    act(() => mockSocket.fire("round-start", START));
+    expect(has(r.root, playerOptionId("alice"))).toBe(true);
+    const answering = bar(r.root)!;
+    expect(answering.duration).toBe(7_700);
+    expect(scoreModal(r.root).visible).toBe(false);
+
+    // The client never runs a timer of its own: time passing changes nothing until the server moves on
+    act(() => jest.advanceTimersByTime(60_000));
+    expect(bar(r.root)!.id).toBe(answering.id);
+    expect(has(r.root, playerOptionId("alice"))).toBe(true);
+
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "carol", duration: 3_000 }));
+    expect(bar(r.root)).toBeNull(); // no bar in reveal
+    expect(scoreModal(r.root).visible).toBe(false);
+    expect(scoreModal(r.root).correctAnswer).toBe("carol");
+
+    act(() => mockSocket.fire("round-scores", { scores: SCORES, round: 1, totalRounds: 10, duration: 5_000 }));
+    expect(bar(r.root)!.duration).toBe(5_000);
+    const modal = scoreModal(r.root);
+    expect(modal.visible).toBe(true);
+    expect(modal.scoreRound).toEqual(SCORES);
+    expect(modal.rounds).toEqual({ round: 1, roundsOfGame: 10 });
+    expect(modal.myUsername).toBe("bob");
+
+    act(() => mockSocket.fire("waiting-photo", { round: 2, duration: 15_000 }));
+    expect(has(r.root, TEST_IDS.gameWaitingPhoto)).toBe(true);
+    expect(has(r.root, "score-modal-probe")).toBe(false);
+    expect(bar(r.root)!.duration).toBe(15_000);
+
+    act(() => mockSocket.fire("round-start", { ...START, photo: "/temp/y.jpg", round: 2, duration: 7_000 }));
+    expect(has(r.root, TEST_IDS.gameWaitingPhoto)).toBe(false);
+    expect(bar(r.root)!.duration).toBe(7_000);
+    expect(scoreModal(r.root).correctAnswer).toBe(""); // the previous answer is not carried over
+  });
+
+  it("a hold hides the overlay and freezes; hold-resume draws a fresh bar with the remaining time", () => {
+    act(() => mockSocket.fire("round-start", START));
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "carol", duration: 3_000 }));
+    act(() => mockSocket.fire("round-scores", { scores: SCORES, round: 1, totalRounds: 10, duration: 5_000 }));
+
+    act(() => mockSocket.fire("hold-start"));
+    expect(bar(r.root)).toBeNull();
+    expect(has(r.root, "score-modal-probe")).toBe(false);
+    expect(has(r.root, playerOptionId("alice"))).toBe(false);
+
+    act(() => mockSocket.fire("hold-resume", { phase: "scores", duration: 2_400 }));
+    expect(bar(r.root)!.duration).toBe(2_400);
+    expect(scoreModal(r.root).visible).toBe(true);
+  });
+
+  it("hold-end from the server (force release) shows the overlay again", () => {
+    act(() => mockSocket.fire("round-start", START));
+    act(() => mockSocket.fire("round-scores", { scores: SCORES, round: 1, totalRounds: 10, duration: 5_000 }));
+    act(() => mockSocket.fire("hold-start"));
+    expect(has(r.root, "score-modal-probe")).toBe(false);
+    act(() => mockSocket.fire("hold-end"));
+    expect(scoreModal(r.root).visible).toBe(true);
+  });
+
+  it("the owner's hold button sends hold-start on press and hold-end on release, only in scores", () => {
+    act(() => mockSocket.fire("round-start", { ...START, isOwner: true }));
+    expect(has(r.root, TEST_IDS.holdButton)).toBe(false); // not while answering
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "bob", duration: 3_000 }));
+    expect(has(r.root, TEST_IDS.holdButton)).toBe(false);
+    act(() => mockSocket.fire("round-scores", { scores: SCORES, round: 1, totalRounds: 10, duration: 5_000 }));
+
+    const button = () => r.root.find((n) => n.props.testID === TEST_IDS.holdButton && typeof n.props.onPressIn === "function");
+    act(() => button().props.onPressIn());
+    act(() => button().props.onPressIn()); // a second press while held sends nothing more
+    expect(emitted("hold-start")).toHaveLength(1);
+    act(() => mockSocket.fire("hold-start")); // the server's echo hides the overlay; the button (owner, still in scores) stays to catch the release
+    expect(has(r.root, TEST_IDS.holdButton)).toBe(true);
+    act(() => button().props.onPressOut());
+    expect(emitted("hold-end")).toHaveLength(1);
+    act(() => button().props.onPressOut()); // released already
+    expect(emitted("hold-end")).toHaveLength(1);
+  });
+
+  it("game-paused hides the bar behind the paused modal; game-resumed restarts it with the server's remaining time", () => {
+    act(() => mockSocket.fire("round-start", START));
+    act(() => mockSocket.fire("game-paused", { duration: 300_000, waitingFor: ["carol"], pause: 1, maxPauses: 3 }));
+    expect(has(r.root, TEST_IDS.pausedModal)).toBe(true);
+    expect(bar(r.root)).toBeNull();
+
+    act(() => mockSocket.fire("game-resumed", { phase: "answering", duration: 4_200 }));
+    expect(has(r.root, TEST_IDS.pausedModal)).toBe(false);
+    expect(bar(r.root)!.duration).toBe(4_200);
+    expect(has(r.root, playerOptionId("alice"))).toBe(true); // same round, same photo
+  });
+
+  it("the next round drops a hold still pressed (the button goes), and the owner can hold again later", () => {
+    act(() => mockSocket.fire("round-start", { ...START, isOwner: true }));
+    act(() => mockSocket.fire("round-scores", { scores: SCORES, round: 1, totalRounds: 10, duration: 5_000 }));
+    const button = () => r.root.find((n) => n.props.testID === TEST_IDS.holdButton && typeof n.props.onPressIn === "function");
+    act(() => button().props.onPressIn());
+    expect(emitted("hold-start")).toHaveLength(1);
+
+    // The server moved on (it ends the hold itself): every phase change resets the press, so the button unmounts
+    // (GameScreen's `|| pressing` keep-alive is not reached by any server event) and a new press is not ignored
+    act(() => mockSocket.fire("round-start", { ...START, photo: "/temp/y.jpg", round: 2, isOwner: true }));
+    expect(has(r.root, TEST_IDS.holdButton)).toBe(false);
+
+    act(() => mockSocket.fire("round-scores", { scores: SCORES, round: 2, totalRounds: 10, duration: 5_000 }));
+    act(() => button().props.onPressIn());
+    expect(emitted("hold-start")).toHaveLength(2);
+  });
+
+  // The bar is keyed by phase: every new duration from the server must restart it, also when it stays on screen
+  // (otherwise the old animation would keep running and close the answers at the wrong time)
+  describe("restarts the bar even when it never left the screen", () => {
+    it("answering -> scores with no reveal in between", () => {
+      act(() => mockSocket.fire("round-start", START));
+      const answering = bar(r.root)!;
+      act(() => mockSocket.fire("round-scores", { scores: SCORES, round: 1, totalRounds: 10, duration: 5_000 }));
+      const scores = bar(r.root)!;
+      expect(scores.duration).toBe(5_000);
+      expect(scores.id).not.toBe(answering.id);
+    });
+
+    it("round-start -> round-start (next round)", () => {
+      act(() => mockSocket.fire("round-start", START));
+      const first = bar(r.root)!;
+      act(() => mockSocket.fire("round-start", { ...START, photo: "/temp/y.jpg", round: 2, duration: 7_700 }));
+      const second = bar(r.root)!;
+      expect(second.duration).toBe(7_700);
+      expect(second.id).not.toBe(first.id);
+    });
+
+    it("hold-resume while the bar is showing (its hold-start was missed)", () => {
+      act(() => mockSocket.fire("round-start", START));
+      act(() => mockSocket.fire("round-scores", { scores: SCORES, round: 1, totalRounds: 10, duration: 5_000 }));
+      const before = bar(r.root)!;
+      act(() => mockSocket.fire("hold-resume", { phase: "scores", duration: 5_000 }));
+      const after = bar(r.root)!;
+      expect(after.duration).toBe(5_000);
+      expect(after.id).not.toBe(before.id);
+    });
+
+    it("game-resumed while the bar is showing (its game-paused was missed)", () => {
+      act(() => mockSocket.fire("round-start", START));
+      const before = bar(r.root)!;
+      act(() => mockSocket.fire("game-resumed", { phase: "answering", duration: 7_700 }));
+      const after = bar(r.root)!;
+      expect(after.duration).toBe(7_700);
+      expect(after.id).not.toBe(before.id);
+    });
+  });
+});

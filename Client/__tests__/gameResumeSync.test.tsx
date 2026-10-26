@@ -51,7 +51,7 @@ afterAll(() => jest.restoreAllMocks());
 
 const snapshot = (over: Partial<GameStateSnapshot> = {}): GameStateSnapshot => ({
   started: true, phase: "answering", round: 3, totalRounds: 10, photo: "/temp/1-a.jpg", correctAnswer: null,
-  duration: 4_000, held: false, pause: null, scores: [], players: mockPlayers, ...over,
+  duration: 4_000, phaseTotal: 8_000, held: false, pause: null, scores: [], players: mockPlayers, ...over,
 });
 const ROUND_START = { photo: "/temp/1-a.jpg", round: 3, duration: 8_000 };
 const PAUSE = { duration: 300_000, waitingFor: ["alice"], pause: 1, maxPauses: 3 };
@@ -84,7 +84,7 @@ describe("GameScreen round bar after a resume or reconnect (EXP-080)", () => {
     act(() => mockSocket.fire("round-start", ROUND_START));
     act(() => mockSocket.fire("game-paused", PAUSE));
     expect(bar(r.root)).toBeNull();
-    act(() => mockSocket.fire("game-resumed", { phase: "answering", duration: 2_000 }));
+    act(() => mockSocket.fire("game-resumed", { phase: "answering", duration: 2_000, phaseTotal: 8_000 }));
     expect(bar(r.root)).toEqual({ duration: 2_000, elapsed: 0.75 });
     act(() => r.unmount());
   });
@@ -98,9 +98,20 @@ describe("GameScreen round bar after a resume or reconnect (EXP-080)", () => {
     expect(bar(r.root)).toEqual({ duration: 6_000, elapsed: 0.25 });
 
     act(() => mockSocket.fire("waiting-photo", { round: 4, duration: 15_000 }));
-    act(() => mockSocket.fire("game-state", snapshot({ phase: "waiting-photo", photo: null, duration: 3_000 })));
+    act(() => mockSocket.fire("game-state", snapshot({ phase: "waiting-photo", photo: null, duration: 3_000, phaseTotal: 15_000 })));
     expect(r.root.findAll((n) => n.props.testID === TEST_IDS.gameWaitingPhoto).length).toBeGreaterThan(0);
     expect(bar(r.root)).toEqual({ duration: 3_000, elapsed: 0.8 });
+    act(() => r.unmount());
+  });
+
+  // EXP-273: the phase changed while away (answering → scores); the snapshot's phaseTotal places the bar
+  it("a reconnect snapshot of a phase not seen from its start places the bar with the server's phaseTotal", async () => {
+    const r = await mountGame();
+    act(() => mockSocket.fire("round-start", ROUND_START));
+    goOffline();
+    mockSocket.connected = true;
+    act(() => mockSocket.fire("game-state", snapshot({ phase: "scores", correctAnswer: "alice", duration: 1_000, phaseTotal: 5_000 })));
+    expect(bar(r.root)).toEqual({ duration: 1_000, elapsed: 0.8 });
     act(() => r.unmount());
   });
 });

@@ -1,6 +1,6 @@
 import {
-  GamePausedData, GameResumedData, GameStateSnapshot, HoldResumeData, RoundRevealData, RoundScoresData, RoundStartData, ScoreRound,
-  ServerPhase, WaitingPhotoData,
+  GamePausedData, GameResumedData, GameStateSnapshot, HoldResumeData, ResyncTiming, RoundRevealData, RoundScoresData,
+  RoundStartData, ScoreRound, ServerPhase, WaitingPhotoData,
 } from "../models/interfaces";
 
 // ── Round view: what the game screen shows of the server's current phase (see Server/GAME_FLOW.md) ──
@@ -11,7 +11,10 @@ export interface RoundView {
   phase: ServerPhase | null;
   /** The server's duration for the current phase, in ms: what is left of it when it was resumed */
   phaseDuration: number;
-  /** The current phase's full duration, in ms, as first received: a resume or snapshot only sends what is left */
+  /**
+   * The current phase's full duration, in ms: its start event's `duration`, or the `phaseTotal` of a resume or
+   * snapshot (which sends what is left as `duration`)
+   */
   phaseTotal: number;
   /** Changes with every phase/resume: restarts the progress bar */
   phaseKey: number;
@@ -56,25 +59,23 @@ export type RoundAction =
   | { type: "game-state"; snap: GameStateSnapshot; serverUrl: string };
 
 /**
- * A server phase with its duration: remounts the progress bar (phaseKey), empty unless continuedPhase keeps the
- * phase's full duration (the same phase resumed)
+ * A server phase with `duration` ms left of its full duration `total` (a start event: the whole phase is left):
+ * remounts the progress bar (phaseKey), which starts at the fraction already gone (see phaseElapsed)
  */
-const startPhase = (state: RoundView, phase: ServerPhase | null, duration: number): RoundView => ({
-  ...state, phase, phaseDuration: duration, phaseTotal: duration, phaseKey: state.phaseKey + 1,
+const startPhase = (state: RoundView, phase: ServerPhase | null, duration: number, total = duration): RoundView => ({
+  ...state, phase, phaseDuration: duration, phaseTotal: total, phaseKey: state.phaseKey + 1,
 });
 
 /**
- * `next` goes on with the phase `previous` showed (a resume, a hold released, a snapshot of the same phase): it keeps
- * the phase's full duration, so its progress bar continues from where it was (see phaseElapsed). A resume may get
- * more time than was left (the server's minimum), never more than a whole phase.
+ * The server's phase from a resync payload (`game-state`, `game-resumed`, `hold-resume`): what is left of it and its
+ * full duration, so the bar goes on from where the phase is, whether or not this screen saw it start
  */
-const continuedPhase = (previous: RoundView, next: RoundView): RoundView => ({
-  ...next, phaseTotal: Math.max(previous.phaseTotal, next.phaseDuration),
-});
+const resyncPhase = (state: RoundView, phase: ServerPhase | null, timing: ResyncTiming): RoundView =>
+  startPhase(state, phase, timing.duration, timing.phaseTotal);
 
 /** Fraction of the current phase already gone, where its progress bar starts: 0 for a phase seen from its start */
 export const phaseElapsed = ({ phaseDuration, phaseTotal }: Pick<RoundView, "phaseDuration" | "phaseTotal">): number =>
-  phaseTotal > 0 ? 1 - phaseDuration / phaseTotal : 0;
+  phaseTotal > 0 ? Math.max(0, 1 - phaseDuration / phaseTotal) : 0;
 
 /** Leaves the previous round: no answer, scores, pick or hold left over */
 const PER_ROUND_RESET = {
@@ -88,10 +89,10 @@ const showsRound = (snap: GameStateSnapshot) => inRoundPhase(snap.phase) && !!sn
 
 /**
  * `waiting-photo` (and a `game-state` in that phase): leave the previous round's photo and scores and show the
- * waiting screen for round `round`, with the server's `duration` for the progress bar.
+ * waiting screen for round `round`, with the server's `duration` (of the wait's full `total`) for the progress bar.
  */
-const waitForPhoto = (state: RoundView, data: WaitingPhotoData): RoundView => ({
-  ...startPhase(state, "waiting-photo", data.duration), ...PER_ROUND_RESET, photo: null, round: data.round,
+const waitForPhoto = (state: RoundView, round: number, duration: number, total = duration): RoundView => ({
+  ...startPhase(state, "waiting-photo", duration, total), ...PER_ROUND_RESET, photo: null, round,
 });
 
 /**
@@ -112,21 +113,17 @@ const applySnapshot = (state: RoundView, snap: GameStateSnapshot, serverUrl: str
   if (showsRound(snap)) {
     const photo = `${serverUrl}${snap.photo}`;
     const sameRound = snap.round === state.round && photo === state.photo;
-    const next: RoundView = {
-      ...startPhase(held, snap.phase, snap.duration),
+    return {
+      ...resyncPhase(held, snap.phase, snap),
       photo, round: snap.round, correctAnswer: snap.correctAnswer ?? "",
       scores: snap.phase === "scores" ? snap.scores : null,
       mySelection: snapshotSelection(state, snap, sameRound),
       sentGuess: sameRound ? state.sentGuess : "",
     };
-    return sameRound && snap.phase === state.phase ? continuedPhase(state, next) : next;
   }
 
   // Waiting for the next photo: same screen as `waiting-photo` (snapshot round is the last played one)
-  if (snap.phase === "waiting-photo") {
-    const next = waitForPhoto(held, { round: snap.round + 1, duration: snap.duration });
-    return state.phase === "waiting-photo" && state.round === next.round ? continuedPhase(state, next) : next;
-  }
+  if (snap.phase === "waiting-photo") return waitForPhoto(held, snap.round + 1, snap.duration, snap.phaseTotal);
 
   // Ready phase: back to the "are you ready" screen until the first round
   return {
@@ -137,7 +134,7 @@ const applySnapshot = (state: RoundView, snap: GameStateSnapshot, serverUrl: str
 export const roundReducer = (state: RoundView, action: RoundAction): RoundView => {
   switch (action.type) {
     case "waiting-photo":
-      return waitForPhoto(state, action.data);
+      return waitForPhoto(state, action.data.round, action.data.duration);
     case "your-turn":
       return { ...state, round: action.round };
     // New round: its photo and answer phase, nothing left of the previous round
@@ -168,17 +165,14 @@ export const roundReducer = (state: RoundView, action: RoundAction): RoundView =
       return { ...state, gameHeld: false, pressing: false };
     // The held phase continues with the remaining time
     case "hold-resume":
-      return continuedPhase(state, {
-        ...startPhase(state, state.phase, action.data.duration), gameHeld: false, pressing: false,
-      });
+      return { ...resyncPhase(state, action.data.phase, action.data), gameHeld: false, pressing: false };
+    // The server's phase goes on, also when this screen still showed an earlier one (the game-state that follows a
+    // rejoin fills in what that phase shows)
     case "game-resumed": {
-      // Paused between rounds (after scores): the next round's photo is awaited now, a new phase
+      // Paused between rounds (after scores): the next round's photo is awaited now
       const nextRoundPhoto = action.data.phase === "waiting-photo" && state.phase !== "waiting-photo";
-      if (nextRoundPhoto) {
-        const nextRound = { ...state, photo: null, scores: null, round: state.round + 1 };
-        return startPhase(nextRound, "waiting-photo", action.data.duration);
-      }
-      return continuedPhase(state, startPhase(state, state.phase, action.data.duration));
+      const resumed = nextRoundPhoto ? { ...state, photo: null, scores: null, round: state.round + 1 } : state;
+      return resyncPhase(resumed, action.data.phase, action.data);
     }
     case "game-state":
       return applySnapshot(state, action.snap, action.serverUrl);

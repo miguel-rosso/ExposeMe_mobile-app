@@ -69,10 +69,19 @@ export interface GamePausedData {
   maxPauses: number;
 }
 
-/** `game-resumed`: the paused phase continues with `duration` ms */
-export interface GameResumedData {
-  phase: ServerPhase | null;
+/**
+ * Timing of a resync payload (`game-state`, `game-resumed`, `hold-resume`): `duration` ms left of the phase, whose
+ * full duration (the `duration` its start event sent; `duration` itself when the countdown is shown whole) is
+ * `phaseTotal`
+ */
+export interface ResyncTiming {
   duration: number;
+  phaseTotal: number;
+}
+
+/** `game-resumed`: the paused phase continues with `duration` ms */
+export interface GameResumedData extends ResyncTiming {
+  phase: ServerPhase | null;
 }
 
 /** `waiting-photo`: the whole room waits up to `duration` ms for round `round`'s photo (owner not revealed) */
@@ -107,9 +116,8 @@ export interface RoundScoresData {
 }
 
 /** `hold-resume`: the held phase continues with `duration` ms */
-export interface HoldResumeData {
-  phase: string;
-  duration: number;
+export interface HoldResumeData extends ResyncTiming {
+  phase: ServerPhase | null;
 }
 
 /**
@@ -128,7 +136,7 @@ export interface RoundSkippedData {
 }
 
 /** `game-state`: snapshot sent to a player who rejoins (see Server/GAME_FLOW.md) */
-export interface GameStateSnapshot {
+export interface GameStateSnapshot extends ResyncTiming {
   started: boolean;
   phase: ServerPhase | null;
   round: number;
@@ -136,7 +144,6 @@ export interface GameStateSnapshot {
   photo: string | null;
   /** Whose photo it was, only from the reveal on (nobody, the owner included, is told earlier) */
   correctAnswer: string | null;
-  duration: number;
   held: boolean;
   pause: GamePausedData | null;
   scores: ScoreRound[];

@@ -82,7 +82,7 @@ describe("a photo wait resumed with less than PHOTO_RESUME_MIN_REMAINING left (E
     start();
     vi.advanceTimersByTime(PHOTO_WAIT_TIMEOUT - LEFT_AT_PAUSE);
     pauseFor(PAUSE_MIN_DURATION);
-    expect(lastResumed()).toEqual({ phase: "waiting-photo", duration: PHOTO_RESUME_MIN_REMAINING });
+    expect(lastResumed()).toEqual({ phase: "waiting-photo", duration: PHOTO_RESUME_MIN_REMAINING, phaseTotal: PHOTO_WAIT_TIMEOUT });
   });
 
   it("planted round with no photo coming: game-resumed shows the same minimum, not the frozen countdown", () => {
@@ -101,7 +101,7 @@ describe("a photo wait resumed with less than PHOTO_RESUME_MIN_REMAINING left (E
     expect(events("round-skipped")).toHaveLength(0);
 
     pauseFor(PAUSE_MIN_DURATION);
-    expect(lastResumed()).toEqual({ phase: "waiting-photo", duration: PHOTO_RESUME_MIN_REMAINING });
+    expect(lastResumed()).toEqual({ phase: "waiting-photo", duration: PHOTO_RESUME_MIN_REMAINING, phaseTotal: PHOTO_WAIT_TIMEOUT });
     // The skip comes when that countdown ends, as for an absent owner
     vi.advanceTimersByTime(PHOTO_RESUME_MIN_REMAINING - 1);
     expect(events("round-skipped")).toHaveLength(0);

@@ -376,9 +376,9 @@ and, once the game screen listens, re-sends `join-create-game` on the **same** s
 fresh snapshot (and `your-turn` for an awaited photo), which the game screen renders like any reconnect. Events
 that reached the lobby screen in between are covered by that snapshot.
 
-- **`game-state`** = `{ started, phase, round, totalRounds, photo, correctAnswer, duration, held, pause,
+- **`game-state`** = `{ started, phase, round, totalRounds, photo, correctAnswer, duration, phaseTotal, held, pause,
   scores, players }`, the same for every recipient. `duration` is the remaining time of the current phase (frozen
-  while paused/held). `photo` is only set in `answering`/`reveal`/`scores` (the owner's name is never in it before
+  while paused/held), `phaseTotal` its full duration (see "Phase totals in resync payloads"). `photo` is only set in `answering`/`reveal`/`scores` (the owner's name is never in it before
   the reveal: `correctAnswer` carries it from `reveal` on);
   in `waiting-photo`, `round` is the last played round (the awaited one is `round + 1`, as in `waiting-photo`) and
   `duration` what is left of the photo wait, so the client renders the same waiting screen as for `waiting-photo`;
@@ -417,7 +417,7 @@ that reached the lobby screen in between are covered by that snapshot.
   or is removed) `game-paused` is sent again with the new `waitingFor` and the remaining `duration` (same pause, same `pause` number).
 - **Resume**: as soon as 2 players are connected again (a rejoin), but never before the pause lasted
   **2 s** (`PAUSE_MIN_DURATION`; an earlier rejoin schedules the resume, a new drop cancels it), the server sends
-  `game-resumed { phase, duration }` and the frozen phase continues with its remaining time (at least 1.5 s;
+  `game-resumed { phase, duration, phaseTotal }` and the frozen phase continues with its remaining time (at least 1.5 s;
   at least 5 s when waiting for a photo, normal or planted alike, so the countdown never tells them apart; the owner
   gets `your-turn` again). A pause at a round boundary
   resumes by starting that round (new owner, same round number). Scores and round numbers are untouched.
@@ -426,6 +426,16 @@ that reached the lobby screen in between are covered by that snapshot.
 - Disconnect detection depends on the socket.io heartbeat (`pingInterval` + `pingTimeout`), unless the client
   closes the socket itself; a player whose loss the server hasn't noticed yet is still "connected", and a
   rejoin before that just rebinds the player to the new socket (the old socket's disconnect is ignored).
+
+### Phase totals in resync payloads
+
+`game-state`, `game-resumed` and `hold-resume` send what is left of the phase (`duration`) and **`phaseTotal`**: the
+full duration the phase had when it started, i.e. the `duration` of the event that started it (`waiting-photo`
+15 s, `round-start` 7.7 s, `round-reveal` 3 s, `round-scores` 5 s). Pauses, holds and resume minimums never change it,
+and it is never less than `duration`. The client draws the progress bar from `1 - duration / phaseTotal`, so a
+player who reconnects into a phase it never saw start (it was away when the phase changed) sees the bar where it is
+for everyone else, not empty. Before any start event (the ready phase, or a round about to start after a pause at a
+round boundary) the countdown is shown whole: `phaseTotal` = `duration`. A game over snapshot sends 0 for both.
 
 ## Hold (pause)
 
@@ -463,10 +473,10 @@ All game events are **atomic** — each contains everything the client needs.
 | `round-scores` | scores | `{ scores, round, totalRounds, duration }` | Show scoreboard (`scores`: `{ username, points, isHost, lastAnswerCorrect, lastGuess }[]`, highest first, ties in room order) |
 | `hold-start` | scores | - | Pause everything visually |
 | `hold-end` | scores | - | The hold is over (released, force-released or ended by a pause); `hold-resume` carries the time |
-| `hold-resume` | scores | `{ phase, duration }` | Resume with remaining time |
+| `hold-resume` | scores | `{ phase, duration, phaseTotal }` | Resume with remaining time (`phaseTotal`: the phase's full duration) |
 | `round-skipped` | - | `{ round, reason: "timeout" \| "unavailable" }` | No photo for this round; the next `waiting-photo` follows |
 | `game-paused` | any | `{ duration, waitingFor, pause, maxPauses }` | Fewer than 2 connected: freeze, show countdown and "pause N of M" |
-| `game-resumed` | any | `{ phase, duration }` | Paused phase continues with remaining time |
+| `game-resumed` | any | `{ phase, duration, phaseTotal }` | Paused phase continues with remaining time (`phaseTotal`: the phase's full duration) |
 | `game-state` | any | snapshot (see "Pause and reconnect") | Only to a rejoining socket (or one re-sending its join in a started game): render current phase |
 | `game-over` | - | `{ finalScore }` | Show final results (`finalScore`: same shape as `round-scores.scores`) |
 | `player-connection` | lobby | `{ username, connected }` | A player is gone (disconnected > 15 s) or back: dim / undim them in the lobby list |

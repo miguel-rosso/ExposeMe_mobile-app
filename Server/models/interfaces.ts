@@ -170,8 +170,19 @@ export interface RoundStartData {
 }
 
 /**
+ * `game-resumed` / `hold-resume`: the paused or held `phase` continues with `duration` ms left of its `phaseTotal`
+ * (the full countdown its start event sent).
+ */
+export interface PhaseResumeData {
+  phase: RoundPhase | null;
+  duration: number;
+  phaseTotal: number;
+}
+
+/**
  * `game-state`: sent only to a player who rejoins, so a reconnecting client can render the current phase.
- * `duration` is the remaining time of the current phase (frozen while paused or held).
+ * `duration` is the remaining time of the current phase (frozen while paused or held), `phaseTotal` its full
+ * countdown as its start event sent it, so the client's bar resumes at the right point.
  */
 export interface GameStateSnapshot {
   started: boolean;
@@ -183,6 +194,7 @@ export interface GameStateSnapshot {
   /** Only in reveal/scores */
   correctAnswer: string | null;
   duration: number;
+  phaseTotal: number;
   held: boolean;
   /** The pause in progress (same as the last `game-paused`), or null when not paused */
   pause: PauseInfo | null;

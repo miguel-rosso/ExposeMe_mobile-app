@@ -86,6 +86,7 @@ const snapshot = (over: Partial<GameStateSnapshot> = {}): GameStateSnapshot => (
   photo: "/temp/1-a.jpg",
   correctAnswer: null,
   duration: 4200,
+  phaseTotal: 8000,
   held: false,
   pause: null,
   scores: [{ username: "alice", points: 2, isHost: true, lastAnswerCorrect: false, lastGuess: "" }],
@@ -207,11 +208,12 @@ describe("reveal, scores, hold and pause", () => {
     expect(reveal.mySelection).toBe("carol");
   });
 
+
   it("hold-resume keeps the phase and restarts its bar; hold-end and a pause release the hold", () => {
     const held = roundReducer({ ...answering, phase: "scores", pressing: true }, { type: "hold-start" });
     expect(held.gameHeld).toBe(true);
-    expect(roundReducer(held, { type: "hold-resume", data: { phase: "scores", duration: 2_000 } })).toMatchObject({
-      phase: "scores", phaseDuration: 2_000, phaseKey: 8, gameHeld: false, pressing: false,
+    expect(roundReducer(held, { type: "hold-resume", data: { phase: "scores", duration: 2_000, phaseTotal: 5_000 } })).toMatchObject({
+      phase: "scores", phaseDuration: 2_000, phaseTotal: 5_000, phaseKey: 8, gameHeld: false, pressing: false,
     });
     expect(roundReducer(held, { type: "hold-end" })).toMatchObject({ gameHeld: false, pressing: false });
     expect(roundReducer(held, { type: "game-paused" })).toMatchObject({ gameHeld: false, pressing: false });
@@ -219,17 +221,17 @@ describe("reveal, scores, hold and pause", () => {
 
   it("resuming a pause taken after scores waits for the next round's photo", () => {
     const scores = { ...answering, phase: "scores" as const, scores: [], correctAnswer: "alice" };
-    expect(roundReducer(scores, { type: "game-resumed", data: { phase: "waiting-photo", duration: 1_500 } })).toMatchObject({
+    expect(roundReducer(scores, { type: "game-resumed", data: { phase: "waiting-photo", duration: 1_500, phaseTotal: 1_500 } })).toMatchObject({
       photo: null, scores: null, phase: "waiting-photo", round: 3, phaseDuration: 1_500, phaseKey: 8,
     });
-    // Same phase resumed: only the remaining time changes
-    expect(roundReducer(answering, { type: "game-resumed", data: { phase: "answering", duration: 4_000 } })).toEqual({
-      ...answering, phaseDuration: 4_000, phaseTotal: 4_000, phaseKey: 8,
+    // Same phase resumed: only the remaining time (of the server's phase total) changes
+    expect(roundReducer(answering, { type: "game-resumed", data: { phase: "answering", duration: 4_000, phaseTotal: 7_700 } })).toEqual({
+      ...answering, phaseDuration: 4_000, phaseTotal: 7_700, phaseKey: 8,
     });
   });
 });
 
-// ── Progress bar after a resume or reconnect (EXP-080 / EXP-099) ──
+// ── Progress bar after a resume or reconnect (EXP-080 / EXP-099 / EXP-273) ──
 
 describe("phaseElapsed: where the progress bar of a resumed phase starts", () => {
   const roundStart = (duration = 8_000) => roundReducer(view({ phaseKey: 3 }), {
@@ -244,20 +246,22 @@ describe("phaseElapsed: where the progress bar of a resumed phase starts", () =>
 
   it("a resumed pause continues from the fraction already gone, against the phase's full duration", () => {
     const paused = roundReducer(roundStart(), { type: "game-paused" });
-    const resumed = roundReducer(paused, { type: "game-resumed", data: { phase: "answering", duration: 2_000 } });
+    const resumed = roundReducer(paused, { type: "game-resumed", data: { phase: "answering", duration: 2_000, phaseTotal: 8_000 } });
     expect(resumed).toMatchObject({ phaseDuration: 2_000, phaseTotal: 8_000, phaseKey: 5 });
     expect(phaseElapsed(resumed)).toBe(0.75);
     // A second pause in the same phase still measures against the full duration
     const again = roundReducer(roundReducer(resumed, { type: "game-paused" }), {
-      type: "game-resumed", data: { phase: "answering", duration: 1_000 },
+      type: "game-resumed", data: { phase: "answering", duration: 1_000, phaseTotal: 8_000 },
     });
     expect(phaseElapsed(again)).toBe(0.875);
   });
 
-  it("a resume with more time than was left (the server's minimum) starts the bar further back, never before empty", () => {
-    const resumed = roundReducer(roundStart(), { type: "game-resumed", data: { phase: "answering", duration: 9_000 } });
-    expect(resumed.phaseTotal).toBe(9_000);
-    expect(phaseElapsed(resumed)).toBe(0);
+  // EXP-273: the screen may still show an earlier phase (it was away when the phase changed); the server's phase and
+  // its total win over the stale one
+  it("game-resumed of another phase than the one on screen renders the server's phase with its total", () => {
+    const resumed = roundReducer(roundStart(), { type: "game-resumed", data: { phase: "scores", duration: 2_000, phaseTotal: 5_000 } });
+    expect(resumed).toMatchObject({ phase: "scores", phaseDuration: 2_000, phaseTotal: 5_000 });
+    expect(phaseElapsed(resumed)).toBe(0.6);
   });
 
   it("a hold released in scores continues the scores bar", () => {
@@ -265,35 +269,47 @@ describe("phaseElapsed: where the progress bar of a resumed phase starts", () =>
       type: "round-scores", data: { scores: [], round: 3, totalRounds: 10, duration: 6_000 },
     });
     const held = roundReducer(scores, { type: "hold-start" });
-    const resumed = roundReducer(held, { type: "hold-resume", data: { phase: "scores", duration: 1_500 } });
+    const resumed = roundReducer(held, { type: "hold-resume", data: { phase: "scores", duration: 1_500, phaseTotal: 6_000 } });
     expect(phaseElapsed(resumed)).toBe(0.75);
   });
 
-  it("a pause between rounds resumes a new photo wait: its bar starts empty", () => {
+  it("a pause between rounds resumes a new photo wait: the server shows it whole, its bar starts empty", () => {
     const scores = roundReducer(roundStart(), {
       type: "round-scores", data: { scores: [], round: 3, totalRounds: 10, duration: 6_000 },
     });
-    const resumed = roundReducer(scores, { type: "game-resumed", data: { phase: "waiting-photo", duration: 15_000 } });
+    const resumed = roundReducer(scores, { type: "game-resumed", data: { phase: "waiting-photo", duration: 1_500, phaseTotal: 1_500 } });
     expect(resumed.phase).toBe("waiting-photo");
     expect(phaseElapsed(resumed)).toBe(0);
   });
 
-  it("a snapshot of the phase on screen continues its bar; one of another phase or round starts it empty", () => {
+  it("a snapshot places the bar at the fraction gone of the server's phaseTotal, whatever the screen showed", () => {
     const answering = roundStart();
-    const same = applyGameState(snapshot({ duration: 6_000 }), "http://srv", answering).state;
-    expect(phaseElapsed(same)).toBe(0.25);
-    const reveal = applyGameState(snapshot({ phase: "reveal", correctAnswer: "alice", duration: 1_000 }), "http://srv", answering);
-    expect(phaseElapsed(reveal.state)).toBe(0);
+    expect(phaseElapsed(applyGameState(snapshot({ duration: 6_000 }), "http://srv", answering).state)).toBe(0.25);
+    const reveal = applyGameState(
+      snapshot({ phase: "reveal", correctAnswer: "alice", duration: 1_000, phaseTotal: 3_000 }), "http://srv", answering,
+    ).state;
+    expect(reveal).toMatchObject({ phase: "reveal", phaseDuration: 1_000, phaseTotal: 3_000 });
+    expect(phaseElapsed(reveal)).toBeCloseTo(2 / 3);
     const otherRound = applyGameState(snapshot({ round: 4, photo: "/temp/2-b.jpg", duration: 6_000 }), "http://srv", answering);
-    expect(phaseElapsed(otherRound.state)).toBe(0);
+    expect(phaseElapsed(otherRound.state)).toBe(0.25);
+    const scoresFromWait = applyGameState(
+      snapshot({ phase: "scores", correctAnswer: "alice", duration: 1_000, phaseTotal: 5_000 }), "http://srv",
+      roundReducer(view(), { type: "waiting-photo", data: { round: 3, duration: 15_000 } }),
+    );
+    expect(phaseElapsed(scoresFromWait.state)).toBe(0.8);
+    // Never before empty, even with a phaseTotal shorter than what is left
+    const short = applyGameState(snapshot({ phase: "reveal", correctAnswer: "alice", duration: 2_000, phaseTotal: 1_000 }), "http://srv", answering);
+    expect(phaseElapsed(short.state)).toBe(0);
   });
 
-  it("a snapshot of the same photo wait continues its bar; a wait for another round starts it empty", () => {
+  it("a waiting-photo snapshot shows the wait for the next round, its bar at the fraction gone", () => {
     const waiting = roundReducer(view(), { type: "waiting-photo", data: { round: 4, duration: 15_000 } });
-    const same = applyGameState(snapshot({ phase: "waiting-photo", photo: null, round: 3, duration: 5_000 }), "", waiting);
+    const same = applyGameState(snapshot({ phase: "waiting-photo", photo: null, round: 3, duration: 5_000, phaseTotal: 15_000 }), "", waiting);
     expect(same.state).toMatchObject({ phase: "waiting-photo", round: 4, phaseDuration: 5_000, phaseTotal: 15_000 });
     expect(phaseElapsed(same.state)).toBeCloseTo(2 / 3);
-    const next = applyGameState(snapshot({ phase: "waiting-photo", photo: null, round: 4, duration: 5_000 }), "", waiting);
-    expect(phaseElapsed(next.state)).toBe(0);
+    const fromReveal = roundReducer(roundStart(), { type: "round-reveal", data: { correctAnswer: "alice", duration: 3_000 } });
+    const next = applyGameState(snapshot({ phase: "waiting-photo", photo: null, duration: 12_000, phaseTotal: 15_000 }), "", fromReveal);
+    expect(next.state).toMatchObject({ phase: "waiting-photo", round: 4, photo: null, correctAnswer: "" });
+    expect(phaseElapsed(next.state)).toBeCloseTo(0.2);
   });
 });

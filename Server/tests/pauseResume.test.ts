@@ -170,7 +170,7 @@ describe("pause with fewer than 2 connected players", () => {
     vi.advanceTimersByTime(PAUSE_TIMEOUT - 1_000); // past the hold safety timeout too
     expect(events("hold-resume")).toHaveLength(0);
     rejoin(others[1]);
-    expect(last("game-resumed")!.args[0]).toEqual({ phase: "scores", duration: 4_000 });
+    expect(last("game-resumed")!.args[0]).toEqual({ phase: "scores", duration: 4_000, phaseTotal: SCORE_DISPLAY_TIME });
     vi.advanceTimersByTime(4_000);
     expect(events("your-turn")).toHaveLength(2);
   });
@@ -214,7 +214,7 @@ describe("pause with fewer than 2 connected players", () => {
     vi.advanceTimersByTime(PAUSE_MIN_DURATION);
     rejoin(other);
     // The owner gets at least 5 s to (re)send the photo for the same round
-    expect(last("game-resumed")!.args[0]).toEqual({ phase: "waiting-photo", duration: 5_000 });
+    expect(last("game-resumed")!.args[0]).toEqual({ phase: "waiting-photo", duration: 5_000, phaseTotal: PHOTO_WAIT_TIMEOUT });
     const turns = events("your-turn");
     expect(turns).toHaveLength(2);
     expect(turns[1]).toEqual({ target: owner.socketId, event: "your-turn", args: [{ round: 1, attempt: 1 }] });

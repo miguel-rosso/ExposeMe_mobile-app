@@ -598,7 +598,7 @@ describe("hold", () => {
     expect(room.held).toBe(false);
     const resume = lastEvent("hold-resume")!;
     expect(resume.target).toBe(room.gameCode);
-    expect(resume.args[0]).toEqual({ phase: "scores", duration: SCORE_DISPLAY_TIME - 2_000 });
+    expect(resume.args[0]).toEqual({ phase: "scores", duration: SCORE_DISPLAY_TIME - 2_000, phaseTotal: SCORE_DISPLAY_TIME });
 
     vi.advanceTimersByTime(SCORE_DISPLAY_TIME - 2_000 - 1);
     expect(events("your-turn")).toHaveLength(1);
@@ -667,7 +667,7 @@ describe("hold", () => {
     vi.advanceTimersByTime(1);
 
     expect(room.held).toBe(false);
-    expect(lastEvent("hold-resume")!.args[0]).toEqual({ phase: "scores", duration: SCORE_DISPLAY_TIME });
+    expect(lastEvent("hold-resume")!.args[0]).toEqual({ phase: "scores", duration: SCORE_DISPLAY_TIME, phaseTotal: SCORE_DISPLAY_TIME });
     expect(events("hold-end")).toHaveLength(1);
 
     vi.advanceTimersByTime(SCORE_DISPLAY_TIME);
@@ -679,7 +679,7 @@ describe("hold", () => {
     vi.advanceTimersByTime(SCORE_DISPLAY_TIME - 1_500);
     expect(engine.handleHold(room, ownerSocket)).toBe(true);
     engine.handleRelease(room, ownerSocket);
-    expect(lastEvent("hold-resume")!.args[0]).toEqual({ phase: "scores", duration: 1_500 });
+    expect(lastEvent("hold-resume")!.args[0]).toEqual({ phase: "scores", duration: 1_500, phaseTotal: SCORE_DISPLAY_TIME });
   });
 
   // Hold limits per round (EXP-167)

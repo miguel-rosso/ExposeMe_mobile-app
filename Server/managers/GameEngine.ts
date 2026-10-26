@@ -1,6 +1,6 @@
 import { Server } from "socket.io";
 import {
-  GameStateSnapshot, PauseInfo, Player, PlayerConnectionData, Room, RoundPhase, RoundSkippedData, RoundStartData, ScoreRound, WaitingPhotoData, YourTurnData,
+  GameStateSnapshot, PauseInfo, PhaseResumeData, Player, PlayerConnectionData, Room, RoundPhase, RoundSkippedData, RoundStartData, ScoreRound, WaitingPhotoData, YourTurnData,
 } from "../models/interfaces";
 import { DISCONNECT_GRACE, RoomManager } from "./RoomManager";
 import { uploadStore } from "../middlewares/uploadStore";
@@ -10,11 +10,20 @@ const ANSWER_TIME = 8_000;
 // Clients are shown ANSWER_TIME minus this, while answers are taken until ANSWER_TIME: a tap at the very end of the
 // bar still reaches the server in "answering" (latency margin)
 export const ANSWER_GRACE = 300;
+const SHOWN_ANSWER_TIME = ANSWER_TIME - ANSWER_GRACE;
 const REVEAL_TIME = 3_000;
 const SCORE_DISPLAY_TIME = 5_000;
 const GAME_START_DELAY = 1_000;
 const READY_TIMEOUT = 10_000; // After game-started, start the first round with whoever sent im-ready
 const PHOTO_WAIT_TIMEOUT = 15_000;
+// Countdown clients get when each phase starts (the `duration` of waiting-photo / round-start / round-reveal /
+// round-scores); resync payloads repeat it as `phaseTotal`, so a client that missed the start resumes its bar right
+const PHASE_TOTAL: Record<RoundPhase, number> = {
+  "waiting-photo": PHOTO_WAIT_TIMEOUT,
+  answering: SHOWN_ANSWER_TIME,
+  reveal: REVEAL_TIME,
+  scores: SCORE_DISPLAY_TIME,
+};
 // The photo owner may hold the scores screen at most MAX_HOLDS_PER_ROUND times per round, HOLD_BUDGET_PER_ROUND in
 // total (a hold that outlasts what is left of the budget is force-released)
 export const MAX_HOLDS_PER_ROUND = 3;
@@ -213,7 +222,7 @@ export class GameEngine {
     console.log(`[${room.gameCode}] Round ${room.round}: ${source} photo from ${owner.username}`);
 
     this.markPhaseEmitted(room, room.round);
-    const data: RoundStartData = { photo, round: room.round, duration: ANSWER_TIME - ANSWER_GRACE };
+    const data: RoundStartData = { photo, round: room.round, duration: SHOWN_ANSWER_TIME };
     this.io.to(room.gameCode).emit("round-start", data);
 
     this.setTimer(room, ANSWER_TIME, () => this.enterReveal(room));
@@ -429,7 +438,8 @@ export class GameEngine {
     const inRound = room.phase === "answering" || room.phase === "reveal" || room.phase === "scores";
     const shown = room.phase === "reveal" || room.phase === "scores";
     // Running timer: what is left of it; paused/held timer: the frozen remaining time
-    const duration = room._timer ? Math.max(0, room._timerDuration - (Date.now() - room._timerStartedAt)) : room._timerDuration;
+    const remaining = room._timer ? Math.max(0, room._timerDuration - (Date.now() - room._timerStartedAt)) : room._timerDuration;
+    const { duration, phaseTotal } = room.started ? this.phaseTiming(room, remaining) : { duration: 0, phaseTotal: 0 };
     // Guesses of the round in play are secret until round-scores (points already count a correct one), also through
     // the scores' order (see buildScores)
     const scores = this.buildScores(room, this.roomManager.guessesHidden(room));
@@ -441,7 +451,8 @@ export class GameEngine {
       totalRounds: room.rounds,
       photo: inRound ? room.currentPhoto : null,
       correctAnswer: shown ? room.currentPlayer?.username ?? null : null,
-      duration: room.started ? this.clientDuration(room, duration) : 0,
+      duration,
+      phaseTotal,
       held: room.held,
       pause: room.paused ? this.pauseInfo(room) : null,
       scores,
@@ -514,7 +525,8 @@ export class GameEngine {
       room._timerDuration = Math.max(min, room._timerDuration);
     }
     console.log(`[${room.gameCode}] RESUMED "${room.phase}" with ${room._timerDuration}ms (${room._pauseCount}/${MAX_PAUSES} pauses counted)`);
-    this.io.to(room.gameCode).emit("game-resumed", { phase: room.phase, duration: this.clientDuration(room, room._timerDuration) });
+    const resumed: PhaseResumeData = { phase: room.phase, ...this.phaseTiming(room, room._timerDuration) };
+    this.io.to(room.gameCode).emit("game-resumed", resumed);
     // A photo sent while paused was ignored: ask the owner again (unless they left: the owner review replaces them)
     const owner = room.currentPlayer;
     if (room.phase === "waiting-photo" && owner?.connected && room.players.includes(owner) && owner !== rejoined) {
@@ -740,6 +752,18 @@ export class GameEngine {
     return room.phase === "answering" ? Math.max(0, remaining - ANSWER_GRACE) : remaining;
   }
 
+  /**
+   * Timing of a resync payload (`game-state`, `game-resumed`, `hold-resume`) for a phase timer with `remaining` ms
+   * left: the countdown to show (`duration`) and `phaseTotal`, the full countdown the phase's start event sent, so a
+   * client that never saw that start draws the bar from where the phase is. Before any start event (ready phase, a
+   * round about to start after a boundary pause) the countdown is shown whole: `phaseTotal` = `duration`.
+   */
+  private phaseTiming(room: Room, remaining: number): { duration: number; phaseTotal: number } {
+    const duration = this.clientDuration(room, remaining);
+    const boundary = room.phase === "waiting-photo" && !room.currentPlayer && !this.plantedWait(room);
+    return { duration, phaseTotal: room.phase && !boundary ? PHASE_TOTAL[room.phase] : duration };
+  }
+
   /** How long until `planter`'s planted photo appears (see plantedDelay.ts): realistic, and like their own uploads. */
   private plantedDelay(room: Room, planter: Player): number {
     return drawPlantedDelay(this.waitHistoryOf(room).of(planter.username), PHOTO_WAIT_TIMEOUT - PLANTED_DELAY_MARGIN);
@@ -943,11 +967,9 @@ export class GameEngine {
     room._timerDuration = remaining;
     console.log(`[${room.gameCode}] Resuming "${room.phase}" with ${remaining}ms`);
 
-    // Atomic event: tells client which phase and how much time
-    this.io.to(room.gameCode).emit("hold-resume", {
-      phase: room.phase,
-      duration: remaining,
-    });
+    // Atomic event: tells client which phase, how much time is left and the phase's full duration
+    const resumed: PhaseResumeData = { phase: room.phase, ...this.phaseTiming(room, remaining) };
+    this.io.to(room.gameCode).emit("hold-resume", resumed);
 
     this.resumeTimer(room);
   }

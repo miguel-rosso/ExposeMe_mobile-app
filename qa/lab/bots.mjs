@@ -119,6 +119,9 @@
 //   ready (waiting-photo, round-start, round-skipped, game-paused, game-state, game-over in between): "turn-dropped".
 //   A turn dropped while connected must be asked again (a later your-turn for that round) or skipped for a reason
 //   other than timeout ("consistency").
+//   Resync timing (EXP-273): every game-state, game-resumed and hold-resume carries `phaseTotal`, the full countdown
+//   of the phase (the `duration` its start event sent; `duration` itself when shown whole), never less than
+//   `duration`; anything else is an error of the room.
 import { io } from "socket.io-client";
 import fs from "node:fs";
 import path from "node:path";
@@ -271,6 +274,24 @@ const DROP_BOT = Number(args["drop-bot"] || N_BOTS) - 1;
 const DROP_ON_TURN = !!args["drop-on-turn"];
 // Events that end the photo request in force, as GAME_FLOW.md lists them: the app drops the result of a turn in flight
 const TURN_ENDING_EVENTS = new Set(["waiting-photo", "round-start", "round-skipped", "game-paused", "game-state", "game-over"]);
+// The event that starts each phase (its `duration` is the phase's full countdown), and the payloads that resync a
+// phase with what is left of it plus that full countdown as `phaseTotal` (EXP-273)
+const PHASE_START_EVENTS = { "waiting-photo": "waiting-photo", "round-start": "answering", "round-reveal": "reveal", "round-scores": "scores" };
+const RESYNC_EVENTS = new Set(["game-state", "game-resumed", "hold-resume"]);
+
+/**
+ * What is wrong with a resync payload's `phaseTotal`, or null: it is never less than `duration`, and it repeats the
+ * `duration` of the phase's start event (`startDuration`, when this bot saw one) unless the countdown is shown whole
+ * (`phaseTotal` = `duration`: ready phase, a round about to start after a boundary pause, game over).
+ */
+function phaseTotalProblem(ev, d, startDuration) {
+  const { phase, duration, phaseTotal } = d ?? {};
+  if (!Number.isFinite(phaseTotal) || !(phaseTotal >= duration)) return `${ev}: phaseTotal ${phaseTotal} with duration ${duration} (${phase})`;
+  if (startDuration !== undefined && phaseTotal !== startDuration && phaseTotal !== duration) {
+    return `${ev}: phaseTotal ${phaseTotal} for ${phase}, whose start event sent duration ${startDuration}`;
+  }
+  return null;
+}
 // Like the app rejoining from its lobby screen ("Join" after closing it): the first snapshot of a started game
 // (and any your-turn with it) is missed while switching screens, then the join is re-sent on the same socket,
 // which answers with a fresh game-state (and your-turn for an awaited photo)
@@ -481,11 +502,18 @@ function runRoom(roomIdx, fixedCode) {
       // Privacy check of every received event. Runs before the event's own handler, so `phase` is the phase this
       // bot was in when it arrived; `baseline` = points per player at the last round-scores (null when unknown)
       const priv = { phase: null, baseline: null };
+      // `duration` of the last start event of each phase this bot saw: what a resync's phaseTotal must repeat
+      const phaseStartDurations = new Map();
       socket.on("disconnect", () => { priv.baseline = null; }); // round-scores may be missed while away
       socket.onAny((ev, ...payload) => {
         const tokens = new Map(bots.map((b) => [b.name, b.token]));
         for (const leak of payloadLeaks(name, ev, payload, socketIds, tokens, priv)) rec("payload-leak", bot.round, { leak });
         const d = payload[0];
+        if (PHASE_START_EVENTS[ev]) phaseStartDurations.set(PHASE_START_EVENTS[ev], d?.duration);
+        if (RESYNC_EVENTS.has(ev)) {
+          const problem = phaseTotalProblem(ev, d, phaseStartDurations.get(d?.phase));
+          if (problem) errors.push(`${name}: ${problem}`);
+        }
         if (TURN_ENDING_EVENTS.has(ev)) bot.turn = null;
         if (ev === "game-started") { priv.phase = null; priv.baseline = new Map((d ?? []).map((p) => [p.username, 0])); }
         else if (ev === "waiting-photo") priv.phase = "waiting-photo";

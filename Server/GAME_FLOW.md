@@ -137,8 +137,22 @@ After last round: game-over
   matching `rejoinToken` (a reconnecting player is never locked out), and a join to a room that already has a
   connected player on the same IP (same network, e.g. the party Wi-Fi: it knows the code anyway), at most **24 per IP
   per window** (env `JOIN_EXEMPT_MAX`). Misses keep counting while locked; past **3 × `JOIN_MISS_MAX`** in the window
-  the same-network exemption is dropped too (token rejoins only). A socket records at most one miss every 3 s, so one
-  device alone can't fill the window. Creating a room (`gameCode: null`) is
+  the same-network exemption is dropped too (token rejoins only). A socket records at most one miss every 3 s, and
+  for those 3 s after a miss its joins with a code answer `"Too many attempts"` without looking the code up (same
+  exemptions), so every `"Game not found"` is a recorded miss (the app opens a new socket after a failed join anyway).
+  Two coarser layers stop rotation across many addresses; both only tighten the limit of IPs that have misses of
+  their own, so an IP with no misses in the window is never locked by others:
+  - every IPv6 miss also counts against its **/48**: while the /48 has **300 misses in the window** (env
+    `JOIN_MISS_PREFIX_MAX`), each /64 in it is locked at **2 misses of its own** (and loses the same-network exemption
+    at 6 own misses once the /48 has 3 × `JOIN_MISS_PREFIX_MAX`). IPv4 has no prefix layer.
+  - a **global budget**: once **600 misses** (env `JOIN_MISS_GLOBAL_MAX`, counted only from IPs that weren't locked)
+    land in one window, the server is under pressure and every IP's limit drops to **5 misses per window** (env
+    `JOIN_MISS_PRESSURE_MAX`; 2 own misses in a /48 with 2 × that) until it clears. An attacker can trigger the
+    pressure on purpose; it then only affects IPs with misses of their own (e.g. someone who mistyped a few codes),
+    never IPs without misses, and token rejoins and same-network joins keep their exemptions.
+
+  Misses are tracked for at most 50,000 IPs and 50,000 /48s (env `JOIN_MISS_MAX_TRACKED`; the least recently missing
+  one is forgotten first), so rotating addresses can't grow memory without bound. Creating a room (`gameCode: null`) is
   not affected. `"Username already taken"`, `"Game already started"` and `"Room is full"` therefore only reach
   someone who already has a valid code. The client IP follows the same `TRUST_PROXY` hop count as Express (`req.ip`);
   per-IP limits count IPv4-mapped IPv6 (any notation) as IPv4 and IPv6 by its /64 prefix.

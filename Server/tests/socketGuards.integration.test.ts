@@ -8,13 +8,14 @@ vi.hoisted(() => {
   process.env.SOCKET_MAX_CONNECTIONS_PER_IP = "6";
   process.env.JOIN_MISS_MAX = "6"; // hard ceiling 18
   process.env.JOIN_EXEMPT_MAX = "3";
+  process.env.JOIN_MISS_PREFIX_MAX = "8"; // per IPv6 /48 (EXP-183)
   // Clients pick their IP with X-Forwarded-For (one trusted hop: the test client is the "proxy"), so each test
   // has its own limits
   process.env.TRUST_PROXY = "1";
 });
 
 import { io, server } from "../app";
-import { connections, roomManager } from "../routes/socketRoutes";
+import { connections, joinMisses, roomManager } from "../routes/socketRoutes";
 
 interface RoomOfGame { success: boolean; message?: string; rejoinToken?: string; room?: { gameCode: string } }
 
@@ -137,9 +138,13 @@ describe("per-IP socket limits (EXP-164)", () => {
     alice.disconnect();
     await sleep(100);
 
-    // One socket records at most one miss every few seconds: 3 quick misses count once
+    // One socket records at most one miss every few seconds: 3 quick misses count once, and inside that cooldown
+    // its joins with a code are answered without looking the code up (EXP-183)
     const quick = await newClient();
-    for (const n of ["q1", "q2", "q3"]) expect((await join(quick, wrong, n)).message).toBe("Game not found");
+    const quickAnswers: string[] = [];
+    for (const n of ["q1", "q2", "q3"]) quickAnswers.push((await join(quick, wrong, n)).message!);
+    expect(quickAnswers).toEqual(["Game not found", "Too many attempts", "Too many attempts"]);
+    expect(await join(quick, gameCode, "q4")).toEqual({ success: false, message: "Too many attempts" });
     quick.disconnect();
     // 4 more sockets, one miss each: 5 counted, still under the limit of 6
     for (let s = 0; s < 5; s++) {
@@ -194,6 +199,60 @@ describe("join lock: same-network exemption limits (EXP-164)", () => {
     expect(await missFrom(12, wrong)).toEqual(Array(12).fill("Too many attempts"));
     expect(await join(await newClient(), gameCode, "carl")).toEqual({ success: false, message: "Too many attempts" });
     expect((await join(await newClient(), gameCode, "alice", token)).success).toBe(true);
+  });
+});
+
+describe("join lock per IPv6 /48 (EXP-183)", () => {
+  it("a full /48 locks its /64s that miss (at 2 own misses), not innocent /64s nor other /48s", async () => {
+    clientIp = "2001:db8:100:1::1";
+    const alice = await newClient();
+    const created = await join(alice, null, "alice");
+    const gameCode = created.room!.gameCode;
+    const wrong = gameCode === "100000" ? "100001" : "100000";
+
+    // 8 misses (JOIN_MISS_PREFIX_MAX), each from a different /64 of 2001:db8:100::/48: each /64 is far under its own
+    // limit (6), the /48 is full
+    for (let i = 0; i < 8; i++) {
+      clientIp = `2001:db8:100:${(i + 2).toString(16)}::1`;
+      expect(await missFrom(1, wrong)).toEqual(["Game not found"]);
+    }
+
+    // A rotating /64 gets one more answered guess (2 own misses), then can't tell a real code from a wrong one
+    clientIp = "2001:db8:100:2::1";
+    expect(await missFrom(1, wrong)).toEqual(["Game not found"]);
+    expect(await join(await newClient(), gameCode, "mallory")).toEqual({ success: false, message: "Too many attempts" });
+    // An innocent /64 of the same /48 with no misses of its own joins normally
+    clientIp = "2001:db8:100:ff::1";
+    expect((await join(await newClient(), gameCode, "bob")).success).toBe(true);
+    // Another /48 is not affected
+    clientIp = "2001:db8:200:1::1";
+    expect((await join(await newClient(), gameCode, "carl")).success).toBe(true);
+  });
+});
+
+describe("no answered guess without a recorded miss (EXP-183)", () => {
+  it("N sockets × 5 rapid joins from one IP: 'Game not found' answers == recorded misses", async () => {
+    clientIp = "10.0.0.6";
+    const host = await newClient();
+    const gameCode = (await join(host, null, "host")).room!.gameCode;
+    host.disconnect();
+    await sleep(100);
+    let notFound = 0;
+    for (let s = 0; s < 4; s++) {
+      const sock = await newClient();
+      for (let j = 0; j < 5; j++) {
+        // Wrong codes (never issued: codes are 100000-999999) around the real one: the cooldown answer must not
+        // depend on whether the code exists
+        const code = j === 2 ? gameCode : `0000${s}${j}`;
+        const res = await join(sock, code, `u${s}${j}`);
+        if (res.message === "Game not found") notFound++;
+        if (code === gameCode) expect(res).toEqual({ success: false, message: "Too many attempts" });
+      }
+      sock.disconnect();
+      await sleep(20);
+    }
+    expect(notFound).toBe(4);
+    expect(joinMisses.count("10.0.0.6")).toBe(notFound);
   });
 });
 

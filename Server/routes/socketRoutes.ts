@@ -6,8 +6,9 @@ import { acceptsPlantedPhoto, setUploadRooms } from "../middlewares/uploadAccess
 import { uploadStore } from "../middlewares/uploadStore";
 import { createSlidingWindow } from "../middlewares/rateLimit";
 import {
-  ALLOWED_EMOJIS, createConnectionCounter, createTokenBucket, EMOJI_BURST, EMOJI_RATE_PER_S, handshakeKey, HOLD_START_BURST,
-  HOLD_START_RATE_PER_S, JOIN_EXEMPT_MAX, JOIN_MISS_HARD_FACTOR, JOIN_MISS_MAX, JOIN_MISS_SOCKET_INTERVAL_MS, JOIN_MISS_WINDOW_MS, MAX_CONNECTIONS_PER_IP,
+  ALLOWED_EMOJIS, createConnectionCounter, createJoinMissGuard, createTokenBucket, EMOJI_BURST, EMOJI_RATE_PER_S, handshakeKey,
+  HOLD_START_BURST, HOLD_START_RATE_PER_S, JOIN_EXEMPT_MAX, JOIN_MISS_GLOBAL_MAX, JOIN_MISS_HARD_FACTOR, JOIN_MISS_MAX,
+  JOIN_MISS_PREFIX_MAX, JOIN_MISS_PRESSURE_MAX, JOIN_MISS_SOCKET_INTERVAL_MS, JOIN_MISS_WINDOW_MS, MAX_CONNECTIONS_PER_IP,
 } from "../managers/socketGuards";
 import { JoinCreateGameData, PhotoUnavailableData, Player, Room } from "../models/interfaces";
 
@@ -30,13 +31,16 @@ const MAX_USERNAME_LENGTH = 20;
 const MAX_CHAT_LENGTH = 100;
 // Per-IP limits (see managers/socketGuards): open sockets, and join attempts with a code that matches no room
 const connections = createConnectionCounter(MAX_CONNECTIONS_PER_IP);
-const joinMisses = createSlidingWindow({ max: JOIN_MISS_MAX, windowMs: JOIN_MISS_WINDOW_MS }); // locked when full
-const joinMissesHard = createSlidingWindow({ max: JOIN_MISS_HARD_FACTOR * JOIN_MISS_MAX, windowMs: JOIN_MISS_WINDOW_MS });
+// Per IP key, per IPv6 /48 and global budget (see createJoinMissGuard)
+const joinMisses = createJoinMissGuard({
+  max: JOIN_MISS_MAX, windowMs: JOIN_MISS_WINDOW_MS, hardFactor: JOIN_MISS_HARD_FACTOR,
+  prefixMax: JOIN_MISS_PREFIX_MAX, globalMax: JOIN_MISS_GLOBAL_MAX, pressureMax: JOIN_MISS_PRESSURE_MAX,
+});
 const joinExemptions = createSlidingWindow({ max: JOIN_EXEMPT_MAX, windowMs: JOIN_MISS_WINDOW_MS });
 // One socket.io socket per engine.io connection (a second CONNECT on the same transport is refused)
 const connsWithSocket = new WeakSet<object>();
-/** Exported for tests: open connections per IP key. */
-export { connections };
+/** Exported for tests: open connections per IP key, join misses per IP key. */
+export { connections, joinMisses };
 
 /** Some connected player of `room` is on the same IP key as the sender (that network already knows the code). */
 function hasMemberOnIp(room: Room, ip: string): boolean {
@@ -143,19 +147,18 @@ io.on("connection", (socket: Socket) => {
   const joinAttempts: number[] = []; // timestamps of recent join-create-game events on this socket
   let lastMissAt = -Infinity;
   /**
-   * An unknown code: counts against the IP, at most once per JOIN_MISS_SOCKET_INTERVAL_MS per socket. Also while
-   * locked (towards the hard ceiling); each window stops recording once full, so its timestamps stay bounded.
+   * An unknown code: counts against the IP (and its IPv6 /48, and the global budget), at most once per
+   * JOIN_MISS_SOCKET_INTERVAL_MS per socket. Also while locked (towards the hard ceiling).
    */
+  const missCooldown = () => Date.now() - lastMissAt < JOIN_MISS_SOCKET_INTERVAL_MS;
   const recordMiss = () => {
-    const now = Date.now();
-    if (now - lastMissAt < JOIN_MISS_SOCKET_INTERVAL_MS) return;
-    lastMissAt = now;
-    if (!joinMisses.retryAfter(ip)) joinMisses.hit(ip);
-    if (!joinMissesHard.retryAfter(ip)) joinMissesHard.hit(ip);
+    if (missCooldown()) return;
+    lastMissAt = Date.now();
+    joinMisses.record(ip);
   };
   /** Locked IP: a connected player of `room` on this IP lets the join through, unless past the hard ceiling or the exemption cap. */
   const sameNetworkExempt = (room: Room | undefined): boolean => {
-    if (!room || joinMissesHard.retryAfter(ip) || joinExemptions.retryAfter(ip) || !hasMemberOnIp(room, ip)) return false;
+    if (!room || joinMisses.hardLocked(ip) || joinExemptions.retryAfter(ip) || !hasMemberOnIp(room, ip)) return false;
     joinExemptions.hit(ip);
     return true;
   };
@@ -211,8 +214,9 @@ io.on("connection", (socket: Socket) => {
         // This IP guessed too many unknown codes: no answer reveals whether this code exists, unless the sender
         // proves it is a player of that room (rejoin with its token) or a connected player of the room is on the
         // same IP (same network: they know the code anyway; see sameNetworkExempt). Misses still count.
+        // Same answer on a socket in its miss cooldown, so every "Game not found" below is a recorded miss.
         const target = roomManager.getRoom(gameCode);
-        if (joinMisses.retryAfter(ip) && !roomManager.canRejoin(gameCode, username, data.rejoinToken) && !sameNetworkExempt(target)) {
+        if ((missCooldown() || joinMisses.locked(ip)) && !roomManager.canRejoin(gameCode, username, data.rejoinToken) && !sameNetworkExempt(target)) {
           if (!target) recordMiss();
           socket.emit("room-of-game", { success: false, message: "Too many attempts" });
           return;

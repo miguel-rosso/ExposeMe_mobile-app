@@ -12,8 +12,12 @@ const mockGetPermissions = jest.fn();
 const mockRequestPermissions = jest.fn();
 jest.mock("expo-media-library", () => {
   class Query {
+    skip = 0;
+    take = Infinity;
     eq() { return this; }
-    async exeForMetadata() { return mockPhotos; }
+    offset(n: number) { this.skip = n; return this; }
+    limit(n: number) { this.take = n; return this; }
+    async exeForMetadata() { return mockPhotos.slice(this.skip, this.skip + this.take); }
   }
   class Asset {
     id: string;

@@ -1,7 +1,18 @@
-import React, { createContext, useContext, useState, useCallback, useMemo } from "react";
+import React, { createContext, useContext, useState, useCallback, useMemo, useEffect, useRef } from "react";
 import * as MediaLibrary from "expo-media-library";
 import { GamePhotoResult, PhotoContextProps, PhotoProviderProps } from "@/app/models/interfaces";
 import { checkGalleryAccess as checkAccess, GalleryAccess } from "@/app/utils/galleryAccess";
+import { createRandomPhotoPicker } from "@/app/utils/randomGalleryPhoto";
+
+/** Id of the visible image at `offset`: a one-row query, never a full gallery read (EXP-174) */
+const photoIdAt = async (offset: number): Promise<string | null> => {
+  const page = await new MediaLibrary.Query()
+    .eq(MediaLibrary.AssetField.MEDIA_TYPE, MediaLibrary.MediaType.IMAGE)
+    .offset(offset)
+    .limit(1)
+    .exeForMetadata();
+  return page[0]?.id ?? null;
+};
 
 const PhotoContext = createContext<PhotoContextProps | undefined>(undefined);
 
@@ -72,25 +83,34 @@ export const PhotoProvider: React.FC<PhotoProviderProps> = ({ children }) => {
     }
   }, []);
 
+  // Image count cached across turns; dropped when the gallery or the limited selection changes. The change
+  // listener is only registered once a photo is first picked, and removed on unmount.
+  const [picker] = useState(() => createRandomPhotoPicker(photoIdAt));
+  const pickerSubRef = useRef<{ remove: () => void } | null>(null);
+  useEffect(() => () => pickerSubRef.current?.remove(), []);
+
   /** Random photo among the ones the app can see (all of them, or the limited selection). */
   const pickFromGallery = useCallback(async (): Promise<GamePhotoResult> => {
-    // Lightweight metadata of every photo; the file URI is only resolved for the picked one
-    const photos = await new MediaLibrary.Query()
-      .eq(MediaLibrary.AssetField.MEDIA_TYPE, MediaLibrary.MediaType.IMAGE)
-      .exeForMetadata();
-    if (photos.length === 0) {
-      console.log("No photos on device.");
-      return { error: "no-photos" };
+    if (!pickerSubRef.current) {
+      try {
+        pickerSubRef.current = MediaLibrary.addListener(() => picker.invalidate());
+      } catch (e) {
+        console.log("Gallery change listener unavailable:", e);
+        pickerSubRef.current = { remove: () => {} };
+      }
     }
-
     // Retry up to 3 times if the picked asset can't be resolved to a file URI
     for (let i = 0; i < 3; i++) {
-      const randomIndex = Math.floor(Math.random() * photos.length);
-      console.log(`Selected photo index: ${randomIndex}`);
+      const id = await picker.pick();
+      if (id === null) {
+        console.log("No photos on device.");
+        return { error: "no-photos" };
+      }
+      console.log(`Selected photo: ${id}`);
 
       let uri: string | null = null;
       try {
-        uri = await new MediaLibrary.Asset(photos[randomIndex].id).getUri();
+        uri = await new MediaLibrary.Asset(id).getUri();
       } catch (e) {
         console.log("Could not resolve photo URI:", e);
       }
@@ -105,7 +125,7 @@ export const PhotoProvider: React.FC<PhotoProviderProps> = ({ children }) => {
 
     console.log("Failed to select a photo after retries.");
     return { error: "failed" };
-  }, []);
+  }, [picker]);
 
   const getRandomPhoto = useCallback(async (): Promise<string | null> => {
     console.log("Getting random photo...");

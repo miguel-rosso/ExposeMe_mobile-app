@@ -15,12 +15,22 @@ jest.mock("expo-media-library", () => {
   ];
   class Query {
     filters: [string, unknown][] = [];
+    skip = 0;
+    take = Infinity;
     eq(field: string, value: unknown) {
       this.filters.push([field, value]);
       return this;
     }
+    offset(n: number) {
+      this.skip = n;
+      return this;
+    }
+    limit(n: number) {
+      this.take = n;
+      return this;
+    }
     async exeForMetadata() {
-      return photos.filter((p) => this.filters.every(([f, v]) => (p as any)[f] === v));
+      return photos.filter((p) => this.filters.every(([f, v]) => (p as any)[f] === v)).slice(this.skip, this.skip + this.take);
     }
   }
   class Asset {

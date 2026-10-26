@@ -36,8 +36,7 @@ export type RoundAction =
   | { type: "your-turn"; round: number }
   | { type: "round-start"; data: RoundStartData; serverUrl: string }
   | { type: "round-reveal"; data: RoundRevealData }
-  /** `username`: me, to show the guess the server recorded for me */
-  | { type: "round-scores"; data: RoundScoresData; username: string }
+  | { type: "round-scores"; data: RoundScoresData }
   | { type: "pick"; guess: string }
   | { type: "pick-sent"; guess: string }
   | { type: "pressing"; pressing: boolean }
@@ -46,8 +45,7 @@ export type RoundAction =
   | { type: "hold-resume"; data: HoldResumeData }
   | { type: "game-paused" }
   | { type: "game-resumed"; data: GameResumedData }
-  /** `username`: me, to show the guess the server recorded for me in a `scores` snapshot */
-  | { type: "game-state"; snap: GameStateSnapshot; serverUrl: string; username: string };
+  | { type: "game-state"; snap: GameStateSnapshot; serverUrl: string };
 
 /** A new server phase (or the same one resumed) with its duration: restarts the progress bar */
 const startPhase = (state: RoundView, phase: ServerPhase | null, duration: number): RoundView => ({
@@ -58,10 +56,6 @@ const startPhase = (state: RoundView, phase: ServerPhase | null, duration: numbe
 const PER_ROUND_RESET = {
   correctAnswer: "", scores: null, mySelection: "", sentGuess: "", gameHeld: false, pressing: false,
 } as const;
-
-/** The guess the server recorded for me (`lastGuess`, "" for none), or `fallback` if I'm not in the scores */
-const recordedGuess = (scores: ScoreRound[], username: string, fallback: string) =>
-  scores.find((s) => s.username === username)?.lastGuess ?? fallback;
 
 const inRoundPhase = (phase: ServerPhase | null) => phase === "answering" || phase === "reveal" || phase === "scores";
 
@@ -78,18 +72,16 @@ const waitForPhoto = (state: RoundView, data: WaitingPhotoData): RoundView => ({
 
 /**
  * The pick to show in a snapshot of a round in play, as the live events would: while answering the current pick of the
- * same round (the screen re-sends it); in reveal the last one sent (a pick made while disconnected never counted); in
- * scores the guess the server recorded for me.
+ * same round (the screen re-sends it); past answering the last one sent (a pick made while disconnected never counted),
+ * which the reveal colours. In scores the options are not drawn: the scoreboard lists the guess the server recorded.
  */
-const snapshotSelection = (state: RoundView, snap: GameStateSnapshot, sameRound: boolean, username: string) => {
-  const sentGuess = sameRound ? state.sentGuess : "";
+const snapshotSelection = (state: RoundView, snap: GameStateSnapshot, sameRound: boolean) => {
   if (snap.phase === "answering") return sameRound ? state.mySelection : "";
-  if (snap.phase === "scores") return recordedGuess(snap.scores, username, sentGuess);
-  return sentGuess;
+  return sameRound ? state.sentGuess : "";
 };
 
 /** Renders the `game-state` snapshot a rejoining player receives (the pick shown: see snapshotSelection) */
-const applySnapshot = (state: RoundView, snap: GameStateSnapshot, serverUrl: string, username: string): RoundView => {
+const applySnapshot = (state: RoundView, snap: GameStateSnapshot, serverUrl: string): RoundView => {
   if (!snap.started) return { ...state, pressing: false, gameHeld: false };
   const held = { ...state, pressing: false, gameHeld: snap.held };
 
@@ -100,7 +92,7 @@ const applySnapshot = (state: RoundView, snap: GameStateSnapshot, serverUrl: str
       ...startPhase(held, snap.phase, snap.duration),
       photo, isOwner: snap.isOwner === true, round: snap.round, correctAnswer: snap.correctAnswer ?? "",
       scores: snap.phase === "scores" ? snap.scores : null,
-      mySelection: snapshotSelection(state, snap, sameRound, username),
+      mySelection: snapshotSelection(state, snap, sameRound),
       sentGuess: sameRound ? state.sentGuess : "",
     };
   }
@@ -132,12 +124,9 @@ export const roundReducer = (state: RoundView, action: RoundAction): RoundView =
         ...startPhase(state, "reveal", action.data.duration), correctAnswer: action.data.correctAnswer,
         mySelection: state.sentGuess,
       };
-    // The scores carry the guess the server actually recorded for me (a sent pick can still arrive too late)
+    // The scoreboard lists the guess the server recorded for each player; the options are not drawn under it
     case "round-scores":
-      return {
-        ...startPhase(state, "scores", action.data.duration), scores: action.data.scores, round: action.data.round,
-        mySelection: recordedGuess(action.data.scores, action.username, state.mySelection),
-      };
+      return { ...startPhase(state, "scores", action.data.duration), scores: action.data.scores, round: action.data.round };
     case "pick":
       return { ...state, mySelection: action.guess };
     case "pick-sent":
@@ -161,7 +150,7 @@ export const roundReducer = (state: RoundView, action: RoundAction): RoundView =
       return startPhase(resumed, resumed.phase, action.data.duration);
     }
     case "game-state":
-      return applySnapshot(state, action.snap, action.serverUrl, action.username);
+      return applySnapshot(state, action.snap, action.serverUrl);
   }
 };
 

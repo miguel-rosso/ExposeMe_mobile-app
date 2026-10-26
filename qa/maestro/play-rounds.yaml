@@ -19,6 +19,14 @@ appId: com.socketNull.ExposeMe
           waitToSettleTimeoutMs: 500
       - evalScript: ${output.shot = (output.shot || 0) + 1}
       - takeScreenshot: round-${USERNAME}-${output.shot}
+      # EXP-141: the scoreboard is drawn alone, with no answer options under it
+      - runFlow:
+          when:
+            visible:
+              id: "score-modal"
+          commands:
+            - assertNotVisible:
+                id: "player-option-.*"
       - waitForAnimationToEnd:
           timeout: 4000
 - takeScreenshot: final-${USERNAME}

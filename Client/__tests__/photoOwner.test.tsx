@@ -213,7 +213,8 @@ describe("GameScreen: whose photo it is (EXP-128)", () => {
     expect(answers()).toEqual([{ guess: "carol" }]); // too late: never sent in reveal
   });
 
-  it("the scores colour the guess the server recorded for me", () => {
+  // The scoreboard lists each player's recorded guess; no options are drawn under it (EXP-141), so none can show a stale pick
+  it("the scores show no stale colour: the options are gone under the scoreboard", () => {
     act(() => mockSocket.fire("round-start", { ...START, isOwner: false }));
     press(r.root, "carol");
     act(() => { jest.advanceTimersByTime(250); });
@@ -225,8 +226,7 @@ describe("GameScreen: whose photo it is (EXP-128)", () => {
     act(() => mockSocket.fire("round-scores", {
       scores: [score("alice", "bob"), score("bob", "carol"), score("carol", "")], round: 1, totalRounds: 10, duration: 5_000,
     }));
-    expect(bgOf(r.root, "carol")).toBe(RED);
-    expect(bgOf(r.root, "alice")).not.toBe(GREEN);
+    for (const n of ["alice", "bob", "carol"]) expect(option(r.root, n)).toBeUndefined();
   });
 
   it("a wrong guess turns red at the reveal", () => {

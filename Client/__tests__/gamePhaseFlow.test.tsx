@@ -212,13 +212,68 @@ describe("GameScreen: server phases drawn with the received duration (EXP-063)",
     expect(emitted("hold-start")).toHaveLength(1);
 
     // The server moved on (it ends the hold itself): every phase change resets the press, so the button unmounts
-    // (GameScreen's `|| pressing` keep-alive is not reached by any server event) and a new press is not ignored
+    // and a new press is not ignored
     act(() => mockSocket.fire("round-start", { ...START, photo: "/temp/y.jpg", round: 2, isOwner: true }));
     expect(has(r.root, TEST_IDS.holdButton)).toBe(false);
 
     act(() => mockSocket.fire("round-scores", { scores: SCORES, round: 2, totalRounds: 10, duration: 5_000 }));
     act(() => button().props.onPressIn());
     expect(emitted("hold-start")).toHaveLength(2);
+  });
+
+  // EXP-189: the hold button exists only for the photo owner and only in scores (no press keeps it in another phase)
+  it("the hold button is mounted only in scores, only for the owner, also while pressed", () => {
+    const holdPhases = (isOwner: boolean) => {
+      const seen: string[] = [];
+      const check = (phase: string) => { if (has(r.root, TEST_IDS.holdButton)) seen.push(phase); };
+      act(() => mockSocket.fire("round-start", { ...START, isOwner }));
+      check("answering");
+      act(() => mockSocket.fire("round-reveal", { correctAnswer: isOwner ? "bob" : "carol", duration: 3_000 }));
+      check("reveal");
+      act(() => mockSocket.fire("round-scores", { scores: SCORES, round: 1, totalRounds: 10, duration: 5_000 }));
+      check("scores");
+      const button = r.root.findAll((n) => n.props.testID === TEST_IDS.holdButton && typeof n.props.onPressIn === "function")[0];
+      if (button) {
+        act(() => button.props.onPressIn());
+        check("scores (pressed)");
+      }
+      act(() => mockSocket.fire("waiting-photo", { round: 2, duration: 15_000 }));
+      check("waiting-photo");
+      return seen;
+    };
+    expect(holdPhases(false)).toEqual([]);
+    expect(holdPhases(true)).toEqual(["scores", "scores (pressed)"]);
+  });
+
+  // EXP-141: with many players the answer list reached under the scoreboard; it is not drawn in scores at all
+  it("the answer options are not rendered while the scoreboard shows, and come back with the next round", () => {
+    act(() => mockSocket.fire("round-start", START));
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "carol", duration: 3_000 }));
+    expect(has(r.root, playerOptionId("alice"))).toBe(true); // the reveal colours them
+
+    act(() => mockSocket.fire("round-scores", { scores: SCORES, round: 1, totalRounds: 10, duration: 5_000 }));
+    expect(scoreModal(r.root).visible).toBe(true);
+    expect(mockPlayers.filter((p) => has(r.root, playerOptionId(p.username)))).toEqual([]);
+
+    // A rejoin snapshot in scores draws the same screen
+    act(() => mockSocket.fire("game-state", {
+      started: true, phase: "scores", round: 1, totalRounds: 10, isOwner: false, photo: "/temp/x.jpg",
+      correctAnswer: "carol", duration: 4_000, held: false, pause: null, scores: SCORES, players: mockPlayers,
+    }));
+    expect(has(r.root, playerOptionId("alice"))).toBe(false);
+
+    act(() => mockSocket.fire("round-start", { ...START, photo: "/temp/y.jpg", round: 2 }));
+    expect(has(r.root, playerOptionId("alice"))).toBe(true);
+  });
+
+  it("the owner's scoreboard keeps room for the hold button and the hint is gone in scores", () => {
+    act(() => mockSocket.fire("round-start", { ...START, isOwner: true }));
+    expect(has(r.root, TEST_IDS.ownPhotoHint)).toBe(true);
+    act(() => mockSocket.fire("round-scores", { scores: SCORES, round: 1, totalRounds: 10, duration: 5_000 }));
+    expect(has(r.root, TEST_IDS.ownPhotoHint)).toBe(false);
+    expect(has(r.root, playerOptionId("alice"))).toBe(false);
+    expect(scoreModal(r.root).reserveHoldButton).toBe(true);
+    expect(has(r.root, TEST_IDS.holdButton)).toBe(true);
   });
 
   // The bar is keyed by phase: every new duration from the server must restart it, also when it stays on screen

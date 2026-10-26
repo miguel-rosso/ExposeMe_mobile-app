@@ -147,8 +147,10 @@ const GameScreen = () => {
   const [isReady, setIsReady] = useState(false);
 
   // ── Derived ──────────────────────────────────────────
-  // Hold button: mounted during scores phase for photo owner (or while pressing to catch onPressOut)
-  const holdButtonMounted = isOwner && (phase === "scores" || pressing);
+  // Hold button: the photo owner's, during scores only (every event that ends scores also clears the press)
+  const holdButtonMounted = isOwner && phase === "scores";
+  // The scoreboard covers the photo in scores: the answer options (or the owner's hint) are not drawn under it
+  const showAnswers = phase !== "scores";
 
   // ── Photo access (room members only: room code + rejoin token) ─
   const uploadImage = async (uri: string): Promise<string> =>
@@ -269,7 +271,7 @@ const GameScreen = () => {
     socket.on("round-scores", (data: RoundScoresData) => {
       markPhaseHandled("scores");
       console.log(`[GAME] round-scores: round ${data.round}/${data.totalRounds}`);
-      dispatchRound({ type: "round-scores", data, username: safeUsername });
+      dispatchRound({ type: "round-scores", data });
     });
 
     // Hold: everyone pauses
@@ -320,7 +322,7 @@ const GameScreen = () => {
       // An awaited photo of mine is asked again with your-turn right after this snapshot
       turnRequest.endTurn();
       if (snap.phase !== "waiting-photo") setSkipNotice(null);
-      dispatchRound({ type: "game-state", snap, serverUrl: SERVER_URL, username: safeUsername });
+      dispatchRound({ type: "game-state", snap, serverUrl: SERVER_URL });
       const result = gameStateFollowUps(snap);
       setPause(result.pause);
       if (result.gameOver) showGameOver(snap.scores);
@@ -378,7 +380,8 @@ const GameScreen = () => {
   const [answersTop, setAnswersTop] = useState<number | null>(null);
 
   // ── Render helpers ───────────────────────────────────
-  const isRevealOrScores = phase === "reveal" || phase === "scores";
+  // The options are drawn while answering and in the reveal (not in scores: the scoreboard covers the photo)
+  const isReveal = phase === "reveal";
 
   const renderPlayer = ({ item }: { item: Player }) => {
     // The answer is only known from round-reveal on (correctAnswer); before that nobody is told whose photo it is
@@ -386,11 +389,11 @@ const GameScreen = () => {
     const isSelected = item.username === mySelection;
     const isMe = item.username === safeUsername;
 
-    // Only color YOUR selection: green if correct, red if wrong
+    // Only color YOUR selection: blue while answering, then green if correct, red if wrong
     let bg = "bg-gray-700";
-    if (isRevealOrScores && isSelected) {
+    if (isReveal && isSelected) {
       bg = isAnswer ? "bg-green-500" : "bg-red-500";
-    } else if (!isRevealOrScores && isSelected) {
+    } else if (isSelected) {
       bg = "bg-blue-500";
     }
 
@@ -399,7 +402,7 @@ const GameScreen = () => {
         testID={playerOptionId(item.username)}
         style={tw`p-3 rounded-lg mb-2 mx-1 flex-grow flex-basis-[48%] ${bg}`}
         onPress={() => phase === "answering" && !answersClosed && !isOwner && item.username !== mySelection && pickGuess(item.username)}
-        disabled={isRevealOrScores || isOwner || answersClosed}
+        disabled={isReveal || isOwner || answersClosed}
       >
         <View style={tw`flex-row items-center justify-between`}>
           <Text style={tw`text-white text-base flex-1 ${isMe ? "font-bold" : ""}`} numberOfLines={1} ellipsizeMode="tail">
@@ -488,29 +491,31 @@ const GameScreen = () => {
                 )}
 
                 {/* Player selection buttons (my own photo: I can't vote, so a hint instead while the others answer) */}
-                <View
-                  style={tw`absolute z-40 bottom-22 left-0 right-0 p-2 flex-row justify-center`}
-                  onLayout={(e) => setAnswersTop(e.nativeEvent.layout.y)}
-                >
-                  {isOwner && phase === "answering" ? (
-                    <Text
-                      testID={TEST_IDS.ownPhotoHint}
-                      style={tw`text-white text-lg font-bold text-center bg-gray-800 bg-opacity-80 px-4 py-3 rounded-xl max-w-[500px]`}
-                    >
-                      {t.ownPhotoHint}
-                    </Text>
-                  ) : (
-                    <FlatList
-                      data={playersProvider}
-                      renderItem={renderPlayer}
-                      keyExtractor={(item) => item.username}
-                      numColumns={2}
-                      columnWrapperStyle={tw`justify-between`}
-                      style={tw`w-full max-w-[500px] px-2`}
-                      contentContainerStyle={tw`w-full`}
-                    />
-                  )}
-                </View>
+                {showAnswers && (
+                  <View
+                    style={tw`absolute z-40 bottom-22 left-0 right-0 p-2 flex-row justify-center`}
+                    onLayout={(e) => setAnswersTop(e.nativeEvent.layout.y)}
+                  >
+                    {isOwner && phase === "answering" ? (
+                      <Text
+                        testID={TEST_IDS.ownPhotoHint}
+                        style={tw`text-white text-lg font-bold text-center bg-gray-800 bg-opacity-80 px-4 py-3 rounded-xl max-w-[500px]`}
+                      >
+                        {t.ownPhotoHint}
+                      </Text>
+                    ) : (
+                      <FlatList
+                        data={playersProvider}
+                        renderItem={renderPlayer}
+                        keyExtractor={(item) => item.username}
+                        numColumns={2}
+                        columnWrapperStyle={tw`justify-between`}
+                        style={tw`w-full max-w-[500px] px-2`}
+                        contentContainerStyle={tw`w-full`}
+                      />
+                    )}
+                  </View>
+                )}
 
                 {/* Score modal */}
                 <ScoreModal

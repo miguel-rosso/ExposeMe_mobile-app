@@ -3,6 +3,7 @@ import tw from "twrnc";
 import { useGameContext } from "../../providers/GameContext";
 import { useRef } from "react";
 import { REACTION_EMOJIS } from "../../utils/reactions";
+import { emojiButtonId } from "../../utils/testIds";
 
 function EmojisButton() {
   const { socket } = useGameContext();
@@ -26,7 +27,8 @@ function EmojisButton() {
       >
         {REACTION_EMOJIS.map((emoji, index) => (
           <TouchableOpacity
-            key={index}
+            key={emoji}
+            testID={emojiButtonId(index)}
             style={tw`mx-1 bg-gray-800 bg-opacity-80 rounded-full h-10 w-10 items-center justify-center`}
             onPress={() => sendEmojiReaction(emoji)}
           >

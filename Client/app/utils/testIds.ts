@@ -65,6 +65,8 @@ export const TEST_IDS = {
 } as const;
 
 export const playerOptionId = (username: string) => `player-option-${username}`;
+/** Emoji bar button, by its position in REACTION_EMOJIS (ASCII ids: Maestro selectors can't hold the emoji itself) */
+export const emojiButtonId = (index: number) => `emoji-button-${index}`;
 export const lobbyPlayerId = (username: string) => `lobby-player-${username}`;
 /** "disconnected" label on a gone player's lobby row (EXP-157) */
 export const lobbyPlayerOfflineId = (username: string) => `lobby-player-offline-${username}`;

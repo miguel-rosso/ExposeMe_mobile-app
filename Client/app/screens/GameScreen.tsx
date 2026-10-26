@@ -28,7 +28,7 @@ import { useI18n } from "../i18n";
 import { uploadPhoto } from "@/app/utils/uploadPhoto";
 import { photoAuthHeaders, resolvePhotoAuth } from "@/app/utils/photoAuth";
 import { prefetchImage } from "@/app/utils/image";
-import { uploadWithRetry } from "../utils/uploadRetry";
+import { TURN_UPLOAD_RETRY, uploadWithRetry } from "../utils/uploadRetry";
 import { SkipNotice, skipNoticeFor, skipNoticeText } from "../utils/waitingPhoto";
 import { gameStateFollowUps, initialRoundView, isRevealedOwner, RoundAction, roundReducer, RoundView } from "../utils/roundState";
 import { useGameConnection } from "../hooks/useGameConnection";
@@ -138,7 +138,7 @@ const GameScreen = () => {
   const setPlayers = (next: Player[]) => { playersRef.current = next; setPlayersProvider(next); };
 
   // ── Waiting for the photo ────────────────────────────
-  // My own photo request (your-turn): ended by every TURN_ENDING_EVENTS handler below
+  // My own photo request (your-turn): ended (or, on a pause, suspended) by every TURN_ENDING_EVENTS handler below
   const turnRequest = useTurnRequest(socket);
   const [skipNotice, setSkipNotice] = useState<SkipNotice | null>(null); // last skipped round, until round-start
 
@@ -275,7 +275,9 @@ const GameScreen = () => {
           const picked = await pickGamePhoto();
           if ("error" in picked) { turnRequest.reportUnavailable(picked.error, data); return; }
           let url: string;
-          try { url = await uploadWithRetry(picked.uri, uploadImage); }
+          // Retries go on while this request is in force or paused, and stop once it is over
+          const stillWanted = () => turnRequest.isCurrent(data) || turnRequest.isSuspended(data);
+          try { url = await uploadWithRetry(picked.uri, uploadImage, TURN_UPLOAD_RETRY, stillWanted); }
           catch { turnRequest.reportUnavailable("upload", data); return; }
           setPhotoUri(null);
           turnRequest.sendPhoto(data, url);
@@ -337,9 +339,9 @@ const GameScreen = () => {
         console.log(`[GAME] game-paused ${data.pause}/${data.maxPauses}: ${data.duration}ms, waiting for ${data.waitingFor.join(", ")}`);
         setPause(data);
         dispatchRound({ type: "game-paused" });
-        // The server ignores photos while paused and sends your-turn again on resume (an upload that finishes
-        // meanwhile is kept and re-sent then)
-        turnRequest.endTurn();
+        // My photo request is only suspended: its pick, upload and retries go on (the server accepts the upload while
+        // paused), nothing is sent until the resume's your-turn (same attempt), which re-sends the uploaded photo
+        turnRequest.endTurn({ suspended: true });
       },
 
       "game-resumed": (data: GameResumedData) => {
@@ -353,8 +355,9 @@ const GameScreen = () => {
         console.log(`[GAME] game-state: ${snap.phase} round ${snap.round}, paused=${!!snap.pause}`);
         setPlayers(snap.players);
         // An awaited photo of mine is asked again with your-turn right after this snapshot. A report of mine was
-        // answered while I was away (that round-skipped is lost): a later skip is not mine.
-        turnRequest.endTurn({ forgetReport: true });
+        // answered while I was away (that round-skipped is lost): a later skip is not mine. A paused game only
+        // suspends my request (its upload goes on, like on game-paused).
+        turnRequest.endTurn({ forgetReport: true, suspended: !!snap.pause });
         if (snap.phase !== "waiting-photo") setSkipNotice(null);
         dispatchRound({ type: "game-state", snap, serverUrl: SERVER_URL });
         const result = gameStateFollowUps(snap);

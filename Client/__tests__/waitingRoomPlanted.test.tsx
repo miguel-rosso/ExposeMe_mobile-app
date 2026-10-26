@@ -1,14 +1,16 @@
 import React from "react";
 import TestRenderer, { act } from "react-test-renderer";
-import { Alert } from "react-native";
+import { ActivityIndicator, Alert } from "react-native";
 import { TEST_IDS } from "../app/utils/testIds";
 import en from "../app/i18n/en";
 // Loaded with the file (jest.mock calls below are hoisted above it), not inside a test
 import WaitingRoom from "../app/screens/WaitingRoom";
+import { PLANT_FAILED_NOTICE_MS } from "../app/components/PlantPhotoButton";
 
 // EXP-035 / EXP-126: the photo is planted from the lobby as soon as it is picked (upload + plant-photo, uncropped).
-// The lobby shows "planted" for a photo picked for this game (the context drops it after a game) or when the server
-// has mine (room-of-game `hasPlantedPhoto`, my own mark only). A rejoin into a started game leaves it alone.
+// The lobby shows "planted" once the server has the photo picked for this game (plantedPhotoSent; the context drops it
+// after a game, EXP-269: not while it uploads or after its upload failed) or when the server says it has mine
+// (room-of-game `hasPlantedPhoto`, my own mark only). A rejoin into a started game leaves it alone.
 
 // ── Fake socket ──────────────────────────────────────────
 
@@ -42,9 +44,26 @@ class FakeSocket {
 
 const mockSocket = new FakeSocket();
 // Context planted photo: a plain holder, read on every render (the provider re-renders with the new value)
-const mockPlanted: { uri: string | null } = { uri: null };
-const mockSetPlantedPhotoUri = jest.fn((uri: string | null) => { mockPlanted.uri = uri; });
-const mockPlantPhoto = jest.fn(async () => true);
+const mockPlanted: { uri: string | null; sent: boolean; upload: "idle" | "uploading" | "failed" } = {
+  uri: null, sent: false, upload: "idle",
+};
+const mockSetPlantedPhotoUri = jest.fn((uri: string | null) => {
+  mockPlanted.uri = uri;
+  mockPlanted.sent = false;
+  mockPlanted.upload = "idle";
+});
+/** Like the context: true (and plantedPhotoSent) once the server has the photo. */
+const mockPlantPhoto = jest.fn(async () => { mockPlanted.sent = true; return true; });
+/** A plantPhoto still uploading (plantUpload "uploading") until the test settles it as the context would. */
+const pendingPlant = () => {
+  const settle = { confirm: () => {}, giveUp: () => {} };
+  mockPlantPhoto.mockImplementationOnce(() => new Promise<boolean>((resolve) => {
+    mockPlanted.upload = "uploading";
+    settle.confirm = () => { mockPlanted.sent = true; mockPlanted.upload = "idle"; resolve(true); };
+    settle.giveUp = () => { mockPlanted.upload = "failed"; resolve(false); };
+  }));
+  return settle;
+};
 
 jest.mock("expo-router", () => ({
   useRouter: () => ({ replace: jest.fn() }),
@@ -56,6 +75,7 @@ jest.mock("../app/providers/GameContext", () => ({
     setPlayersProvider: jest.fn(), socket: mockSocket, username: "bob",
     setRoundsOfGame: jest.fn(), roundsOfGame: 10,
     plantedPhotoUri: mockPlanted.uri, setPlantedPhotoUri: mockSetPlantedPhotoUri, plantPhoto: mockPlantPhoto,
+    plantedPhotoSent: mockPlanted.sent, plantUpload: mockPlanted.upload,
     saveRejoinToken: jest.fn(), getRejoinToken: async () => "tok-123", clearRejoinToken: jest.fn(),
   }),
 }));
@@ -104,11 +124,27 @@ const mount = async () => {
 const plantButton = (r: TestRenderer.ReactTestRenderer) =>
   r.root.find((n) => n.props.testID === TEST_IDS.plantPhotoButton && typeof n.props.onPress === "function");
 const has = (r: TestRenderer.ReactTestRenderer, id: string) => r.root.findAll((n) => n.props.testID === id).length > 0;
-const expectPlanted = (r: TestRenderer.ReactTestRenderer, planted: boolean) => {
+const expectPlanted = (
+  r: TestRenderer.ReactTestRenderer,
+  planted: boolean,
+  label: string = planted ? en.photoPlanted : en.plantPhoto,
+) => {
   expect(has(r, TEST_IDS.plantPhotoPlanted)).toBe(planted);
   expect(has(r, TEST_IDS.plantPhotoNotPlanted)).toBe(!planted);
   const labels = plantButton(r).findAll((n) => typeof n.props.children === "string").map((n) => n.props.children);
-  expect(labels).toContain(planted ? en.photoPlanted : en.plantPhoto);
+  expect(labels).toContain(label);
+};
+const hasPhotoAddedAlert = (r: TestRenderer.ReactTestRenderer) =>
+  r.root.findAll((n) => n.props.text === en.photoSelectedForGame).length > 0;
+const isUploading = (r: TestRenderer.ReactTestRenderer) =>
+  plantButton(r).findAll((n) => n.type === ActivityIndicator).length > 0;
+const hasFailedNotice = (r: TestRenderer.ReactTestRenderer) =>
+  r.root.findAll((n) => n.props.children === en.plantPhotoFailed).length > 0;
+const rerender = (r: TestRenderer.ReactTestRenderer) => act(async () => { r.update(<WaitingRoom />); });
+const pickPhoto = async (r: TestRenderer.ReactTestRenderer) => {
+  await act(async () => { plantButton(r).props.onPress(); });
+  await flush();
+  await rerender(r); // the provider re-renders with the new value
 };
 const plantEvents = () => mockSocket.emitted.filter(([ev]) => ev === "mark-player-planted" || ev === "plant-photo");
 
@@ -119,6 +155,8 @@ beforeEach(() => {
   mockSocket.removeAllListeners();
   mockSocket.emitted = [];
   mockPlanted.uri = null;
+  mockPlanted.sent = false;
+  mockPlanted.upload = "idle";
   mockSetPlantedPhotoUri.mockClear();
   mockPlantPhoto.mockClear();
 });
@@ -133,19 +171,77 @@ describe("WaitingRoom: planted photo state", () => {
     act(() => r.unmount());
   });
 
-  it("picking a photo plants it right away, uncropped, and shows it planted", async () => {
+  it("picking a photo plants it right away, uncropped, shows it uploading, then planted once the server has it", async () => {
     const picker = require("expo-image-picker");
     const alert = jest.spyOn(Alert, "alert").mockImplementation((_t, _m, buttons) => { buttons?.[1]?.onPress?.(); });
+    const plant = pendingPlant();
     const r = await mount();
     act(() => mockSocket.fire("room-of-game", roomOfGame(false)));
-    await act(async () => { plantButton(r).props.onPress(); });
-    await flush();
+    await pickPhoto(r);
     expect(picker.launchImageLibraryAsync).toHaveBeenCalledWith(expect.objectContaining({ allowsEditing: false }));
     expect(mockSetPlantedPhotoUri).toHaveBeenCalledWith("file:///picked.jpg");
     expect(mockPlantPhoto).toHaveBeenCalledTimes(1);
-    await act(async () => { r.update(<WaitingRoom />); }); // the provider re-renders with the new value
+    // Still uploading (e.g. retrying while the server is busy, EXP-269): pending, not planted
+    expectPlanted(r, false, en.plantingPhoto);
+    expect(isUploading(r)).toBe(true);
+    expect(hasPhotoAddedAlert(r)).toBe(false);
+    await act(async () => { plant.confirm(); });
+    await rerender(r);
     expectPlanted(r, true);
+    expect(isUploading(r)).toBe(false);
+    expect(hasPhotoAddedAlert(r)).toBe(true);
     expect(plantEvents()).toEqual([]); // the context sends plant-photo, the lobby sends no mark of its own
+    alert.mockRestore();
+    act(() => r.unmount());
+  });
+
+  it("EXP-269: a planted photo the server never got (busy, retries spent) is not planted, with a short notice", async () => {
+    const alert = jest.spyOn(Alert, "alert").mockImplementation((_t, _m, buttons) => { buttons?.[1]?.onPress?.(); });
+    const plant = pendingPlant();
+    const r = await mount();
+    act(() => mockSocket.fire("room-of-game", roomOfGame(false)));
+    await pickPhoto(r);
+    expect(hasFailedNotice(r)).toBe(false);
+    await act(async () => { plant.giveUp(); });
+    await rerender(r);
+    expect(mockPlanted.uri).toBe("file:///picked.jpg");
+    expectPlanted(r, false);
+    expect(isUploading(r)).toBe(false);
+    expect(hasPhotoAddedAlert(r)).toBe(false);
+    expect(hasFailedNotice(r)).toBe(true);
+    await act(async () => { jest.advanceTimersByTime(PLANT_FAILED_NOTICE_MS); });
+    expect(hasFailedNotice(r)).toBe(false);
+    alert.mockRestore();
+    act(() => r.unmount());
+  });
+
+  it("EXP-269: replacing a planted photo keeps showing planted while the new one uploads", async () => {
+    const alert = jest.spyOn(Alert, "alert").mockImplementation((_t, _m, buttons) => { buttons?.[1]?.onPress?.(); });
+    const r = await mount();
+    act(() => mockSocket.fire("room-of-game", roomOfGame(false)));
+    await pickPhoto(r); // first photo: in at once
+    expectPlanted(r, true);
+    const replacement = pendingPlant();
+    await pickPhoto(r); // "change photo"
+    expect(mockPlanted.sent).toBe(false); // the context's flag is about the new photo...
+    expectPlanted(r, true); // ...but the server still has my earlier one
+    expect(isUploading(r)).toBe(true);
+    await act(async () => { replacement.giveUp(); });
+    await rerender(r);
+    expectPlanted(r, true); // the earlier one is still planted
+    expect(hasFailedNotice(r)).toBe(true);
+    alert.mockRestore();
+    act(() => r.unmount());
+  });
+
+  it("EXP-269: the server's own mark (room-of-game) also keeps a replacement shown as planted", async () => {
+    const alert = jest.spyOn(Alert, "alert").mockImplementation((_t, _m, buttons) => { buttons?.[1]?.onPress?.(); });
+    const r = await mount();
+    act(() => mockSocket.fire("room-of-game", roomOfGame(true)));
+    pendingPlant();
+    await pickPhoto(r);
+    expectPlanted(r, true);
+    expect(isUploading(r)).toBe(true);
     alert.mockRestore();
     act(() => r.unmount());
   });
@@ -161,9 +257,11 @@ describe("WaitingRoom: planted photo state", () => {
   it("picked photo the server doesn't have (upload failed / new socket): plants it again from the lobby", async () => {
     mockPlanted.uri = "file:///picked.jpg";
     const r = await mount();
-    expectPlanted(r, true);
+    expectPlanted(r, false); // picked, but not sent
     act(() => mockSocket.fire("room-of-game", roomOfGame(false)));
     expect(mockPlantPhoto).toHaveBeenCalledTimes(1);
+    await act(async () => { r.update(<WaitingRoom />); });
+    expectPlanted(r, true);
     act(() => r.unmount());
   });
 

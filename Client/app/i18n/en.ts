@@ -13,6 +13,8 @@ export default {
   rounds: "Rounds",
   plantPhoto: "Plant Photo",
   photoPlanted: "Photo Planted",
+  plantingPhoto: "Uploading…",
+  plantPhotoFailed: "Your photo couldn't be uploaded. Try again.",
   startGame: "Start Game",
   waitingForPlayers: "Waiting for players",
   waitingHost: "Waiting host",

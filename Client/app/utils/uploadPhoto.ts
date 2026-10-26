@@ -1,6 +1,7 @@
 import { File } from "expo-file-system";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import { PhotoAuth, photoAuthHeaders } from "./photoAuth";
+import { UploadAbandonedError, UploadHttpError, parseRetryAfterMs } from "./uploadRetry";
 
 // ── Upload of a local photo to POST /upload ──
 
@@ -44,11 +45,19 @@ export const convertForUpload = async (uri: string): Promise<string> => {
 
 /**
  * Converts and uploads the photo at `uri` as the room member `auth`; returns the server path (`/temp/...`).
- * Throws on failure (also 401/403: not a member of the room, or the server isn't awaiting a photo from us).
+ * Throws on failure (also 401/403: not a member of the room, or the server isn't awaiting a photo from us); a refused
+ * request throws an UploadHttpError with the server's Retry-After. `stillWanted` is checked once the photo is converted:
+ * a photo no longer wanted by then (e.g. a planted photo replaced) is not sent (UploadAbandonedError).
  */
-export const uploadPhoto = async (serverUrl: string, uri: string, auth: PhotoAuth): Promise<string> => {
+export const uploadPhoto = async (
+  serverUrl: string,
+  uri: string,
+  auth: PhotoAuth,
+  stillWanted: () => boolean = () => true,
+): Promise<string> => {
   const file = new File(await convertForUpload(uri));
   try {
+    if (!stillWanted()) throw new UploadAbandonedError();
     const formData = new FormData();
     // expo/fetch (global fetch since SDK 56) serializes Blob-like parts exposing bytes(); it can't
     // rename an expo-file-system File (read-only name), so wrap it to send the safe filename.
@@ -58,7 +67,9 @@ export const uploadPhoto = async (serverUrl: string, uri: string, auth: PhotoAut
       bytes: () => file.bytes(),
     } as unknown as Blob);
     const response = await fetch(`${serverUrl}/upload`, { method: "POST", body: formData, headers: photoAuthHeaders(auth) });
-    if (!response.ok) throw new Error(`Upload failed: ${response.status}`);
+    if (!response.ok) {
+      throw new UploadHttpError(response.status, parseRetryAfterMs(response.headers.get("Retry-After")));
+    }
     return (await response.json()).url;
   } finally {
     // The converted copy is only needed for this request.

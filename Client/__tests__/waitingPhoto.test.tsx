@@ -2,6 +2,7 @@ import React from "react";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import { skipNoticeFor, skipNoticeText } from "../app/utils/waitingPhoto";
 import { TEST_IDS } from "../app/utils/testIds";
+import { TURN_UPLOAD_RETRY } from "../app/utils/uploadRetry";
 import en from "../app/i18n/en";
 import es from "../app/i18n/es";
 // Loaded with the file (jest.mock calls below are hoisted above it): a cold transform must not hit the test timeout
@@ -197,21 +198,48 @@ describe("GameScreen while a photo is awaited", () => {
     expect(textOf(r.root, TEST_IDS.roundSkippedNotice)).toBe(en.ownPhotoNoPhotos);
   });
 
-  it("every upload attempt fails: photo-unavailable after the 3 retries, not a silent 15 s wait", async () => {
-    mockPickGamePhoto.mockResolvedValue({ uri: "file:///p1.jpg" });
-    mockUploadPhoto.mockRejectedValue(new Error("Upload failed: 500"));
-    act(() => mockSocket.fire("waiting-photo", { round: 1, duration: 15_000 }));
-    act(() => mockSocket.fire("your-turn", { round: 1, attempt: 1 }));
-    await flush();
-    expect(mockUploadPhoto).toHaveBeenCalledTimes(1);
-    await act(async () => { jest.advanceTimersByTime(1_000); });
-    await flush();
-    await act(async () => { jest.advanceTimersByTime(2_000); });
-    await flush();
-    expect(mockUploadPhoto).toHaveBeenCalledTimes(3);
-    expect(mockSocket.emitted).toContainEqual(["photo-unavailable", { round: 1, attempt: 1 }]);
-    act(() => mockSocket.fire("round-skipped", { round: 1, reason: "unavailable" }));
-    expect(textOf(r.root, TEST_IDS.roundSkippedNotice)).toBe(en.ownPhotoUploadFailed);
+  describe("upload retries (EXP-269)", () => {
+    let random: jest.SpyInstance;
+    beforeEach(() => { random = jest.spyOn(Math, "random").mockReturnValue(0); }); // no jitter: exact 1 s, 2 s, 3 s
+    afterEach(() => random.mockRestore());
+    const advance = async (ms: number) => { await act(async () => { jest.advanceTimersByTime(ms); }); await flush(); };
+    const reported = () => mockSocket.emitted.some(([ev]) => ev === "photo-unavailable");
+
+    it("every upload attempt fails: photo-unavailable after exactly 4 attempts, not a silent 15 s wait", async () => {
+      mockPickGamePhoto.mockResolvedValue({ uri: "file:///p1.jpg" });
+      mockUploadPhoto.mockRejectedValue(new TypeError("Network request failed"));
+      act(() => mockSocket.fire("waiting-photo", { round: 1, duration: 15_000 }));
+      act(() => mockSocket.fire("your-turn", { round: 1, attempt: 1 }));
+      await flush();
+      expect(mockUploadPhoto).toHaveBeenCalledTimes(1);
+      await advance(1_000);
+      expect(mockUploadPhoto).toHaveBeenCalledTimes(2);
+      await advance(2_000);
+      expect(mockUploadPhoto).toHaveBeenCalledTimes(3);
+      await advance(2_999);
+      expect(reported()).toBe(false); // still within the third wait
+      await advance(1);
+      expect(mockUploadPhoto).toHaveBeenCalledTimes(4);
+      expect(mockSocket.emitted).toContainEqual(["photo-unavailable", { round: 1, attempt: 1 }]);
+      // A fifth attempt (4 s more) would pass TURN_UPLOAD_RETRY.maxTotalWaitMs
+      await advance(TURN_UPLOAD_RETRY.maxTotalWaitMs);
+      expect(mockUploadPhoto).toHaveBeenCalledTimes(4);
+      act(() => mockSocket.fire("round-skipped", { round: 1, reason: "unavailable" }));
+      expect(textOf(r.root, TEST_IDS.roundSkippedNotice)).toBe(en.ownPhotoUploadFailed);
+    });
+
+    it("my turn ending while a retry waits stops the uploads (the photo would come too late)", async () => {
+      mockPickGamePhoto.mockResolvedValue({ uri: "file:///p1.jpg" });
+      mockUploadPhoto.mockRejectedValue(new TypeError("Network request failed"));
+      act(() => mockSocket.fire("waiting-photo", { round: 1, duration: 15_000 }));
+      act(() => mockSocket.fire("your-turn", { round: 1, attempt: 1 }));
+      await flush();
+      expect(mockUploadPhoto).toHaveBeenCalledTimes(1);
+      act(() => mockSocket.fire("round-skipped", { round: 1, reason: "timeout" }));
+      await advance(TURN_UPLOAD_RETRY.maxTotalWaitMs);
+      expect(mockUploadPhoto).toHaveBeenCalledTimes(1);
+      expect(reported()).toBe(false);
+    });
   });
 
   it("a turn that ended (timeout) before the gallery answered reports nothing and shows the room's notice", async () => {
@@ -336,19 +364,80 @@ describe("GameScreen while a photo is awaited", () => {
     expect(textOf(r.root, TEST_IDS.waitingPhotoText)).toBe(en.someoneChoosingPhoto);
   });
 
-  it("an upload failing for good during a pause reports nothing (the resume's your-turn asks again)", async () => {
+  // EXP-269: a pause only suspends my request: the server accepts my upload meanwhile, so it (and its retries) go on,
+  // nothing is sent while paused, and the resume's your-turn (same attempt) re-sends the uploaded photo
+  it("an upload failing during a pause keeps retrying; the resume re-sends the uploaded photo without a new upload", async () => {
+    const PHOTO = "/temp/" + "b".repeat(32) + ".jpg";
     mockPickGamePhoto.mockResolvedValue({ uri: "file:///p1.jpg" });
-    mockUploadPhoto.mockRejectedValue(new Error("Upload failed: 500"));
+    mockUploadPhoto.mockRejectedValueOnce(new TypeError("Network request failed")).mockResolvedValue(PHOTO);
     act(() => mockSocket.fire("waiting-photo", { round: 1, duration: 15_000 }));
     act(() => mockSocket.fire("your-turn", { round: 1, attempt: 1 }));
     await flush();
     act(() => mockSocket.fire("game-paused", { duration: 300_000, waitingFor: ["carol"], pause: 1, maxPauses: 3 }));
-    await act(async () => { jest.advanceTimersByTime(1_000); });
+    for (let s = 0; s < 2; s++) {
+      await act(async () => { jest.advanceTimersByTime(1_000); });
+      await flush();
+    }
+    expect(mockUploadPhoto).toHaveBeenCalledTimes(2); // retried during the pause
+    expect(mockSocket.emitted).toEqual([]); // nothing sent while paused
+
+    act(() => mockSocket.fire("game-resumed", { phase: "waiting-photo", duration: 10_000 }));
+    act(() => mockSocket.fire("your-turn", { round: 1, attempt: 1 })); // resumed: same request
     await flush();
-    await act(async () => { jest.advanceTimersByTime(2_000); });
+    expect(mockUploadPhoto).toHaveBeenCalledTimes(2);
+    expect(mockPickGamePhoto).toHaveBeenCalledTimes(1);
+    expect(mockSocket.emitted).toEqual([["photo-sent", { photo: PHOTO }]]);
+  });
+
+  it("a pause while my photo is being picked still uploads it, and the resume sends it", async () => {
+    const PHOTO = "/temp/" + "d".repeat(32) + ".jpg";
+    let resolvePick!: (v: { uri: string }) => void;
+    mockPickGamePhoto.mockReturnValue(new Promise((res) => { resolvePick = res; }));
+    mockUploadPhoto.mockResolvedValue(PHOTO);
+    act(() => mockSocket.fire("waiting-photo", { round: 1, duration: 15_000 }));
+    act(() => mockSocket.fire("your-turn", { round: 1, attempt: 1 }));
+    act(() => mockSocket.fire("game-paused", { duration: 300_000, waitingFor: ["carol"], pause: 1, maxPauses: 3 }));
+    await act(async () => { resolvePick({ uri: "file:///p1.jpg" }); });
     await flush();
-    expect(mockUploadPhoto).toHaveBeenCalledTimes(3);
+    expect(mockUploadPhoto).toHaveBeenCalledTimes(1);
     expect(mockSocket.emitted).toEqual([]);
+    act(() => mockSocket.fire("your-turn", { round: 1, attempt: 1 })); // resumed
+    expect(mockSocket.emitted).toEqual([["photo-sent", { photo: PHOTO }]]);
+    expect(mockUploadPhoto).toHaveBeenCalledTimes(1);
+  });
+
+  it("a round that moves on after a pause (round-skipped) cuts the suspended upload", async () => {
+    mockPickGamePhoto.mockResolvedValue({ uri: "file:///p1.jpg" });
+    mockUploadPhoto.mockRejectedValue(new TypeError("Network request failed"));
+    act(() => mockSocket.fire("waiting-photo", { round: 1, duration: 15_000 }));
+    act(() => mockSocket.fire("your-turn", { round: 1, attempt: 1 }));
+    await flush();
+    act(() => mockSocket.fire("game-paused", { duration: 300_000, waitingFor: ["carol"], pause: 1, maxPauses: 3 }));
+    act(() => mockSocket.fire("round-skipped", { round: 1, reason: "timeout" }));
+    for (let s = 0; s < TURN_UPLOAD_RETRY.maxTotalWaitMs / 1_000; s++) {
+      await act(async () => { jest.advanceTimersByTime(1_000); });
+      await flush();
+    }
+    expect(mockUploadPhoto).toHaveBeenCalledTimes(1);
+    expect(mockSocket.emitted).toEqual([]);
+  });
+
+  it("a pause resumed while a retry waits keeps that retry going (same request)", async () => {
+    mockPickGamePhoto.mockResolvedValue({ uri: "file:///p1.jpg" });
+    mockUploadPhoto
+      .mockRejectedValueOnce(new TypeError("Network request failed"))
+      .mockResolvedValue("/temp/" + "c".repeat(32) + ".jpg");
+    act(() => mockSocket.fire("waiting-photo", { round: 1, duration: 15_000 }));
+    act(() => mockSocket.fire("your-turn", { round: 1, attempt: 1 }));
+    await flush();
+    act(() => mockSocket.fire("game-paused", { duration: 300_000, waitingFor: ["carol"], pause: 1, maxPauses: 3 }));
+    act(() => mockSocket.fire("your-turn", { round: 1, attempt: 1 })); // resumed before the retry's wait is over
+    for (let s = 0; s < 2; s++) {
+      await act(async () => { jest.advanceTimersByTime(1_000); });
+      await flush();
+    }
+    expect(mockUploadPhoto).toHaveBeenCalledTimes(2);
+    expect(mockSocket.emitted).toContainEqual(["photo-sent", { photo: "/temp/" + "c".repeat(32) + ".jpg" }]);
   });
 
   it("a rejoin snapshot in waiting-photo shows the waiting screen with the remaining wait", () => {

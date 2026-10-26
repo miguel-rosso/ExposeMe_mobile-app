@@ -143,6 +143,8 @@ export interface GameStateSnapshot {
   players: Player[];
 }
 
+export type PlantUploadState = "idle" | "uploading" | "failed";
+
 export interface GameContextProps {
   socket: Socket | null;
   gameCode: string | null;
@@ -162,6 +164,8 @@ export interface GameContextProps {
   setPlantedPhotoUri: (uri: string | null) => void;
   /** The server has the picked planted photo (uploaded + plant-photo) */
   plantedPhotoSent: boolean;
+  /** Upload of the picked planted photo: running (with its retries), or given up (cleared by picking another) */
+  plantUpload: PlantUploadState;
   /** Upload the picked photo and send plant-photo; true once the server has it */
   plantPhoto: () => Promise<boolean>;
   saveRejoinToken: (gameCode: string, username: string, token: string) => void;

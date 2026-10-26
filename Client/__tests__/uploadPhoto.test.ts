@@ -1,4 +1,5 @@
 import { uploadPhoto, UPLOAD_MAX_SIDE, UPLOAD_JPEG_QUALITY } from "../app/utils/uploadPhoto";
+import { UploadAbandonedError, UploadHttpError } from "../app/utils/uploadRetry";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 
 // expo-image-manipulator: manipulate(uri, loadOptions) -> context.renderAsync() -> image.saveAsync()
@@ -54,6 +55,12 @@ class FakeFormData {
 const AUTH = { gameCode: "123456", token: "tok-123" };
 
 const okResponse = (url: string) => ({ ok: true, status: 200, json: async () => ({ url }) });
+const errorResponse = (status: number, retryAfter: string | null = null) => ({
+  ok: false,
+  status,
+  headers: { get: (name: string) => (name.toLowerCase() === "retry-after" ? retryAfter : null) },
+  json: async () => ({ error: "x" }),
+});
 
 beforeEach(() => {
   parts = [];
@@ -93,7 +100,7 @@ describe("uploadPhoto (EXP-038)", () => {
   });
 
   it("throws when the server answers non-200", async () => {
-    (global as any).fetch = jest.fn(async () => ({ ok: false, status: 413, json: async () => ({}) }));
+    (global as any).fetch = jest.fn(async () => errorResponse(413));
     await expect(uploadPhoto("http://server", "file:///DCIM/a.jpg", AUTH)).rejects.toThrow("Upload failed: 413");
   });
 
@@ -107,9 +114,36 @@ describe("uploadPhoto (EXP-038)", () => {
 
   it("surfaces 401/403 (not a member / not my turn) as a failed upload", async () => {
     for (const status of [401, 403]) {
-      (global as any).fetch = jest.fn(async () => ({ ok: false, status, json: async () => ({ error: "x" }) }));
+      (global as any).fetch = jest.fn(async () => errorResponse(status));
       await expect(uploadPhoto("http://server", "file:///DCIM/a.jpg", AUTH)).rejects.toThrow(`Upload failed: ${status}`);
     }
+  });
+
+  // EXP-269: a busy server (429/503) says when to retry; uploadWithRetry waits that long
+  it("surfaces the status and the server's Retry-After for the retries", async () => {
+    (global as any).fetch = jest.fn(async () => errorResponse(429, "2"));
+    const busy = await uploadPhoto("http://server", "file:///DCIM/a.jpg", AUTH).catch((e) => e);
+    expect(busy).toBeInstanceOf(UploadHttpError);
+    expect(busy).toMatchObject({ status: 429, retryAfterMs: 2000, message: "Upload failed: 429" });
+
+    (global as any).fetch = jest.fn(async () => errorResponse(500));
+    expect(await uploadPhoto("http://server", "file:///DCIM/a.jpg", AUTH).catch((e) => e)).toMatchObject({
+      status: 500,
+      retryAfterMs: null,
+    });
+  });
+
+  // EXP-269: a planted photo replaced while it was being converted is never uploaded
+  it("checks stillWanted after converting, right before sending", async () => {
+    let wanted = true;
+    mockSaveAsync.mockImplementation(async () => {
+      wanted = false; // replaced during the conversion
+      return { uri: CONVERTED_URI, width: 1600, height: 1200 };
+    });
+    const outcome = await uploadPhoto("http://server", "file:///DCIM/a.jpg", AUTH, () => wanted).catch((e) => e);
+    expect(outcome).toBeInstanceOf(UploadAbandonedError);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(mockDeleted).toEqual([CONVERTED_URI]);
   });
 });
 
@@ -146,7 +180,7 @@ describe("uploadPhoto converts before uploading (EXP-007)", () => {
   });
 
   it("deletes the converted copy even when the upload fails", async () => {
-    (global as any).fetch = jest.fn(async () => ({ ok: false, status: 500, json: async () => ({}) }));
+    (global as any).fetch = jest.fn(async () => errorResponse(500));
     await expect(uploadPhoto("http://server", "file:///DCIM/a.heic", AUTH)).rejects.toThrow("Upload failed: 500");
     expect(mockDeleted).toEqual([CONVERTED_URI]);
   });

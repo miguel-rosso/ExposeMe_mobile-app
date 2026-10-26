@@ -2,9 +2,10 @@ import React, { createContext, useState, useContext, useRef, useEffect } from "r
 import { AppState } from "react-native";
 import { io, Socket } from "socket.io-client";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { GameContextProps, GameProviderProps, Player } from "@/app/models/interfaces";
+import { GameContextProps, GameProviderProps, PlantUploadState, Player } from "@/app/models/interfaces";
 import getEnvVars from "@/config";
 import { uploadPhoto } from "@/app/utils/uploadPhoto";
+import { PLANT_UPLOAD_RETRY, uploadWithRetry } from "@/app/utils/uploadRetry";
 import { leaveAndClose } from "@/app/utils/leaveRoom";
 
 const { SERVER_URL } = getEnvVars();
@@ -27,6 +28,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   // Photo picked in the lobby to plant in this game (dropped when the game/room ends), and whether the server has it
   const [plantedPhotoUri, setPlantedPhotoUriState] = useState<string | null>(null);
   const [plantedPhotoSent, setPlantedPhotoSent] = useState(false);
+  const [plantUpload, setPlantUpload] = useState<PlantUploadState>("idle");
   const plantedUriRef = useRef<string | null>(null);
   const plantingRef = useRef<string | null>(null); // uri being uploaded (one upload per picked photo at a time)
   const socketRef = useRef<Socket | null>(null);
@@ -131,11 +133,13 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     plantedUriRef.current = uri;
     setPlantedPhotoUriState(uri);
     setPlantedPhotoSent(false);
+    setPlantUpload("idle");
   };
 
   /**
    * Upload the picked planted photo and send plant-photo, right away from the lobby (so im-ready never waits for
-   * it). Returns true once the server has it. A photo replaced or dropped while uploading is not sent.
+   * it), retrying while the server is busy. Returns true once the server has it (plantedPhotoSent: the lobby shows
+   * it planted only then). A photo replaced or dropped while uploading is not sent nor retried.
    */
   const plantPhoto = async (): Promise<boolean> => {
     const uri = plantedUriRef.current;
@@ -143,14 +147,26 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     const entry = rejoinTokenRef.current;
     if (!uri || !entry || plantingRef.current === uri) return false;
     plantingRef.current = uri;
+    setPlantedPhotoSent(false); // (re)planting: the server doesn't have it
+    setPlantUpload("uploading");
+    const auth = { gameCode: entry.gameCode, token: entry.token };
+    const stillPicked = () => plantedUriRef.current === uri;
     try {
-      const url = await uploadPhoto(SERVER_URL, uri, { gameCode: entry.gameCode, token: entry.token });
-      if (plantedUriRef.current !== uri || !socketRef.current) return false;
+      const url = await uploadWithRetry(
+        uri,
+        (photoUri) => uploadPhoto(SERVER_URL, photoUri, auth, stillPicked),
+        PLANT_UPLOAD_RETRY,
+        stillPicked,
+      );
+      if (!stillPicked() || !socketRef.current) return false;
       socketRef.current.emit("plant-photo", { photoUrl: url });
       setPlantedPhotoSent(true);
+      setPlantUpload("idle");
       return true;
     } catch (error) {
-      console.error("Error uploading planted photo:", error);
+      // Not console.error: development builds would show it as a toast (the game screen retries after im-ready)
+      console.log("Planted photo not uploaded:", error);
+      if (stillPicked()) setPlantUpload("failed"); // a replaced photo's upload just stops
       return false;
     } finally {
       if (plantingRef.current === uri) plantingRef.current = null;
@@ -175,6 +191,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
         plantedPhotoUri,
         setPlantedPhotoUri,
         plantedPhotoSent,
+        plantUpload,
         plantPhoto,
         saveRejoinToken,
         getRejoinToken,

@@ -103,4 +103,33 @@ describe("useTurnRequest", () => {
     expect(socket.emit).not.toHaveBeenCalled();
     expect(tr().takeReportedReason()).toBeNull();
   });
+
+  // EXP-269: a pause only suspends my request: its upload goes on (the server accepts it) and is re-sent on resume
+  it("endTurn({ suspended }) keeps the request's upload wanted, sends nothing, and the resume re-sends the photo", () => {
+    const socket = makeSocket();
+    const tr = mount(socket);
+    act(() => { tr().start(turn1); });
+    act(() => tr().endTurn({ suspended: true })); // game-paused
+    expect(tr().isCurrent(turn1)).toBe(false);
+    expect(tr().isSuspended(turn1)).toBe(true);
+    expect(tr().isSuspended({ round: 1, attempt: 2 })).toBe(false);
+    act(() => tr().endTurn({ suspended: true, forgetReport: true })); // game-state while paused: still suspended
+    expect(tr().isSuspended(turn1)).toBe(true);
+    tr().sendPhoto(turn1, "/temp/a.jpg"); // the upload finished during the pause
+    expect(socket.emit).not.toHaveBeenCalled();
+    let needsUpload = true;
+    act(() => { needsUpload = tr().start(turn1); }); // resume's your-turn
+    expect(needsUpload).toBe(false);
+    expect(socket.emit).toHaveBeenCalledWith("photo-sent", { photo: "/temp/a.jpg" });
+    expect(tr().isSuspended(turn1)).toBe(false);
+  });
+
+  it("a plain endTurn (waiting-photo, round-start, round-skipped, game-over) cuts a suspended request", () => {
+    const tr = mount(makeSocket());
+    act(() => { tr().start(turn1); });
+    act(() => tr().endTurn({ suspended: true }));
+    act(() => tr().endTurn());
+    expect(tr().isSuspended(turn1)).toBe(false);
+    expect(tr().isCurrent(turn1)).toBe(false);
+  });
 });

@@ -1,5 +1,7 @@
 # Plant a secret photo from the lobby: plant button → alert → system photo picker (newest photo). No crop screen
-# (allowsEditing: false, EXP-126: a square planted photo would stand out). The app uploads and plants it at once.
+# (allowsEditing: false, EXP-126: a square planted photo would stand out). The app uploads and plants it at once; the
+# button shows a spinner while it uploads (retrying a busy server, EXP-269) and "planted" once the server has it.
+# Replacing a photo keeps "planted" (the server still has the earlier one) while the new one uploads.
 # Works for the first plant ("Choose Photo") and for replacing one ("Change Photo"), en/es app and system UI.
 # env: USERNAME
 appId: com.socketNull.ExposeMe

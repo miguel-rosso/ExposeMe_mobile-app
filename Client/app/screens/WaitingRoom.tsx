@@ -35,6 +35,7 @@ import ChatMessage from "@/app/components/IngameComunication/ChatMessage";
 import { appendCapped, MAX_CHAT_MESSAGES } from "@/app/utils/reactions";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import SuccessAlert from "@/app/components/SuccessAlert";
+import PlantPhotoButton from "@/app/components/PlantPhotoButton";
 import { LinearGradient } from "expo-linear-gradient";
 import { useI18n } from "../i18n";
 import { TEST_IDS, lobbyPlayerId, lobbyPlayerOfflineId, roundsOptionId } from "../utils/testIds";
@@ -70,6 +71,8 @@ const WaitingRoom = ({}) => {
     roundsOfGame,
     plantedPhotoUri,
     setPlantedPhotoUri,
+    plantedPhotoSent,
+    plantUpload,
     plantPhoto,
     saveRejoinToken,
     getRejoinToken,
@@ -80,10 +83,11 @@ const WaitingRoom = ({}) => {
   const [dialogVisible, setDialogVisible] = useState<boolean>(false);
   const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
   const [showCopyMessage, setShowCopyMessage] = useState<boolean>(false);
-  // Planted: a photo picked on this device for this game, or the server already has mine (its own mark, only told
-  // to me in room-of-game: e.g. after reopening the app in the lobby)
+  // Planted: the server has the photo picked on this device for this game (not while it uploads or after its upload
+  // failed), or it has an earlier planted photo of mine: its own mark (only told to me in room-of-game: e.g. after
+  // reopening the app in the lobby) or one sent from this lobby, kept while a replacement uploads (or fails)
   const [serverPlanted, setServerPlanted] = useState<boolean>(false);
-  const hasPlantedPhoto = !!plantedPhotoUri || serverPlanted;
+  const hasPlantedPhoto = plantedPhotoSent || serverPlanted;
   const plantedUriRef = useRef(plantedPhotoUri);
   useEffect(() => { plantedUriRef.current = plantedPhotoUri; }, [plantedPhotoUri]);
   const { requestGalleryPermission } = usePhotoContext();
@@ -174,6 +178,13 @@ const WaitingRoom = ({}) => {
     }
   };
 
+  /** Plants the picked photo; once one is in, the server keeps a planted photo of mine whatever a replacement does. */
+  const plantPickedPhoto = async (): Promise<boolean> => {
+    const sent = await plantPhoto();
+    if (sent) setServerPlanted(true);
+    return sent;
+  };
+
   const pickAndPlantImage = async () => {
     if (!hasPlantedPhoto) {
       // First-time photo selection
@@ -213,10 +224,10 @@ const WaitingRoom = ({}) => {
         const selectedImage = result.assets[0].uri;
 
         // Upload and plant it now, in the lobby: im-ready must never wait for it (if this fails, the game screen
-        // retries after im-ready)
+        // retries after im-ready). Confirmed only once the server has it: a busy server can keep it waiting.
         setPlantedPhotoUri(selectedImage);
         plantedUriRef.current = selectedImage;
-        plantPhoto();
+        if (!(await plantPickedPhoto())) return;
         setShowPhotoAddedMessage(true);
         setTimeout(() => {
           setShowPhotoAddedMessage(false);
@@ -320,7 +331,7 @@ const WaitingRoom = ({}) => {
           // and plant the picked photo again if the server doesn't have it (upload failed, or lost on a new socket)
           if (!data.room.started) {
             setServerPlanted(!!data.hasPlantedPhoto);
-            if (!data.hasPlantedPhoto && plantedUriRef.current) plantPhoto();
+            if (!data.hasPlantedPhoto && plantedUriRef.current) plantPickedPhoto();
           }
         }
       },
@@ -581,22 +592,13 @@ const WaitingRoom = ({}) => {
                 {roundsOfGame} {t.rounds}
               </Text>
 
-              <TouchableOpacity testID={TEST_IDS.plantPhotoButton} onPress={pickAndPlantImage} style={tw`mb-2 items-center`} disabled={isSelecting}>
-                <View
-                  testID={hasPlantedPhoto ? TEST_IDS.plantPhotoPlanted : TEST_IDS.plantPhotoNotPlanted}
-                  style={tw`h-14 w-14 rounded-full ${hasPlantedPhoto ? "bg-green-600" : "bg-black/40"} flex justify-center items-center`}
-                >
-                  <Icon
-                    name={hasPlantedPhoto ? "check" : "camera"}
-                    size={22}
-                    color="white"
-                    style={hasPlantedPhoto ? tw`ml-0.5` : tw``}
-                  />
-                </View>
-                <Text style={tw`mt-1 text-white font-medium text-center text-xs`}>
-                  {hasPlantedPhoto ? t.photoPlanted : t.plantPhoto}
-                </Text>
-              </TouchableOpacity>
+              <PlantPhotoButton
+                planted={hasPlantedPhoto}
+                uploading={plantUpload === "uploading"}
+                failed={plantUpload === "failed"}
+                disabled={isSelecting}
+                onPress={pickAndPlantImage}
+              />
             </View>
 
             {/* Player list with limited height */}

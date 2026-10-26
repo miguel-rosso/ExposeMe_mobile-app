@@ -86,11 +86,13 @@ const InitialScreen: React.FC = () => {
               <PhotoFanHero animate={!reduceMotion} />
             )}
 
+            {/* Full width, not shrink-wrapped by the centred column: Android measured the wrapped box a hair narrower
+                than the line draws, so «YOUR GALLERY» wrapped and «IS THE GAME» fell outside the box (EXP-275) */}
             <Text
               testID={TEST_IDS.initialTitle}
               accessibilityRole="header"
               style={[
-                tw`text-white text-center mt-6`,
+                tw`w-full text-white text-center mt-6`,
                 {
                   fontFamily: BRAND_DISPLAY_FONT,
                   fontSize: TITLE_FONT_SIZE,

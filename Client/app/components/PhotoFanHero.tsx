@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef } from "react";
-import { Animated, Image, ImageSourcePropType, Text, View } from "react-native";
+import { Animated, Image, ImageSourcePropType, Platform, Text, View } from "react-native";
 import tw from "twrnc";
 import bg2 from "@/assets/images/bg2.jpg";
 import bg4 from "@/assets/images/bg4.jpg";
@@ -10,8 +10,13 @@ import { BRAND_MASCOT_EMOJI } from "../theme/brand";
 export const HERO_HEIGHT = 180;
 const CARD_WIDTH = 108;
 const CARD_HEIGHT = 136;
-/** Blurred enough to read as "some photo" without showing anything concrete */
-const CARD_BLUR_RADIUS = 8;
+/**
+ * Blurred enough to read as "some photo" without showing anything concrete. Android blurs the decoded bitmap with a
+ * 2-pass box blur at half the radius (in bitmap pixels), so it needs about 2.5x the iOS radius to look the same once
+ * the bitmap is decoded at card size (EXP-275)
+ */
+export const CARD_BLUR_RADIUS = { ios: 8, android: 20 } as const;
+const cardBlurRadius = () => (Platform.OS === "android" ? CARD_BLUR_RADIUS.android : CARD_BLUR_RADIUS.ios);
 
 interface FanCard {
   source: ImageSourcePropType;
@@ -86,6 +91,7 @@ const PhotoFanHero = ({ animate }: PhotoFanHeroProps) => {
   }, [animate]);
 
   const frontIndex = FAN_CARDS.length - 1;
+  const blurRadius = cardBlurRadius();
   return (
     <View
       style={[tw`w-full items-center justify-center`, { height: HERO_HEIGHT }]}
@@ -102,7 +108,15 @@ const PhotoFanHero = ({ animate }: PhotoFanHeroProps) => {
             cardStyles[i],
           ]}
         >
-          <Image source={card.source} blurRadius={CARD_BLUR_RADIUS} resizeMode="cover" style={tw`flex-1 w-full rounded-lg`} />
+          {/* resizeMethod (Android only): decoded at card size, so the blur radius softens every photo alike instead of
+              barely touching the high-resolution ones */}
+          <Image
+            source={card.source}
+            blurRadius={blurRadius}
+            resizeMethod="resize"
+            resizeMode="cover"
+            style={tw`flex-1 w-full rounded-lg`}
+          />
           {i === frontIndex && (
             <Animated.View style={[tw`absolute -top-6 -right-6`, { transform: [{ scale: emojiScale }] }]}>
               <Text style={tw`text-[44px]`}>{BRAND_MASCOT_EMOJI}</Text>

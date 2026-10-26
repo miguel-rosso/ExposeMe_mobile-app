@@ -1,6 +1,6 @@
 import React from "react";
 import TestRenderer, { act, ReactTestInstance, ReactTestRenderer } from "react-test-renderer";
-import { AccessibilityInfo, Animated, Image, ScrollView, StyleSheet, Text, TouchableOpacity } from "react-native";
+import { AccessibilityInfo, Animated, Image, Platform, ScrollView, StyleSheet, Text, TouchableOpacity } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Haptics from "expo-haptics";
 
@@ -33,7 +33,7 @@ let mockT = en;
 jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: mockT }) }));
 
 import InitialScreen from "../app/screens/InitialScreen";
-import PhotoFanHero, { FAN_CARDS, HERO_HEIGHT } from "../app/components/PhotoFanHero";
+import PhotoFanHero, { CARD_BLUR_RADIUS, FAN_CARDS, HERO_HEIGHT } from "../app/components/PhotoFanHero";
 import { TEST_IDS } from "../app/utils/testIds";
 import { useReduceMotion, useReduceMotionSetting } from "../app/hooks/useReduceMotion";
 import { BRAND_GRADIENT, brandTitleShadow } from "../app/theme/brand";
@@ -58,6 +58,9 @@ const flat = (n: ReactTestInstance) => StyleSheet.flatten(n.props.style);
 const heroMotion = (tree: ReactTestRenderer) =>
   tree.root.findAll((n) => typeof n.type === "string" && Array.isArray(flat(n)?.transform)).map((n) => flat(n).transform);
 
+const realOS = Platform.OS;
+const setOS = (os: typeof Platform.OS) => Object.defineProperty(Platform, "OS", { configurable: true, get: () => os });
+
 let reduceMotion = false;
 beforeEach(() => {
   jest.useFakeTimers();
@@ -70,6 +73,7 @@ beforeEach(() => {
 });
 afterEach(async () => {
   act(() => mounted.splice(0).forEach((tree) => tree.unmount()));
+  setOS(realOS);
   jest.clearAllTimers();
   jest.useRealTimers();
   jest.restoreAllMocks();
@@ -147,6 +151,35 @@ describe("InitialScreen copy", () => {
     expect(() => require("../assets/images/PermissionRequestIOS.jpg")).toThrow();
     expect(() => require("../assets/images/galleryPermissionIMG.jpg")).toThrow();
     expect(() => require("../assets/animations/FingerAnimation.json")).toThrow();
+  });
+});
+
+// EXP-275: on Android the title, shrink-wrapped by the centred column, was measured a hair narrower than it draws:
+// «YOUR GALLERY» wrapped onto two lines inside a box measured for two, so «IS THE GAME» was cut off
+describe("InitialScreen title never clips", () => {
+  it.each([
+    ["es", "ios", es],
+    ["en", "ios", en],
+    ["es", "android", es],
+    ["en", "android", en],
+  ])("spans the full column width and nothing caps its height (%s, %s)", async (_lang, os, t) => {
+    setOS(os as typeof Platform.OS);
+    mockT = t;
+    const title = byTestID(await render(), TEST_IDS.initialTitle);
+    const style = flat(title);
+    expect(style.width).toBe("100%");
+    expect(style.textAlign).toBe("center");
+    for (const cap of ["height", "maxHeight", "overflow"]) expect(style).not.toHaveProperty(cap);
+    expect(title.props.numberOfLines).toBeUndefined();
+  });
+
+  it.each([
+    ["es", es, ["TU GALERÍA", "ES EL JUEGO"]],
+    ["en", en, ["YOUR GALLERY", "IS THE GAME"]],
+  ])("renders both lines of the %s title", async (_lang, t, lines) => {
+    mockT = t;
+    const title = byTestID(await render(), TEST_IDS.initialTitle);
+    expect(String(title.props.children).split("\n")).toEqual(lines);
   });
 });
 
@@ -245,6 +278,33 @@ describe("PhotoFanHero motion", () => {
     const tree = await render();
     expect(tree.root.findByType(PhotoFanHero).props.animate).toBe(false);
     expect(heroMotion(tree).slice(0, FAN_CARDS.length)).toEqual(fannedOut);
+  });
+});
+
+// EXP-275: Android blurs the decoded bitmap with a 2-pass box blur at half the radius, so the iOS radius left the
+// centre card's faces recognisable there
+describe("PhotoFanHero blur", () => {
+  const cardImages = async (os: typeof Platform.OS) => {
+    setOS(os);
+    const tree = await render(<PhotoFanHero animate={false} />);
+    return tree.root.findAllByType(Image);
+  };
+
+  it.each([
+    ["ios", 8],
+    ["android", 20],
+  ] as const)("blurs every card on %s with radius %i", async (os, radius) => {
+    const images = await cardImages(os);
+    expect(images).toHaveLength(FAN_CARDS.length);
+    for (const image of images) expect(image.props.blurRadius).toBe(radius);
+  });
+
+  it("decodes the cards at card size, so the radius blurs every photo alike whatever its resolution", async () => {
+    for (const image of await cardImages("android")) expect(image.props.resizeMethod).toBe("resize");
+  });
+
+  it("Android blurs at least twice as hard as iOS to make up for its halved box blur", () => {
+    expect(CARD_BLUR_RADIUS.android).toBeGreaterThanOrEqual(2 * CARD_BLUR_RADIUS.ios);
   });
 });
 

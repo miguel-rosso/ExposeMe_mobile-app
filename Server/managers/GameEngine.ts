@@ -177,25 +177,39 @@ export class GameEngine {
     if (room.currentPlayer?.username !== username) return;
 
     this.recordWait(room);
+    this.beginAnswering(room, room.currentPlayer, photo, "uploaded");
+  }
+
+  /**
+   * Next round's answering phase with `owner`'s photo, uploaded or planted alike (nobody may tell them apart):
+   * atomic round-start (photo + phase info), the same for the whole room. Whose photo it is stays secret until
+   * round-reveal, also to the owner, who may not recognise it and guesses like everyone else (EXP-252).
+   */
+  private beginAnswering(room: Room, owner: Player, photo: string, source: "uploaded" | "planted"): void {
+    room.currentPlayer = owner;
     room.round++;
     room.phase = "answering";
     room.currentPhoto = photo;
     room._consecutiveSkips = 0;
-    console.log(`[${room.gameCode}] Round ${room.round}: photo from ${username}`);
+    console.log(`[${room.gameCode}] Round ${room.round}: ${source} photo from ${owner.username}`);
 
-    this.emitRoundStart(room, photo);
+    this.markPhaseEmitted(room, room.round);
+    const data: RoundStartData = { photo, round: room.round, duration: ANSWER_TIME - ANSWER_GRACE };
+    this.io.to(room.gameCode).emit("round-start", data);
 
     this.setTimer(room, ANSWER_TIME, () => this.enterReveal(room));
   }
 
   /**
-   * Atomic round-start (photo + phase info), the same for the whole room: whose photo it is stays secret until
-   * round-reveal, also to the owner, who may not recognise it and guesses like everyone else (EXP-252).
+   * Room-wide photo wait for the next round (owner or planter included, same payload): everyone shows the wait,
+   * nobody learns whose turn it is or whether the round is planted.
    */
-  private emitRoundStart(room: Room, photo: string): void {
-    this.markPhaseEmitted(room, room.round);
-    const data: RoundStartData = { photo, round: room.round, duration: ANSWER_TIME - ANSWER_GRACE };
-    this.io.to(room.gameCode).emit("round-start", data);
+  private announcePhotoWait(room: Room): void {
+    room.phase = "waiting-photo";
+    room.currentPhoto = null;
+    const waiting: WaitingPhotoData = { round: room.round + 1, duration: PHOTO_WAIT_TIMEOUT };
+    this.markPhaseEmitted(room, waiting.round);
+    this.io.to(room.gameCode).emit("waiting-photo", waiting);
   }
 
   /** Remembers that the room's current phase of `round` is being broadcast now (see phaseEmittedAt). */
@@ -531,31 +545,22 @@ export class GameEngine {
       planted.plantedPhoto = undefined;
       planted.hasPlantedPhoto = false;
       room.currentPlayer = null;
-      room.phase = "waiting-photo";
-      room.currentPhoto = null;
       const delay = this.plantedDelay(room);
       this.plantedWaits.set(room, { planter: planted, photo, shown: PHOTO_WAIT_TIMEOUT, shownSince: Date.now() });
 
       console.log(`[${room.gameCode}] Planted photo from ${planted.username} in ${delay}ms`);
-      const waiting: WaitingPhotoData = { round: room.round + 1, duration: PHOTO_WAIT_TIMEOUT };
-      this.markPhaseEmitted(room, waiting.round);
-      this.io.to(room.gameCode).emit("waiting-photo", waiting);
+      this.announcePhotoWait(room);
 
       this.setTimer(room, delay, () => this.startPlantedRound(room));
     } else {
       const others = connected.filter((p) => p !== exclude);
       const candidates = others.length > 0 ? others : connected;
       room.currentPlayer = candidates[Math.floor(Math.random() * candidates.length)];
-      room.phase = "waiting-photo";
-      room.currentPhoto = null;
       this.plantedWaits.delete(room);
       this.turnAttempts.set(room, (this.turnAttempts.get(room) ?? 0) + 1); // new photo request
 
       console.log(`[${room.gameCode}] Waiting photo from ${room.currentPlayer.username}`);
-      // Room-wide (owner included, same payload): everyone shows the wait, nobody learns whose turn it is
-      const waiting: WaitingPhotoData = { round: room.round + 1, duration: PHOTO_WAIT_TIMEOUT };
-      this.markPhaseEmitted(room, waiting.round);
-      this.io.to(room.gameCode).emit("waiting-photo", waiting);
+      this.announcePhotoWait(room);
       this.io.to(room.currentPlayer.socketId).emit("your-turn", this.yourTurn(room));
 
       this.setTimer(room, PHOTO_WAIT_TIMEOUT, () => {
@@ -589,17 +594,8 @@ export class GameEngine {
       return;
     }
     this.plantedWaits.delete(room);
-
-    room.currentPlayer = wait.planter;
     room.plantedPhotosShown++;
-    room.round++;
-    room.phase = "answering";
-    room.currentPhoto = wait.photo;
-    room._consecutiveSkips = 0;
-
-    console.log(`[${room.gameCode}] Round ${room.round}: planted photo from ${wait.planter.username}`);
-    this.emitRoundStart(room, wait.photo);
-    this.setTimer(room, ANSWER_TIME, () => this.enterReveal(room));
+    this.beginAnswering(room, wait.planter, wait.photo, "planted");
   }
 
   /** The planted photo wait in progress, if any. */

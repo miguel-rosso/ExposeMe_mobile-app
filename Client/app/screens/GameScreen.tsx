@@ -30,6 +30,7 @@ import { withHost, withoutPlayer } from "../utils/roomPlayers";
 import PausedModal from "@/app/components/modals/PausedModal";
 import GalleryAccessModal from "@/app/components/modals/GalleryAccessModal";
 import { useGalleryAccessGuard } from "@/app/hooks/useGalleryAccessGuard";
+import { useQaRenderAck } from "../hooks/useQaRenderAck";
 import { useScreenshotReaction } from "../hooks/useScreenshotReaction";
 import { appendCapped, isAllowedReaction, MAX_VISIBLE_REACTIONS } from "../utils/reactions";
 
@@ -76,6 +77,8 @@ const GameScreen = () => {
   const {
     photo, isOwner, round, phase, phaseDuration, phaseKey, correctAnswer, scores, mySelection, gameHeld, pressing,
   } = roundView;
+  // QA builds only: tells the server when this device rendered each phase (lab render-skew metrics)
+  useQaRenderAck(socket, phase, round, phaseKey);
   // My pick goes to the server as soon as it changes: answers are only taken while answering (EXP-148), the last counts.
   // Rapid taps are coalesced: at most one send per PICK_SEND_INTERVAL, then a trailing send of the latest pick (within
   // the server's 300 ms grace), so its per-socket rate limit never drops the pick that counts.

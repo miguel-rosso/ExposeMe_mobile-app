@@ -11,6 +11,7 @@ import {
   HOLD_START_BURST, HOLD_START_RATE_PER_S, JOIN_EXEMPT_MAX, JOIN_MISS_GLOBAL_MAX, JOIN_MISS_HARD_FACTOR, JOIN_MISS_MAX,
   JOIN_MISS_PREFIX_MAX, JOIN_MISS_PRESSURE_MAX, JOIN_MISS_SOCKET_INTERVAL_MS, JOIN_MISS_WINDOW_MS, MAX_CONNECTIONS_PER_IP,
 } from "../managers/socketGuards";
+import { createQaTelemetry, isQaAck, QA_ACK_BURST, QA_ACK_RATE_PER_S } from "../managers/qaTelemetry";
 import { JoinCreateGameData, PhotoUnavailableData, Player, Room } from "../models/interfaces";
 
 const roomManager = new RoomManager();
@@ -40,6 +41,8 @@ const joinMisses = createJoinMissGuard({
 const joinExemptions = createSlidingWindow({ max: JOIN_EXEMPT_MAX, windowMs: JOIN_MISS_WINDOW_MS });
 // One socket.io socket per engine.io connection (a second CONNECT on the same transport is refused)
 const connsWithSocket = new WeakSet<object>();
+// Dev/QA only (QA_TELEMETRY=1): records when each device rendered a phase; null in production (no qa-ack handler)
+const qaTelemetry = createQaTelemetry();
 /** Exported for tests: open connections per IP key, join misses per IP key. */
 export { connections, joinMisses };
 
@@ -466,4 +469,20 @@ io.on("connection", (socket: Socket) => {
       }
     } catch (e) { console.error("remove-player error:", e); }
   });
+
+  // ── QA telemetry (dev/QA only) ─────────────────────
+
+  if (qaTelemetry) {
+    const qaAckBucket = createTokenBucket(QA_ACK_BURST, QA_ACK_RATE_PER_S);
+    socket.on("qa-ack", (data: unknown) => {
+      try {
+        const s = session(socket);
+        if (!s || !isQaAck(data) || !qaAckBucket.take()) return;
+        const { phase, round, at } = data;
+        qaTelemetry.record({
+          gameCode: s.room.gameCode, username: s.player.username, phase, round, at, receivedAt: Date.now(),
+        });
+      } catch (e) { console.error("qa-ack error:", e); }
+    });
+  }
 });

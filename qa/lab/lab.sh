@@ -9,14 +9,16 @@
 #   down                        Shut down all lab devices and background processes
 #   status                      Show devices, server, metro
 #   server [--restart] [--port N] [--stop]  Local Server on :3000 (log: qa/runs/server.log); --port for a worktree's own server
-#   metro  [--restart]          Start Metro with EXPO_PUBLIC_SERVER_URL=http://localhost:3000
+#                               QA render telemetry on: qa-ack lines in qa/runs/telemetry.jsonl (telemetry-<port>.jsonl)
+#   metro  [--restart]          Start Metro with EXPO_PUBLIC_SERVER_URL=http://localhost:3000 and EXPO_PUBLIC_QA=1
 #   photos [N]                  Generate N labelled photos per device and push to its gallery (default 12)
 #   build [ios|android|all]     Build dev-client binaries (slow, only when native deps change)
 #   install                     Install the last built binaries on every lab device
 #   open                        Open the app on every device, pointed at local Metro
 #   shot <label>                Screenshot every device into qa/runs/<RUN_ID>/shots/<label>-<device>.png
 #   play [--bots N] [--rounds R] [--devices all|pair|ios|android|none|<label,label>] [--flow play-game] [--bot-args "..."]
-#                               Full multiplayer session: bots host a room, devices join and play
+#                               Full multiplayer session: bots host a room, devices join and play; prints the bots
+#                               summary and the device render skew per phase (qa/runs/<RUN_ID>/render-skew.json)
 #                               (--bot-args: extra bots.mjs flags, e.g. --flow tie-game --bot-args --no-answer)
 #        [--second-room "<bots.mjs args>"]  also start a 2nd bots room; its code reaches the flows as NEW_CODE
 #        [--maestro-env KEY=VALUE]          extra Maestro variable for every device (repeatable)
@@ -188,9 +190,10 @@ cmd_down() {
   log "Lab down"
 }
 
+bg_running() { [ -f "$STATE/$1.pid" ] && kill -0 "$(cat "$STATE/$1.pid")" 2>/dev/null; } # name
 bg_start() { # name, logfile, cwd, cmd...
   local name=$1 logf=$2 cwd=$3; shift 3
-  if [ -f "$STATE/$name.pid" ] && kill -0 "$(cat "$STATE/$name.pid")" 2>/dev/null; then log "$name already running"; return 0; fi
+  if bg_running "$name"; then log "$name already running"; return 0; fi
   nohup bash -c 'cd "$1" && shift && exec "$@"' _ "$cwd" "$@" </dev/null >"$logf" 2>&1 &
   echo $! >"$STATE/$name.pid"
   log "$name started (pid $!, log $logf)"
@@ -209,7 +212,7 @@ cmd_server() {
   local port=$SERVER_PORT restart=0 stop=0
   while [ $# -gt 0 ]; do case $1 in
     --restart) restart=1; shift;; --stop) stop=1; shift;; --port) port=$2; shift 2;; *) die "bad arg $1";; esac; done
-  local name=server logf="$RUNS/server.log"
+  local name=server logf="$RUNS/server.log" telemetry; telemetry="$(telemetry_file "$port")"
   [ "$port" != "$SERVER_PORT" ] && { name="server-$port"; logf="$RUNS/server-$port.log"; }
   if [ $stop = 1 ]; then bg_stop "$name" "$port"; log "$name stopped"; return 0; fi
   [ $restart = 1 ] && bg_stop "$name" "$port"
@@ -218,7 +221,11 @@ cmd_server() {
   # UPLOAD_INFLIGHT_*=... / SOCKET_MAX_CONNECTIONS_PER_IP=... / JOIN_MISS_MAX=... / JOIN_MISS_PREFIX_MAX=... /
   # JOIN_MISS_GLOBAL_MAX=... / JOIN_MISS_PRESSURE_MAX=...).
   # ALLOW_QA_ROUNDS=1: accept QA-only 3-round games (play --rounds 3); production never sets it
-  bg_start "$name" "$logf" "$ROOT/Server" env PORT="$port" ALLOW_QA_ROUNDS=1 UPLOAD_ROOM_RATE_MAX="${UPLOAD_ROOM_RATE_MAX:-100000}" \
+  # QA_TELEMETRY=1: record the qa-ack of QA builds (when each device rendered a phase) in $telemetry (play reads it);
+  # a fresh server starts a fresh file, so it never grows across sessions
+  bg_running "$name" || rotate_telemetry "$telemetry"
+  bg_start "$name" "$logf" "$ROOT/Server" env PORT="$port" ALLOW_QA_ROUNDS=1 QA_TELEMETRY=1 QA_TELEMETRY_FILE="$telemetry" \
+    UPLOAD_ROOM_RATE_MAX="${UPLOAD_ROOM_RATE_MAX:-100000}" \
     UPLOAD_PLAYER_RATE_MAX="${UPLOAD_PLAYER_RATE_MAX:-100000}" \
     UPLOAD_INFLIGHT_MAX="${UPLOAD_INFLIGHT_MAX:-10000}" UPLOAD_INFLIGHT_PER_IP_MAX="${UPLOAD_INFLIGHT_PER_IP_MAX:-10000}" \
     UPLOAD_INFLIGHT_PER_ROOM_MAX="${UPLOAD_INFLIGHT_PER_ROOM_MAX:-10000}" UPLOAD_INFLIGHT_PER_MEMBER_MAX="${UPLOAD_INFLIGHT_PER_MEMBER_MAX:-10000}" \
@@ -233,7 +240,8 @@ cmd_server() {
 cmd_metro() {
   [ "${1:-}" = --restart ] && bg_stop metro $METRO_PORT
   local cpath; cpath="$(client_path)" || exit 1
-  bg_start metro "$RUNS/metro.log" "$ROOT/Client" env PATH="$cpath" EXPO_PUBLIC_SERVER_URL="http://localhost:$SERVER_PORT" npx expo start --dev-client --port $METRO_PORT
+  bg_start metro "$RUNS/metro.log" "$ROOT/Client" env PATH="$cpath" EXPO_PUBLIC_SERVER_URL="http://localhost:$SERVER_PORT" \
+    EXPO_PUBLIC_QA=1 npx expo start --dev-client --port $METRO_PORT
   for _ in $(seq 1 60); do [[ "$(curl -fs "http://localhost:$METRO_PORT/status" 2>/dev/null)" == *running* ]] && { log "metro ready"; return 0; }; sleep 1; done
   die "metro not ready — see $RUNS/metro.log"
 }
@@ -316,6 +324,23 @@ cmd_shot() {
   log "screenshots in $dir"
 }
 
+# ── QA render telemetry (sourceable: qa/lab/tests/render-skew.test.sh) ──
+telemetry_file() { # port: the JSON-lines file where that lab server records qa-ack (Server/GAME_FLOW.md)
+  if [ "${1:-$SERVER_PORT}" = "$SERVER_PORT" ]; then echo "$RUNS/telemetry.jsonl"; else echo "$RUNS/telemetry-$1.jsonl"; fi
+}
+
+rotate_telemetry() { # file: keep only the previous server session's telemetry (file.prev), start the new one empty
+  if [ -f "$1" ]; then mv -f "$1" "$1.prev"; fi
+  return 0
+}
+
+print_render_skew() { # dir, room code: per-phase device render skew of that room (QA builds only) -> dir/render-skew.json
+  local file; file="$(telemetry_file)"
+  [ -s "$file" ] || return 0
+  log "device render skew (ms, spread of qa-ack receipt across devices):"
+  node "$QA/lab/render-skew.mjs" "$file" "$2" | tee "$1/render-skew.json" || true
+}
+
 # ── play helpers (sourceable: qa/lab/tests/lab-play.test.sh) ──
 ROOM_CODE_TIMEOUT_S=30          # how long a bots room may take to publish its code (override: LAB_ROOM_CODE_TIMEOUT)
 MAESTRO_ENV_RE='^[A-Za-z_][A-Za-z0-9_]*='
@@ -396,6 +421,7 @@ cmd_play() {
   forget_bots_pid "$bots_pid"
   stop_play_bots
   node -e 'const r=require(process.argv[1]);console.log(JSON.stringify(r.summary,null,2))' "$dir/bots.json" 2>/dev/null || true
+  print_render_skew "$dir" "$code"
   [ $fail = 0 ] && log "RUN $RUN_ID PASS ($dir)" || { log "RUN $RUN_ID had failures ($dir)"; exit 1; }
 }
 
@@ -412,5 +438,5 @@ c=${1:-help}; shift || true
 case $c in
   doctor|setup|up|down|status|server|metro|photos|build|install|open|shot|play) "cmd_$c" "$@";;
   bots) node "$QA/lab/bots.mjs" "$@";;
-  *) sed -n '2,23p' "$0";;
+  *) sed -n '2,/^#   bots/p' "$0";;
 esac

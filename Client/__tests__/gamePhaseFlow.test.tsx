@@ -262,3 +262,38 @@ describe("GameScreen: server phases drawn with the received duration (EXP-063)",
     });
   });
 });
+
+// EXP-012: QA builds tell the server when each phase was rendered (lab render-skew metrics); other builds never do
+describe("GameScreen: qa-ack render telemetry (EXP-012)", () => {
+  const original = process.env.EXPO_PUBLIC_QA;
+
+  async function playRound(qa: string | undefined) {
+    if (qa === undefined) delete process.env.EXPO_PUBLIC_QA;
+    else process.env.EXPO_PUBLIC_QA = qa;
+    mockSocket.emitted = [];
+    let r!: TestRenderer.ReactTestRenderer;
+    await act(async () => { r = TestRenderer.create(<GameScreen />); });
+    act(() => mockSocket.fire("waiting-photo", { round: 1, duration: 15_000 }));
+    act(() => mockSocket.fire("round-start", START));
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "carol", duration: 3_000 }));
+    act(() => mockSocket.fire("round-scores", { scores: SCORES, round: 1, totalRounds: 10, duration: 5_000 }));
+    act(() => r.unmount());
+  }
+
+  afterEach(() => {
+    if (original === undefined) delete process.env.EXPO_PUBLIC_QA;
+    else process.env.EXPO_PUBLIC_QA = original;
+  });
+
+  it("with EXPO_PUBLIC_QA=1 acks every rendered phase once", async () => {
+    await playRound("1");
+    expect(emitted("qa-ack").map(([, d]) => [d.phase, d.round])).toEqual([
+      ["waiting-photo", 1], ["answering", 1], ["reveal", 1], ["scores", 1],
+    ]);
+  });
+
+  it("sends no qa-ack in regular builds", async () => {
+    await playRound(undefined);
+    expect(emitted("qa-ack")).toHaveLength(0);
+  });
+});

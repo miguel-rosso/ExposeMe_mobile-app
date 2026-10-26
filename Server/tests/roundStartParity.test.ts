@@ -13,7 +13,7 @@ const REVEAL_TIME = 3_000;
 const SCORE_DISPLAY_TIME = 5_000;
 const GAME_START_DELAY = 1_000;
 const PHOTO_WAIT_TIMEOUT = 15_000;
-const PLANTED_DELAY_MIN = 1_000; // with Math.random() = 0 (no past waits in the room)
+const PLANTED_DELAY = 2_000; // with Math.random() = 0 (no past waits in the room): the fixed distribution's median
 const PHOTO = "/temp/" + "a".repeat(32) + ".jpg";
 const PLANTED = "/temp/" + "b".repeat(32) + ".jpg";
 
@@ -105,7 +105,7 @@ describe("normal and planted rounds start the same way (EXP-249)", () => {
 
     it(`${kind}: round-start, its state and the answer timer up to round-reveal`, () => {
       startOneRound(planted);
-      const owner = sendRoundPhoto(planted, PLANTED_DELAY_MIN);
+      const owner = sendRoundPhoto(planted, PLANTED_DELAY);
       const roundStartAt = Date.now();
 
       expect(room).toMatchObject({ phase: "answering", round: 1, currentPhoto: planted ? PLANTED : PHOTO, _consecutiveSkips: 0 });
@@ -120,8 +120,8 @@ describe("normal and planted rounds start the same way (EXP-249)", () => {
 
       expect(roomWideTimeline()).toEqual([
         { event: "waiting-photo", args: [{ round: 1, duration: PHOTO_WAIT_TIMEOUT }], after: 0 },
-        { event: "round-start", args: [{ photo: "<photo>", round: 1, duration: ANSWER_TIME - ANSWER_GRACE }], after: PLANTED_DELAY_MIN },
-        { event: "round-reveal", args: [{ correctAnswer: owner.username, duration: REVEAL_TIME }], after: PLANTED_DELAY_MIN + ANSWER_TIME },
+        { event: "round-start", args: [{ photo: "<photo>", round: 1, duration: ANSWER_TIME - ANSWER_GRACE }], after: PLANTED_DELAY },
+        { event: "round-reveal", args: [{ correctAnswer: owner.username, duration: REVEAL_TIME }], after: PLANTED_DELAY + ANSWER_TIME },
       ]);
     });
   }
@@ -131,14 +131,14 @@ describe("normal and planted rounds start the same way (EXP-249)", () => {
   for (const planted of [false, true]) {
     it(`${planted ? "planted" : "uploaded"} round 2: phaseEmittedAt matches its waiting-photo and round-start`, () => {
       startOneRound(planted, 2);
-      sendRoundPhoto(false, PLANTED_DELAY_MIN); // round 1: alice's uploaded photo
+      sendRoundPhoto(false, PLANTED_DELAY); // round 1: alice's uploaded photo
       vi.advanceTimersByTime(ANSWER_TIME + REVEAL_TIME + SCORE_DISPLAY_TIME);
 
       expect(room.phase).toBe("waiting-photo");
       expect(emittedAt("waiting-photo", 2)).toBe(Date.now());
       expect(engine.phaseEmittedAt(room, "waiting-photo", 2)).toBe(emittedAt("waiting-photo", 2));
 
-      sendRoundPhoto(planted, PLANTED_DELAY_MIN); // longer than the planted delay drawn from round 1's 1 s wait
+      sendRoundPhoto(planted, PLANTED_DELAY); // longer than the planted delay drawn from round 1's 2 s wait
       expect(room).toMatchObject({ phase: "answering", round: 2, currentPhoto: planted ? PLANTED : PHOTO });
       expect(emittedAt("round-start", 2)).toBeDefined();
       expect(engine.phaseEmittedAt(room, "answering", 2)).toBe(emittedAt("round-start", 2));
@@ -147,10 +147,10 @@ describe("normal and planted rounds start the same way (EXP-249)", () => {
 
   it("only a planted round counts as a planted photo shown", () => {
     startOneRound(false);
-    sendRoundPhoto(false, PLANTED_DELAY_MIN);
+    sendRoundPhoto(false, PLANTED_DELAY);
     expect(room.plantedPhotosShown).toBe(0);
     startOneRound(true);
-    sendRoundPhoto(true, PLANTED_DELAY_MIN);
+    sendRoundPhoto(true, PLANTED_DELAY);
     expect(room.plantedPhotosShown).toBe(1);
   });
 });

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GameEngine } from "../managers/GameEngine";
+import { PLANTED_DELAY_MAX } from "../managers/plantedDelay";
 import { RoomManager } from "../managers/RoomManager";
 import { GameStateSnapshot, Room } from "../models/interfaces";
 import { CapturedEmit, createFakeIo } from "./helpers";
@@ -48,8 +49,8 @@ function answeringRoom(): Room {
   engine.startGame(room);
   room.players.forEach((p) => engine.markReady(room, p));
   vi.advanceTimersByTime(GAME_START_DELAY);
-  // Round 1 may be a planted round: a photo wait with no owner, then round-start within 3 s (EXP-126)
-  if (!room.currentPlayer) vi.advanceTimersByTime(3_000);
+  // Round 1 may be a planted round: a photo wait with no owner, then round-start within PLANTED_DELAY_MAX (EXP-126)
+  if (!room.currentPlayer) vi.advanceTimersByTime(PLANTED_DELAY_MAX);
   else engine.onPhotoReceived(room, PHOTO, room.currentPlayer.username);
   expect(room.phase).toBe("answering");
   return room;

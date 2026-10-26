@@ -122,5 +122,63 @@ expect_error "leave: an event missed before the exit is still a missed event" le
 got="$(exits left missed-before-exit)"
 [[ "$got" == "missed events: bot3 [round-reveal#1]" ]] && ok "leave: only that one is reported (none of the rounds after the exit)" || ko "leave: only that one is reported" "$got"
 
+# ── --drop-on-turn: the photo owner drops while its photo is awaited (EXP-226, EXP-029 / DEC-035) ──
+# A synthetic 1-round game of N bots where bot1, the round's owner, is away S seconds. Outcome "kept": it comes back
+# and its photo is played; "repicked": AFTER ms after the drop the others get a new waiting-photo of round 1 and bot2's
+# photo is played; "skipped": the same, preceded by round-skipped "timeout"; "lost": like "repicked", but the game ends
+# without playing round 1. Prints the consistency errors, one per line (a game as the server plays it prints nothing).
+owner_drop() { # bots, away secs, outcome (kept|repicked|skipped|lost), new pick after ms
+  node --input-type=module -e '
+    const { analyseRoom } = await import(process.argv[1]);
+    const [n, secs, outcome, skipAfter] = process.argv.slice(2).map((v, i) => (i === 2 ? v : Number(v)));
+    const players = Array.from({ length: n }, (_, i) => `bot${i + 1}`);
+    const others = players.slice(1);
+    const events = [];
+    const at = (bot, ev, round, t, payload) => events.push({ bot, ev, round, t, ...(payload !== undefined ? { payload } : {}) });
+    const all = (names, ev, round, t, payload) => names.forEach((b) => at(b, ev, round, t, payload));
+    const DROP = 1_000;
+    const back = DROP + secs * 1000;
+    all(players, "game-started", 0, 0, { rounds: 1, players });
+    all(players, "waiting-photo", 1, 500, { round: 1, duration: 15000 });
+    at("bot1", "your-turn", 1, 600, { attempt: 1 });
+    at("bot1", "planned-disconnect", 1, DROP, { secs, onTurn: true, attempt: 1 });
+    let owner = "bot1";
+    let attempt = 1;
+    const repicked = outcome !== "kept";
+    if (repicked) {
+      if (outcome === "skipped") all(others, "round-skipped", 1, DROP + skipAfter, { round: 1, reason: "timeout" });
+      all(others, "waiting-photo", 1, DROP + skipAfter + 1, { round: 1, duration: 15000 });
+      owner = "bot2";
+      attempt = 2;
+      at(owner, "your-turn", 1, DROP + skipAfter + 2, { attempt });
+    }
+    at("bot1", "game-state", 1, back, { phase: "waiting-photo", paused: false, started: true });
+    if (outcome === "kept") at("bot1", "your-turn", 1, back + 1, { attempt });
+    const start = Math.max(back, DROP + (repicked ? skipAfter : 0)) + 100;
+    if (outcome !== "lost") {
+      at(owner, "photo-sent", 1, start - 50, { attempt });
+      all(players, "round-start", 1, start, { photo: "/temp/p1.jpg", duration: 7700 });
+      all(players, "round-reveal", 1, start + 8000, { correctAnswer: owner });
+      all(players, "round-scores", 1, start + 11000, { round: 1, scores: players.map((u) => ({ username: u, points: 0, lastGuess: "", lastAnswerCorrect: false })) });
+    }
+    all(players, "game-over", 1, start + 16000, { finalScore: [] });
+    const r = { code: "QAROOM", reason: "game-over", players, errors: [], uploads: [], rateLimited: 0, events };
+    console.log(analyseRoom(r, { host: true, rounds: 1, playAgainLingerS: 0, lingerBot: 0, startNextGameS: 0 }).consistency_errors.join("\n"));
+  ' "$ANALYSIS" "$@"
+}
+owner_drop_case() { # label, expected error text ("" = none), owner_drop args...
+  local label="$1" want="$2" got; shift 2
+  got="$(owner_drop "$@")"
+  if [ -z "$want" ]; then [ -z "$got" ] && ok "$label" || ko "$label" "$got"
+  else [[ "$got" == *"$want"* ]] && ok "$label" || ko "$label" "expected [$want] in [$got]"; fi
+}
+owner_drop_case "3 bots, owner back within the window: its photo is played" "" 3 1 kept 0
+owner_drop_case "3 bots, owner away 6 s: another player is asked for the same round after the window" "" 3 6 repicked 3000
+owner_drop_case "3 bots, owner away 6 s but nobody else is asked" "round 1: nobody else was asked for its photo although its owner bot1 was away 6 s" 3 6 kept 0
+owner_drop_case "3 bots, owner away 6 s: another owner asked only after the 15 s wait" "round 1: another owner was asked 15001 ms after bot1 dropped" 3 6 repicked 15000
+owner_drop_case "3 bots, owner away 6 s: its round is skipped instead" "round 1 skipped when its owner bot1 went away" 3 6 skipped 3000
+owner_drop_case "3 bots, owner away 6 s: the game ends without that round" "game over after 0 of 1 rounds" 3 6 lost 3000
+owner_drop_case "3 bots, owner back within the window but replaced" "bot1: never sent its round 1 photo (attempt 1) after returning" 3 1 repicked 3000
+owner_drop_case "3 bots, owner away about the window: either outcome" "" 3 3 repicked 3000
 echo "# $pass passed, $fail failed"
 [ "$fail" = 0 ]

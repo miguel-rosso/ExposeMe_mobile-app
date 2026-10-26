@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ANSWER_GRACE, GameEngine } from "../managers/GameEngine";
+import { PLANTED_DELAY_MAX } from "../managers/plantedDelay";
 import { RoomManager } from "../managers/RoomManager";
 import { Room } from "../models/interfaces";
 import { CapturedEmit, createFakeIo, plantPhoto } from "./helpers";
@@ -400,8 +401,8 @@ describe("game over", () => {
     vi.advanceTimersByTime(GAME_START_DELAY);
 
     for (let i = 0; i < 10; i++) {
-      // Planted round: a photo wait with no owner picked, then round-start within the planted delay (≤3 s)
-      if (room.phase === "waiting-photo" && !room.currentPlayer) vi.advanceTimersByTime(3_000);
+      // Planted round: a photo wait with no owner picked, then round-start within the planted delay
+      if (room.phase === "waiting-photo" && !room.currentPlayer) vi.advanceTimersByTime(PLANTED_DELAY_MAX);
       if (room.phase === "waiting-photo") engine.onPhotoReceived(room, PHOTO, room.currentPlayer!.username);
       vi.advanceTimersByTime(ANSWER_TIME + REVEAL_TIME + SCORE_DISPLAY_TIME);
     }

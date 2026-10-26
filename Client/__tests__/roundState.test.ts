@@ -67,6 +67,13 @@ describe("waiting-photo", () => {
       photo: null, phase: "waiting-photo", round: 4, phaseDuration: 15_000, scores: null, mySelection: "",
     });
   });
+
+  // EXP-029 / DEC-035: the owner went away, the server picks another one for the same round with a new waiting-photo
+  it("a new wait for the same round restarts the bar with the server's duration", () => {
+    const waiting = view({ phase: "waiting-photo", round: 4, phaseDuration: 15_000, phaseKey: 6 });
+    const next = roundReducer(waiting, { type: "waiting-photo", data: { round: 4, duration: 15_000 } });
+    expect(next).toMatchObject({ phase: "waiting-photo", round: 4, phaseDuration: 15_000, phaseKey: 7 });
+  });
 });
 
 // ── game-state ───────────────────────────────────────────

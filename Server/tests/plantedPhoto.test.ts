@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ANSWER_GRACE, GameEngine, PAUSE_MIN_DURATION } from "../managers/GameEngine";
+import { PLANTED_DELAY_MAX, TYPICAL_WAIT_MIN } from "../managers/plantedDelay";
 import { RoomManager } from "../managers/RoomManager";
 import { GameStateSnapshot, Player, Room } from "../models/interfaces";
 import { CapturedEmit, createFakeIo, plantPhoto, receivedBy } from "./helpers";
 
 // EXP-126: nobody can tell who planted a photo. No player payload says who planted one (nor who is ready, which
 // gave the uploading planter away), a planted round shows the same sequence as a normal one (waiting-photo, then
-// round-start after a delay like this room's real waits, no your-turn to anyone), and a planted photo is cleared
+// round-start after a realistic upload-like delay, no your-turn to anyone), and a planted photo is cleared
 // once it is used.
 
 const ANSWER_TIME = 8_000;
@@ -14,11 +15,9 @@ const REVEAL_TIME = 3_000;
 const SCORE_DISPLAY_TIME = 5_000;
 const GAME_START_DELAY = 1_000;
 const PHOTO_WAIT_TIMEOUT = 15_000;
-const PLANTED_DELAY_MIN = 1_000;
-const PLANTED_DELAY_MAX = 3_000;
+const PLANTED_DELAY_MIN = TYPICAL_WAIT_MIN;
 const PHOTO = "/temp/" + "a".repeat(32) + ".jpg";
 const PLANTED = "/temp/" + "b".repeat(32) + ".jpg";
-const ROUND_TIME = ANSWER_TIME + REVEAL_TIME + SCORE_DISPLAY_TIME;
 
 let emits: CapturedEmit[];
 let engine: GameEngine;
@@ -156,7 +155,7 @@ describe("planted photos stay anonymous", () => {
     expect(events("waiting-photo")).toHaveLength(1);
   });
 
-  it("the planter leaving in the window looks like an absent owner: the wait times out at 15 s and is skipped", () => {
+  it("the planter leaving in the window looks like an owner who left: another player is asked at once (EXP-029, DEC-035)", () => {
     /** Room-wide events (what every non-owner sees) with their time since `t0`. */
     const roomSeq = (t0: number, from: number) => emits.slice(from).filter((e) => e.target === room.gameCode)
       .map((e) => ({ event: e.event, args: e.args })).filter((e) => e.event !== "player-left");
@@ -169,7 +168,7 @@ describe("planted photos stay anonymous", () => {
     engine.onConnectionChange(room);
     const timeline = (key: string, from: number) => {
       for (let t = 0; t <= PHOTO_WAIT_TIMEOUT; t += 250) {
-        if (emits.slice(from).some((e) => e.event === "round-skipped")) break;
+        if (emits.slice(from).filter((e) => e.event === "waiting-photo" && e.target === room.gameCode).length > 1) break;
         vi.advanceTimersByTime(250);
       }
       times[key].push(Date.now() - t0);
@@ -177,6 +176,9 @@ describe("planted photos stay anonymous", () => {
     timeline("planted", 0);
     const planted = roomSeq(t0, 0);
     expect(events("round-start")).toHaveLength(0);
+    // The planted photo left with its planter: a connected player is asked for round 1's photo
+    const plantedTurns = events("your-turn").map((e) => e.args[0]);
+    expect(["alice", "carol"]).toContain(room.currentPlayer?.username);
 
     // Normal round, the picked owner leaves at once
     const fake = createFakeIo();
@@ -194,32 +196,20 @@ describe("planted photos stay anonymous", () => {
     engine.onConnectionChange(room);
     timeline("normal", 0);
     const normal = roomSeq(t0, 0);
+    // The new owner's request is numbered the same way: one attempt per waiting-photo, the planted one included (S4)
+    expect(events("your-turn").map((e) => e.args[0]).slice(1)).toEqual(plantedTurns);
+    expect(plantedTurns).toEqual([{ round: 1, attempt: 2 }]);
 
-    // Same room-wide sequence: game-started, waiting-photo, round-skipped "timeout" after 15 s, next waiting-photo
+    // Same room-wide sequence: game-started, waiting-photo, then right away a new waiting-photo for the same round
     const shape = (seq: { event: string; args: unknown[] }[]) => seq.map((e) => e.event === "game-started" ? e.event : JSON.stringify(e));
     expect(shape(planted)).toEqual(shape(normal));
-    expect(planted.map((e) => e.event)).toEqual(["game-started", "waiting-photo", "round-skipped", "waiting-photo"]);
-    expect(planted[2].args[0]).toEqual({ round: 1, reason: "timeout" });
+    expect(planted.map((e) => e.event)).toEqual(["game-started", "waiting-photo", "waiting-photo"]);
+    expect(planted[2].args[0]).toEqual({ round: 1, duration: PHOTO_WAIT_TIMEOUT });
     expect(times.planted[0]).toBe(times.normal[0]);
-    expect(times.normal[0]).toBe(PHOTO_WAIT_TIMEOUT);
+    expect(times.normal[0]).toBe(0);
   });
 
-  it("the planted delay imitates this room's real photo waits", () => {
-    room = plantedRoundOne(3);
-    // Rounds 1-2: owners send their photo after 6 s
-    for (let i = 0; i < 2; i++) {
-      vi.advanceTimersByTime(6_000);
-      engine.onPhotoReceived(room, PHOTO, room.currentPlayer!.username);
-      vi.advanceTimersByTime(ROUND_TIME);
-    }
-    expect(room.phase).toBe("waiting-photo");
-    expect(room.currentPlayer).toBeNull(); // round 3: planted
-    const t0 = Date.now();
-    while (!events("round-start").some((e) => (e.args[0] as { photo: string }).photo === PLANTED)) vi.advanceTimersByTime(50);
-    const delay = Date.now() - t0;
-    expect(delay).toBeGreaterThanOrEqual(6_000 * 0.85 - 50);
-    expect(delay).toBeLessThanOrEqual(6_000 * 1.15 + 50);
-  });
+  // How long the hidden delay lasts (realistic, and like the room's own real waits): plantedDelay.test.ts
 
   it("game over in the window: no round-start, the snapshot shows no countdown", () => {
     room = plantedRoundOne();

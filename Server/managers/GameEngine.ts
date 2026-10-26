@@ -4,6 +4,7 @@ import {
 } from "../models/interfaces";
 import { DISCONNECT_GRACE, RoomManager } from "./RoomManager";
 import { uploadStore } from "../middlewares/uploadStore";
+import { drawPlantedDelay, PhotoWaitHistory } from "./plantedDelay";
 
 const ANSWER_TIME = 8_000;
 // Clients are shown ANSWER_TIME minus this, while answers are taken until ANSWER_TIME: a tap at the very end of the
@@ -26,14 +27,20 @@ export const PAUSE_GRACE = 10_000; // A pause resumed sooner than this is refund
 export const MAX_TOTAL_PAUSES = 10; // Pauses per game counted or not, so quick flaps can't freeze a game forever
 export const PAUSE_MIN_DURATION = 2_000; // A pause is never shorter than this (flapping connections)
 const RESUME_MIN_REMAINING = 1_500; // A resumed phase gets at least this much time
-const PHOTO_RESUME_MIN_REMAINING = 5_000; // ...and the photo owner at least this much to (re)send the photo
-// A planted round shows a normal photo wait first, as long as a real one: a past wait of this room (waiting-photo →
-// photo-sent) with ±PLANTED_JITTER, or PLANTED_DELAY_MIN..MAX when the room has none yet
-const PLANTED_DELAY_MIN = 1_000;
-const PLANTED_DELAY_MAX = 3_000;
-const PLANTED_JITTER = 0.15;
-const PLANTED_DELAY_FLOOR = 500;
-const WAIT_HISTORY_SIZE = 20; // real photo waits remembered per room
+// ...and a photo wait, normal or planted alike, at least this much on its countdown (the owner can (re)send the photo)
+const PHOTO_RESUME_MIN_REMAINING = 5_000;
+// The awaited owner disconnected: another player is asked for the round's photo unless they are back within this (a
+// brief flap goes unnoticed)
+export const OWNER_RETURN_WINDOW = 3_000;
+// Owner changes per player and game that don't count as a skip (the owner left, or was away for OWNER_RETURN_WINDOW).
+// Beyond them that player gets no return window (the normal photo wait and its counted timeout) and leaving counts
+// toward MAX_CONSECUTIVE_SKIPS, so players can't keep passing their turns on to steer every round onto someone
+export const MAX_FREE_OWNER_CHANGES = 2;
+// A planted round's hidden delay (see plantedDelay.ts) ends before its 15 s countdown by at least this
+const PLANTED_DELAY_MARGIN = 1_000;
+// After a resume, a planted photo comes at least this long later, like an owner re-sending a photo already uploaded
+const PLANTED_RESEND_MIN = 100;
+const PLANTED_RESEND_MAX = 400;
 // A planted photo is only drawn if its upload outlives the round it would be shown in (the longest photo wait, then
 // answering and reveal); one expiring sooner is dropped and the round is played with a normal photo
 const PLANTED_PHOTO_MIN_LIFETIME = PHOTO_WAIT_TIMEOUT + ANSWER_TIME + REVEAL_TIME;
@@ -48,8 +55,8 @@ interface PlantedWait {
   shown: number;
   shownSince: number | null;
   /**
-   * No photo comes (the planter left, or the photo expired during a long pause): the wait times out when the
-   * countdown ends, like an absent owner's
+   * No photo comes (it expired during a long pause): the wait times out when the countdown ends, like that of an
+   * owner who never sends
    */
   noPhoto?: boolean;
 }
@@ -58,8 +65,8 @@ export class GameEngine {
   /** Holds of the current round: round number, holds started, ms held so far, start of the active hold */
   private holdUsage = new WeakMap<Room, { round: number; count: number; usedMs: number; since: number | null }>();
   /**
-   * Id of each room's current photo request (your-turn `attempt`): one per owner pick, never reused, so a
-   * photo-unavailable for an earlier pick (same round number after a skip) can't skip the current one
+   * Id of each room's current photo request (your-turn `attempt`): one per waiting-photo (planted ones included),
+   * never reused, so a photo-unavailable for an earlier pick (same round number after a skip) can't skip the current one
    */
   private turnAttempts = new WeakMap<Room, number>();
   /**
@@ -67,8 +74,17 @@ export class GameEngine {
    * delay before its round-start. Nobody is told the round is planted.
    */
   private plantedWaits = new WeakMap<Room, PlantedWait>();
-  /** How long this room's real photo waits took (ms, waiting-photo → accepted photo-sent), newest last */
-  private waitHistory = new WeakMap<Room, number[]>();
+  /** Each room's real photo waits per player (waiting-photo → accepted photo-sent), kept across its games */
+  private waitHistories = new WeakMap<Room, PhotoWaitHistory>();
+  /**
+   * Each room's pending OWNER_RETURN_WINDOW: the photo request (your-turn `attempt`) whose disconnected owner it waits
+   * for, and its timer
+   */
+  private ownerReturnWindows = new WeakMap<Room, { attempt: number; timer: NodeJS.Timeout }>();
+  /** Players who went away as owner of each room's awaited round (see goneOwnersOf) */
+  private goneOwners = new WeakMap<Room, { round: number; players: Set<Player> }>();
+  /** Free owner changes used in each room's game, by username (see MAX_FREE_OWNER_CHANGES) */
+  private freeOwnerChanges = new WeakMap<Room, Map<string, number>>();
   /**
    * Last phase broadcast to each room: phase, round (as clients see it) and server clock (QA telemetry `serverAt`).
    * `at` is undefined when that phase of that round was broadcast more than once (a skipped photo wait re-sends
@@ -135,6 +151,7 @@ export class GameEngine {
       if (result.newHost) this.io.to(room.gameCode).emit("new-host", this.roomManager.publicPlayer(result.newHost, room));
       if (!result.isEmpty) this.io.to(room.gameCode).emit("player-left", ghost.username);
     }
+    this.forgetLeaversWaits(room);
   }
 
   /** im-ready: only counts between game-started and the first round (phase is null until then). */
@@ -163,6 +180,8 @@ export class GameEngine {
     room.currentPlayer = null; // Picked by startRound; a stale owner from a previous game can't send a photo
     this.plantedWaits.delete(room);
     this.holdUsage.delete(room); // a new game: round numbers start over
+    this.goneOwners.delete(room);
+    this.freeOwnerChanges.delete(room);
     this.phaseEmits.delete(room);
     this.assignPlantedSlots(room);
     console.log(`[${room.gameCode}] All ready, planted slots: [${[...room.plantedSlots].join(",")}]`);
@@ -176,7 +195,7 @@ export class GameEngine {
     // Only the player whose turn it is may provide the photo
     if (room.currentPlayer?.username !== username) return;
 
-    this.recordWait(room);
+    this.recordWait(room, room.currentPlayer);
     this.beginAnswering(room, room.currentPlayer, photo, "uploaded");
   }
 
@@ -207,6 +226,7 @@ export class GameEngine {
   private announcePhotoWait(room: Room): void {
     room.phase = "waiting-photo";
     room.currentPhoto = null;
+    this.turnAttempts.set(room, (this.turnAttempts.get(room) ?? 0) + 1); // new photo request, planted or not
     const waiting: WaitingPhotoData = { round: room.round + 1, duration: PHOTO_WAIT_TIMEOUT };
     this.markPhaseEmitted(room, waiting.round);
     this.io.to(room.gameCode).emit("waiting-photo", waiting);
@@ -236,9 +256,7 @@ export class GameEngine {
     if (!room.currentPlayer || room.currentPlayer.username !== username) return;
     const current = this.yourTurn(room);
     if (round !== current.round || attempt !== current.attempt) return;
-    if (room._timer) clearTimeout(room._timer);
-    room._timer = null;
-    room._timerCallback = null;
+    this.clearPhaseTimer(room);
     console.log(`[${room.gameCode}] ${username} has no photo to send — skipping`);
     this.skipRound(room, "unavailable");
   }
@@ -324,10 +342,16 @@ export class GameEngine {
    * Lobby: reviewLobby. `rejoined`: the player whose rejoin this is (see onPlayerRejoined).
    */
   onConnectionChange(room: Room, rejoined?: Player): void {
+    this.forgetLeaversWaits(room); // a leave or kick: a newcomer under the same name doesn't inherit their waits
     if (!room.started) { this.reviewLobby(room); return; }
     if (room.phase === null) return;
     const connected = room.players.filter((p) => p.connected).length;
-    if (connected >= 2) { this.resumeGame(room, rejoined); return; }
+    if (connected >= 2) {
+      this.resumeGame(room, rejoined);
+      // A rejoin reviews the owner after the rejoiner's snapshot (onPlayerRejoined)
+      if (!rejoined) this.reviewAwaitedOwner(room);
+      return;
+    }
     if (room.players.length === connected) { this.endGame(room); return; } // nobody can come back
     if (!room.paused) { this.pauseGame(room); return; }
     // Still paused: a resume scheduled by a rejoin is off, and the others learn who is still missing
@@ -373,12 +397,14 @@ export class GameEngine {
   /**
    * A player rejoined on a new socket: resume if they were awaited, then send them a state snapshot, and your-turn
    * after it if their photo is awaited. The app drops a turn in flight on game-state (EXP-226), so a resume this
-   * rejoin causes leaves the rejoiner's your-turn to this method, which sends it after the snapshot.
+   * rejoin causes leaves the rejoiner's your-turn to this method, which sends it after the snapshot. The awaited owner
+   * is reviewed last (a new owner's waiting-photo and your-turn also come after the snapshot).
    */
   onPlayerRejoined(room: Room, player: Player): void {
     this.onConnectionChange(room, player);
     this.io.to(player.socketId).emit("game-state", this.snapshot(room));
     this.sendAwaitedTurn(room, player);
+    this.reviewAwaitedOwner(room);
   }
 
   /**
@@ -443,6 +469,7 @@ export class GameEngine {
     }
     const wait = this.plantedWait(room);
     if (wait) { wait.shown = this.shownDuration(room)!; wait.shownSince = null; }
+    this.cancelOwnerReturnWindow(room); // the resume reviews the owner again
     room.paused = true;
     // Counted up front (the payload shows the would-be number); resumeGame refunds it if the pause was short
     room._pauseCount++;
@@ -475,10 +502,12 @@ export class GameEngine {
     if (Date.now() - room._pauseStartedAt < PAUSE_GRACE) room._pauseCount--;
     const wait = this.plantedWait(room);
     if (wait) {
-      // Planted photo wait: the countdown goes on from where the pause froze it (what the snapshot showed); the photo
-      // arrives after a fresh upload-like delay, as a resumed owner re-sends theirs, never after the countdown
-      room._timerDuration = wait.noPhoto ? Math.max(100, wait.shown)
-        : Math.min(Math.max(room._timerDuration, this.plantedDelay(room)), Math.max(100, wait.shown - 100));
+      // Planted photo wait: the countdown goes on from where the pause froze it, with the same minimum as a normal
+      // one. The photo comes after what the pause left of the hidden delay, or a quick re-send at least (as a resumed
+      // owner re-sends a photo already uploaded), always PLANTED_DELAY_MARGIN before the countdown ends
+      wait.shown = Math.max(PHOTO_RESUME_MIN_REMAINING, wait.shown);
+      room._timerDuration = wait.noPhoto ? wait.shown
+        : Math.min(Math.max(room._timerDuration, this.resendDelay()), wait.shown - PLANTED_DELAY_MARGIN);
       wait.shownSince = Date.now();
     } else {
       const min = room.phase === "waiting-photo" && room.currentPlayer ? PHOTO_RESUME_MIN_REMAINING : RESUME_MIN_REMAINING;
@@ -486,9 +515,10 @@ export class GameEngine {
     }
     console.log(`[${room.gameCode}] RESUMED "${room.phase}" with ${room._timerDuration}ms (${room._pauseCount}/${MAX_PAUSES} pauses counted)`);
     this.io.to(room.gameCode).emit("game-resumed", { phase: room.phase, duration: this.clientDuration(room, room._timerDuration) });
-    // A photo sent while paused was ignored: ask the owner again
-    if (room.phase === "waiting-photo" && room.currentPlayer?.connected && room.currentPlayer !== rejoined) {
-      this.io.to(room.currentPlayer.socketId).emit("your-turn", this.yourTurn(room));
+    // A photo sent while paused was ignored: ask the owner again (unless they left: the owner review replaces them)
+    const owner = room.currentPlayer;
+    if (room.phase === "waiting-photo" && owner?.connected && room.players.includes(owner) && owner !== rejoined) {
+      this.io.to(owner.socketId).emit("your-turn", this.yourTurn(room));
     }
     this.resumeTimer(room);
   }
@@ -510,14 +540,105 @@ export class GameEngine {
     return room.players.filter((p) => !p.connected).map((p) => p.username);
   }
 
+  /**
+   * Running photo wait whose photo can't come (EXP-029, DEC-035): its owner (or a planted round's planter) left the
+   * room, or a disconnected owner with free owner changes left isn't back within OWNER_RETURN_WINDOW. The owner is
+   * replaced (see replaceGoneOwner). An owner without free changes left gets no window: the normal wait and its
+   * counted timeout. A planted photo is already uploaded: its planter being disconnected changes nothing.
+   */
+  private reviewAwaitedOwner(room: Room): void {
+    if (room.phase !== "waiting-photo" || room.paused) return;
+    const planted = this.plantedWait(room);
+    const owner = planted ? planted.planter : room.currentPlayer;
+    if (!owner) return;
+    if (!room.players.includes(owner)) {
+      console.log(`[${room.gameCode}] ${owner.username} left while their photo was awaited`);
+      this.replaceGoneOwner(room, owner);
+    } else if (owner.connected) {
+      this.cancelOwnerReturnWindow(room); // back in time: a later drop gets a whole window again
+    } else if (!planted && this.freeOwnerChangesLeft(room, owner) > 0) {
+      this.startOwnerReturnWindow(room, owner);
+    }
+  }
+
+  /** The disconnected `owner` of the current photo request has OWNER_RETURN_WINDOW to come back (one window at a time). */
+  private startOwnerReturnWindow(room: Room, owner: Player): void {
+    const attempt = this.yourTurn(room).attempt;
+    if (this.ownerReturnWindows.get(room)?.attempt === attempt) return;
+    this.cancelOwnerReturnWindow(room);
+    const timer = setTimeout(() => {
+      this.ownerReturnWindows.delete(room);
+      const sameRequest = room.started && room.phase === "waiting-photo" && room.currentPlayer === owner
+        && this.yourTurn(room).attempt === attempt;
+      if (!sameRequest || room.paused || owner.connected) return;
+      console.log(`[${room.gameCode}] ${owner.username} didn't come back for their photo`);
+      this.replaceGoneOwner(room, owner);
+    }, OWNER_RETURN_WINDOW);
+    this.ownerReturnWindows.set(room, { attempt, timer });
+  }
+
+  private cancelOwnerReturnWindow(room: Room): void {
+    const window = this.ownerReturnWindows.get(room);
+    if (!window) return;
+    clearTimeout(window.timer);
+    this.ownerReturnWindows.delete(room);
+  }
+
+  /**
+   * The awaited `owner` is gone: the same round's photo is asked of another connected player who hasn't gone away
+   * as its owner yet (the normal waiting-photo + your-turn, new attempt, no round-skipped). That uses one of the
+   * owner's free owner changes, or counts toward MAX_CONSECUTIVE_SKIPS when they have none left. When nobody is left
+   * to ask, the round is played again from scratch (round-skipped "timeout", same number), counted like any skip.
+   */
+  private replaceGoneOwner(room: Room, owner: Player): void {
+    this.clearPhaseTimer(room);
+    this.cancelOwnerReturnWindow(room);
+    this.plantedWaits.delete(room);
+    const gone = this.goneOwnersOf(room);
+    gone.add(owner);
+    if (!room.players.some((p) => p.connected && !gone.has(p))) {
+      console.log(`[${room.gameCode}] Every player went away as owner of round ${room.round + 1} — playing it again`);
+      gone.clear();
+      this.skipRound(room, "timeout");
+      return;
+    }
+    if (!this.takeFreeOwnerChange(room, owner) && this.countSkip(room)) return;
+    console.log(`[${room.gameCode}] Asking another player for the round ${room.round + 1} photo`);
+    this.startRound(room, gone);
+  }
+
+  private freeOwnerChangesLeft(room: Room, owner: Player): number {
+    return MAX_FREE_OWNER_CHANGES - (this.freeOwnerChanges.get(room)?.get(owner.username) ?? 0);
+  }
+
+  /** Uses one of `owner`'s free owner changes of this game; false when none is left. */
+  private takeFreeOwnerChange(room: Room, owner: Player): boolean {
+    if (this.freeOwnerChangesLeft(room, owner) <= 0) return false;
+    const used = this.freeOwnerChanges.get(room) ?? new Map<string, number>();
+    used.set(owner.username, (used.get(owner.username) ?? 0) + 1);
+    this.freeOwnerChanges.set(room, used);
+    return true;
+  }
+
+  /** Players who went away as owner of the round now awaited (room.round + 1): not asked for its photo again. */
+  private goneOwnersOf(room: Room): Set<Player> {
+    const round = room.round + 1;
+    let entry = this.goneOwners.get(room);
+    if (entry?.round !== round) {
+      entry = { round, players: new Set() };
+      this.goneOwners.set(room, entry);
+    }
+    return entry.players;
+  }
+
   // ── Private: Phase transitions ───────────────────────
 
   /**
    * Next round: a planted photo, or a connected player picked to send one (`waiting-photo` to the room, then
-   * `your-turn` to that player). `exclude` (the owner who just reported photo-unavailable) is not picked again
-   * for this round when someone else can be.
+   * `your-turn` to that player). `exclude` (the owner who just reported photo-unavailable, or the owners who went
+   * away) is not picked for this round when someone else can be.
    */
-  private startRound(room: Room, exclude?: Player): void {
+  private startRound(room: Room, exclude: ReadonlySet<Player> = new Set()): void {
     if (room.round >= room.rounds) { this.endGame(room); return; }
     // Reset answers for the new round (also before a boundary pause: the last ones were shown by round-scores)
     room.players.forEach((p) => { p.lastGuess = ""; p.lastAnswerCorrect = false; });
@@ -545,7 +666,7 @@ export class GameEngine {
       planted.plantedPhoto = undefined;
       planted.hasPlantedPhoto = false;
       room.currentPlayer = null;
-      const delay = this.plantedDelay(room);
+      const delay = this.plantedDelay(room, planted);
       this.plantedWaits.set(room, { planter: planted, photo, shown: PHOTO_WAIT_TIMEOUT, shownSince: Date.now() });
 
       console.log(`[${room.gameCode}] Planted photo from ${planted.username} in ${delay}ms`);
@@ -553,12 +674,10 @@ export class GameEngine {
 
       this.setTimer(room, delay, () => this.startPlantedRound(room));
     } else {
-      const others = connected.filter((p) => p !== exclude);
+      const others = connected.filter((p) => !exclude.has(p));
       const candidates = others.length > 0 ? others : connected;
       room.currentPlayer = candidates[Math.floor(Math.random() * candidates.length)];
       this.plantedWaits.delete(room);
-      this.turnAttempts.set(room, (this.turnAttempts.get(room) ?? 0) + 1); // new photo request
-
       console.log(`[${room.gameCode}] Waiting photo from ${room.currentPlayer.username}`);
       this.announcePhotoWait(room);
       this.io.to(room.currentPlayer.socketId).emit("your-turn", this.yourTurn(room));
@@ -573,19 +692,17 @@ export class GameEngine {
   }
 
   /**
-   * End of a planted round's hidden delay: its round-start or, if the planter left or the photo would expire before
-   * the reveal is over (the wait may have been paused for minutes), a timeout like any owner's.
+   * End of a planted round's hidden delay: its round-start or, if the photo would expire before the reveal is over
+   * (the wait may have been paused for minutes), a timeout like any owner's. (A planter who left was already replaced
+   * by reviewAwaitedOwner.)
    */
   private startPlantedRound(room: Room): void {
     const wait = this.plantedWait(room);
     if (!wait) return;
-    const planterGone = !room.players.includes(wait.planter);
-    if (planterGone || !uploadStore.isLive(wait.photo, ANSWER_TIME + REVEAL_TIME)) {
-      if (!planterGone) {
-        console.log(`[${room.gameCode}] Planted photo from ${wait.planter.username} expired — round will time out`);
-        uploadStore.remove(wait.photo);
-      }
-      // Like a normal owner who left: no photo comes, the wait runs out (15 s from waiting-photo) and is skipped
+    if (!uploadStore.isLive(wait.photo, ANSWER_TIME + REVEAL_TIME)) {
+      console.log(`[${room.gameCode}] Planted photo from ${wait.planter.username} expired — round will time out`);
+      uploadStore.remove(wait.photo);
+      // Like an owner who never sends: no photo comes, the wait runs out (15 s from waiting-photo) and is skipped
       wait.noPhoto = true;
       this.setTimer(room, this.shownDuration(room)!, () => {
         this.plantedWaits.delete(room);
@@ -623,25 +740,37 @@ export class GameEngine {
     return room.phase === "answering" ? Math.max(0, remaining - ANSWER_GRACE) : remaining;
   }
 
-  /** How long until a planted photo appears: a random past real wait of this room with jitter, else 1-3 s. */
-  private plantedDelay(room: Room): number {
-    const history = this.waitHistory.get(room) ?? [];
-    if (history.length === 0) {
-      return PLANTED_DELAY_MIN + Math.floor(Math.random() * (PLANTED_DELAY_MAX - PLANTED_DELAY_MIN + 1));
-    }
-    const base = history[Math.floor(Math.random() * history.length)];
-    const jittered = base * (1 + (Math.random() * 2 - 1) * PLANTED_JITTER);
-    return Math.round(Math.min(PHOTO_WAIT_TIMEOUT - 1_000, Math.max(PLANTED_DELAY_FLOOR, jittered)));
+  /** How long until `planter`'s planted photo appears (see plantedDelay.ts): realistic, and like their own uploads. */
+  private plantedDelay(room: Room, planter: Player): number {
+    return drawPlantedDelay(this.waitHistoryOf(room).of(planter.username), PHOTO_WAIT_TIMEOUT - PLANTED_DELAY_MARGIN);
   }
 
-  /** A real photo arrived: remember how long its wait took (pauses excluded) for planted rounds to imitate. */
-  private recordWait(room: Room): void {
+  /** A resumed planted wait's quickest photo: a re-send of an already uploaded photo (PLANTED_RESEND_MIN..MAX). */
+  private resendDelay(): number {
+    return PLANTED_RESEND_MIN + Math.round(Math.random() * (PLANTED_RESEND_MAX - PLANTED_RESEND_MIN));
+  }
+
+  /** `owner`'s photo arrived: remember how long its wait took (pauses excluded) for their planted rounds to imitate. */
+  private recordWait(room: Room, owner: Player): void {
     const remaining = room._timer ? room._timerDuration - (Date.now() - room._timerStartedAt) : room._timerDuration;
     const waited = Math.min(PHOTO_WAIT_TIMEOUT, Math.max(0, PHOTO_WAIT_TIMEOUT - remaining));
-    const history = this.waitHistory.get(room) ?? [];
-    history.push(waited);
-    if (history.length > WAIT_HISTORY_SIZE) history.shift();
-    this.waitHistory.set(room, history);
+    this.waitHistoryOf(room).record(owner.username, waited);
+  }
+
+  /** The room's real photo waits, of the players still in it only. */
+  private waitHistoryOf(room: Room): PhotoWaitHistory {
+    let history = this.waitHistories.get(room);
+    if (!history) {
+      history = new PhotoWaitHistory();
+      this.waitHistories.set(room, history);
+    }
+    this.forgetLeaversWaits(room);
+    return history;
+  }
+
+  /** Drops the waits of players no longer in the room, as soon as they leave or are removed. */
+  private forgetLeaversWaits(room: Room): void {
+    this.waitHistories.get(room)?.keepOnly(room.players.map((p) => p.username));
   }
 
   /**
@@ -667,18 +796,24 @@ export class GameEngine {
     }
   }
 
-  /** The awaited photo won't be played: announce it, then the next round (same number) or game over. */
+  /**
+   * The awaited photo won't be played: announce it, then the next round (same number) or game over.
+   */
   private skipRound(room: Room, reason: RoundSkippedData["reason"]): void {
     const owner = room.currentPlayer ?? undefined;
     const skipped: RoundSkippedData = { round: room.round + 1, reason };
     this.io.to(room.gameCode).emit("round-skipped", skipped);
+    if (this.countSkip(room)) return;
+    this.startRound(room, new Set(reason === "unavailable" && owner ? [owner] : []));
+  }
+
+  /** One more photo wait lost in a row: true if that ends the game (MAX_CONSECUTIVE_SKIPS). */
+  private countSkip(room: Room): boolean {
     room._consecutiveSkips++;
-    if (room._consecutiveSkips >= MAX_CONSECUTIVE_SKIPS) {
-      console.log(`[${room.gameCode}] ${room._consecutiveSkips} rounds skipped in a row — ending game`);
-      this.endGame(room);
-      return;
-    }
-    this.startRound(room, reason === "unavailable" ? owner : undefined);
+    if (room._consecutiveSkips < MAX_CONSECUTIVE_SKIPS) return false;
+    console.log(`[${room.gameCode}] ${room._consecutiveSkips} rounds skipped in a row — ending game`);
+    this.endGame(room);
+    return true;
   }
 
   private enterReveal(room: Room): void {
@@ -718,6 +853,7 @@ export class GameEngine {
       room.players.forEach((p) => Object.assign(p, this.roomManager.hiddenGuess(p)));
     }
     this.roomManager.clearAllTimers(room);
+    this.cancelOwnerReturnWindow(room);
     this.plantedWaits.delete(room);
     room.started = false;
     room.phase = null;
@@ -744,6 +880,13 @@ export class GameEngine {
       room._timerCallback = null;
       try { callback(); } catch (e) { console.error(`[${room.gameCode}] Timer error:`, e); }
     }, ms);
+  }
+
+  /** Drops the phase timer and its callback (the phase ends early). */
+  private clearPhaseTimer(room: Room): void {
+    if (room._timer) clearTimeout(room._timer);
+    room._timer = null;
+    room._timerCallback = null;
   }
 
   private pauseTimer(room: Room): void {

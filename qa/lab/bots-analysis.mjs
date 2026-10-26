@@ -16,6 +16,12 @@ const MAX_PAUSES = 3; // counted pauses per game
 const MAX_TOTAL_PAUSES = 10; // pauses per game, counted or refunded
 const PAUSE_GRACE_MS = 10_000; // a pause resumed sooner is refunded (not counted)
 const GRACE_SLACK_MS = 500; // near PAUSE_GRACE_MS, network latency decides: accept both
+// The awaited owner disconnected (3+ players): unless it is back within this, the server asks another player for the
+// same round's photo, as in Server/managers/GameEngine.ts (GAME_FLOW.md "The owner goes away"; bots-cli.test.sh checks
+// the copy)
+const OWNER_RETURN_WINDOW_MS = 3_000;
+const RETURN_WINDOW_SLACK_MS = 500; // an owner away about as long as the window: latency decides, accept both outcomes
+const OWNER_REPICK_SLACK_MS = 2_000; // that new pick comes this long after the window at most (not after the 15 s wait)
 // Answer grace, as in Server/managers/GameEngine.ts (GAME_FLOW.md; bots-cli.test.sh checks the copy): round-start
 // announces ANSWER_GRACE_MS less than the server's answer timer, which keeps taking answers until it fires
 const ANSWER_GRACE_MS = 300;
@@ -244,19 +250,56 @@ function twoPlayerDropErrors(r, drops) {
   return out;
 }
 
+/**
+ * --drop-on-turn: the photo owner `d` dropped while its photo was awaited. With 2 players the game pauses, and with
+ * 3+ an owner back within OWNER_RETURN_WINDOW_MS keeps its turn (EXP-226): it sends that photo after returning and the
+ * round is not timed out. With 3+ and an owner away longer (EXP-029, DEC-035), another player is asked for the same
+ * round soon after the window (a new waiting-photo of that round, not after the 15 s wait and with no round-skipped
+ * before it), and the game still plays all its rounds (the gone owner's round is not lost). It is the bot's only
+ * drop, so always one of its free owner changes (MAX_FREE_OWNER_CHANGES per game in the server).
+ * Away about as long as the window: either outcome.
+ */
+function ownerDropErrors(r, d) {
+  const after = (ev) => r.events.filter((e) => e.ev === ev && e.round === d.round && e.t > d.t);
+  const timeoutSkips = after("round-skipped").filter((e) => e.payload?.reason === "timeout");
+  const awayMs = d.payload.secs * 1000;
+  const pauses = r.players.length === 2;
+  if (!pauses && awayMs >= OWNER_RETURN_WINDOW_MS + RETURN_WINDOW_SLACK_MS) return repickErrors(r, d, after);
+  if (!pauses && awayMs > OWNER_RETURN_WINDOW_MS - RETURN_WINDOW_SLACK_MS) return [];
+  const out = [];
+  const sent = after("photo-sent").some((e) => e.bot === d.bot && e.payload?.attempt === d.payload.attempt);
+  if (!sent) out.push(`${d.bot}: never sent its round ${d.round} photo (attempt ${d.payload.attempt}) after returning`);
+  if (timeoutSkips.length > 0) out.push(`round ${d.round} skipped by timeout after its owner ${d.bot} returned`);
+  return out;
+}
+
+/**
+ * ownerDropErrors, owner `d` gone for good: the others get a new waiting-photo of its round in time, never a skip
+ * first, and a game that reached game-over played every round of game-started.
+ */
+function repickErrors(r, d, after) {
+  const repicks = after("waiting-photo").filter((e) => e.bot !== d.bot);
+  if (repicks.length === 0) return [`round ${d.round}: nobody else was asked for its photo although its owner ${d.bot} was away ${d.payload.secs} s`];
+  const firstRepick = Math.min(...repicks.map((e) => e.t));
+  const out = [];
+  const late = firstRepick - d.t;
+  if (late > OWNER_RETURN_WINDOW_MS + OWNER_REPICK_SLACK_MS) {
+    out.push(`round ${d.round}: another owner was asked ${Math.round(late)} ms after ${d.bot} dropped (window ${OWNER_RETURN_WINDOW_MS} ms)`);
+  }
+  if (after("round-skipped").some((e) => e.t <= firstRepick)) out.push(`round ${d.round} skipped when its owner ${d.bot} went away (another player must be asked)`);
+  const rounds = r.events.find((e) => e.ev === "game-started")?.payload?.rounds;
+  const played = new Set(r.events.filter((e) => e.ev === "round-start").map((e) => e.round)).size;
+  if (r.reason === "game-over" && played < rounds) out.push(`game over after ${played} of ${rounds} rounds (round ${d.round}'s owner ${d.bot} went away)`);
+  return out;
+}
+
 /** Planned drop: the bot must come back with a snapshot; with 2 players the game must pause and resume. */
 function checkPlannedDrops(r) {
   const out = [];
   const drops = r.events.filter((e) => e.ev === "planned-disconnect");
   for (const d of drops) {
     if (!r.events.some((e) => e.bot === d.bot && e.ev === "game-state" && e.t > d.t)) out.push(`${d.bot} rejoined without a game-state snapshot`);
-    // --drop-on-turn (EXP-226): the returning owner still sends the awaited photo, and its round is not timed out
-    if (d.payload?.onTurn) {
-      const after = (ev) => r.events.filter((e) => e.ev === ev && e.round === d.round && e.t > d.t);
-      const sent = after("photo-sent").some((e) => e.bot === d.bot && e.payload?.attempt === d.payload.attempt);
-      if (!sent) out.push(`${d.bot}: never sent its round ${d.round} photo (attempt ${d.payload.attempt}) after returning`);
-      if (after("round-skipped").some((e) => e.payload?.reason === "timeout")) out.push(`round ${d.round} skipped by timeout after its owner ${d.bot} returned`);
-    }
+    if (d.payload?.onTurn) out.push(...ownerDropErrors(r, d));
   }
   if (r.players.length === 2) out.push(...twoPlayerDropErrors(r, drops));
   return out;

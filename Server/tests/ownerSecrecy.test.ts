@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ANSWER_GRACE, GameEngine } from "../managers/GameEngine";
+import { PLANTED_DELAY_MAX } from "../managers/plantedDelay";
 import { RoomManager } from "../managers/RoomManager";
 import { Player, Room } from "../models/interfaces";
 import { CapturedEmit, createFakeIo, plantPhoto, receivedBy } from "./helpers";
@@ -61,8 +62,8 @@ function setup(plantedBy?: string): void {
   room.phase = "waiting-photo";
   engine.onAllPlayersReady(room);
   vi.advanceTimersByTime(GAME_START_DELAY);
-  // A planted round starts after a short photo wait (EXP-126, at most 3 s)
-  if (plantedBy) vi.advanceTimersByTime(3_000);
+  // A planted round starts after an upload-like photo wait (EXP-126, at most PLANTED_DELAY_MAX)
+  if (plantedBy) vi.advanceTimersByTime(PLANTED_DELAY_MAX);
 }
 
 beforeEach(() => {

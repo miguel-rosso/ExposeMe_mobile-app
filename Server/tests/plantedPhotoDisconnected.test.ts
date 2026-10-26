@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GameEngine } from "../managers/GameEngine";
+import { PLANTED_DELAY_MAX } from "../managers/plantedDelay";
 import { RoomManager } from "../managers/RoomManager";
 import { uploadStore } from "../middlewares/uploadStore";
 import { Player, Room } from "../models/interfaces";
@@ -13,7 +14,6 @@ const ANSWER_TIME = 8_000;
 const REVEAL_TIME = 3_000;
 const SCORE_DISPLAY_TIME = 5_000;
 const GAME_START_DELAY = 1_000;
-const PLANTED_DELAY_MAX = 3_000;
 const PHOTO = "/temp/" + "a".repeat(32) + ".jpg";
 const PLANTED = "/temp/" + "b".repeat(32) + ".jpg";
 const OTHER_PLANTED = "/temp/" + "c".repeat(32) + ".jpg";

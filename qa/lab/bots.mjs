@@ -30,9 +30,13 @@
 //                           # 10 refunded pauses (pause 1 of 3 every time), the 11th drop ends the game
 //            --drop-on-turn the planned drop happens instead on the first your-turn from round R on, by whichever bot
 //                           gets it (--drop-bot is ignored): the photo owner drops during waiting-photo before sending
-//                           its photo and returns S seconds later. Its photo must still be played (EXP-226): it sends
-//                           it after its return and that round is not skipped by timeout ("consistency").
+//                           its photo and returns S seconds later. With 2 bots (the game pauses) or 3+ bots and S under
+//                           the server's 3 s owner return window, its photo must still be played (EXP-226): it sends
+//                           it after its return and that round is not skipped by timeout. With 3+ bots and S over the
+//                           window another bot must be asked for the same round right after the window, with no
+//                           round-skipped, and the game still plays every round (EXP-029, DEC-035) ("consistency").
 //   node qa/lab/bots.mjs --bots 2 --host --drop-round 1 --drop-secs 3 --drop-on-turn   # owner's return resumes
+//   node qa/lab/bots.mjs --bots 3 --host --drop-round 1 --drop-secs 6 --drop-on-turn   # owner too late: re-picked
 //            --app-resync   after a rejoin snapshot of a started game, ignore it (and your-turn) and re-send the join
 //                           on the same socket, like the app going from its lobby to the game screen (EXP-097)
 //   node qa/lab/bots.mjs --bots 2 --host --drop-round 2 --drop-secs 8 --app-resync

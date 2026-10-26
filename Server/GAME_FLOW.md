@@ -15,6 +15,8 @@ Each round:
   │     (≤15s)                               (8s)         (3s)       (5s)
   │  No photo after 15s, or the owner sends photo-unavailable:
   │  └─ round-skipped ──→ next round (same round number, no penalty)
+  │  The owner leaves, or stays disconnected 3s:
+  │  └─ waiting-photo again for the same round, another player picked (no round-skipped; 2 free per player/game)
   └──────────────────────────────────────────────────────────────────────────────
 
 After last round: game-over
@@ -26,8 +28,10 @@ After last round: game-over
   **whole room** (owner included, identical payload, so it never tells who was picked), and then
   **`your-turn { round, attempt }`** to the picked player only. `round` is the round about to be played
   (`room.round + 1`), `duration` the wait (`PHOTO_WAIT_TIMEOUT`, 15 s). `attempt` identifies this photo request: a
-  new integer for every owner pick in the room (it changes even when the round number repeats after a skip, also if
-  the same player is picked again); re-sends of the same request (rejoin, resume) carry the same `attempt`.
+  new integer for every `waiting-photo` in the room, planted ones included (so it counts exactly the photo waits and
+  never tells whether an earlier wait was planted; it changes even when the round number repeats after a skip or an
+  owner change, also if the same player is picked again); re-sends of the same request (rejoin, resume) carry the same
+  `attempt`.
   Every client shows "someone is choosing a photo" with a progress bar of that `duration`, **the owner's too**: the
   app picks and uploads the photo for `your-turn` in the background, with no different text or timing on screen, so
   the owner can't tell it's their turn (see "Whose photo it is").
@@ -38,10 +42,28 @@ After last round: game-over
   ignored. The round is skipped at once. The app also drops the result of a your-turn flow whose request ended
   (next `waiting-photo`, `round-start`, `round-skipped`, `game-paused`, `game-state`, `game-over`): it neither sends
   that photo nor reports it unavailable (a photo uploaded meanwhile is re-sent if the same request is asked again).
-- Every skip is announced with **`round-skipped { round, reason }`**, `reason` = `"timeout"` (no photo in 15 s) or
-  `"unavailable"` (owner reported photo-unavailable); it never names the owner. The next round (same number)
-  follows right away with a new `waiting-photo`. After an `"unavailable"` skip the same player is not picked for
-  the next attempt when another connected player can be.
+- Every skip is announced with **`round-skipped { round, reason }`**, `reason` = `"timeout"` (no photo in 15 s, or
+  every player went away as its owner, below) or `"unavailable"` (owner reported photo-unavailable); it never names
+  the owner. The next round (same number) follows right away with a new `waiting-photo`. After an `"unavailable"`
+  skip the same player is not picked for the next attempt when another connected player can be.
+- **The owner goes away** (DEC-035; while the game runs, not paused): the owner *goes away* when they leave the
+  room (`leave-room`, removed by the host) or stay disconnected for **3 s** (`OWNER_RETURN_WINDOW`; a brief flap goes
+  unnoticed, and an owner back in time gets `your-turn` again and keeps the rest of the wait; a later drop gets a
+  whole new window). The round is then **not skipped**: another connected player is picked for the **same round**
+  right away, with the normal events (a new room-wide `waiting-photo { round, duration: 15 s }` with the same
+  `round`, then `your-turn` with a new `attempt` to the new owner only; no `round-skipped`), so the others don't sit
+  through the rest of the 15 s and the round isn't lost. The round number doesn't advance, so the game still plays
+  its configured number of rounds. Each player is picked at most once per round this way (an earlier owner who came
+  back isn't asked again for it). A pause in between cancels the 3 s window, and the resume starts it again if the
+  owner is still away.
+  - **Free owner changes** (anti-abuse, so players can't keep passing their turns on to steer every round onto
+    someone): each player has **2 per game** (`MAX_FREE_OWNER_CHANGES`, by username, reset at each game start) that
+    don't count toward the 3 consecutive skips that end the game. Once a player has used them, they get no 3 s
+    window: when they disconnect as owner the normal 15 s wait applies and its timeout is a counted skip; if they
+    leave, the round still goes to another player at once, but that counts as a skip.
+  - When every connected player has already gone away as owner of that round, the round is played again from
+    scratch: `round-skipped { reason: "timeout" }`, then a new `waiting-photo` with the same `round`, and anyone may
+    be picked. That replay counts as a skip, so a round nobody keeps can't stall the game forever.
 - **Planting.** The app uploads the chosen photo and sends `plant-photo` from the **lobby**, as soon as it is
   picked (uncropped, like the game's gallery photos), so `im-ready` never waits for it. Only if that upload failed
   does the game screen retry it, **after** `im-ready` (accepted until round 1 is played; a photo planted after the
@@ -49,16 +71,25 @@ After last round: game-over
   one goes back only to that player (`room-of-game.hasPlantedPhoto`); there is no way to drop a planted photo.
 - **Planted rounds look like any other round** (nobody can tell one was planted, nor by whom): the server sends
   the same room-wide `waiting-photo { round, duration: 15 s }`, sends **no `your-turn`** (not even to the planter),
-  and after a hidden delay the usual room-wide `round-start`. The delay imitates the
-  room's real waits: a random past `waiting-photo` → accepted `photo-sent` time of this room (last 20) with ±15 %
-  jitter, or 1–3 s when there is none yet. During that wait the phase is `waiting-photo` with no owner picked: the
+  and after a hidden delay the usual room-wide `round-start`. The delay (`managers/plantedDelay.ts`) is drawn from a
+  fixed distribution of realistic photo waits (log-normal, median 2 s, clamped to 0.8–6 s), mixed with the
+  **planter's own** real waits in this room (`waiting-photo` → accepted `photo-sent` of their uploaded photos, the
+  latest 3, each counted as at most 6 s), so the planted photo arrives like that player's uploads do: with n of them,
+  one (±15 % jitter) is drawn with probability n / (n + 4). Nobody else's waits count: other rooms, the room's other
+  players and players who left the room (their waits are forgotten) can't shift it; right after a server start, or for
+  a planter with no upload yet, it is the fixed distribution, not a recognisable fixed range. The delay always ends
+  at least 1 s before the 15 s countdown. During that wait the phase is `waiting-photo` with no owner picked: the
   planter can't send a photo nor `photo-unavailable`. Clients see the countdown of a normal 15 s wait (rejoin
-  snapshot, `game-resumed`), never the hidden delay; a pause freezes it, `game-resumed` continues from exactly what
-  the snapshot showed during the pause, re-sends no `your-turn`, and the photo comes after a fresh upload-like delay
-  (as a resumed owner re-sends theirs, never past the countdown). If the planter left meanwhile it behaves like an
-  absent owner: no photo, `round-skipped { reason: "timeout" }` when the 15 s run out, then the next
-  `waiting-photo`. The planted photo (`plantedPhoto`, `hasPlantedPhoto`) is cleared when its wait starts, so it is
-  never shown twice.
+  snapshot, `game-resumed`), never the hidden delay; a pause freezes both, and `game-resumed` continues from what the
+  snapshot showed during the pause with the same minimum as a normal wait (at least 5 s, see "Pause and reconnect")
+  and re-sends no `your-turn`. The photo then comes after what the pause left of the hidden delay, or after a quick
+  re-send of 100–400 ms when less was left (as a resumed owner re-sends a photo already uploaded), at least 1 s before
+  the countdown ends. If the planter left meanwhile it behaves like an owner who left: the
+  planted photo is dropped and a connected player is picked for the same round at once (new `waiting-photo` with the
+  same `round`, `your-turn` to the new owner, no `round-skipped`; it uses one of the planter's free owner changes, as
+  for any owner); a planter who only disconnected changes nothing (the photo is already uploaded). If the photo
+  expired during a pause, no photo comes and the round is skipped (`"timeout"`) when the countdown ends. The planted
+  photo (`plantedPhoto`, `hasPlantedPhoto`) is cleared when its wait starts, so it is never shown twice.
 - **Only connected planters are drawn.** A planted round draws among the planted photos of connected players (like
   the owners of uploaded photos). With none (every planter left is disconnected, within their grace), the round is
   played as a normal one, and a disconnected planter keeps their photo: it gets a random free later round (if one is
@@ -327,7 +358,10 @@ After last round: game-over
   clears its timers.
 - Photo-wait timeouts and `photo-unavailable` skip the round (`round-skipped`), but after **3 consecutive skips**
   (`MAX_CONSECUTIVE_SKIPS`) the server ends the game (`game-over`) instead of skipping forever.
-  Any round that is actually played (uploaded or planted photo) resets the counter.
+  Any round that is actually played (uploaded or planted photo) resets the counter. An owner going away (left, or
+  disconnected and not back within 3 s, see "Waiting for the photo") hands the round to another player and doesn't
+  count while that player has free owner changes left (2 per game); beyond them it counts, and so does the replay of
+  a round once everyone went away as its owner.
 
 ## Pause and reconnect
 
@@ -359,7 +393,10 @@ that reached the lobby screen in between are covered by that snapshot.
 - The photo owner who rejoins while their photo is awaited gets `your-turn` again (same `round` and `attempt`);
   the client re-sends the photo it already uploaded for that request instead of uploading a new one. That
   `your-turn` always comes **after** the owner's `game-state` (also when their return resumes the game:
-  `game-resumed`, `game-state`, `your-turn`), because the client drops a turn in flight on `game-state`.
+  `game-resumed`, `game-state`, `your-turn`), because the client drops a turn in flight on `game-state`. A new owner
+  picked because of that rejoin (it resumes a game whose owner left meanwhile) is announced after the rejoiner's
+  `game-state` too (`game-resumed`, `game-state`, `waiting-photo`, `your-turn` to the new owner); the owner who left
+  is never asked again.
 - **Pause**: mid-game (after the ready phase), when fewer than 2 players are connected (on a disconnect,
   leave or removal, or at a round boundary) and someone who dropped could still return, the server
   **pauses**: the phase timer is frozen (an active hold ends with `hold-end`; no hold while paused), photos
@@ -381,7 +418,8 @@ that reached the lobby screen in between are covered by that snapshot.
 - **Resume**: as soon as 2 players are connected again (a rejoin), but never before the pause lasted
   **2 s** (`PAUSE_MIN_DURATION`; an earlier rejoin schedules the resume, a new drop cancels it), the server sends
   `game-resumed { phase, duration }` and the frozen phase continues with its remaining time (at least 1.5 s;
-  at least 5 s when waiting for a photo, and the owner gets `your-turn` again). A pause at a round boundary
+  at least 5 s when waiting for a photo, normal or planted alike, so the countdown never tells them apart; the owner
+  gets `your-turn` again). A pause at a round boundary
   resumes by starting that round (new owner, same round number). Scores and round numbers are untouched.
 - **Expiry**: when a pause's countdown runs out, `game-over`.
 - With 2 or more players connected the game goes on without the missing ones (never picked as photo owner).

@@ -2,6 +2,7 @@
 name: qa-fixer
 description: Implements the fix for ONE ExposeMe backlog issue (or one pack of related low-severity issues) with a test first, keeping the change minimal. Use after the orchestrator picks an issue or pack.
 tools: Read, Edit, Write, Grep, Glob, Bash
+effort: high
 ---
 
 You fix exactly one issue in ExposeMe — or one **pack** of related `low` issues in the same zone, in a single diff. Read `CLAUDE.md` and `Server/GAME_FLOW.md` first.

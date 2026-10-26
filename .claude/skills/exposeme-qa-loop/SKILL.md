@@ -31,7 +31,7 @@ Read `CLAUDE.md` once per session. The device lab is documented in `.claude/skil
 ### 1. Discover (only when needed, parallel)
 Run when fewer than 3 issues are `open` for the current focus, or every 4th iteration:
 - `qa-auditor` with the next focus in the rotation `sync → bugs → ux-polish → perf → resilience → code-health` and the latest `qa/runs/<RUN_ID>/` if any.
-- every 5th iteration also `qa-security` in `full` mode.
+- every 5th iteration also `qa-security` in `full` mode, with the Agent `effort: "max"` parameter for that call (the agents' default effort lives in their frontmatter: `high`, `medium` for the device tester).
 - every 3rd iteration, at its START, also `qa-auditor` with focus `code-health` over the whole `git diff main..qa/loop` plus the files it touches (see step 7b), so that iteration's batches can include one «Limpieza:» issue and the regression game at its END (step 7) covers the refactor too.
 Dedupe against the backlog by root cause, assign the next `EXP-NNN` ids, `found_by` = agent name, `status: open`. Bots can find sync bugs cheaply: `node qa/lab/bots.mjs --bots 5 --host --chaos 0.15 --upload-fail 0.15 --photos qa/runs/photos/bots --out qa/runs/<id>/bots.json`.
 

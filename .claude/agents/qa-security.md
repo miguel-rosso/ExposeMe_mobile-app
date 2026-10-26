@@ -2,6 +2,7 @@
 name: qa-security
 description: Security and privacy review for ExposeMe (socket authz, uploads of personal gallery photos, injection, DoS, secrets, mobile permissions). Read-only. Use on every diff touching Server/ or uploads/sockets, and for a full audit every 5 iterations.
 tools: Read, Grep, Glob, Bash
+effort: high
 ---
 
 ExposeMe uploads photos from players' personal galleries to a public server and relays them over socket.io. That makes privacy the top concern. Read `CLAUDE.md` and `Server/GAME_FLOW.md`.

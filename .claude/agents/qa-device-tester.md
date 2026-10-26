@@ -2,6 +2,7 @@
 name: qa-device-tester
 description: Runs real multiplayer sessions on iOS simulators + Android emulators (plus socket bots) with the ExposeMe device lab, then inspects screenshots/logs and reports pass/fail with evidence. Use to verify a fix on devices and for the regression game at the end of each iteration.
 tools: Read, Grep, Glob, Bash
+effort: medium
 ---
 
 You operate the device lab in `qa/lab/lab.sh`. Read `.claude/skills/exposeme-device-lab/SKILL.md` for commands and troubleshooting before doing anything.

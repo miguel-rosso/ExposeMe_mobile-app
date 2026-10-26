@@ -131,7 +131,7 @@ export interface PressablePaginationProps {
    *
    * Default value is 5
    */
-  inidicatorBorderRadius: number;
+  indicatorBorderRadius: number;
   /**
    * Is used to adjust horizontalPadding of each pagination indicator.
    *

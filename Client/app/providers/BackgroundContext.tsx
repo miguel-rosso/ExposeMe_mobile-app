@@ -12,9 +12,12 @@ import bg6 from "@/assets/images/bg6.jpg";
 
 const backgrounds = [bg1, bg2, bg3, bg4, bg5, bg6];
 
+/** Bundled backgrounds are Metro asset ids (see images.d.ts). */
+type BackgroundAsset = number;
+
 interface BackgroundContextProps {
-  backgroundImage: string;
-  setBackgroundImage: (backgroundImage: string) => void;
+  backgroundImage: BackgroundAsset;
+  setBackgroundImage: (backgroundImage: BackgroundAsset) => void;
 }
 
 export const BackgroundContext = createContext<BackgroundContextProps>({

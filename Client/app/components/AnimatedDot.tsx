@@ -8,7 +8,7 @@ const AnimatedDot = ({ delay = 0 }) => (
       0.4: { translateY: -5 },
       0.8: { translateY: 0 },
       1: { translateY: 0 },
-    }}ƒ
+    }}
     iterationCount="infinite"
     direction="alternate"
     delay={delay}

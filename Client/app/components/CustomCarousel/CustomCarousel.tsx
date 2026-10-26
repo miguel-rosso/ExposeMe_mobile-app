@@ -4,14 +4,14 @@ import { CustomCarouselProps, RefProps } from "@/app/components/CustomCarousel/I
 import PressablePagination from "@/app/components/CustomCarousel/PressablePagination";
 
 const { width: WIDTH } = Dimensions.get("window");
+const DEFAULT_INDICATOR_BORDER_RADIUS = 5;
 
 const CustomCarousel = forwardRef<RefProps, CustomCarouselProps>(({ disablePagination = false, ...props }, ref) => {
   const flatlistRef = useRef<FlatList>(null);
   const scrollX = useRef(new Animated.Value(0)).current;
   const [currentItemIndex, setCurrentItemIndex] = useState<number>(0);
 
-  // Fix typo in prop name throughout the file
-  const borderRadius = props.indicatorBorderRadius ?? props.inidicatorBorderRadius ?? 5;
+  const borderRadius = props.indicatorBorderRadius ?? DEFAULT_INDICATOR_BORDER_RADIUS;
 
   useImperativeHandle(ref, () => {
     return {
@@ -61,7 +61,7 @@ const CustomCarousel = forwardRef<RefProps, CustomCarouselProps>(({ disablePagin
 
   // Add getItemLayout for performance
   const getItemLayout = useCallback(
-    (_, index: number) => {
+    (_data: ArrayLike<unknown> | null | undefined, index: number) => {
       const itemWidth = props.widthBoundaryForPagination ?? WIDTH;
       return {
         length: itemWidth,
@@ -111,7 +111,7 @@ const CustomCarousel = forwardRef<RefProps, CustomCarouselProps>(({ disablePagin
             indicatorWidth={props.indicatorWidth ?? [20, 40, 20]}
             indicatorColor={props.indicatorColor ?? ["grey", "black", "grey"]}
             paginataionBackgroundColor={props.paginataionBackgroundColor ?? "transparent"}
-            inidicatorBorderRadius={borderRadius}
+            indicatorBorderRadius={borderRadius}
             indicatorHorizontalPadding={props.indicatorHorizontalPadding ?? 10}
           />
         </View>

@@ -10,13 +10,13 @@ import {
 } from 'react-native';
 
 import useImageBlur from '../../hooks/useImageBlur';
-import { getImageSource } from '../../utils/image';
+import { getImageSource, type ImageSrc } from '../../utils/image';
 
 import styles from './ImageBlur.styles';
 
 type BlurShapeImage = {
   height: number;
-  src: string;
+  src: ImageSrc;
   /** Request headers for `src` (server photos need the room credentials) */
   headers?: Record<string, string>;
   width: number;

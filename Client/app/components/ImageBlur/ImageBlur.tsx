@@ -2,7 +2,7 @@ import React, { useRef, useState, useEffect, useMemo } from 'react';
 import { Image, View, ViewStyle } from 'react-native';
 
 import { ImageBlurProvider } from '../../providers/ImageBlurContext';
-import { getImageSource } from '../../utils/image';
+import { getImageSource, type ImageSrc } from '../../utils/image';
 
 import ImageBlurShape, { type ImageBlurShapeProps } from './ImageBlurShape';
 
@@ -19,7 +19,7 @@ export type ImageBlurProps = {
   blurChildren: ImageBlurShapeProps['children'];
   children?: React.ReactNode;
   resizeMode?: ImageBlurShapeProps['resizeMode'];
-  src: string;
+  src: ImageSrc;
   /** Request headers for `src` (server photos need the room credentials) */
   headers?: Record<string, string>;
   blurRadius?: ImageBlurRadius;

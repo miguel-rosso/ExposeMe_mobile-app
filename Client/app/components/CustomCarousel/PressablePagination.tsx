@@ -51,7 +51,7 @@ const PressablePagination = (props: PressablePaginationProps) => {
                   indicatorWidth,
                   indicatorHeight,
                   backgroundColor,
-                  props.inidicatorBorderRadius
+                  props.indicatorBorderRadius
                 )}
               />
             </TouchableOpacity>

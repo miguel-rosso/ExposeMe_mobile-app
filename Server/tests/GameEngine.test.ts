@@ -560,8 +560,15 @@ describe("recordAnswer", () => {
     expect(player(guessers[0]).points).toBe(1);
   });
 
-  // Possible bug (follow-up): the photo owner can answer their own photo and score a point.
-  it.todo("rejects answers from the photo owner");
+  // EXP-128: any vote of the owner is ignored, not only for themselves (see "rejects the photo owner's vote")
+  it("ignores the photo owner's vote for another player, which never reaches round-scores", () => {
+    engine.onPhotoReceived(room, PHOTO, owner);
+    engine.recordAnswer(room, owner, guessers[0]);
+    expect(player(owner)).toMatchObject({ points: 0, lastAnswerCorrect: false, lastGuess: "" });
+    vi.advanceTimersByTime(ANSWER_TIME + REVEAL_TIME);
+    const { scores } = lastEvent("round-scores")!.args[0] as { scores: { username: string; lastGuess: string; points: number }[] };
+    expect(scores.find((s) => s.username === owner)).toMatchObject({ points: 0, lastGuess: "" });
+  });
 });
 
 // ── Hold ───────────────────────────────────────────────
@@ -621,8 +628,21 @@ describe("hold", () => {
     expect(engine.handleHold(room, ownerSocket)).toBe(false);
   });
 
-  // GAME_FLOW.md says hold is available during reveal AND scores; the engine only allows scores.
-  it.todo("allows hold during reveal as documented in GAME_FLOW.md (doc/code mismatch, follow-up)");
+  // EXP-014: hold is scores-only (GAME_FLOW.md "Hold"): every earlier phase of the round refuses it
+  it("allows hold only in the scores phase", () => {
+    expect(room.phase).toBe("waiting-photo");
+    expect(engine.handleHold(room, ownerSocket)).toBe(false);
+    engine.onPhotoReceived(room, PHOTO, room.currentPlayer!.username);
+    expect(room.phase).toBe("answering");
+    expect(engine.handleHold(room, ownerSocket)).toBe(false);
+    vi.advanceTimersByTime(ANSWER_TIME);
+    expect(room.phase).toBe("reveal");
+    expect(engine.handleHold(room, ownerSocket)).toBe(false);
+    vi.advanceTimersByTime(REVEAL_TIME);
+    expect(room.phase).toBe("scores");
+    expect(engine.handleHold(room, ownerSocket)).toBe(true);
+    expect(room.held).toBe(true);
+  });
 
   it("rejects hold when less than 1.5s of scores remain", () => {
     toScores();

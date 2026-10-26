@@ -303,7 +303,8 @@ that reached the lobby screen in between are covered by that snapshot.
 
 ## Hold (pause)
 
-- Available to the photo owner during the `scores` phase only (with at least 1.5 s of it left)
+- Available to the photo owner during the `scores` phase only (with at least 1.5 s of it left); `hold-start` in any
+  other phase (`waiting-photo`, `answering`, `reveal`), while paused or already held is ignored
 - Press: game pauses for everyone (server stops timer)
 - Release: game resumes from where it paused
 - Limits per round: at most **3 holds**, **30 s held in total** (`MAX_HOLDS_PER_ROUND`, `HOLD_BUDGET_PER_ROUND`).
@@ -319,21 +320,28 @@ All game events are **atomic** — each contains everything the client needs.
 | Event | Phase | Data | Description |
 |-------|-------|------|-------------|
 | `room-of-game` | - | `{ success, room?, rounds?, message?, rejoinToken?, hasPlantedPhoto? }` | Join result (token and own planted mark only to the joiner) |
+| `player-joined` | lobby | public player | A new player joined (not sent for rejoins; not to the joiner) |
+| `player-left` | any | `username` (string) | A player left (`leave-room`, a join to another room, or removed as gone at game start) |
+| `player-removed` | any | public player | The host removed this player (`remove-player`) |
+| `rounds-updated` | lobby | `rounds` (number) | The host changed the number of rounds |
 | `game-started` | - | `players, rounds` | Navigate to game screen (public player data only, see "Public player data") |
 | `waiting-photo` | waiting-photo | `{ round, duration }` | Whole room: a photo is awaited (owner not revealed), show wait bar |
 | `your-turn` | waiting-photo | `{ round, attempt }` | Only the picked player: pick and upload a photo (or send `photo-unavailable`) |
 | `round-start` | answering | `{ photo, round, duration, isOwner }` | Show photo, start answer timer (`duration` = 7.7 s: 300 ms grace before answers freeze). Per recipient: `isOwner` true only to the photo owner (never names the owner) |
 | `round-reveal` | reveal | `{ correctAnswer, duration }` | Show correct answer |
-| `round-scores` | scores | `{ scores, duration }` | Show scoreboard |
-| `hold-start` | - | - | Pause everything visually |
-| `hold-resume` | reveal/scores | `{ phase, duration }` | Resume with remaining time |
+| `round-scores` | scores | `{ scores, round, totalRounds, duration }` | Show scoreboard (`scores`: `{ username, points, isHost, lastAnswerCorrect, lastGuess }[]`, highest first) |
+| `hold-start` | scores | - | Pause everything visually |
+| `hold-end` | scores | - | The hold is over (released, force-released or ended by a pause); `hold-resume` carries the time |
+| `hold-resume` | scores | `{ phase, duration }` | Resume with remaining time |
 | `round-skipped` | - | `{ round, reason: "timeout" \| "unavailable" }` | No photo for this round; the next `waiting-photo` follows |
 | `game-paused` | any | `{ duration, waitingFor, pause, maxPauses }` | Fewer than 2 connected: freeze, show countdown and "pause N of M" |
 | `game-resumed` | any | `{ phase, duration }` | Paused phase continues with remaining time |
 | `game-state` | any | snapshot (see "Pause and reconnect") | Only to a rejoining socket (or one re-sending its join in a started game): render current phase |
-| `game-over` | - | `{ finalScores }` | Show final results |
+| `game-over` | - | `{ finalScore }` | Show final results (`finalScore`: same shape as `round-scores.scores`) |
 | `player-connection` | lobby | `{ username, connected }` | A player is gone (disconnected > 15 s) or back: dim / undim them in the lobby list |
 | `new-host` | any | public player | The host left (lobby or mid-game), was removed at game start, or has been gone > 15 s in the lobby (also checked at game-over): this player is the host now |
+| `chat-message` | any | `{ username, message }` | Chat from another player (not echoed to the sender) |
+| `emoji-reaction` | any | `{ username, emoji }` | Emoji reaction, to the whole room (sender included) |
 
 ## Events (Client → Server)
 
@@ -343,6 +351,7 @@ All game events are **atomic** — each contains everything the client needs.
 | `set-rounds` | `{ rounds }` (10/15/20; 3 only with `ALLOW_QA_ROUNDS=1`, QA-only) | Host only, lobby only |
 | `start-game` | - | Host only |
 | `remove-player` | `{ username }` | Host only: removes that player (not the host) and evicts their sockets |
+| `leave-room` | - | Explicit leave (Exit button): player removed, host handed over, `player-left` to the room; from a socket replaced by a rejoin it only detaches that socket |
 | `im-ready` | - | Player ready to start (session player; payload ignored) |
 | `photo-sent` | `{ photo }` | Photo uploaded; only from the current owner, `photo` must be a path the owner got from `/upload` in this room (`/temp/<32 hex>.jpg\|png\|webp`) |
 | `photo-unavailable` | `{ round, attempt }` (from its `your-turn`) | The awaited owner has no photo to send (no access, no photos, upload failed): skip the round now |

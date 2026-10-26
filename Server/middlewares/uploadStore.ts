@@ -1,4 +1,5 @@
 import fs from "fs";
+import { UPLOAD_TTL_MS } from "./uploadSweeper";
 
 // ── Per-room upload registry ──
 // Every stored photo belongs to the room and player that uploaded it (GET /temp serves it only to members of that
@@ -13,6 +14,11 @@ export interface UploadRecord {
   file: string;
   /** Exact TTL deletion timer (UploadController); cleared when the record goes away earlier */
   timer?: NodeJS.Timeout;
+  /**
+   * Epoch ms after which the photo is expired, stamped by register (UPLOAD_TTL_MS from then). The file is written
+   * after registering, so this is never later than the deadline /temp and the sweeper derive from its mtime.
+   */
+  expiresAt?: number;
   /** room.round when it was stored: a photo shown since then was stored at an earlier round (rounds only advance on show) */
   round?: number;
   /** Authorized as the awaited owner's turn photo, or as a (candidate) planted photo; see releaseSuperseded */
@@ -37,6 +43,7 @@ export class UploadStore {
   /** Records an upload authorized at `epoch`. Returns false (nothing recorded) if the room was released since. */
   register(name: string, record: UploadRecord, epoch: number): boolean {
     if (epoch !== this.epoch(record.gameCode)) return false;
+    record.expiresAt = Date.now() + UPLOAD_TTL_MS;
     this.byName.set(name, record);
     let names = this.byRoom.get(record.gameCode);
     if (!names) this.byRoom.set(record.gameCode, (names = new Set()));
@@ -46,6 +53,15 @@ export class UploadStore {
 
   get(name: string): UploadRecord | undefined {
     return this.byName.get(name);
+  }
+
+  /**
+   * The photo at `pathOrName` is still stored and will not expire within `minRemainingMs` (a photo whose record is
+   * gone was deleted: TTL expiry, released with its room or player).
+   */
+  isLive(pathOrName: string, minRemainingMs = 0): boolean {
+    const record = this.byName.get(nameOf(pathOrName));
+    return !!record && (record.expiresAt ?? Infinity) - Date.now() > minRemainingMs;
   }
 
   countFor(gameCode: string): number {
@@ -64,9 +80,9 @@ export class UploadStore {
     return record;
   }
 
-  /** Forgets one upload and deletes its file. */
-  private remove(name: string): void {
-    const record = this.forget(name);
+  /** Forgets one upload and deletes its file (no-op if it is not stored). */
+  remove(pathOrName: string): void {
+    const record = this.forget(nameOf(pathOrName));
     if (!record) return;
     fs.unlink(record.file, (err) => {
       if (err && err.code !== "ENOENT") console.error("Error deleting room upload:", err.code);

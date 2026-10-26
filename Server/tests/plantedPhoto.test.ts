@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ANSWER_GRACE, GameEngine, PAUSE_MIN_DURATION } from "../managers/GameEngine";
 import { RoomManager } from "../managers/RoomManager";
 import { GameStateSnapshot, Player, Room } from "../models/interfaces";
-import { CapturedEmit, createFakeIo, receivedBy } from "./helpers";
+import { CapturedEmit, createFakeIo, plantPhoto, receivedBy } from "./helpers";
 
 // EXP-126: nobody can tell who planted a photo. No player payload says who planted one (nor who is ready, which
 // gave the uploading planter away), a planted round shows the same sequence as a normal one (waiting-photo, then
@@ -34,8 +34,7 @@ function plantedRoundOne(slot = 1): Room {
   rm.joinRoom(r.gameCode, "bob", "sock-bob");
   rm.joinRoom(r.gameCode, "carol", "sock-carol");
   const bob = r.players[1];
-  bob.hasPlantedPhoto = true;
-  bob.plantedPhoto = PLANTED;
+  plantPhoto(r.gameCode, bob, PLANTED);
   engine.startGame(r);
   r.players.forEach((p) => engine.markReady(r, p));
   r.plantedSlots = new Set([slot]); // force the planted slot
@@ -239,7 +238,7 @@ describe("planted photos stay anonymous", () => {
 
   it("a planted photo that arrives after the draw (app retry after im-ready) still gets a later round", () => {
     room = plantedRoundOne();
-    player("carol").plantedPhoto = PHOTO;
+    plantPhoto(room.gameCode, player("carol"), PHOTO);
     expect(room.plantedSlots.size).toBe(0); // bob's slot (round 1) is already in its wait
     engine.onLatePlantedPhoto(room);
     expect(room.plantedSlots.size).toBe(1);

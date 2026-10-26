@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ANSWER_GRACE, GameEngine } from "../managers/GameEngine";
 import { RoomManager } from "../managers/RoomManager";
 import { Room } from "../models/interfaces";
-import { CapturedEmit, createFakeIo } from "./helpers";
+import { CapturedEmit, createFakeIo, plantPhoto } from "./helpers";
 
 const ANSWER_TIME = 8_000;
 const REVEAL_TIME = 3_000;
@@ -398,8 +398,8 @@ describe("game over", () => {
     room = roomManager.createRoom("alice", "sock-alice");
     roomManager.joinRoom(room.gameCode, "bob", "sock-bob");
     roomManager.joinRoom(room.gameCode, "carol", "sock-carol");
-    const planted = "https://example.invalid/planted.jpg";
-    room.players[1].plantedPhoto = planted;
+    const planted = "/temp/" + "c".repeat(32) + ".jpg";
+    plantPhoto(room.gameCode, room.players[1], planted);
     engine.startGame(room);
     room.players.forEach((p) => (p.isReady = true));
     room.phase = "waiting-photo";

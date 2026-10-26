@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ANSWER_GRACE, GameEngine } from "../managers/GameEngine";
 import { RoomManager } from "../managers/RoomManager";
 import { Player, Room } from "../models/interfaces";
-import { CapturedEmit, createFakeIo, receivedBy } from "./helpers";
+import { CapturedEmit, createFakeIo, plantPhoto, receivedBy } from "./helpers";
 
 // EXP-128: the photo owner's identity never reaches anyone but the owner before round-reveal: round-start and the
 // game-state snapshot are per recipient (`isOwner` only true for the owner), uploaded and planted photos alike.
@@ -51,7 +51,7 @@ function setup(plantedBy?: string): void {
   roomManager.joinRoom(room.gameCode, "bob", "sock-bob");
   roomManager.joinRoom(room.gameCode, "carol", "sock-carol");
   if (plantedBy) {
-    room.players.find((p) => p.username === plantedBy)!.plantedPhoto = PLANTED;
+    plantPhoto(room.gameCode, room.players.find((p) => p.username === plantedBy)!, PLANTED);
     room.rounds = 1; // the only round is the planted one
   }
   engine.startGame(room);

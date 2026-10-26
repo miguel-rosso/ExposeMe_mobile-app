@@ -34,6 +34,9 @@ const PLANTED_DELAY_MAX = 3_000;
 const PLANTED_JITTER = 0.15;
 const PLANTED_DELAY_FLOOR = 500;
 const WAIT_HISTORY_SIZE = 20; // real photo waits remembered per room
+// A planted photo is only drawn if its upload outlives the round it would be shown in (the longest photo wait, then
+// answering and reveal); one expiring sooner is dropped and the round is played with a normal photo
+const PLANTED_PHOTO_MIN_LIFETIME = PHOTO_WAIT_TIMEOUT + ANSWER_TIME + REVEAL_TIME;
 
 /**
  * A planted round's photo wait. `shown`/`shownSince` drive the countdown clients see: a normal 15 s photo wait,
@@ -44,8 +47,11 @@ interface PlantedWait {
   photo: string;
   shown: number;
   shownSince: number | null;
-  /** The planter left: no photo comes, the wait times out when the countdown ends (like an absent owner) */
-  planterGone?: boolean;
+  /**
+   * No photo comes (the planter left, or the photo expired during a long pause): the wait times out when the
+   * countdown ends, like an absent owner's
+   */
+  noPhoto?: boolean;
 }
 
 export class GameEngine {
@@ -444,7 +450,7 @@ export class GameEngine {
     if (wait) {
       // Planted photo wait: the countdown goes on from where the pause froze it (what the snapshot showed); the photo
       // arrives after a fresh upload-like delay, as a resumed owner re-sends theirs, never after the countdown
-      room._timerDuration = wait.planterGone ? Math.max(100, wait.shown)
+      room._timerDuration = wait.noPhoto ? Math.max(100, wait.shown)
         : Math.min(Math.max(room._timerDuration, this.plantedDelay(room)), Math.max(100, wait.shown - 100));
       wait.shownSince = Date.now();
     } else {
@@ -546,13 +552,21 @@ export class GameEngine {
     }
   }
 
-  /** End of a planted round's hidden delay: its round-start, or, if the planter left, a timeout like any owner's. */
+  /**
+   * End of a planted round's hidden delay: its round-start or, if the planter left or the photo would expire before
+   * the reveal is over (the wait may have been paused for minutes), a timeout like any owner's.
+   */
   private startPlantedRound(room: Room): void {
     const wait = this.plantedWait(room);
     if (!wait) return;
-    if (!room.players.includes(wait.planter)) {
+    const planterGone = !room.players.includes(wait.planter);
+    if (planterGone || !uploadStore.isLive(wait.photo, ANSWER_TIME + REVEAL_TIME)) {
+      if (!planterGone) {
+        console.log(`[${room.gameCode}] Planted photo from ${wait.planter.username} expired — round will time out`);
+        uploadStore.remove(wait.photo);
+      }
       // Like a normal owner who left: no photo comes, the wait runs out (15 s from waiting-photo) and is skipped
-      wait.planterGone = true;
+      wait.noPhoto = true;
       this.setTimer(room, this.shownDuration(room)!, () => {
         this.plantedWaits.delete(room);
         if (room.phase === "waiting-photo") this.skipRound(room, "timeout");
@@ -786,6 +800,7 @@ export class GameEngine {
     const nextRound = room.round + 1;
     if (!room.plantedSlots.has(nextRound)) return null;
 
+    this.dropExpiredPlantedPhotos(room);
     const candidates = room.players.filter((p) => p.plantedPhoto);
     if (candidates.length === 0) {
       // Slot reserved but no planted photos left — skip, play normal round
@@ -795,6 +810,20 @@ export class GameEngine {
 
     room.plantedSlots.delete(nextRound);
     return candidates[Math.floor(Math.random() * candidates.length)];
+  }
+
+  /**
+   * Drops planted photos whose upload is gone or expires before it could be shown (would load as a 404), deleting
+   * the file right away if it is still stored.
+   */
+  private dropExpiredPlantedPhotos(room: Room): void {
+    for (const p of room.players) {
+      if (!p.plantedPhoto || uploadStore.isLive(p.plantedPhoto, PLANTED_PHOTO_MIN_LIFETIME)) continue;
+      console.log(`[${room.gameCode}] Planted photo from ${p.username} expired — dropped`);
+      uploadStore.remove(p.plantedPhoto);
+      p.plantedPhoto = undefined;
+      p.hasPlantedPhoto = false;
+    }
   }
 
   /** Pre-assign random round slots for planted photos at game start */

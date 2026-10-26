@@ -1,5 +1,6 @@
 import type { Server } from "socket.io";
 import { uploadStore } from "../middlewares/uploadStore";
+import type { Player } from "../models/interfaces";
 
 export interface CapturedEmit {
   target: string;
@@ -34,6 +35,16 @@ export function createFakeIo(): { io: Server; emits: CapturedEmit[] } {
 export function registerUpload(gameCode: string, username: string, photo: string): void {
   const name = photo.replace(/^\/temp\//, "");
   uploadStore.register(name, { gameCode, username, file: `/nonexistent/exposeme-test/${name}` }, uploadStore.epoch(gameCode));
+}
+
+/**
+ * `player` planted `photo` (a `/temp/<name>` path) in the lobby, as POST /upload + plant-photo do: the upload is
+ * registered (fresh, so it is not expired) and becomes the player's planted photo.
+ */
+export function plantPhoto(gameCode: string, player: Player, photo: string): void {
+  registerUpload(gameCode, player.username, photo);
+  player.plantedPhoto = photo;
+  player.hasPlantedPhoto = true;
 }
 
 /**

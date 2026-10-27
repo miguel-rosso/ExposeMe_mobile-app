@@ -11,14 +11,13 @@ import {
   Platform,
   Animated,
   Share,
+  Image,
 } from "react-native";
 import tw from "twrnc";
 import { useGameContext } from "@/app/providers/GameContext";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import type { Socket } from "socket.io-client";
 import { RoomOfGameResponse, Player, GameStateSnapshot, PlayerConnectionData } from "@/app/models/interfaces";
-import ImageBlur from "@/app/components/ImageBlur/ImageBlur";
-import { ImageBlurView } from "@/app/components/ImageBlur";
 import { useBackgroundContext } from "@/app/providers/BackgroundContext";
 import { usePhotoContext } from "@/app/providers/PhotoContext";
 import CloseButton from "@/app/components/CloseButton";
@@ -46,6 +45,9 @@ import { parseRoomCodeParam } from "../utils/roomCode";
 import { KICKED_BY_HOST_MESSAGE } from "../utils/serverMessage";
 import { dismissKeyboardOnBackPress } from "../utils/keyboardBackPress";
 import { useBackHandler } from "@react-native-community/hooks";
+
+/** How much the lobby background photo is blurred */
+const BACKDROP_BLUR_RADIUS = 10;
 
 // Define chat message interface
 interface ChatMessageType {
@@ -495,15 +497,10 @@ const WaitingRoom = ({}) => {
     <View style={tw`flex-1`}>
       <View style={tw`absolute w-full h-full`}>
         <StatusBar hidden />
-        {/* Background blur - unchanged */}
-        <ImageBlur
-          src={backgroundImage}
-          blurRadius={10}
-          blurChildren={<ImageBlurView style={{ height: "100%", width: "100%" }} />}
-          style={{ flex: 1 }}
-        />
+        {/* Blurred background: one image, no layout/measure round trips (EXP-262) */}
+        <Image source={backgroundImage} blurRadius={BACKDROP_BLUR_RADIUS} resizeMode="cover" style={tw`w-full h-full`} />
       </View>
-      <CloseButton onPress={handleLeaveGame} />
+      <CloseButton onPress={handleLeaveGame} accessibilityLabel={t.leaveRoom} />
 
       {/* Chat messages container - unchanged */}
       <View style={tw`absolute top-20 left-0 right-0 z-40 items-center`}>
@@ -564,7 +561,13 @@ const WaitingRoom = ({}) => {
               </Text>
 
               <View style={tw`flex-row items-center mb-1 max-w-full`}>
-                <TouchableOpacity testID={TEST_IDS.copyCodeButton} onPress={copyGameCodeToClipboard} style={tw`p-2`}>
+                <TouchableOpacity
+                  testID={TEST_IDS.copyCodeButton}
+                  accessibilityRole="button"
+                  accessibilityLabel={t.copyGameCode}
+                  onPress={copyGameCodeToClipboard}
+                  style={tw`p-2`}
+                >
                   <Ionicons name="copy-outline" size={24} color="rgba(255,255,255,0.7)" />
                 </TouchableOpacity>
                 {/* Letters are wider than digits: shrink rather than wrap or clip on narrow screens */}
@@ -579,7 +582,13 @@ const WaitingRoom = ({}) => {
                 >
                   {gameCode}
                 </Text>
-                <TouchableOpacity testID={TEST_IDS.shareCodeButton} onPress={shareGameCode} style={tw`p-2`}>
+                <TouchableOpacity
+                  testID={TEST_IDS.shareCodeButton}
+                  accessibilityRole="button"
+                  accessibilityLabel={t.shareGameCode}
+                  onPress={shareGameCode}
+                  style={tw`p-2`}
+                >
                   <Ionicons name="share-social-outline" size={24} color="rgba(255,255,255,0.7)" />
                 </TouchableOpacity>
               </View>
@@ -695,6 +704,8 @@ const WaitingRoom = ({}) => {
               />
               <TouchableOpacity
                 testID={TEST_IDS.chatSendButton}
+                accessibilityRole="button"
+                accessibilityLabel={t.sendMessage}
                 onPress={sendChatMessage}
                 disabled={!chatMessage.trim()}
                 style={tw`rounded-full w-10 h-10 ${!chatMessage.trim() ? "bg-gray-600" : "bg-[#ff8605]"} items-center justify-center`}

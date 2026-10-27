@@ -68,8 +68,6 @@ jest.mock("expo-image-picker", () => ({
   launchImageLibraryAsync: jest.fn(async () => ({ canceled: false, assets: [{ uri: "file:///picked.jpg" }] })),
 }));
 jest.mock("expo-linear-gradient", () => ({ LinearGradient: "LinearGradient" }));
-jest.mock("@/app/components/ImageBlur/ImageBlur", () => () => null);
-jest.mock("@/app/components/ImageBlur", () => ({ ImageBlurView: () => null }));
 jest.mock("@/app/components/CloseButton", () => () => null);
 jest.mock("@/app/components/AnimatedDot", () => () => null);
 jest.mock("@/app/components/modals/AlertModal", () => () => null);

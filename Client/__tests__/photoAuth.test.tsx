@@ -9,12 +9,6 @@ import PhotoComponent from "../app/components/PhotoComponent";
 // rejoin token as headers on POST /upload and on every in-game <Image> of a server photo.
 
 jest.mock("expo-blur", () => ({ BlurView: () => null }));
-// The test renderer can't measure views: one blurred element measured at a fixed rect, so ImageBlurShape draws its
-// blur shape image
-const mockBlurRefs = [{ current: { measureLayout: (_rel: unknown, cb: (x: number, y: number, w: number, h: number) => void) => cb(0, 0, 300, 600) } }];
-jest.mock("../app/hooks/useImageBlur", () => () => ({
-  getRefList: () => mockBlurRefs, getBlurProps: () => undefined, pushRef: () => {}, setBlurProps: () => {},
-}));
 
 const AUTH = { gameCode: "123456", token: "tok-123" };
 const HEADERS = { Authorization: "Bearer tok-123", "X-Game-Code": "123456" };

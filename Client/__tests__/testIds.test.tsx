@@ -11,6 +11,8 @@ import CloseButton from "../app/components/CloseButton";
 
 // Icon fonts are not loadable under jest
 jest.mock("react-native-vector-icons/FontAwesome", () => "Icon");
+// The close button names itself for screen readers in the UI language
+jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/en").default }) }));
 
 // Animatable schedules animation frames: keep them on fake timers and unmount after each render
 beforeEach(() => jest.useFakeTimers());

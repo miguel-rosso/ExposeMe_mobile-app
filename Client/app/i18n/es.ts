@@ -10,6 +10,9 @@ export default {
   // Home banner while only part of the gallery is shared (iOS limited, Android 14+ selected photos)
   limitedAccessBanner: "Solo algunas fotos",
   addMorePhotos: "Añadir más",
+  // Screen reader names of the home's icon-only buttons
+  clearUsername: "Borrar nombre",
+  clearGameCode: "Borrar código de sala",
 
   // WaitingRoom
   gameCode: "Código de Sala",
@@ -23,6 +26,11 @@ export default {
   waitingHost: "Esperando al host",
   sendCodeToFriends: "¡Envía el código a tus amigos para que se unan!",
   typeMessage: "Escribe un mensaje...",
+  // Screen reader names of the lobby's icon-only buttons
+  copyGameCode: "Copiar código de sala",
+  shareGameCode: "Compartir código de sala",
+  sendMessage: "Enviar mensaje",
+  leaveRoom: "Salir de la sala",
   confirmRemovePlayer: "Confirmar Expulsión",
   areYouSureRemove: "¿Estás seguro de que quieres expulsar a",
   remove: "Expulsar",
@@ -145,6 +153,7 @@ export default {
 
   // General
   confirm: "Confirmar",
+  close: "Cerrar",
 
   // LanguageToggle
   changeLanguage: "Cambiar idioma",

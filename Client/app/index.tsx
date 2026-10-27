@@ -20,8 +20,6 @@ import { useGameContext } from "@/app/providers/GameContext";
 import { useLocalSearchParams } from "expo-router";
 import { StatusBar } from "react-native";
 import * as Animatable from "react-native-animatable";
-import ImageBlur from "@/app/components/ImageBlur/ImageBlur";
-import { ImageBlurView } from "@/app/components/ImageBlur";
 import { useBackHandler } from "@react-native-community/hooks";
 import { useFocusEffect } from "expo-router";
 // import logoIndex from "@/assets/images/icon_index.png";
@@ -41,6 +39,10 @@ import { isRoomCode, sanitizeRoomCodeInput } from "./utils/roomCode";
 import { translateServerMessage } from "./utils/serverMessage";
 
 SplashScreen.preventAutoHideAsync();
+
+/** How much the home background photo is blurred */
+const BACKDROP_BLUR_RADIUS = 3;
+
 // Animaciones personalizadas para React Native Animatable
 Animatable.initializeRegistryWithDefinitions({
   slideInDownBounce: {
@@ -336,13 +338,8 @@ const Index = () => {
     <>
       <View style={tw`absolute w-full h-full bg-black`}>
         <StatusBar hidden />
-        {/* Fondo desenfocado */}
-        <ImageBlur
-          src={backgroundImage}
-          blurRadius={3} // intensidad del blur
-          blurChildren={<ImageBlurView style={{ height: "100%", width: "100%", backgroundColor: "black" }} />}
-          style={{ flex: 1 }}
-        />
+        {/* Blurred background: one image, no layout/measure round trips (EXP-262) */}
+        <Image source={backgroundImage} blurRadius={BACKDROP_BLUR_RADIUS} resizeMode="cover" style={tw`w-full h-full`} />
       </View>
       <View style={tw`flex-1 justify-center items-center `}>
         {/* Language toggle */}
@@ -403,6 +400,8 @@ const Index = () => {
                   <View style={tw`absolute flex items-center justify-center h-full absolute right-4`}>
                     <TouchableOpacity
                       testID={TEST_IDS.usernameClearButton}
+                      accessibilityRole="button"
+                      accessibilityLabel={t.clearUsername}
                       style={tw` justify-center  bg-gray-200 h-8 w-8 rounded-full flex items-center justify-center`}
                       onPress={() => {
                         handleUsernameChange("");
@@ -484,6 +483,8 @@ const Index = () => {
                   {gameCode && gameCode.length > 0 && (
                     <View style={tw`absolute right-4 h-full flex justify-center items-center`}>
                       <TouchableOpacity
+                        accessibilityRole="button"
+                        accessibilityLabel={t.clearGameCode}
                         style={tw`  bg-gray-200 h-8 w-8 rounded-full flex items-center justify-center`}
                         onPress={() => {
                           setGameCode("");
@@ -515,7 +516,13 @@ const Index = () => {
         </View>
         {/* Botón para navegar a la pantalla de fotos propias */}
         <Animatable.View ref={buttonRef} animation="slideInUp" duration={600} style={tw`absolute bottom-22 items-center`}>
-          <TouchableOpacity testID={TEST_IDS.ownPhotosButton} style={tw`bg-white/50 p-3  rounded-3xl`} onPress={openPhotoExplorer}>
+          <TouchableOpacity
+            testID={TEST_IDS.ownPhotosButton}
+            accessibilityRole="button"
+            accessibilityLabel={t.photoExplorer}
+            style={tw`bg-white/50 p-3  rounded-3xl`}
+            onPress={openPhotoExplorer}
+          >
             <Ionicons name="dice" size={44} color="white" />
           </TouchableOpacity>
         </Animatable.View>

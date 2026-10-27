@@ -27,8 +27,6 @@ jest.mock("expo-router", () => {
 jest.mock("expo-splash-screen", () => ({ preventAutoHideAsync: jest.fn(), hideAsync: jest.fn() }));
 jest.mock("@expo/vector-icons", () => ({ Ionicons: () => null }));
 jest.mock("@react-native-community/hooks", () => ({ useBackHandler: () => {} }));
-jest.mock("@/app/components/ImageBlur/ImageBlur", () => () => null);
-jest.mock("@/app/components/ImageBlur", () => ({ ImageBlurView: () => null }));
 jest.mock("@/app/screens/InitialScreen", () => () => null);
 jest.mock("../app/components/LanguageToggle", () => () => null);
 jest.mock("../app/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: 1 }) }));

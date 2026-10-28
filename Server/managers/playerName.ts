@@ -1,4 +1,4 @@
-import { ASCII_CONFUSABLES } from "./asciiConfusables";
+import { ASCII_CONFUSABLES, SYMBOL_CONFUSABLES } from "./asciiConfusables";
 import { displayOrder } from "./displayOrder";
 
 /**
@@ -92,7 +92,7 @@ const LETTER = /\p{L}/gu;
 const ANY_MARK = /\p{M}/gu;
 
 /** Latin letters, and other letters only when drawn like ASCII (Greek nu yes; Greek sigma, Cyrillic zhe no). */
-const readsAsLatin = (letter: string) => LATIN_LETTER.test(letter) || letter in ASCII_CONFUSABLES;
+const readsAsLatin = (letter: string) => LATIN_LETTER.test(letter) || ASCII_CONFUSABLES.has(letter);
 
 const lookalikeScriptOf = (letter: string) =>
   LOOKALIKE_SCRIPT_PATTERNS.find(({ pattern }) => pattern.test(letter))?.name;
@@ -120,8 +120,15 @@ const WHITESPACE_RUN = /\s+/gu;
 const LOOKS_LIKE_L = /[Il|1]/g;
 const VISUAL_LOOKALIKES: ReadonlyArray<[RegExp, string]> = [[/rn/g, "m"], [/vv/g, "w"], [/cl/g, "d"], [/0/g, "o"]];
 
+/** `text` with each character found in `table` replaced by its entry. */
+const replaceChars = (text: string, table: ReadonlyMap<string, string>) =>
+  Array.from(text, (char) => table.get(char) ?? char).join("");
+
 /** Each character drawn like ASCII letters or digits replaced by them (UTS #39 table, see asciiConfusables.ts). */
-const toAscii = (text: string) => Array.from(text, (char) => ASCII_CONFUSABLES[char] ?? char).join("");
+const toAscii = (text: string) => replaceChars(text, ASCII_CONFUSABLES);
+
+/** Characters drawn like other symbols replaced by them ("∙" as "•", "ǃ" as "!", "一" as "ー"; asciiConfusables.ts). */
+const foldSymbols = (text: string) => replaceChars(text, SYMBOL_CONFUSABLES);
 
 /** Upper then lower approximates Unicode case folding (sharp s to "ss", final sigma to sigma), unlike toLowerCase. */
 const foldCase = (text: string) => text.toUpperCase().toLowerCase();
@@ -148,11 +155,14 @@ export function nameKey(name: string): string {
 }
 
 /**
- * Looser key for letter groups that only differ in some fonts: I / l / | / 1 read as "l", then "rn" as "m", "vv" as
- * "w", "cl" as "d" and 0 as "o" ("AIice" reads as "Alice", "rnike" as "mike").
+ * Looser key for symbols drawn like other symbols and letter groups that only differ in some fonts: symbols read as
+ * their UTS #39 prototype of the same size ("(∙_∙)" as "(•_•)", "ǃǃ" as "!!", "¯" as "ˉ", curly quotes as straight
+ * ones), I / l / | / 1 as "l", then "rn" as "m", "vv" as "w", "cl" as "d" and 0 as "o" ("AIice" reads as "Alice",
+ * "rnike" as "mike"). The symbol table runs before the skeleton too because NFKC can lose the look: the macron "¯"
+ * becomes a space and a combining macron.
  */
 export function visualKey(name: string): string {
-  const folded = toAscii(foldCase(skeleton(name).replace(LOOKS_LIKE_L, "l")));
+  const folded = toAscii(foldCase(foldSymbols(skeleton(foldSymbols(name))).replace(LOOKS_LIKE_L, "l")));
   return VISUAL_LOOKALIKES.reduce((key, [pattern, replacement]) => key.replace(pattern, replacement), folded);
 }
 

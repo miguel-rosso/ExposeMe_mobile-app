@@ -115,6 +115,8 @@ describe("joinRoom", () => {
     ["rn as m", "Mike", "rnike"],
     ["cl as d", "Dara", "Clara"],
     ["Arabic alef as I (UTS #39 reads it as l)", "XI", "X\u0627"],
+    ["bullet operator as a bullet", "(\u2022_\u2022)", "(\u2219_\u2219)"],
+    ["retroflex clicks as exclamation marks", "!!", "\u01C3\u01C3"],
   ])("refuses a name that only looks like an existing one (%s) as too similar", (_label, existing, lookalike) => {
     const room = rm.createRoom("host", "sock-host");
     rm.joinRoom(room.gameCode, existing, "sock-existing");

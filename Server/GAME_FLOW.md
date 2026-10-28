@@ -182,12 +182,22 @@ After last round: game-over
   `managers/asciiConfusables.ts`, regenerated with `scripts/generateAsciiConfusables.mjs`), then NFKC, combining
   marks and accents dropped unless they sit on a space, the table again, case-folded, joiners dropped, whitespace
   trimmed and collapsed. The table runs before NFKC too, so long s still reads as `f`. `visualKey`: the same, but
-  I / l / | / 1 read as `l`, then `rn` as `m`, `vv` as `w`, `cl` as `d` and `0` as `o`. Both keys are taken from the
-  name as stored and as drawn (`managers/displayOrder.ts`: the Unicode Bidirectional Algorithm via `bidi-js`, with
-  the direction of the first strong letter, whole grapheme clusters moved (a letter keeps its marks) and brackets
-  mirrored in right-to-left runs; so `Mi` followed by Hebrew samekh and vav, or by an Arabic-Indic five and a vav,
-  reads `Milo`). Stored order is compared with stored order and drawn order with drawn order, so a right-to-left
-  name never meets its own reversal. Each player's keys are computed once, when they join.
+  symbols drawn like other symbols read as their UTS #39 prototype first (a second table in the same file,
+  `SYMBOL_CONFUSABLES`, applied before and after the skeleton because NFKC turns `¯`, `´` or `¸` into a space and a
+  mark), then I / l / | / 1 read as `l`, `rn` as `m`, `vv` as `w`, `cl` as `d` and `0` as `o`. The symbol table
+  leaves out what reads as a different name: a clearly different size (measured in Roboto and SF: `•` and `∙` apart
+  from `·` and `・`, `○` and `◦` from `°`, `█` and `■` from `∎`, `–` and `−` from `-` and from `—`, `˜` from `~`,
+  full-width `－` from `ー`), emoji (drawn in colour: `🍎` and `🍏`), combining and spacing marks (Indic and Khmer
+  vowel signs: `डॉली` and `डाली`), symbols whose prototype is a cased letter (case folding would join `∑` with `∫`),
+  and characters newer than Unicode 15.1 (the tables are generated with Node 20, the oldest the server supports,
+  so they read the same on every Node). Known limits: only the groups common in kaomoji were measured, the rest
+  follow UTS #39; `º`, `⁰` and `ᵒ` read as `°` in this key, so `bºb` no longer meets `b0b` (it is still the
+  same name as `bob`). Both keys are taken from the name as stored and as drawn (`managers/displayOrder.ts`: the
+  Unicode Bidirectional Algorithm via `bidi-js`, with the direction of the first strong letter, whole grapheme
+  clusters moved (a letter keeps its marks) and brackets mirrored in right-to-left runs; so `Mi` followed by Hebrew
+  samekh and vav, or by an Arabic-Indic five and a vav, reads `Milo`). Stored order is compared with stored
+  order and drawn order with drawn order, so a right-to-left name never meets its own reversal. Each player's keys
+  are computed once, when they join.
   - Same `nameKey` = the **same name**: with `bob` in the room, `bob `, `Bob`, full-width `bob`, `bob` with a dot
     below or `BOB` in Cyrillic capitals get `"Username already taken"`, and so do `Dave` written with a Latin small
     capital A or in Cherokee letters, `ᗅlice` (Canadian Syllabics) or `A│ice` (box drawing) next to `Alice`, `Raſe`
@@ -195,7 +205,9 @@ After last round: game-over
     samekh and vav next to `Milo`, and `(•_•) ` or full-width `<3` next to `(•_•)` or `<3`. This holds even with the
     existing player's token: a rejoin needs the exact stored name.
   - Only the same `visualKey` = a **different name that looks too alike**: `AIice` next to `Alice`, `b0b` next to
-    `bob`, and real names such as `Clara` next to `Dara` or `Arnie` next to `Amie` get `"Username too similar"`, so
+    `bob`, real names such as `Clara` next to `Dara` or `Arnie` next to `Amie`, and symbol lookalikes such as
+    `(∙_∙)` next to `(•_•)`, `ǃǃ` next to `!!`, `ˉ\_(ツ)_/ˉ` next to `¯\_(ツ)_/¯`, `(˚_˚)` or `(º_º)` next to `(°_°)`,
+    `it’s` or `it´s` next to `it's`, `(一_一)` or `(—_—)` next to `(ー_ー)` get `"Username too similar"`, so
     the player knows the name isn't in use and only needs to differ more. Letters drawn like a capital I (Cyrillic
     І, Arabic alef) have the prototype `l` in UTS #39, so next to a name with I they also get `"Username too
     similar"` rather than `"Username already taken"`: both refuse the name.

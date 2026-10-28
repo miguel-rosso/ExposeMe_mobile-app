@@ -2,6 +2,9 @@
 // Regenerates Server/managers/asciiConfusables.ts (EXP-032) from Unicode's confusables.txt (UTS #39):
 //   curl -o /tmp/confusables.txt https://www.unicode.org/Public/security/latest/confusables.txt
 //   node Server/scripts/generateAsciiConfusables.mjs /tmp/confusables.txt > Server/managers/asciiConfusables.ts
+// Run it with the oldest Node the server supports (20.x, Unicode 15.1; the generated header records the version): the
+// output depends on Node's Unicode data (NFKC, character categories), and characters a newer Unicode adds are left out
+// of the symbol table, so the tables read the same on every newer Node.
 //
 // Keeps every character, whatever its script or category (letters, math and box-drawing symbols, punctuation such as
 // an inverted exclamation mark), whose prototype is 1-3 ASCII letters or digits once combining marks are dropped and
@@ -13,6 +16,17 @@
 // has no entry of its own, is added with the lowercase prototype ("к" as "k"), as the player sees the same shape.
 // Except under an "l" prototype: capitals drawn like I share it with l, but their lowercase looks like an i (small
 // Roman numeral one, full-width i, ij ligature; NFKC already reads most of them).
+//
+// SYMBOL_CONFUSABLES (EXP-268), for playerName.visualKey only: symbols drawn like other symbols. Keeps every character
+// whose prototype has no letters or digits other than modifier letters ("∙" as "•", "ǃ" as "!", "’" as "'", "¯"
+// as "ˉ", "一" and "ㅡ" as "ー"), and every punctuation mark or symbol whatever its prototype ("—" and "―" as "ー").
+// Each prototype is written as playerName's skeleton reads it (ASCII table, NFKC, combining marks dropped), so a name
+// typed with it gets the same key; playerName applies the table before NFKC too, which turns "¯" into a space and a
+// mark. Left out: ASCII letters and digits, ASCII_CONFUSABLES sources, marks (Indic vowel signs are letters of a
+// word), colour emoji (🍎 and 🍏 differ by colour), spaces, characters NFKC already reads as the prototype,
+// prototypes that lose marks in the skeleton or that have cased letters (visualKey folds case after the table, which
+// would join "∑" and "∫"), cased letters whose other case reads differently, characters newer than the generating
+// Node's Unicode, and symbols of a clearly different size (SIZE_PROTOTYPES).
 import { readFileSync } from "fs";
 
 const ASCII_PROTOTYPE = /^[A-Za-z0-9]{1,3}$/;
@@ -64,18 +78,26 @@ if (!sourcePath) {
 const text = readFileSync(sourcePath, "utf8");
 const version = text.match(/^# Version: (.+)$/m)?.[1] ?? "unknown";
 
+/** The MA entries of confusables.txt: source character, raw prototype and the source's name. */
+const confusables = text.split("\n").flatMap((line) => {
+  const match = line.match(ENTRY);
+  if (!match) return [];
+  const source = String.fromCodePoint(parseInt(match[1], 16));
+  const prototype = String.fromCodePoint(...match[2].trim().split(" ").map((hex) => parseInt(hex, 16)));
+  return [{ source, prototype, name: match[3] }];
+});
+
+// ── ASCII_CONFUSABLES ───────────────────────────────
+
 /** Whether `source` belongs in the table with this ASCII prototype (see the header for what is left out). */
 const keeps = (source, prototype) => source.codePointAt(0) > 0x7f && !NONSPACING_MARK.test(source)
   && stripMarks(source) === source && ASCII_PROTOTYPE.test(prototype)
   && stripMarks(source.normalize("NFKC")) !== prototype;
 
 const entries = new Map(Object.entries(SMALL_CAPITALS));
-for (const line of text.split("\n")) {
-  const match = line.match(ENTRY);
-  if (!match) continue;
-  const source = String.fromCodePoint(parseInt(match[1], 16));
-  const prototype = asAscii(String.fromCodePoint(...match[2].trim().split(" ").map((hex) => parseInt(hex, 16))));
-  if (keeps(source, prototype) && !entries.has(source)) entries.set(source, [prototype, match[3]]);
+for (const { source, prototype: raw, name } of confusables) {
+  const prototype = asAscii(raw);
+  if (keeps(source, prototype) && !entries.has(source)) entries.set(source, [prototype, name]);
 }
 
 // Lowercase letters only listed through their capital, added once every entry of its own is in
@@ -87,13 +109,107 @@ for (const [source, [prototype, name]] of [...entries]) {
   entries.set(lower, [lowerPrototype, `lowercase of ${name}`]);
 }
 
-const sorted = [...entries].sort(([a], [b]) => a.codePointAt(0) - b.codePointAt(0));
+// ── SYMBOL_CONFUSABLES ──────────────────────────────
+
+const PUNCTUATION_OR_SYMBOL = /[\p{P}\p{S}]/u;
+// Letters and digits make a prototype a word; modifier letters don't: "ー" and "ˉ" are strokes
+const WORD_CHARACTER = /[\p{Lu}\p{Ll}\p{Lt}\p{Lo}\p{N}]/u;
+const UNASSIGNED = /\p{Cn}/u;
+const ANY_MARK = /\p{M}/u;
+// Emoji (other than ASCII digits, "#" and "*") may be drawn in colour: "🍎" and "🍏" differ by colour only. Emoji, not
+// Extended_Pictographic: Unicode 17 took "☐" and "♩" out of the latter, so Node 20 and 24 would disagree
+const EMOJI = /(?![\0-\x7F])\p{Emoji}/u;
+const WHITESPACE = /\s/u;
+const ASCII_ALPHANUMERIC = /^[A-Za-z0-9]$/;
+
+// Drawn size (EXP-268): UTS #39 joins symbols of one shape whatever their size, but a clearly bigger, smaller or
+// bolder glyph reads as a different name. Measured ink boxes (Roboto and Noto Sans Symbols on Android, SF on iOS, in
+// em) split these groups; each source gets the prototype of its size group, or itself when it has a size of its own.
+const SIZE_PROTOTYPES = new Map([
+  // Dots: the bullet and the bullet operator (0.17-0.20) are twice the middle dot (0.11), which keeps the other dots
+  ["\u2022", "\u2022"], ["\u2219", "\u2022"],
+  // Katakana middle dot: bullet-sized but centred in a full-width cell, so "(・_・)" spreads wider than "(•_•)"
+  ["\u30FB", "\u30FB"], ["\uFF65", "\u30FB"],
+  // Circles: white circles (0.41-0.79) are bigger than the degree sign (0.25-0.29); the white bullet and ring
+  // operator are degree-sized but sit at mid height instead of raised
+  ["\u25CB", "\u25CB"], ["\uFFEE", "\u25CB"], ["\u26AC", "\u26AC"], ["\u25E6", "\u25E6"], ["\u2218", "\u2218"],
+  // Squares: full block (0.71 x 1.21), black square (0.60) and small square (0.18-0.25) against end of proof (0.46)
+  ["\u2588", "\u2588"], ["\u25A0", "\u25A0"], ["\uFFED", "\u25A0"], ["\u25AA", "\u25AA"],
+  // Dashes: en dash, minus and figure dash (0.41-0.55) are twice the hyphen (0.24-0.31) and shorter than the em
+  // dash group (0.65-1.01); the heavy box line is twice as thick; the full-width hyphen-minus is a hyphen-long
+  // stroke (0.24) in a full-width cell, not the long bar of "ー" (NFKC already reads it as "-")
+  ["\u2013", "\u2013"], ["\u2212", "\u2013"], ["\u2012", "\u2013"], ["\u2501", "\u2501"], ["\uFF0D", "\uFF0D"],
+  // Overline: the upper one eighth block (0.71-0.80) is twice the macron (0.33)
+  ["\u2594", "\u2594"],
+  // Tildes: the small tilde (0.29-0.35, raised) is half the tilde (0.48-0.55, mid height); the wave dash is 0.92
+  ["\u02DC", "\u02DC"], ["\u301C", "\u301C"],
+]);
+
+const toAscii = (text) => Array.from(text, (char) => entries.get(char)?.[0] ?? char).join("");
+/** `text` as playerName.skeleton reads it (no spaces here, so every combining mark goes). */
+const skeletonOf = (text) => toAscii(stripMarks(toAscii(text).normalize("NFKC")));
+/** Whether the skeleton keeps every mark of `text` ("-" with a dot above loses its dot). */
+const keepsMarks = (text) => skeletonOf(text) === toAscii(toAscii(text).normalize("NFKC"));
+const isCased = (text) => text.toLowerCase() !== text.toUpperCase();
+
+/**
+ * Whether `source` may be read as `rawPrototype`, whose skeleton is `prototype`: see the header. Unassigned characters
+ * (newer than this Node's Unicode) are left out, so the table reads the same on every Node from the one that
+ * generated it.
+ */
+const keepsSymbol = (source, rawPrototype, prototype) => !ASCII_ALPHANUMERIC.test(source)
+  && !entries.has(source) && !ANY_MARK.test(source) && !EMOJI.test(source) && !WHITESPACE.test(source)
+  && !UNASSIGNED.test(source + rawPrototype) && keepsMarks(rawPrototype)
+  && prototype !== "" && prototype !== skeletonOf(source) && !WHITESPACE.test(prototype) && !isCased(prototype)
+  && (PUNCTUATION_OR_SYMBOL.test(source) || !WORD_CHARACTER.test(prototype));
+
+const symbols = new Map();
+for (const { source, prototype: raw, name } of confusables) {
+  const sized = SIZE_PROTOTYPES.get(source) ?? raw;
+  if (symbols.has(source) || !keepsSymbol(source, sized, skeletonOf(sized))) continue;
+  symbols.set(source, [skeletonOf(sized), name]);
+}
+
+// A cased letter stays only when its other case reads the same: visualKey folds case after this table, so "ɁɁ"
+// can't look like "??" while "ɂɂ", the same name in lowercase, doesn't
+const readsAs = (text) => symbols.get(text)?.[0] ?? skeletonOf(text);
+const caseMismatches = [...symbols].filter(([source, [prototype]]) => isCased(source)
+  && [source.toLowerCase(), source.toUpperCase()].some((other) => readsAs(other) !== prototype));
+for (const [source] of caseMismatches) symbols.delete(source);
+
+// UTS #39 prototypes are never sources themselves, so a prototype is already its own key. Checked here because the
+// skeleton and the size groups may have rewritten it: a typed prototype must not be folded again by playerName.
+for (const [source, [prototype]] of symbols) {
+  if (Array.from(prototype).some((char) => symbols.has(char)) || skeletonOf(prototype) !== prototype) {
+    console.error(`prototype of ${escape(source)} is not its own key: ${prototype}`);
+    process.exit(1);
+  }
+}
+
+// ── Output ──────────────────────────────────────────
+
+/** `text` as the body of a double-quoted TypeScript string: printable ASCII as is, anything else escaped. */
+const quote = (text) => Array.from(text, (char) => (/^[\x20-\x7E]$/.test(char) && char !== "\"" && char !== "\\"
+  ? char
+  : escape(char))).join("");
+const byCodePoint = ([a], [b]) => a.codePointAt(0) - b.codePointAt(0);
+/** A read-only Map (no prototype keys such as "constructor" to look up by mistake). */
+const mapLines = (exportName, table) => [
+  `export const ${exportName}: ReadonlyMap<string, string> = new Map<string, string>([`,
+  ...[...table].sort(byCodePoint)
+    .map(([source, [prototype, name]]) => `  ["${escape(source)}", "${quote(prototype)}"], // ${name}`),
+  "]);",
+];
+
 const out = [
-  `// Generated by Server/scripts/generateAsciiConfusables.mjs from Unicode confusables.txt ${version} (UTS #39). Do not edit.`,
+  `// Generated by Server/scripts/generateAsciiConfusables.mjs from Unicode confusables.txt ${version} (UTS #39)`,
+  `// with Node ${process.version} (Unicode ${process.versions.unicode}). Do not edit.`,
+  "",
   "// Character \u2192 the ASCII letters or digits it is drawn like (letters of any script, symbols, punctuation).",
-  "export const ASCII_CONFUSABLES: Readonly<Record<string, string>> = {",
-  ...sorted.map(([source, [prototype, name]]) => `  "${escape(source)}": "${prototype}", // ${name}`),
-  "};",
+  ...mapLines("ASCII_CONFUSABLES", entries),
+  "",
+  "// Character \u2192 the symbols it is drawn like, as the name skeleton reads them (bullets, dashes, quotes...).",
+  ...mapLines("SYMBOL_CONFUSABLES", symbols),
   "",
 ];
 process.stdout.write(out.join("\n"));

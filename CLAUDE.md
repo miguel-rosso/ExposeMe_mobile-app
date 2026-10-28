@@ -30,3 +30,7 @@ Si alguna vez se sube algo sensible, para y avisa al usuario (rotar credenciales
 
 ## Bucle de QA
 El flujo autónomo de arreglos y pulido es la skill `exposeme-qa-loop` (`/exposeme-qa-loop`, o `/loop /exposeme-qa-loop`). Subagentes: `qa-auditor`, `qa-fixer`, `qa-reviewer`, `qa-security` y `qa-device-tester`, en `.claude/agents/`. Se trabaja en la rama `qa/loop` y el progreso se publica en el dashboard de QA: https://claude.ai/artifact/Tymg6zZ1y6Mdb1Z29eaTui. Las preguntas al usuario van al dashboard como tarjetas, y él responde con comentarios.
+
+## reglas
+1. Si no sabes algo no inventes, investiga en internet
+2. nunca me des la razon por que sí, se siempre critico y busca la verdad

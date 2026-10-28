@@ -1,11 +1,11 @@
 # Load the bundle from local Metro in a freshly launched dev client and close the Expo dev menu, ending on the app
 # (home or the first-run InitialScreen). Shared by open-app.yaml and flows that launch with other permissions.
-# Only the Expo dev-client UI (always English) and the first wait below, which must OR dev-menu text with app
-# content, use text. The InitialScreen title spans two lines ("YOUR GALLERY\nIS THE GAME"): (?s) lets .* cross the
-# line break. env: METRO_URL (url-encoded)
+# The app is matched by testID (Client/app/utils/testIds.ts); only the Expo dev-client UI (always English) and the iOS
+# link alert use text (checked by qa/lab/tests/maestro-selectors.test.sh). env: METRO_URL (url-encoded)
+# disableOnboarding=1 skips the dev-menu onboarding sheet, whose "Continue" button reads like the app's InitialScreen one
 appId: com.socketNull.ExposeMe
 ---
-- openLink: "exp+expose-me://expo-development-client/?url=${METRO_URL}"
+- openLink: "exp+expose-me://expo-development-client/?url=${METRO_URL}&disableOnboarding=1"
 - waitForAnimationToEnd:
     timeout: 5000
 # iOS 26+/Xcode 27 simulators confirm custom-scheme links with a system alert
@@ -15,39 +15,44 @@ appId: com.socketNull.ExposeMe
       visible: "Open in Expose Me\\?|¿Abrir en Expose Me\\?"
     commands:
       - tapOn: "Open|Abrir"
-# After clearState the dev client may stay on its launcher instead of loading the bundle
-- runFlow:
-    when:
-      visible: "Development servers"
+# ── Bundle wait ──
+# Poll until the app (by testID) or the Expo dev menu, which opens at launch over it, shows up: one selector can't OR a
+# testID with text. After clearState the dev client may stay on its launcher instead of loading the bundle, sometimes
+# only after a while (seen on Android): pick the local server when it shows, which restarts the wait for the download,
+# up to maxServerPicks times so a launcher that keeps coming back fails the flow instead of hanging it.
+# lab.sh's STUCK_ATTEMPT_S counts on this timeout (lab-play.test.sh reads its `timeout: <ms>`).
+- evalScript: "${output.devClientBoot = { timeout: 120000, maxServerPicks: 2, serverPicks: 0, loaded: false }}"
+- evalScript: ${output.devClientBoot.deadline = Date.now() + output.devClientBoot.timeout}
+- repeat:
+    while:
+      true: ${!output.devClientBoot.loaded && Date.now() < output.devClientBoot.deadline}
     commands:
-      # the server entry is discovered after the header renders (slow emulators)
-      - extendedWaitUntil:
-          visible: "http://.*:8081"
-          timeout: 30000
-      - tapOn: "http://.*:8081"
-# The launcher can also show up only after the check above (seen on Android): wait for it too, then pick the server
-- extendedWaitUntil:
-    visible: "This is the developer menu.*|Join Game|Unirse a Partida|(?s)YOUR GALLERY.*|TU GALER.*|Development servers|DEVELOPMENT SERVERS"
-    timeout: 120000
-- runFlow:
-    when:
-      visible: "Development servers|DEVELOPMENT SERVERS"
-    commands:
-      # the server entry is discovered after the header renders (slow emulators)
-      - extendedWaitUntil:
-          visible: "http://.*:8081"
-          timeout: 30000
-      - tapOn: "http://.*:8081"
-- extendedWaitUntil:
-    visible: "This is the developer menu.*|Join Game|Unirse a Partida|(?s)YOUR GALLERY.*|TU GALER.*"
-    timeout: 120000
-# Expo dev-menu onboarding sheet (first launch after clearState)
-- runFlow:
-    when:
-      visible: "This is the developer menu.*"
-    commands:
-      - tapOn: "Continue"
-# The full dev menu stays open after onboarding: close it (SDK 58 menu header shows "Runtime version")
+      - runFlow:
+          when:
+            visible:
+              id: "join-game-button|initial-screen"
+          commands:
+            - evalScript: ${output.devClientBoot.loaded = true}
+      - runFlow:
+          when:
+            true: ${!output.devClientBoot.loaded}
+            visible: "Connected to:|Runtime version:.*"
+          commands:
+            - evalScript: ${output.devClientBoot.loaded = true}
+      - runFlow:
+          when:
+            true: ${!output.devClientBoot.loaded && output.devClientBoot.serverPicks < output.devClientBoot.maxServerPicks}
+            visible: "Development servers|DEVELOPMENT SERVERS"
+          commands:
+            # the server entry is discovered after the header renders (slow emulators)
+            - extendedWaitUntil:
+                visible: "http://.*:8081"
+                timeout: 30000
+            - tapOn: "http://.*:8081"
+            - evalScript: ${output.devClientBoot.serverPicks += 1}
+            - evalScript: ${output.devClientBoot.deadline = Date.now() + output.devClientBoot.timeout}
+- assertTrue: ${output.devClientBoot.loaded}
+# The dev menu opens at launch (showsAtLaunch defaults to true): close it (SDK 58 menu header shows "Runtime version")
 - runFlow:
     when:
       visible: "Connected to:|Runtime version:.*"

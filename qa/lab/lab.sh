@@ -6,7 +6,8 @@
 #   doctor                      Check toolchain
 #   setup                       One-time: install Maestro, create AVDs, npm deps for qa/
 #   up [--ios N] [--android N]  Boot devices (default 2+2), grant perms, adb reverse, write devices.json
-#   down                        Shut down all lab devices and background processes
+#   down [--worktrees]          Shut down all lab devices and background processes; --worktrees also stops the lab
+#                               servers (server --port N) this checkout's git worktrees started (through their pidfiles)
 #   status                      Show devices, every lab server by port (this checkout and its git worktrees), metro
 #   server [--restart] [--port N] [--stop --port N]  Local Server on :3000 (log: qa/runs/server.log); --port for a
 #                               worktree's own server. Stop/restart only touch the server this checkout started on that
@@ -209,16 +210,22 @@ grant_android_perms() {
 }
 
 cmd_down() {
+  local worktrees=0
+  while [ $# -gt 0 ]; do case $1 in --worktrees) worktrees=1; shift;; *) die "bad arg $1 (usage: down [--worktrees])";; esac; done
+  [ $worktrees = 1 ] && in_linked_worktree \
+    && die "down --worktrees runs from the main checkout only (from a worktree it would stop the other agents' servers)"
   devices | while read -r d; do
     local id; id="$(jq -r .id <<<"$d")"
     if [ "$(jq -r .platform <<<"$d")" = ios ]; then xcrun simctl shutdown "$id" 2>/dev/null || true
     else adbs "$id" emu kill 2>/dev/null || true; fi
   done
-  bg_stop server $SERVER_PORT; bg_stop metro $METRO_PORT
+  bg_stop server $SERVER_PORT || true; bg_stop metro $METRO_PORT || true
+  [ $worktrees = 0 ] || stop_worktree_servers
   log "Lab down"
 }
 
 bg_command_of() { case $1 in metro) echo "expo start";; *) echo "ts-node server.ts";; esac; } # name: what it runs
+bg_dir_of() { case $1 in metro) echo Client;; *) echo Server;; esac; } # name: the checkout dir bg_start runs it in
 bg_pid_is() { # pid, name: exit 0 when that pid is alive and runs that lab process (a pidfile's pid may be reused)
   [ -n "$1" ] && [[ "$(ps -o command= -p "$1" 2>/dev/null)" == *"$(bg_command_of "$2")"* ]]
 }
@@ -238,24 +245,40 @@ process_tree() { # pid: prints the pid and all its descendants (npx → node, ex
   local child; for child in $(pgrep -P "$1" 2>/dev/null); do process_tree "$child"; done; echo "$1"
 }
 port_listeners() { { lsof -ti "tcp:$1" -sTCP:LISTEN 2>/dev/null || true; } | tr '\n' ' ' | sed 's/ $//'; } # port: pids listening on it
-bg_stop() { # name, port
-  local pidfile="$STATE/$1.pid" pid pids others
+pid_cwd() { lsof -a -p "$1" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p'; } # pid: its working directory
+tree_listens_on() { # pid, port: exit 0 when that pid or one of its descendants listens on the port
+  local p listeners=" $(port_listeners "$2") "
+  for p in $(process_tree "$1"); do [[ $listeners == *" $p "* ]] && return 0; done
+  return 1
+}
+# Another checkout's pidfile (down --worktrees) may be stale with its pid reused by another session's lab process: it
+# is that checkout's only if it runs in that checkout's Server/Client dir (bg_start's cwd) or serves the pidfile's port
+bg_pid_of_checkout() { # pid, name, port, checkout root
+  local dir; dir="$(cd "$4/$(bg_dir_of "$2")" 2>/dev/null && pwd -P)" || return 1
+  bg_pid_is "$1" "$2" && { [ "$(pid_cwd "$1")" = "$dir" ] || tree_listens_on "$1" "$3"; }
+}
+# Returns 0 when it stopped a process, 1 when there was nothing to stop (no pidfile, or a stale one: removed)
+bg_stop() { # name, port, [another checkout's lab state dir holding the pidfile, default this checkout's]
+  local pidfile="${3:-$STATE}/$1.pid" checkout="${3:+${3%/qa/runs/.lab}}" pid pids others stopped=1 owned
   if [ -f "$pidfile" ]; then
     pid="$(cat "$pidfile")"
-    if bg_pid_is "$pid" "$1"; then
+    owned=(bg_pid_is "$pid" "$1")
+    [ -z "$checkout" ] || owned=(bg_pid_of_checkout "$pid" "$1" "$2" "$checkout")
+    if "${owned[@]}"; then
       pids="$(process_tree "$pid" | tr '\n' ' ')"
       kill $pids 2>/dev/null || true
       for _ in $(seq 1 $BG_STOP_GRACE_TICKS); do kill -0 $pids 2>/dev/null || break; sleep 0.2; done
       kill -9 $pids 2>/dev/null || true
+      stopped=0
     else
-      warn "stale $1 pidfile: pid $pid is gone or no longer runs '$(bg_command_of "$1")', removed without killing it"
+      warn "stale $1 pidfile${checkout:+ of $checkout}: pid $pid is gone or no longer runs '$(bg_command_of "$1")'${checkout:+" from that checkout"}, removed without killing it"
     fi
     rm -f "$pidfile"
   fi
   others="$(port_listeners "$2")"
   [ -z "$others" ] || warn "port :$2 is still in use by pid(s) $others, which this lab checkout didn't start" \
     "(another checkout's lab server?): left running"
-  return 0
+  return $stopped
 }
 in_linked_worktree() { [ -f "$ROOT/.git" ]; } # a linked git worktree has a .git file, the main checkout a .git dir
 ensure_port_free() { # port, hint for a worktree: dies when something this checkout didn't start listens on the port
@@ -275,14 +298,19 @@ cmd_server() {
   [ $stop = 1 ] && [ $port_given = 0 ] && die "server --stop needs the port it stops: --port N (--port $SERVER_PORT for the shared lab server)"
   local name=server logf="$RUNS/server.log" telemetry; telemetry="$(telemetry_file "$port")"
   [ "$port" != "$SERVER_PORT" ] && { name="server-$port"; logf="$RUNS/server-$port.log"; }
-  if [ $stop = 1 ]; then bg_stop "$name" "$port"; log "$name stopped"; return 0; fi
-  [ $restart = 1 ] && bg_stop "$name" "$port"
+  if [ $stop = 1 ]; then
+    if bg_stop "$name" "$port"; then log "$name stopped"; else log "$name was not running (nothing stopped)"; fi
+    return 0
+  fi
+  [ $restart = 0 ] || bg_stop "$name" "$port" || true
   bg_running "$name" || ensure_port_free "$port" "Run your own: server --port N"
   # Bots/load tests: lift the per-player and per-room /upload rate limits, the /upload in-flight caps (including the
-  # per-IP cap of a busy server) and the per-IP socket limits (every bot shares one IP) (override with
-  # UPLOAD_PLAYER_RATE_MAX=... / UPLOAD_ROOM_RATE_MAX=... /
-  # UPLOAD_INFLIGHT_*=... / SOCKET_MAX_CONNECTIONS_PER_IP=... / JOIN_MISS_MAX=... / JOIN_MISS_PREFIX_MAX=... /
-  # JOIN_MISS_GLOBAL_MAX=... / JOIN_MISS_PRESSURE_MAX=...).
+  # per-IP cap of a busy server), the stored-photo caps (server-wide and lobby photos per IP) and the per-IP socket
+  # limits: open connections and new sessions per minute (every bot shares one IP) (override with
+  # UPLOAD_PLAYER_RATE_MAX=... / UPLOAD_ROOM_RATE_MAX=... / UPLOAD_INFLIGHT_*=... / UPLOAD_STORED_MAX=... /
+  # UPLOAD_LOBBY_PER_IP_MAX=... / SOCKET_MAX_CONNECTIONS_PER_IP=... / SOCKET_HANDSHAKE_RATE_MAX=... /
+  # JOIN_MISS_MAX=... / JOIN_MISS_PREFIX_MAX=... / JOIN_MISS_GLOBAL_MAX=... / JOIN_MISS_PRESSURE_MAX=...).
+  # Each value stays within the range the server accepts (envInt clamps it), checked by qa/lab/tests/lab-server.test.sh.
   # ALLOW_QA_ROUNDS=1: accept QA-only 3-round games (play --rounds 3); production never sets it
   # QA_TELEMETRY=1: record the qa-ack of QA builds (when each device rendered a phase) in $telemetry (play reads it);
   # a fresh server starts a fresh file, so it never grows across sessions
@@ -293,7 +321,9 @@ cmd_server() {
     UPLOAD_INFLIGHT_MAX="${UPLOAD_INFLIGHT_MAX:-10000}" UPLOAD_INFLIGHT_PER_IP_MAX="${UPLOAD_INFLIGHT_PER_IP_MAX:-10000}" \
     UPLOAD_INFLIGHT_PER_IP_BUSY_MAX="${UPLOAD_INFLIGHT_PER_IP_BUSY_MAX:-10000}" \
     UPLOAD_INFLIGHT_PER_ROOM_MAX="${UPLOAD_INFLIGHT_PER_ROOM_MAX:-10000}" UPLOAD_INFLIGHT_PER_MEMBER_MAX="${UPLOAD_INFLIGHT_PER_MEMBER_MAX:-10000}" \
+    UPLOAD_STORED_MAX="${UPLOAD_STORED_MAX:-100000}" UPLOAD_LOBBY_PER_IP_MAX="${UPLOAD_LOBBY_PER_IP_MAX:-100000}" \
     SOCKET_MAX_CONNECTIONS_PER_IP="${SOCKET_MAX_CONNECTIONS_PER_IP:-100000}" \
+    SOCKET_HANDSHAKE_RATE_MAX="${SOCKET_HANDSHAKE_RATE_MAX:-100000}" \
     JOIN_MISS_MAX="${JOIN_MISS_MAX:-100000}" JOIN_MISS_PREFIX_MAX="${JOIN_MISS_PREFIX_MAX:-1000000}" \
     JOIN_MISS_GLOBAL_MAX="${JOIN_MISS_GLOBAL_MAX:-10000000}" JOIN_MISS_PRESSURE_MAX="${JOIN_MISS_PRESSURE_MAX:-100000}" \
     npx ts-node server.ts
@@ -302,7 +332,7 @@ cmd_server() {
 }
 
 cmd_metro() {
-  [ "${1:-}" = --restart ] && bg_stop metro $METRO_PORT
+  [ "${1:-}" != --restart ] || bg_stop metro $METRO_PORT || true
   # A Metro this checkout didn't start (e.g. without EXPO_PUBLIC_QA) would otherwise pass as "metro ready"
   bg_running metro || ensure_port_free "$METRO_PORT" "Metro is shared: run it from the main checkout"
   local cpath; cpath="$(client_path)" || exit 1
@@ -756,6 +786,10 @@ lab_state_dirs() { # this checkout's lab state dir, then the other git worktrees
     [ "$(cd "$wt" 2>/dev/null && pwd -P)" = "$here" ] || echo "$wt/qa/runs/.lab"
   done
 }
+linked_worktree_state_dirs() { # the lab state dir of every linked git worktree (never the main checkout's), one per line
+  # `git worktree list` names the main checkout first
+  git -C "$ROOT" worktree list --porcelain 2>/dev/null | sed -n 's|^worktree \(.*\)|\1/qa/runs/.lab|p' | tail -n +2
+}
 server_port_of() { case $1 in server) echo "$SERVER_PORT";; *) echo "${1#server-}";; esac; } # pidfile name: its port
 servers_status() { # one line per lab server pidfile (server.pid, server-<port>.pid) of every lab state dir, by port
   local dir f name pid state where
@@ -768,6 +802,19 @@ servers_status() { # one line per lab server pidfile (server.pid, server-<port>.
       printf '  :%s\t%s%s\n' "$(server_port_of "$name")" "$state" "$where"
     done
   done
+}
+# down --worktrees (EXP-279): the servers the worktrees started keep their pidfiles in each worktree's qa/runs, which a
+# plain down never reads. Main checkout only (cmd_down checks it): from a worktree it would stop the other agents' servers
+stop_worktree_servers() {
+  local dir f name
+  while IFS= read -r dir; do
+    for f in "$dir"/server.pid "$dir"/server-*.pid; do
+      [ -f "$f" ] || continue
+      name="$(basename "$f" .pid)"
+      if bg_stop "$name" "$(server_port_of "$name")" "$dir"; then log "$name stopped (${dir%/qa/runs/.lab})"
+      else log "$name: stale pidfile removed, nothing stopped (${dir%/qa/runs/.lab})"; fi
+    done
+  done < <(linked_worktree_state_dirs)
 }
 
 cmd_status() {

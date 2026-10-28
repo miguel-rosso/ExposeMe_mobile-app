@@ -91,7 +91,7 @@ ANALYSIS="$HERE/../bots-analysis.mjs"
 mirrors() { # server file (from Server/), our file, our const, server const: same initializer in both (digit separators ignored)
   local theirs ours
   theirs="$(sed -n "s/^\(export \)\{0,1\}const $4 = \([^;]*\);.*/\2/p" "$SERVER_SRC/$1")"
-  ours="$(sed -n "s/^const $3 = \([^;]*\);.*/\1/p" "$2")"
+  ours="$(sed -n "s/^\(export \)\{0,1\}const $3 = \([^;]*\);.*/\2/p" "$2")"
   [[ -n "$theirs" && "${ours//_/}" == "${theirs//_/}" ]] && ok "$3 matches the server's $4" || ko "$3 matches the server's $4" "ours=[$ours] server=[$theirs]"
 }
 mirrors managers/RoomManager.ts "$BOTS" ROUND_OPTIONS ROUND_OPTIONS
@@ -106,6 +106,18 @@ mirrors managers/GameEngine.ts "$ANALYSIS" PAUSE_GRACE_MS PAUSE_GRACE
 mirrors managers/GameEngine.ts "$ANALYSIS" ANSWER_GRACE_MS ANSWER_GRACE
 mirrors managers/GameEngine.ts "$ANALYSIS" OWNER_RETURN_WINDOW_MS OWNER_RETURN_WINDOW
 mirrors managers/playerName.ts "$BOTS" MAX_USERNAME_LENGTH MAX_USERNAME_LENGTH
+mirrors managers/RoomManager.ts "$ANALYSIS" DISCONNECT_GRACE_MS DISCONNECT_GRACE   # bots.mjs imports it from there
+# Every stored-photo refusal scope (uploadStore.ts) is named by the hint with its envInt knob (EXP-260): a 503
+# "storage" from a big load test must point at UPLOAD_STORED_MAX, a 429 "lobby-ip" at UPLOAD_LOBBY_PER_IP_MAX
+STORE_SRC="$SERVER_SRC/middlewares/uploadStore.ts"
+scopes="$(sed -n 's/^ *scope: \(".*"\);$/\1/p' "$STORE_SRC" | grep -o '"[a-z-]*"' | tr -d '"')"
+[ -n "$scopes" ] && ok "uploadStore.ts refusal scopes found ($(echo $scopes))" || ko "uploadStore.ts refusal scopes found"
+storage_hint="$(grep 'const storageKnob = ' "$BOTS")"
+for scope in $scopes; do
+  knob="$(sed -nE "s/.*(\"$scope\"|[ {]$scope): \"([A-Z_]+)\".*/\2/p" <<<"$storage_hint")"   # { storage: "KNOB", "lobby-ip": "KNOB" }
+  [ -n "$knob" ] && grep -q "envInt(\"$knob\"" "$STORE_SRC" && ok "upload refusal hint for scope $scope names $knob" \
+    || ko "upload refusal hint for scope $scope names an uploadStore.ts knob" "hint=[$storage_hint] knob=[$knob]"
+done
 
 # ── --leave-round / --kick: players out of the room (EXP-139) ──
 for bad in 0 abc 2,3 -1; do
@@ -174,6 +186,16 @@ done
 SERVER_URL="$URL" node "$BOTS" --bots 2 --code K7MQ4X --name-prefix b_2- --timeout 1 >/dev/null 2>"$TMP/err"; rc=$?
 [[ "$rc" != 2 ]] && ok "--name-prefix b_2- is accepted" || ko "--name-prefix b_2- is accepted" "$(cat "$TMP/err")"
 [[ "$(node "$BOTS" --help)" == *"--name-prefix P"* ]] && ok "--help lists --name-prefix" || ko "--help lists --name-prefix"
+
+# ── --quit-after-game-over: the next game drops a bot that quit at game-over (EXP-151) ──
+run 2 "--quit-after-game-over without --host exits 2" --bots 3 --code K7MQ4X --quit-after-game-over --timeout 1
+[[ "$err" == *"--quit-after-game-over needs --host"* ]] && ok "--quit-after-game-over without --host is named" || ko "--quit-after-game-over without --host is named" "$err"
+run 2 "--quit-after-game-over with 2 bots exits 2" --bots 2 --host --quit-after-game-over --timeout 1
+[[ "$err" == *"needs --bots 3 or more"* ]] && ok "--quit-after-game-over with 2 bots is named" || ko "--quit-after-game-over with 2 bots is named" "$err"
+run 2 "--quit-after-game-over with --play-again-linger exits 2" --bots 3 --host --quit-after-game-over --play-again-linger 5 --timeout 1
+SERVER_URL="$URL" node "$BOTS" --bots 3 --host --rounds 3 --quit-after-game-over --timeout 1 >/dev/null 2>"$TMP/err"; rc=$?
+[[ "$rc" != 2 ]] && ok "--quit-after-game-over with --host and 3 bots is accepted" || ko "--quit-after-game-over accepted" "$(cat "$TMP/err")"
+[[ "$(node "$BOTS" --help)" == *"--quit-after-game-over"* ]] && ok "--help lists --quit-after-game-over" || ko "--help lists --quit-after-game-over"
 
 # ── --drop-on-turn is a known flag (EXP-226) ──
 SERVER_URL="$URL" node "$BOTS" --bots 2 --host --drop-round 1 --drop-secs 3 --drop-on-turn --timeout 1 >/dev/null 2>"$TMP/err"; rc=$?

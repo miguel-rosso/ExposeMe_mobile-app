@@ -52,11 +52,7 @@
  "rounds_played": 3,
  "rounds_skipped": 0,
  "planted_sent": 0,
- "planted_rounds": [
-  1,
-  2,
-  4
- ],
+ "planted_rounds": [],
  "skipped_unavailable": 0,
  "unavailable_skip_ms": {
   "max": null

@@ -33,8 +33,8 @@ alive() { builtin kill -0 "$1" 2>/dev/null; }
 foreign_listener() { # port: a listener no lab pidfile knows about (the shared :3000 from a worktree's point of view)
   node -e "$LISTEN_JS" "$1" & FOREIGN=$!; SPAWNED+=("$FOREIGN"); wait_listening "$1"
 }
-lab_like() { # name: starts a process whose command line looks like that lab process (server, metro); sets LAB_LIKE
-  bash -c "sleep 30; : $(bg_command_of "$1")" & LAB_LIKE=$!; SPAWNED+=("$LAB_LIKE")
+lab_like() { # name, [cwd]: starts a process whose command line looks like that lab process (server, metro); sets LAB_LIKE
+  (cd "${2:-.}" && exec bash -c "sleep 30; : $(bg_command_of "$1")") & LAB_LIKE=$!; SPAWNED+=("$LAB_LIKE")
   for _ in $(seq 1 50); do bg_pid_is "$LAB_LIKE" "$1" && return 0; sleep 0.1; done; return 1
 }
 TAB=$'\t'   # servers_status separates the port from the state with a tab
@@ -136,6 +136,76 @@ grep -q "^  :4101${TAB}running (pid $theirs)$" <<<"$out" && grep -q "^  :$P_SHAR
 rm -f "$STATE"/server*.pid "$WT"/qa/runs/.lab/server*.pid
 out="$( (set -euo pipefail; cmd_status) 2>&1)"
 grep -q "^  (none)$" <<<"$out" && grep -q "metro: stopped" <<<"$out" && ok "status: no lab server -> (none)" || ko "status: none" "$out"
+
+# ── down --worktrees: also stops the servers the worktrees started, through their own pidfiles (EXP-279) ──
+# A worktree's server runs in its Server dir (bg_start's cwd); a pidfile whose pid now runs another session's lab-like
+# process (pid reuse) elsewhere must not be followed, unless that process serves the pidfile's port
+run_down() { out="$( (set -euo pipefail; cmd_down "$@") 2>&1)"; rc=$?; } # sets out, rc
+gone_soon() { for _ in $(seq 1 25); do alive "$1" || return 0; sleep 0.2; done; return 1; } # pid: exit 0 once it exited
+mkdir -p "$WT/Server" "$TMP/elsewhere"
+lab_like server-4101 "$WT/Server" || ko "lab-like worktree server up"; theirs=$LAB_LIKE
+echo "$theirs" >"$WT/qa/runs/.lab/server-4101.pid"
+lab_like server "$WT/Server" || ko "lab-like worktree default-port server up"; theirs_default=$LAB_LIKE
+echo "$theirs_default" >"$WT/qa/runs/.lab/server.pid"
+lab_like server-4103 "$TMP/elsewhere" || ko "another session's lab-like server up"; reused=$LAB_LIKE
+echo "$reused" >"$WT/qa/runs/.lab/server-4103.pid"   # stale pidfile, its pid reused by another session's server
+P_SERVED="$(free_port)"   # started elsewhere, but serving the pidfile's port: the worktree's server all the same
+bg_start "server-$P_SERVED" "$TMP/served.log" "$TMP/elsewhere" bash -c "node -e '$LISTEN_JS' $P_SERVED; : ts-node server.ts" >/dev/null
+served="$(cat "$STATE/server-$P_SERVED.pid")"; SPAWNED+=("$served"); mv "$STATE/server-$P_SERVED.pid" "$WT/qa/runs/.lab/"
+wait_listening "$P_SERVED" || ko "worktree server serving its port up"
+lab_like server-4200 || ko "lab-like main checkout server up"; mine=$LAB_LIKE; echo "$mine" >"$STATE/server-4200.pid"
+run_down
+[ $rc = 0 ] && alive "$theirs" && [ -f "$WT/qa/runs/.lab/server-4101.pid" ] \
+  && ok "down without --worktrees: the worktrees' servers keep running" || ko "plain down leaves worktree servers" "rc=$rc $out"
+run_down --worktrees
+gone_soon "$theirs" && gone_soon "$theirs_default" && [ ! -e "$WT/qa/runs/.lab/server-4101.pid" ] \
+  && [ ! -e "$WT/qa/runs/.lab/server.pid" ] && [ $rc = 0 ] \
+  && ok "down --worktrees: every worktree server stopped through its pidfile, pidfiles removed" || ko "down --worktrees stops worktree servers" "rc=$rc $out"
+grep -q "server-4101 stopped ($WT)" <<<"$out" && ok "  ... and says which worktree each stopped server belonged to" || ko "down --worktrees log" "$out"
+gone_soon "$served" && [ -z "$(port_listeners "$P_SERVED")" ] && grep -q "server-$P_SERVED stopped ($WT)" <<<"$out" \
+  && ok "  ... a server running elsewhere but serving its pidfile's port is stopped too" || ko "down --worktrees: port-serving server" "$out"
+alive "$reused" && [ ! -e "$WT/qa/runs/.lab/server-4103.pid" ] \
+  && grep -q "stale server-4103 pidfile of $WT: pid $reused is gone or no longer runs 'ts-node server.ts' from that checkout, removed without killing it" <<<"$out" \
+  && grep -q "server-4103: stale pidfile removed, nothing stopped ($WT)" <<<"$out" && ! grep -q "server-4103 stopped" <<<"$out" \
+  && ok "  ... a stale pidfile whose pid now runs another session's server elsewhere: removed, that server left running" \
+  || ko "down --worktrees: reused pid not killed" "$out"
+alive "$FOREIGN" && alive "$mine" \
+  && ok "  ... the shared port's foreign listener and the main checkout's other servers left running" || ko "down --worktrees kills only worktree servers" "$out"
+lab_like server-4102 "$WT/Server" || ko "lab-like worktree server up"; theirs=$LAB_LIKE; echo "$theirs" >"$WT/qa/runs/.lab/server-4102.pid"
+out="$( (set -euo pipefail; ROOT="$WT"; STATE="$WT/qa/runs/.lab"; cmd_down --worktrees) 2>&1)"; rc=$?
+[ $rc != 0 ] && grep -q "down --worktrees runs from the main checkout only" <<<"$out" && alive "$theirs" && alive "$mine" \
+  && ok "down --worktrees from a worktree -> refused before stopping anything" || ko "down --worktrees from a worktree" "rc=$rc $out"
+run_down --bogus
+[ $rc != 0 ] && grep -q "bad arg --bogus (usage: down \[--worktrees\])" <<<"$out" && ok "down: unknown option refused" || ko "down bad arg" "rc=$rc $out"
+rm -f "$STATE"/server*.pid "$WT"/qa/runs/.lab/server*.pid
+
+# ── server: the load-test limits are lifted, within the range the server accepts (EXP-260) ──
+SERVER_SRC="$HERE/../../../Server"
+server_env() { # [VAR=value...]: the VAR=value environment cmd_server starts the server with (nothing is started)
+  ( set -euo pipefail; [ $# = 0 ] || export "$@"
+    bg_running() { return 1; }; ensure_port_free() { :; }; curl() { return 0; }
+    bg_start() { shift 3; printf '%s\n' "$@"; }   # name, log, cwd, then: env VAR=value... npx ts-node server.ts
+    cmd_server --port 4999 ) 2>/dev/null | grep -E '^[A-Z_]+='
+}
+env_value() { sed -n "s/^$1=//p" <<<"$2"; } # VAR, environment
+envint_args() { # VAR: "default|min|max" of the server's envInt() for it (digit separators dropped), empty if none
+  grep -rhoE --include=*.ts --exclude-dir=node_modules --exclude-dir=tests "envInt\(\"$1\", [^)]*\)" "$SERVER_SRC" | head -1 \
+    | sed -E 's/^envInt\("[A-Z_]+", (.*)\)$/\1/; s/([0-9])_([0-9])/\1\2/g; s/, /|/g'
+}
+is_int() { [[ $1 =~ ^[0-9]+$ ]]; }
+env="$(server_env)"
+for knob in SOCKET_HANDSHAKE_RATE_MAX UPLOAD_STORED_MAX UPLOAD_LOBBY_PER_IP_MAX SOCKET_MAX_CONNECTIONS_PER_IP; do
+  [ -n "$(env_value "$knob" "$env")" ] && ok "server: sets $knob for load tests" || ko "server sets $knob" "$env"
+done
+while IFS='=' read -r knob value; do
+  IFS='|' read -r default min max <<<"$(envint_args "$knob")"
+  [ -n "$max" ] || continue   # not a server limit (PORT, QA_TELEMETRY...)
+  if is_int "$max" && [ "$value" -gt "$max" ]; then ko "server: $knob=$value within the server's max $max"
+  elif is_int "$default" && [ "$value" -le "$default" ]; then ko "server: $knob=$value lifts the server's default $default"
+  else ok "server: $knob=$value lifts the server default ($default) within its max ($max)"; fi
+done <<<"$env"
+[ "$(env_value UPLOAD_STORED_MAX "$(server_env UPLOAD_STORED_MAX=7)")" = 7 ] \
+  && ok "server: a limit set in the environment overrides the lab's" || ko "server: env override of UPLOAD_STORED_MAX"
 
 echo "# $pass passed, $fail failed"
 [ $fail = 0 ]

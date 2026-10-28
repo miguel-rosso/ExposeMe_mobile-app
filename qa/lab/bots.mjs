@@ -82,6 +82,13 @@
 //                           it (qa/maestro/play-again-auto-join.yaml). Same second-game checks as above (ready phase
 //                           shorter than 8 s, no timeout skips); the run ends with the second game's game-over.
 //   node qa/lab/bots.mjs --bots 2 --host --rounds 3 --play-again-linger 1 --play-again-linger-bot 0 --start-next-game 15
+//            --quit-after-game-over  at game-over the last bot closes its socket and never comes back (the app killed on
+//                           the final screens: no leave-room), the others Play again at once, and the host starts the next
+//                           game once the quitter has been gone longer than the server's 15 s disconnect grace (EXP-151).
+//                           The start drops it: every other bot gets player-left for it before game-started, and it is in
+//                           no second-game player list, round-scores or answer; the second game is played to game-over
+//                           ("consistency"; second-game events are recorded as "g2-<event>"). Needs --host and 3+ bots.
+//   node qa/lab/bots.mjs --bots 3 --host --rounds 3 --quit-after-game-over
 //            --leave-round R  the last bot leaves at round R's round-start exactly like the app's Exit (leave-room and
 //                           closes its socket once the server acks it, EXP-139 / EXP-254). Every other bot gets player-left and drops it
 //                           from its answer options; it is in no later round-scores nor answer, and the game goes on while
@@ -125,11 +132,11 @@
 import { io } from "socket.io-client";
 import fs from "node:fs";
 import path from "node:path";
-import { analyseRoom } from "./bots-analysis.mjs";
+import { analyseRoom, DISCONNECT_GRACE_MS } from "./bots-analysis.mjs";
 
 // ── Command line ──
 // Parsed and validated before anything touches the network (EXP-197): --help and bad arguments never connect
-const BOOL_FLAGS = new Set(["host", "no-answer", "app-resync", "lobby-host-drop", "drop-on-turn", "help"]);
+const BOOL_FLAGS = new Set(["host", "no-answer", "app-resync", "lobby-host-drop", "drop-on-turn", "quit-after-game-over", "help"]);
 const VALUE_FLAGS = new Set([
   "server", "bots", "rooms", "rounds", "wait-players", "code", "code-file", "photos", "out", "chaos", "upload-fail",
   "timeout", "no-ready", "drop-round", "drop-rounds", "drop-secs", "drop-bot", "photo-unavailable", "plant", "play-again-linger",
@@ -159,6 +166,7 @@ Headless ExposeMe players (see the header of qa/lab/bots.mjs for every scenario)
   --leave-round R            the last bot leaves the room (leave-room) at round R's round-start
   --kick NAME[@R]            the host bot removes NAME (remove-player): in the lobby once NAME is in, or at round R
   --play-again-linger S [--play-again-linger-bot K] [--start-next-game D]
+  --quit-after-game-over     the last bot quits at game-over; the next game must drop it (needs --host, 3+ bots)
   --help, -h                 print this help and exit (no network)
 
 Exit codes: 0 pass, 1 fail, 2 bad arguments.`;
@@ -301,6 +309,19 @@ const PLAY_AGAIN_LINGER_S = Number(args["play-again-linger"] || 0);
 const LINGER_BOT = Number(args["play-again-linger-bot"] || 1) - 1;
 const START_NEXT_GAME_S = Number(args["start-next-game"] || 0); // K = 0: the bots start a 2nd game while a device lingers
 
+// ── Quit at game-over, dropped by the next game (EXP-151) ──
+const QUIT_AFTER_GAME_OVER = !!args["quit-after-game-over"];
+const QUITTER = N_BOTS - 1; // the bot that quits with --quit-after-game-over
+// The host starts the next game this long after the quitter became gone (DISCONNECT_GRACE_MS: the server's grace)
+const GONE_START_MARGIN_MS = 3_000;
+if (QUIT_AFTER_GAME_OVER) {
+  if (!args.host) exitUsage("--quit-after-game-over needs --host (the host bot starts the next game)");
+  if (N_BOTS < 3) exitUsage("--quit-after-game-over needs --bots 3 or more (2 must stay to play the next game)");
+  if (PLAY_AGAIN_LINGER_S) exitUsage("use --quit-after-game-over or --play-again-linger, not both");
+}
+// Runs that play a second game after game-over, on the same sockets (its events are recorded as "g2-<event>")
+const PLAYS_NEXT_GAME = PLAY_AGAIN_LINGER_S > 0 || QUIT_AFTER_GAME_OVER;
+
 // ── Players out of the room (EXP-139) ──
 /** --leave-round R: the round at whose round-start the last bot leaves (0: nobody leaves). */
 function plannedLeaveRound() {
@@ -338,7 +359,10 @@ const KICK_SETTLE_MS = 1_000; // after a lobby kick that ends the run: time for 
 const KICK = plannedKick();
 const LOBBY_KICK = KICK?.round === 0;
 // What the room checks need to know about this run (qa/lab/bots-analysis.mjs)
-const ANALYSIS_OPTS = { host: !!args.host, rounds: ROUNDS, playAgainLingerS: PLAY_AGAIN_LINGER_S, lingerBot: LINGER_BOT, startNextGameS: START_NEXT_GAME_S };
+const ANALYSIS_OPTS = {
+  host: !!args.host, rounds: ROUNDS, playAgainLingerS: PLAY_AGAIN_LINGER_S, lingerBot: LINGER_BOT, startNextGameS: START_NEXT_GAME_S,
+  quitAfterGameOver: QUIT_AFTER_GAME_OVER,
+};
 const PHOTOS = args.photos ? fs.readdirSync(args.photos).filter((f) => f.endsWith(".jpg")).map((f) => path.join(args.photos, f)) : [];
 
 const now = () => performance.timeOrigin + performance.now();
@@ -543,6 +567,7 @@ function runRoom(roomIdx, fixedCode) {
           const lingerer = live.find((b) => b.lingers);
           // Taken into the second game from the final screens (EXP-184): the run ends with that game's game-over
           if (d.room.started) { /* the game-state snapshot that follows sends im-ready */ }
+          else if (QUIT_AFTER_GAME_OVER) startNextGameOnceGone();
           // --play-again-linger-bot 0 --start-next-game D: the device is still on its final screens; start the next game
           else if (LINGER_BOT < 0 && START_NEXT_GAME_S && live.every((b) => b.playAgainDone)) {
             const host = live.find((b) => b.isHost);
@@ -617,7 +642,7 @@ function runRoom(roomIdx, fixedCode) {
         }
       };
       socket.on("game-started", (players, rounds) => {
-        if (PLAY_AGAIN_LINGER_S && bot.playAgainDone !== undefined) bot.game2 = true;
+        if (PLAYS_NEXT_GAME && bot.playAgainDone !== undefined) bot.game2 = true;
         if (bot.lingering) {
           // Like the app's final screens (EXP-184): join the next game at once, the way "Play again" does: re-join on
           // the same socket (lobby hand-over); its game-state snapshot (ready phase) makes us send im-ready
@@ -782,23 +807,33 @@ function runRoom(roomIdx, fixedCode) {
       // game-over, received or learnt from a rejoin snapshot
       const onGameOver = () => {
         bot.inGame = false;
-        if (PLAY_AGAIN_LINGER_S && !bot.gone) {
+        if (PLAYS_NEXT_GAME && !bot.gone) {
           if (bot.game2) {
-            // The second game (started while someone lingered) ends the run
+            // The second game (started while someone lingered, or after the quitter was gone) ends the run
             bot.game2Over = true;
             if (bots.filter((b) => !b.gone).every((b) => b.game2Over)) setTimeout(() => done("game-over"), 500);
             return;
           }
           if (bot.playAgainDone !== undefined) return;
+          if (QUIT_AFTER_GAME_OVER && i === QUITTER) { quitAfterGameOver(); return; }
           bot.playAgainDone = false;
           bot.gameOverAt = now();
           // The socket stays open on the final screens; Play again re-joins on it (the lingering bot after S seconds)
-          bot.lingers = i === LINGER_BOT;
+          bot.lingers = PLAY_AGAIN_LINGER_S > 0 && i === LINGER_BOT;
           bot.lingering = bot.lingers;
           bot.lingerTimer = setTimeout(() => { bot.lingering = false; bot.playAgainPending = true; join(); }, bot.lingers ? PLAY_AGAIN_LINGER_S * 1000 : 300);
           return;
         }
         if (++finished === bots.filter((b) => !b.gone).length) done("game-over");
+      };
+      // --quit-after-game-over: like the app killed on the final screens, the socket just closes (no leave-room) and
+      // never comes back; the next game's start must drop this player
+      const quitAfterGameOver = () => {
+        bot.gone = true;
+        rec("quit-after-game-over", bot.round);
+        socket.disconnect(); // manual disconnect: socket.io-client doesn't reconnect
+        nextGame.quitAt = now();
+        startNextGameOnceGone();
       };
       return bot;
     };
@@ -818,6 +853,18 @@ function runRoom(roomIdx, fixedCode) {
       if (LOBBY_KICK && WAIT_PLAYERS - 1 < 2) setTimeout(() => done("lobby-kick"), KICK_SETTLE_MS);
       else maybeStart();
     };
+    // --quit-after-game-over (EXP-151): once the quitter is gone and every other bot is back in the lobby, the host
+    // starts the next game when the quitter has been disconnected longer than the server's grace
+    const nextGame = { quitAt: null, scheduled: false };
+    const startNextGameOnceGone = () => {
+      const live = bots.filter((b) => !b.gone);
+      if (nextGame.scheduled || nextGame.quitAt === null || !live.every((b) => b.playAgainDone)) return;
+      nextGame.scheduled = true;
+      const host = live.find((b) => b.isHost);
+      const wait = nextGame.quitAt + DISCONNECT_GRACE_MS + GONE_START_MARGIN_MS - now();
+      setTimeout(() => host?.socket.emit("start-game", { gameCode: code }), Math.max(0, wait));
+    };
+
     // Every bot of this process left (--leave-round with real devices playing on) or was kicked (by another bots
     // process' host): nothing more for them to do
     const endIfAllOut = () => { if (bots.every((b) => b.gone)) done("all-out"); };

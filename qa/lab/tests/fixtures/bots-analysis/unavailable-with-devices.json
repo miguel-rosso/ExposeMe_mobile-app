@@ -62,11 +62,7 @@
  "rounds_played": 3,
  "rounds_skipped": 4,
  "planted_sent": 0,
- "planted_rounds": [
-  1,
-  2,
-  3
- ],
+ "planted_rounds": [],
  "skipped_unavailable": 2,
  "unavailable_skip_ms": {
   "p50": "0.6",

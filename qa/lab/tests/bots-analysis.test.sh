@@ -180,5 +180,92 @@ owner_drop_case "3 bots, owner away 6 s: its round is skipped instead" "round 1 
 owner_drop_case "3 bots, owner away 6 s: the game ends without that round" "game over after 0 of 1 rounds" 3 6 lost 3000
 owner_drop_case "3 bots, owner back within the window but replaced" "bot1: never sent its round 1 photo (attempt 1) after returning" 3 1 repicked 3000
 owner_drop_case "3 bots, owner away about the window: either outcome" "" 3 3 repicked 3000
+
+# ── planted_rounds: only the bots' own plants (EXP-163) ──
+# A 3-round game of bot1, bot2 and the device ios-a: round 1 is bot1's upload (your-turn), round 2 the device's (its
+# your-turn never reaches the bots), round 3 bot2's planted photo (no your-turn). Prints planted_rounds as JSON.
+planted_rounds() { # mutation: none | bot2-asked (bot2 planted, but round 3 was a normal turn of bot2) | no-plant
+  node --input-type=module -e '
+    const { analyseRoom } = await import(process.argv[1]);
+    const mutation = process.argv[2];
+    const players = ["bot1", "bot2"];
+    const events = [];
+    let t = 0;
+    const all = (ev, round, payload) => players.forEach((bot) => events.push({ bot, ev, round, t: (t += 10), payload }));
+    if (mutation !== "no-plant") events.push({ bot: "bot2", ev: "planted", round: 0, t: (t += 10) });
+    all("game-started", 0, { rounds: 3, players: [...players, "ios-a"] });
+    const owners = ["bot1", "ios-a", "bot2"];
+    owners.forEach((owner, i) => {
+      const round = i + 1;
+      all("waiting-photo", round, { round, duration: 15000 });
+      if (owner === "bot1" || (owner === "bot2" && mutation === "bot2-asked")) events.push({ bot: owner, ev: "your-turn", round, t: (t += 10), payload: { attempt: round } });
+      all("round-start", round, { photo: `/temp/p${round}.jpg`, duration: 7700 });
+      all("round-reveal", round, { correctAnswer: owner });
+    });
+    const r = { code: "QAROOM", reason: "game-over", players, errors: [], uploads: [], rateLimited: 0, events };
+    console.log(JSON.stringify(analyseRoom(r, { host: true, rounds: 3, playAgainLingerS: 0, lingerBot: 0, startNextGameS: 0 }).planted_rounds));
+  ' "$ANALYSIS" "$1"
+}
+got="$(planted_rounds none)"
+[ "$got" = "[3]" ] && ok "planted_rounds: the planter bot's round only, not the device's" || ko "planted_rounds with a device" "got $got, want [3]"
+got="$(planted_rounds bot2-asked)"
+[ "$got" = "[]" ] && ok "planted_rounds: a planter's normal turn is not planted" || ko "planted_rounds planter asked" "got $got, want []"
+got="$(planted_rounds no-plant)"
+[ "$got" = "[]" ] && ok "planted_rounds: no bot planted -> none" || ko "planted_rounds no plant" "got $got, want []"
+
+# ── --quit-after-game-over: the next game drops the bot that quit at game-over (EXP-151) ──
+# bot1 (host), bot2, bot3 play a 1-round game; at game-over bot3 quits, the others play again and, once bot3 has been
+# gone for the grace, a 1-round second game starts without it. Prints the consistency errors, one per line.
+next_game() { # mutation: none | no-player-left | left-after-start | ghost-in-start | ghost-in-scores | ghost-answer |
+              #           ghost-guessed | ghost-gets-events | no-second-game-over | no-quit
+  node --input-type=module -e '
+    const { analyseRoom } = await import(process.argv[1]);
+    const mutation = process.argv[2];
+    const players = ["bot1", "bot2", "bot3"];
+    const stayers = ["bot1", "bot2"];
+    const events = [];
+    let t = 0;
+    const all = (names, ev, round, payload) => names.forEach((bot) => events.push({ bot, ev, round, t: (t += 10), payload }));
+    const scores = (names) => names.map((u) => ({ username: u, points: 0, lastGuess: "", lastAnswerCorrect: false }));
+    const playRound = (names, prefix, answer) => {
+      all(names, `${prefix}waiting-photo`, 1, { round: 1, duration: 15000 });
+      all(names, `${prefix}round-start`, 1, { photo: "/temp/p1.jpg", duration: 7700 });
+      all(names, `${prefix}round-reveal`, 1, { correctAnswer: answer });
+      all(names, `${prefix}round-scores`, 1, { round: 1, scores: scores(names) });
+    };
+    all(players, "game-started", 0, { rounds: 1, players });
+    playRound(players, "", "bot1");
+    all(players, "game-over", 1, { finalScore: scores(players) });
+    if (mutation !== "no-quit") all(["bot3"], "quit-after-game-over", 1);
+    all(stayers, "play-again-joined", 0, { sameToken: true, isHost: false, started: false, gone: [] });
+    all(stayers, "player-connection", 0, { username: "bot3", connected: false });
+    if (!["no-player-left", "left-after-start"].includes(mutation)) all(stayers, "player-left", 1, { username: "bot3" });
+    all(stayers, "g2-game-started", 0, { rounds: 1, players: mutation === "ghost-in-start" ? players : stayers });
+    if (mutation === "left-after-start") all(stayers, "player-left", 1, { username: "bot3" });
+    if (mutation === "ghost-gets-events") all(["bot3"], "g2-game-started", 0, { rounds: 1, players });
+    if (mutation === "ghost-guessed") all(["bot1"], "g2-guess-sent", 1, { guess: "bot3" });
+    playRound(stayers, "g2-", mutation === "ghost-answer" ? "bot3" : "bot2");
+    if (mutation === "ghost-in-scores") all(stayers, "g2-round-scores", 1, { round: 1, scores: scores(players) });
+    if (mutation !== "no-second-game-over") all(stayers, "g2-game-over", 1, { finalScore: scores(stayers) });
+    const r = { code: "QAROOM", reason: "game-over", players, errors: [], uploads: [], rateLimited: 0, events };
+    const opts = { host: true, rounds: 1, playAgainLingerS: 0, lingerBot: 0, startNextGameS: 0, quitAfterGameOver: true };
+    console.log(analyseRoom(r, opts).consistency_errors.join("\n"));
+  ' "$ANALYSIS" "$1"
+}
+next_game_case() { # label, mutation, expected error text ("" = none)
+  local got; got="$(next_game "$2")"
+  if [ -z "$3" ]; then [ -z "$got" ] && ok "$1" || ko "$1" "$got"
+  else [[ "$got" == *"$3"* ]] && ok "$1" || ko "$1" "expected [$3] in [$got]"; fi
+}
+next_game_case "quit at game-over: player-left before the next game-started, which has no ghost" none ""
+next_game_case "quit: a stayer never told (player-left)" no-player-left "bot1: never got player-left for bot3 (gone since game-over) before the next game"
+next_game_case "quit: player-left only after game-started" left-after-start "bot2: player-left for bot3 came after game-started"
+next_game_case "quit: the ghost is in the next game-started" ghost-in-start "bot1: bot3 quit after game-over but is in the next game-started"
+next_game_case "quit: the ghost is in a next-game round-scores" ghost-in-scores "bot2: bot3 is in a next-game round-scores"
+next_game_case "quit: a next-game answer is the ghost" ghost-answer "bot1: a next-game round's answer is bot3"
+next_game_case "quit: a stayer guessed the ghost" ghost-guessed "bot1: guessed bot3 in the next game"
+next_game_case "quit: the ghost still gets game events" ghost-gets-events "bot3: got g2-game-started after quitting"
+next_game_case "quit: the next game never ends" no-second-game-over "bot2: the next game never ended"
+next_game_case "quit: nobody quit" no-quit "nobody quit after game-over"
 echo "# $pass passed, $fail failed"
 [ "$fail" = 0 ]

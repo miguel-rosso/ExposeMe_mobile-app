@@ -9,7 +9,9 @@ import { percentile } from "./stats.mjs";
 const UNAVAILABLE_SKIP_MAX_MS = 2_000; // photo-unavailable → round-skipped must be immediate (the wait is 15 s)
 // A second game whose players all sent im-ready starts its first round ~1 s after game-started; the ready timeout is 10 s
 const NEXT_GAME_READY_MAX_MS = 8_000;
-const DISCONNECT_GRACE_MS = 15_000; // server: a player disconnected this long is gone (lobby shows it, host hands over)
+// Server/managers/RoomManager.ts DISCONNECT_GRACE: a player disconnected this long is gone (lobby shows it, host hands
+// over, the next start-game drops it); bots.mjs uses it too, bots-cli.test.sh checks the copy
+export const DISCONNECT_GRACE_MS = 15_000;
 const NEW_HOST_EARLY_SLACK_MS = 1_000; // a new-host this much before the grace runs out is still on time
 // Pause limits, as in Server/managers/GameEngine.ts (GAME_FLOW.md "Pause limit"; bots-cli.test.sh checks the copies)
 const MAX_PAUSES = 3; // counted pauses per game
@@ -33,9 +35,10 @@ const OFFLINE_EVENTS = ["chaos-disconnect", "planned-disconnect"];
 const GAME_EVENTS = ["game-started", "waiting-photo", "your-turn", "round-start", "round-reveal", "round-scores", "game-state"];
 
 /**
- * @typedef {{ host: boolean, rounds: number, playAgainLingerS: number, lingerBot: number, startNextGameS: number }} AnalysisOpts
+ * @typedef {{ host: boolean, rounds: number, playAgainLingerS: number, lingerBot: number, startNextGameS: number,
+ *   quitAfterGameOver?: boolean }} AnalysisOpts
  *   the run's options: --host, --rounds, --play-again-linger, --play-again-linger-bot (0-based, -1 = a device lingers),
- *   --start-next-game
+ *   --start-next-game, --quit-after-game-over
  */
 
 // ── Helpers ──
@@ -215,9 +218,16 @@ function checkWaitBeforeRoundStart(r, ctx) {
   return out;
 }
 
-/** Planted rounds: the revealed owner never got your-turn for that round. */
-const plantedRounds = (r, ctx) => [...ctx.answerOf].filter(([round, answer]) =>
-  !r.events.some((e) => e.ev === "your-turn" && e.bot === answer && e.round === round)).map(([round]) => round);
+/**
+ * Planted rounds (EXP-163): the server never tells which rounds were planted (GAME_FLOW.md "Planted rounds look like
+ * any other round"), so only the bots' own plants are known: a round whose revealed owner is a bot that planted and
+ * never got your-turn for it. A device's round (its your-turn never reaches the bots) is not counted.
+ */
+function plantedRounds(r, ctx) {
+  const planters = new Set(r.events.filter((e) => e.ev === "planted").map((e) => e.bot));
+  return [...ctx.answerOf].filter(([round, answer]) => planters.has(answer)
+    && !r.events.some((e) => e.ev === "your-turn" && e.bot === answer && e.round === round)).map(([round]) => round);
+}
 
 /** Payload privacy: no socket ids, other players' tokens or planted photo URLs; guesses hidden until round-scores. */
 const checkPayloadLeaks = (r) => r.events.filter((x) => x.ev === "payload-leak").map((e) => `${e.bot}: ${e.payload.leak}`);
@@ -441,6 +451,36 @@ const checkPlayAgain = (r, opts) => (opts.playAgainLingerS
   ? [...checkPlayAgainJoins(r, opts), ...checkSecondGame(r, opts), ...checkLingeringBot(r, opts)] : []);
 
 /**
+ * --quit-after-game-over (EXP-151): a bot closed its socket at game-over and never came back, and the others played
+ * again once it was gone. The next game drops it before it starts (GAME_FLOW.md "Game start drops gone players"):
+ * every other bot gets player-left for it before game-started, and it is in no second-game player list, score table or
+ * answer; the quitter itself gets nothing after quitting, and the second game is played to its game-over.
+ */
+function checkGoneAtNextGame(r, opts) {
+  if (!opts.quitAfterGameOver) return [];
+  const quit = r.events.find((e) => e.ev === "quit-after-game-over");
+  if (!quit) return ["nobody quit after game-over"];
+  const ghost = quit.bot;
+  const out = [];
+  for (const n of r.players.filter((p) => p !== ghost)) {
+    const got = (ev, match = () => true) => r.events.filter((e) => e.bot === n && e.ev === ev && e.t > quit.t && match(e));
+    const [start] = got("g2-game-started");
+    const [left] = got("player-left", (e) => e.payload?.username === ghost);
+    if (!start) { out.push(`${n}: the next game never started after ${ghost} quit`); continue; }
+    if (!left) out.push(`${n}: never got player-left for ${ghost} (gone since game-over) before the next game`);
+    else if (left.t > start.t) out.push(`${n}: player-left for ${ghost} came after game-started`);
+    if (start.payload?.players?.includes(ghost)) out.push(`${n}: ${ghost} quit after game-over but is in the next game-started`);
+    if (got("g2-round-scores").some((e) => e.payload?.scores?.some((s) => s.username === ghost))) out.push(`${n}: ${ghost} is in a next-game round-scores`);
+    if (got("g2-round-reveal").some((e) => e.payload?.correctAnswer === ghost)) out.push(`${n}: a next-game round's answer is ${ghost}`);
+    if (got("g2-guess-sent").some((e) => e.payload?.guess === ghost)) out.push(`${n}: guessed ${ghost} in the next game`);
+    if (!got("g2-game-over").length) out.push(`${n}: the next game never ended`);
+  }
+  const after = r.events.filter((e) => e.bot === ghost && e.t > quit.t).map((e) => e.ev);
+  if (after.length) out.push(`${ghost}: got ${[...new Set(after)].join(", ")} after quitting`);
+  return out;
+}
+
+/**
  * Players out of the room (EXP-139): a bot that left (--leave-round, "left-room") or a player the host removed
  * (--kick, "kick-sent"). Every other bot still in the room (not offline meanwhile) is told (player-left /
  * player-removed); from then on the player is in no player list, score table or answer, and nobody guesses it; a
@@ -535,6 +575,7 @@ export function analyseRoom(r, opts) {
     ...pauses.errors,
     ...checkLobbyHostDrop(r),
     ...checkPlayAgain(r, opts),
+    ...checkGoneAtNextGame(r, opts),
     ...checkRoomExits(r, ctx),
     ...checkRoundNumbering(ctx),
   ];

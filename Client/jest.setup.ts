@@ -17,3 +17,9 @@ const nodeClearImmediate = globalThis.clearImmediate;
 globalThis.clearImmediate = ((handle?: NodeJS.Immediate) => {
   if (handle instanceof NodeImmediate) nodeClearImmediate(handle);
 }) as typeof clearImmediate;
+
+// ── Safe area ──
+// Screens read the safe-area insets (notch, home indicator…), which the app's root provider supplies at runtime.
+// The library's own mock gives zero insets without a provider (a device without notch); a test can still wrap a
+// screen in its SafeAreaProvider with initialMetrics to set other insets.
+jest.mock("react-native-safe-area-context", () => require("react-native-safe-area-context/jest/mock").default);

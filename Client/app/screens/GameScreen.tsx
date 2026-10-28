@@ -3,6 +3,7 @@ import {
   View, Text, TouchableOpacity, StatusBar, BackHandler, LayoutChangeEvent, useWindowDimensions,
 } from "react-native";
 import { useFocusEffect } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import tw from "twrnc";
 import { useGameContext } from "../providers/GameContext";
 import {
@@ -47,12 +48,16 @@ import { answerOptionsLayout } from "../utils/answerOptionsLayout";
 import { usePlayerColors } from "../hooks/usePlayerColors";
 import { useReduceMotion } from "../hooks/useReduceMotion";
 import { attachHandlers, SocketHandlers } from "../utils/socketHandlers";
+import { safeBottomRow, safeTopRow } from "../utils/safeAreaRows";
+import { ANSWERS_BOTTOM, HOLD_BUTTON_BOTTOM } from "../utils/gameRows";
 
 const { SERVER_URL } = getEnvVars();
 const PICK_SEND_INTERVAL = 200; // ms between submit-answer sends (server: 10 per socket, refilled 5/s)
-// Round progress bar strip at the top of the photo (bar plus its padding); emoji reactions start right below it
-const PROGRESS_BAR_AREA = { top: 60, height: 40 } as const;
-const REACTION_LANE_TOP = PROGRESS_BAR_AREA.top + PROGRESS_BAR_AREA.height;
+// Rows over the photo (see safeAreaRows; the bottom ones are in gameRows)
+// Round progress bar strip at the top of the photo (bar plus its padding, so the bar itself clears a cutout by
+// `margin` + p-4); emoji reactions start right below it
+const PROGRESS_BAR_AREA = { top: 60, height: 40, margin: 4 } as const;
+const RECONNECTING_BANNER = { top: 8, margin: 8 } as const;
 const NO_REACTIONS: EmojiReactionData[] = [];
 const NO_SCORES: ScoreRound[] = [];
 
@@ -69,6 +74,8 @@ const GameScreen = () => {
   // Optional call: screen tests mock the photo context with only what their flow needs.
   useEffect(() => { resetUsedPhotos?.(); }, [resetUsedPhotos]);
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const progressBarRow = safeTopRow(insets, PROGRESS_BAR_AREA.top, PROGRESS_BAR_AREA.margin);
   // Photo access revoked / no photos left (re-checked on foreground): blocking overlay, the game screen stays
   const galleryGuard = useGalleryAccessGuard({ watch: true });
   // One screenshot listener for the whole game (EmojisButton remounts every round)
@@ -486,7 +493,11 @@ const GameScreen = () => {
 
       {/* Subtle indicator while socket.io reconnects; the game screen stays */}
       {!connected && !finalScore && (
-        <View testID={TEST_IDS.reconnectingBanner} style={tw`absolute top-2 left-0 right-0 z-100 items-center`} pointerEvents="none">
+        <View
+          testID={TEST_IDS.reconnectingBanner}
+          style={[tw`absolute z-100 items-center`, safeTopRow(insets, RECONNECTING_BANNER.top, RECONNECTING_BANNER.margin)]}
+          pointerEvents="none"
+        >
           <Text style={tw`text-white text-sm bg-gray-800 bg-opacity-80 px-3 py-1 rounded-full`}>{t.reconnecting}</Text>
         </View>
       )}
@@ -521,7 +532,7 @@ const GameScreen = () => {
             {/* Emoji reactions: own lane between the progress bar and the answer buttons */}
             <EmojiReactionLane
               reactions={emojiReactions}
-              top={REACTION_LANE_TOP}
+              top={progressBarRow.top + PROGRESS_BAR_AREA.height}
               answersTop={answersTop}
               screenshotLabel={t.tookScreenshot}
               onReactionEnd={removeEmoji}
@@ -532,7 +543,14 @@ const GameScreen = () => {
               <View style={tw`z-8 absolute w-full h-full`}>
                 {/* Progress bar during answering or scores */}
                 {(phase === "answering" || phase === "scores") && phaseDuration > 0 && pauseEndsAt === null && (
-                  <View testID={TEST_IDS.roundProgress} style={[tw`absolute left-0 right-0 p-4 items-center`, PROGRESS_BAR_AREA]}>
+                  <View
+                    testID={TEST_IDS.roundProgress}
+                    style={[
+                      tw`absolute p-4 items-center`,
+                      progressBarRow,
+                      { height: PROGRESS_BAR_AREA.height },
+                    ]}
+                  >
                     <View style={tw`w-full max-w-[500px]`}>
                       <ProgressBar
                         key={phaseKey}
@@ -547,7 +565,7 @@ const GameScreen = () => {
                 {/* Player selection buttons: everyone's, the photo owner's too (they aren't told it's theirs) */}
                 {showAnswers && (
                   <View
-                    style={tw`absolute z-40 bottom-22 left-0 right-0 p-2 flex-row justify-center`}
+                    style={[tw`absolute z-40 p-2 flex-row justify-center`, safeBottomRow(insets, ANSWERS_BOTTOM)]}
                     onLayout={onAnswersLayout}
                   >
                     <AnswerOptionsGrid players={playersProvider} layout={answersLayout} renderOption={renderAnswerOption} />
@@ -568,7 +586,12 @@ const GameScreen = () => {
 
             {/* Hold button — mounted during scores for photo owner, invisible while pressing */}
             {holdButtonMounted && (
-              <View style={tw`absolute bottom-24 left-0 right-0 z-60 items-center ${pressing ? "opacity-0" : ""}`}>
+              <View
+                style={[
+                  tw`absolute z-60 items-center ${pressing ? "opacity-0" : ""}`,
+                  safeBottomRow(insets, HOLD_BUTTON_BOTTOM),
+                ]}
+              >
                 <TouchableOpacity
                   testID={TEST_IDS.holdButton}
                   style={tw`bg-blue-600 p-4 rounded-xl w-[90%] max-w-[500px] border-2 border-blue-400 shadow-lg items-center`}

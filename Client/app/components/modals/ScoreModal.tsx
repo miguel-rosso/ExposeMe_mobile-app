@@ -1,5 +1,6 @@
 import React, { memo } from "react";
 import { View, Text, ScrollView } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import tw from "twrnc";
 import { ScoreRound } from "../../models/interfaces";
 import Icon from "react-native-vector-icons/FontAwesome";
@@ -8,9 +9,19 @@ import { TEST_IDS, scoreGuessId, scoreRankId } from "@/app/utils/testIds";
 import { rankScores } from "@/app/utils/ranking";
 import { isRevealedOwner } from "@/app/utils/roundState";
 import PhotoOwnerCard from "@/app/components/PhotoOwnerCard";
+import { topClearOfInset } from "@/app/utils/safeAreaRows";
+import { HOLD_BUTTON_BOTTOM, HOLD_BUTTON_HEIGHT } from "@/app/utils/gameRows";
 
-// Space kept free under the list for the photo owner's hold button (GameScreen: bottom-24 + ~64 dp button)
-export const HOLD_BUTTON_CLEARANCE = 176;
+// Layout, in dp (see safeAreaRows)
+// Round title from the top edge (pushed down only by a cutout taller than that, to TITLE_INSET_MARGIN below it),
+// and the space kept for it above the list
+const TITLE_TOP = 40;
+const TITLE_INSET_MARGIN = 8;
+const TITLE_SPACE = 40;
+// Space kept free under the list, above the bottom inset: the usual margin, or the photo owner's hold button plus a gap
+const LIST_BOTTOM_SPACE = 64;
+const HOLD_BUTTON_GAP = 16;
+export const HOLD_BUTTON_CLEARANCE = HOLD_BUTTON_BOTTOM + HOLD_BUTTON_HEIGHT + HOLD_BUTTON_GAP;
 // From this many players on the rows get tighter so more fit before scrolling
 const COMPACT_FROM = 7;
 // The rows sit on a near-opaque dark panel: the photo (a big caption, busy detail) doesn't show between them (EXP-271)
@@ -36,11 +47,13 @@ const ScoreModal: React.FC<ScoreModalProps> = ({
   reserveHoldButton = false,
 }) => {
   const { t } = useI18n();
+  const insets = useSafeAreaInsets();
 
   if (!visible) {
     return null;
   }
 
+  const titleTop = topClearOfInset(insets, TITLE_TOP, TITLE_INSET_MARGIN);
   const ranked = rankScores(scoreRound);
   const compact = ranked.length >= COMPACT_FROM;
 
@@ -48,11 +61,16 @@ const ScoreModal: React.FC<ScoreModalProps> = ({
     <View
       testID={TEST_IDS.scoreModal}
       style={[
-        tw`absolute inset-0 justify-center items-center bg-black bg-opacity-50 pt-20 pb-16 z-50`,
-        reserveHoldButton && { paddingBottom: HOLD_BUTTON_CLEARANCE },
+        tw`absolute inset-0 justify-center items-center bg-black bg-opacity-50 z-50`,
+        {
+          paddingTop: titleTop + TITLE_SPACE,
+          paddingBottom: insets.bottom + (reserveHoldButton ? HOLD_BUTTON_CLEARANCE : LIST_BOTTOM_SPACE),
+          paddingLeft: insets.left,
+          paddingRight: insets.right,
+        },
       ]}
     >
-      <Text testID={TEST_IDS.scoreRoundTitle} style={tw`text-xl text-white absolute top-10 font-bold mb-4`}>
+      <Text testID={TEST_IDS.scoreRoundTitle} style={[tw`text-xl text-white absolute font-bold mb-4`, { top: titleTop }]}>
         {t.roundOf.replace("{round}", String(rounds.round)).replace("{total}", String(rounds.roundsOfGame))}
       </Text>
 

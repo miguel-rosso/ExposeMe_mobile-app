@@ -5,9 +5,13 @@ import { memo, useRef } from "react";
 import { REACTION_EMOJIS } from "../../utils/reactions";
 import { emojiButtonId } from "../../utils/testIds";
 import { emitWhileConnected } from "../../utils/socketEmit";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { safeBottomRow } from "../../utils/safeAreaRows";
+import { EMOJI_ROW_BOTTOM } from "../../utils/gameRows";
 
 function EmojisButton() {
   const { socket } = useGameContext();
+  const insets = useSafeAreaInsets();
   const lastSentRef = useRef(0);
   const COOLDOWN_TIME = 250; // 250ms cooldown
 
@@ -20,7 +24,7 @@ function EmojisButton() {
   };
 
   return (
-    <View style={tw`absolute bottom-12 left-0 right-0 z-90`}>
+    <View style={[tw`absolute z-90`, safeBottomRow(insets, EMOJI_ROW_BOTTOM)]}>
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}

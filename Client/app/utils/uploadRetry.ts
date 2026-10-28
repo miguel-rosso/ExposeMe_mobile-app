@@ -12,10 +12,27 @@ export interface UploadRetryOptions {
 }
 
 /**
- * The turn photo must arrive within the server's 15 s photo wait (PHOTO_WAIT_TIMEOUT): at most 8 s of waits (1 s, 2 s,
- * 3 s, or a busy server's 2 s Retry-After) leaves the rest to pick the photo and run the uploads.
+ * Share of the photo wait the server gave (`waiting-photo`'s duration, or what is left of it after a resume or rejoin)
+ * that the turn photo's retries may spend waiting: the rest is for picking the photo and running the uploads.
  */
-export const TURN_UPLOAD_RETRY: UploadRetryOptions = { attempts: 4, backoffMs: 1000, maxWaitMs: 5000, maxTotalWaitMs: 8000 };
+const TURN_RETRY_SHARE_OF_PHOTO_WAIT = 0.5;
+
+/**
+ * The turn photo must arrive within the server's 15 s photo wait (PHOTO_WAIT_TIMEOUT): at most half of it in waits
+ * (1 s, 2 s, 3 s, or a busy server's 2 s Retry-After). The most any photo wait gets (see turnUploadRetry).
+ */
+export const TURN_UPLOAD_RETRY: UploadRetryOptions = { attempts: 4, backoffMs: 1000, maxWaitMs: 5000, maxTotalWaitMs: 7500 };
+
+/**
+ * The turn photo's retries for a photo wait of `photoWaitMs` (the `duration` the server gave for it): their waits take
+ * at most TURN_RETRY_SHARE_OF_PHOTO_WAIT of it, so a photo that would come too late is reported unavailable instead
+ * of retried. An unknown wait (0) keeps TURN_UPLOAD_RETRY.
+ */
+export const turnUploadRetry = (photoWaitMs: number): UploadRetryOptions => {
+  if (!(photoWaitMs > 0)) return TURN_UPLOAD_RETRY;
+  const shareMs = Math.round(photoWaitMs * TURN_RETRY_SHARE_OF_PHOTO_WAIT);
+  return { ...TURN_UPLOAD_RETRY, maxTotalWaitMs: Math.min(TURN_UPLOAD_RETRY.maxTotalWaitMs, shareMs) };
+};
 
 /** The planted photo is sent from the lobby, with no deadline: more patience, but "planted" only shows once it's in. */
 export const PLANT_UPLOAD_RETRY: UploadRetryOptions = { attempts: 6, backoffMs: 1000, maxWaitMs: 5000, maxTotalWaitMs: 20_000 };
@@ -33,6 +50,14 @@ export class UploadHttpError extends Error {
   constructor(readonly status: number, readonly retryAfterMs: number | null) {
     super(`Upload failed: ${status}`);
     this.name = "UploadHttpError";
+  }
+}
+
+/** The photo could not be converted for upload (unreadable or unsupported file, no space left): never retried. */
+export class PhotoConversionError extends Error {
+  constructor(cause: unknown) {
+    super(`Photo conversion failed: ${cause instanceof Error ? cause.message : String(cause)}`);
+    this.name = "PhotoConversionError";
   }
 }
 
@@ -54,9 +79,12 @@ export const parseRetryAfterMs = (header: string | null): number | null => {
   return RETRY_AFTER_TOO_LONG_RE.test(header) ? Infinity : null;
 };
 
-/** Only network errors (no response) and the RETRYABLE_STATUSES are worth another attempt. */
+/**
+ * Only network errors (no response) and the RETRYABLE_STATUSES are worth another attempt: a photo that can't be
+ * converted, or a refusal like 400/403/413/415, fails the same way again.
+ */
 const isRetryable = (error: unknown): boolean => {
-  if (error instanceof UploadAbandonedError) return false;
+  if (error instanceof UploadAbandonedError || error instanceof PhotoConversionError) return false;
   return !(error instanceof UploadHttpError) || RETRYABLE_STATUSES.includes(error.status);
 };
 

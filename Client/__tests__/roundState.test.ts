@@ -1,6 +1,6 @@
 import { GameStateSnapshot } from "../app/models/interfaces";
 import {
-  gameStateFollowUps, initialRoundView, isRevealedOwner, phaseElapsed, roundReducer, RoundView,
+  gameStateFollowUps, initialRoundView, isRevealedOwner, phaseElapsed, RoundAction, roundReducer, RoundView,
 } from "../app/utils/roundState";
 
 // Ported from the applyRoundStart / applyWaitingPhoto / applyGameState setter tests (EXP-215): same expectations,
@@ -213,10 +213,20 @@ describe("reveal, scores, hold and pause", () => {
     const held = roundReducer({ ...answering, phase: "scores", pressing: true }, { type: "hold-start" });
     expect(held.gameHeld).toBe(true);
     expect(roundReducer(held, { type: "hold-resume", data: { phase: "scores", duration: 2_000, phaseTotal: 5_000 } })).toMatchObject({
-      phase: "scores", phaseDuration: 2_000, phaseTotal: 5_000, phaseKey: 8, gameHeld: false, pressing: false,
+      phase: "scores", phaseDuration: 2_000, phaseTotal: 5_000, phaseKey: 8, gameHeld: false,
     });
-    expect(roundReducer(held, { type: "hold-end" })).toMatchObject({ gameHeld: false, pressing: false });
+    expect(roundReducer(held, { type: "hold-end" })).toMatchObject({ gameHeld: false });
     expect(roundReducer(held, { type: "game-paused" })).toMatchObject({ gameHeld: false, pressing: false });
+  });
+
+  // The end of a hold may answer a release of mine that arrives after I pressed again: my finger stays down
+  it("hold-resume and hold-end leave my press alone (its release must still go out)", () => {
+    const pressedAgain = view({ ...answering, phase: "scores", gameHeld: true, pressing: true });
+    const answered: RoundAction[] = [
+      { type: "hold-resume", data: { phase: "scores", duration: 2_000, phaseTotal: 5_000 } },
+      { type: "hold-end" },
+    ];
+    expect(answered.reduce(roundReducer, pressedAgain).pressing).toBe(true);
   });
 
   it("resuming a pause taken after scores waits for the next round's photo", () => {

@@ -184,13 +184,78 @@ describe("Round scoreboard (EXP-205)", () => {
   };
 
   it("keeps its title and list clear of the notch and the home indicator", () => {
-    expect(layoutOf(NO_INSETS, false)).toMatchObject({ modal: { paddingTop: 80, paddingBottom: 64 }, title: { top: 40 } });
-    // The title moves just below the island and the list keeps its space under the title
+    // The list starts below the progress bar strip (60 + 40, EXP-158)
+    expect(layoutOf(NO_INSETS, false)).toMatchObject({ modal: { paddingTop: 100, paddingBottom: 64 }, title: { top: 40 } });
+    // Just below the island the title would cross the progress bar (bar strip at 59 + 4): it goes right below the
+    // strip, and the list keeps its space under the title
     expect(layoutOf(ISLAND_INSETS, false)).toMatchObject({
-      modal: { paddingTop: 59 + 8 + 40, paddingBottom: 64 + 34 }, title: { top: 59 + 8 },
+      modal: { paddingTop: 63 + 40 + 40, paddingBottom: 64 + 34 }, title: { top: 63 + 40 },
     });
-    expect(layoutOf(STATUS_BAR_INSETS, false)).toMatchObject({ modal: { paddingTop: 80 }, title: { top: 40 } });
+    expect(layoutOf(STATUS_BAR_INSETS, false)).toMatchObject({ modal: { paddingTop: 100 }, title: { top: 40 } });
     // The owner's hold button moved up by the bottom inset: the space kept for it too
     expect(layoutOf(ISLAND_INSETS, true).modal.paddingBottom).toBe(HOLD_BUTTON_CLEARANCE + 34);
   });
 });
+
+// ── Photo owner card vs. progress bar (EXP-158) ──
+// The scoreboard centres the "It was X's photo" card and the list in the space between its top and bottom padding; a
+// long list (12 players, the hold button's space kept) shrinks and scrolls, so the card then sits right at the top
+// padding, and never above it. So the card can't reach the progress bar as long as that padding starts below the bar's
+// strip, measured here from the rows the game screen actually draws in scores.
+describe("Round scoreboard under the progress bar (EXP-158)", () => {
+  beforeEach(() => { jest.useFakeTimers(); mockSocket.reset(); });
+  afterEach(() => { jest.clearAllTimers(); jest.useRealTimers(); });
+
+  const SHORT_CUTOUT_INSETS = { top: 35, bottom: 0, left: 0, right: 0 };
+  // The shortest cutout that pushes the title into the bar (40 dp + 8 + its 28 dp line passes the bar at 60 + 16)
+  const NOTCH_INSETS = { top: 42, bottom: 0, left: 0, right: 0 };
+  // The title's one text-xl line; the bar inside its strip: the strip's p-4 padding, then the bar's h-2
+  const TITLE_LINE = 28;
+  const BAR_PADDING = 16;
+  const BAR_HEIGHT = 8;
+
+  it.each([
+    ["no insets", NO_INSETS],
+    ["a plain status bar", STATUS_BAR_INSETS],
+    ["a short cutout", SHORT_CUTOUT_INSETS],
+    ["a notch", NOTCH_INSETS],
+    ["a Dynamic Island", ISLAND_INSETS],
+    ["landscape", LANDSCAPE_INSETS],
+  ])("with %s, neither the title nor the card's highest place reach the bar, with the hold button's space kept", async (_name, insets) => {
+    const r = await playRoundToScores(insets);
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "bob", duration: 3_000 }));
+    act(() => mockSocket.fire("round-scores", { scores: [], round: 1, totalRounds: 10, duration: 5_000 }));
+    expect(byId(r.root, TEST_IDS.holdButton)).toBeTruthy();
+    const strip = flat(byId(r.root, TEST_IDS.roundProgress)) as Box & { height: number };
+    const modal = flat(byId(r.root, TEST_IDS.scoreModal));
+    const title = flat(byId(r.root, TEST_IDS.scoreRoundTitle));
+    expect(modal.paddingBottom).toBe(insets.bottom + HOLD_BUTTON_CLEARANCE);
+    expect(modal.paddingTop).toBeGreaterThanOrEqual(strip.top! + strip.height);
+    // The title band [top, top + 28] never meets the bar [strip top + 16, strip top + 24]
+    const bar = { top: strip.top! + BAR_PADDING, bottom: strip.top! + BAR_PADDING + BAR_HEIGHT };
+    const titleBand = { top: title.top!, bottom: title.top! + TITLE_LINE };
+    expect(titleBand.bottom <= bar.top || titleBand.top >= bar.bottom).toBe(true);
+    // And the list starts below the title
+    expect(modal.paddingTop).toBeGreaterThanOrEqual(titleBand.bottom);
+    act(() => r.unmount());
+  });
+
+  it("without insets, or with insets that keep it off the bar, the title stays where it was", () => {
+    expect(titleTopWith(NO_INSETS)).toBe(40);
+    expect(titleTopWith(STATUS_BAR_INSETS)).toBe(40);
+    expect(titleTopWith(SHORT_CUTOUT_INSETS)).toBe(35 + 8);
+  });
+});
+
+/** The round title's top in a ScoreModal drawn with `insets` */
+const titleTopWith = (insets: typeof NO_INSETS) => {
+  let r!: TestRenderer.ReactTestRenderer;
+  act(() => {
+    r = TestRenderer.create(withInsets(insets, (
+      <ScoreModal visible scoreRound={[]} rounds={{ round: 1, roundsOfGame: 10 }} correctAnswer="" />
+    )));
+  });
+  const top = flat(byId(r.root, TEST_IDS.scoreRoundTitle)).top;
+  act(() => r.unmount());
+  return top;
+};

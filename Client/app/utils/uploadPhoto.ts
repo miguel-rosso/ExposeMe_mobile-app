@@ -1,7 +1,7 @@
 import { File } from "expo-file-system";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import { PhotoAuth, photoAuthHeaders } from "./photoAuth";
-import { UploadAbandonedError, UploadHttpError, parseRetryAfterMs } from "./uploadRetry";
+import { PhotoConversionError, UploadAbandonedError, UploadHttpError, parseRetryAfterMs } from "./uploadRetry";
 
 // ── Upload of a local photo to POST /upload ──
 
@@ -23,7 +23,7 @@ export const UPLOAD_FILE_TYPE = "image/jpeg";
 /**
  * Re-encodes the photo at `uri` as a JPEG whose longest side is at most UPLOAD_MAX_SIDE, with the
  * EXIF orientation baked into the pixels and no metadata kept (HEIC/PNG/WebP all become JPEG).
- * Returns the URI of the converted file in the cache directory.
+ * Returns the URI of the converted file in the cache directory; throws a PhotoConversionError if it fails.
  */
 export const convertForUpload = async (uri: string): Promise<string> => {
   // Bounds applied while decoding: large photos are downsampled without loading them in full.
@@ -37,7 +37,7 @@ export const convertForUpload = async (uri: string): Promise<string> => {
       image.release();
     }
   } catch (error) {
-    throw new Error(`Photo conversion failed: ${error instanceof Error ? error.message : String(error)}`);
+    throw new PhotoConversionError(error);
   } finally {
     context.release();
   }

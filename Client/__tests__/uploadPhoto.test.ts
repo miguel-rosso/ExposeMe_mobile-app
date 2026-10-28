@@ -1,5 +1,5 @@
 import { uploadPhoto, UPLOAD_MAX_SIDE, UPLOAD_JPEG_QUALITY } from "../app/utils/uploadPhoto";
-import { UploadAbandonedError, UploadHttpError } from "../app/utils/uploadRetry";
+import { PhotoConversionError, UploadAbandonedError, UploadHttpError } from "../app/utils/uploadRetry";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 
 // expo-image-manipulator: manipulate(uri, loadOptions) -> context.renderAsync() -> image.saveAsync()
@@ -199,6 +199,16 @@ describe("uploadPhoto converts before uploading (EXP-007)", () => {
     await expect(uploadPhoto("http://server", "file:///DCIM/a.png", AUTH)).rejects.toThrow("Photo conversion failed: disk full");
     expect(fetch).not.toHaveBeenCalled();
     expect(mockImageRelease).toHaveBeenCalled();
+  });
+
+  // EXP-076: a conversion failure is its own error, which the retries treat as final (the same photo fails again)
+  it.each([
+    ["decoding", () => mockRenderAsync.mockRejectedValue(new Error("Could not decode image"))],
+    ["saving", () => mockSaveAsync.mockRejectedValue(new Error("disk full"))],
+  ])("a conversion failure while %s is a PhotoConversionError", async (_step, fail) => {
+    fail();
+    const error = await uploadPhoto("http://server", "file:///DCIM/a.heic", AUTH).catch((e) => e);
+    expect(error).toBeInstanceOf(PhotoConversionError);
   });
 });
 

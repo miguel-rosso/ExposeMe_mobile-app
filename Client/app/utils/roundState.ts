@@ -160,12 +160,16 @@ export const roundReducer = (state: RoundView, action: RoundAction): RoundView =
       return { ...state, pressing: action.pressing };
     case "hold-start":
       return { ...state, gameHeld: true };
+    // The end of a hold leaves `pressing` (my finger) alone: it may be the answer to a release of mine that arrives
+    // after I pressed again, and that new press must still send its release. A release after a hold the server ended
+    // by itself is ignored by the server (I hold nothing).
     case "hold-end":
+      return { ...state, gameHeld: false };
     case "game-paused":
       return { ...state, gameHeld: false, pressing: false };
     // The held phase continues with the remaining time
     case "hold-resume":
-      return { ...resyncPhase(state, action.data.phase, action.data), gameHeld: false, pressing: false };
+      return { ...resyncPhase(state, action.data.phase, action.data), gameHeld: false };
     // The server's phase goes on, also when this screen still showed an earlier one (the game-state that follows a
     // rejoin fills in what that phase shows)
     case "game-resumed": {

@@ -1,6 +1,6 @@
 import React, { memo } from "react";
 import { View, Text, ScrollView } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { EdgeInsets, useSafeAreaInsets } from "react-native-safe-area-context";
 import tw from "twrnc";
 import { ScoreRound } from "../../models/interfaces";
 import Icon from "react-native-vector-icons/FontAwesome";
@@ -11,6 +11,7 @@ import { isRevealedOwner } from "@/app/utils/roundState";
 import PhotoOwnerCard from "@/app/components/PhotoOwnerCard";
 import { topClearOfInset } from "@/app/utils/safeAreaRows";
 import { HOLD_BUTTON_BOTTOM, HOLD_BUTTON_HEIGHT } from "@/app/utils/gameRows";
+import { progressBarAreaBottom, progressBarBand } from "@/app/utils/progressBarRow";
 
 // Layout, in dp (see safeAreaRows)
 // Round title from the top edge (pushed down only by a cutout taller than that, to TITLE_INSET_MARGIN below it),
@@ -18,6 +19,8 @@ import { HOLD_BUTTON_BOTTOM, HOLD_BUTTON_HEIGHT } from "@/app/utils/gameRows";
 const TITLE_TOP = 40;
 const TITLE_INSET_MARGIN = 8;
 const TITLE_SPACE = 40;
+/** The title's one text-xl line */
+const TITLE_LINE_HEIGHT = 28;
 // Space kept free under the list, above the bottom inset: the usual margin, or the photo owner's hold button plus a gap
 const LIST_BOTTOM_SPACE = 64;
 const HOLD_BUTTON_GAP = 16;
@@ -26,6 +29,15 @@ export const HOLD_BUTTON_CLEARANCE = HOLD_BUTTON_BOTTOM + HOLD_BUTTON_HEIGHT + H
 const COMPACT_FROM = 7;
 // The rows sit on a near-opaque dark panel: the photo (a big caption, busy detail) doesn't show between them (EXP-271)
 export const SCORE_LIST_BACKING = "rgba(0,0,0,0.85)";
+
+/**
+ * The round title's top: TITLE_TOP, or just below a taller cutout; when that puts it over the round's progress bar
+ * (a notch or Dynamic Island), right below the bar's strip instead (EXP-158)
+ */
+const titleTopFor = (insets: EdgeInsets) => {
+  const top = topClearOfInset(insets, TITLE_TOP, TITLE_INSET_MARGIN);
+  return top + TITLE_LINE_HEIGHT > progressBarBand(insets).top ? progressBarAreaBottom(insets) : top;
+};
 
 interface ScoreModalProps {
   visible: boolean;
@@ -53,7 +65,11 @@ const ScoreModal: React.FC<ScoreModalProps> = ({
     return null;
   }
 
-  const titleTop = topClearOfInset(insets, TITLE_TOP, TITLE_INSET_MARGIN);
+  const titleTop = titleTopFor(insets);
+  // Where the card and the list may start: below the title and below the round's progress bar. A long list shrinks
+  // (and scrolls) down to this edge, so even 12 players with the hold button's space kept never push the card over the
+  // bar (EXP-158)
+  const contentTop = Math.max(titleTop + TITLE_SPACE, progressBarAreaBottom(insets));
   const ranked = rankScores(scoreRound);
   const compact = ranked.length >= COMPACT_FROM;
 
@@ -63,7 +79,7 @@ const ScoreModal: React.FC<ScoreModalProps> = ({
       style={[
         tw`absolute inset-0 justify-center items-center bg-black bg-opacity-50 z-50`,
         {
-          paddingTop: titleTop + TITLE_SPACE,
+          paddingTop: contentTop,
           paddingBottom: insets.bottom + (reserveHoldButton ? HOLD_BUTTON_CLEARANCE : LIST_BOTTOM_SPACE),
           paddingLeft: insets.left,
           paddingRight: insets.right,

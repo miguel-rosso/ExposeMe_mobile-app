@@ -29,7 +29,7 @@ import { useI18n } from "../i18n";
 import { uploadPhoto } from "@/app/utils/uploadPhoto";
 import { photoAuthHeaders, resolvePhotoAuth } from "@/app/utils/photoAuth";
 import { prefetchImage } from "@/app/utils/image";
-import { TURN_UPLOAD_RETRY, uploadWithRetry } from "../utils/uploadRetry";
+import { turnUploadRetry, uploadWithRetry } from "../utils/uploadRetry";
 import { SkipNotice, skipNoticeFor, skipNoticeText } from "../utils/waitingPhoto";
 import {
   gameStateFollowUps, initialRoundView, isRevealedOwner, phaseElapsed, RoundAction, roundReducer, RoundView,
@@ -50,13 +50,11 @@ import { useReduceMotion } from "../hooks/useReduceMotion";
 import { attachHandlers, SocketHandlers } from "../utils/socketHandlers";
 import { safeBottomRow, safeTopRow } from "../utils/safeAreaRows";
 import { ANSWERS_BOTTOM, HOLD_BUTTON_BOTTOM } from "../utils/gameRows";
+import { PROGRESS_BAR_AREA, progressBarAreaBottom, progressBarRow } from "../utils/progressBarRow";
 
 const { SERVER_URL } = getEnvVars();
 const PICK_SEND_INTERVAL = 200; // ms between submit-answer sends (server: 10 per socket, refilled 5/s)
-// Rows over the photo (see safeAreaRows; the bottom ones are in gameRows)
-// Round progress bar strip at the top of the photo (bar plus its padding, so the bar itself clears a cutout by
-// `margin` + p-4); emoji reactions start right below it
-const PROGRESS_BAR_AREA = { top: 60, height: 40, margin: 4 } as const;
+// Rows over the photo (see safeAreaRows; the progress bar strip is in progressBarRow, the bottom ones in gameRows)
 const RECONNECTING_BANNER = { top: 8, margin: 8 } as const;
 const NO_REACTIONS: EmojiReactionData[] = [];
 const NO_SCORES: ScoreRound[] = [];
@@ -75,7 +73,7 @@ const GameScreen = () => {
   useEffect(() => { resetUsedPhotos?.(); }, [resetUsedPhotos]);
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const progressBarRow = safeTopRow(insets, PROGRESS_BAR_AREA.top, PROGRESS_BAR_AREA.margin);
+  const progressRow = progressBarRow(insets);
   // Photo access revoked / no photos left (re-checked on foreground): blocking overlay, the game screen stays
   const galleryGuard = useGalleryAccessGuard({ watch: true });
   // One screenshot listener for the whole game (EmojisButton remounts every round)
@@ -284,13 +282,16 @@ const GameScreen = () => {
         const needsUpload = turnRequest.start(data); // a re-sent request re-sends or awaits its photo
         dispatchRound({ type: "your-turn", round: data.round });
         if (!needsUpload) return;
+        // The photo wait the server gave (waiting-photo, or what a resume or snapshot left of it) bounds the retries
+        const { phase: turnPhase, phaseDuration: photoWaitMs } = roundRef.current;
+        const retry = turnUploadRetry(turnPhase === "waiting-photo" ? photoWaitMs : 0);
         try {
           const picked = await pickGamePhoto();
           if ("error" in picked) { turnRequest.reportUnavailable(picked.error, data); return; }
           let url: string;
           // Retries go on while this request is in force or paused, and stop once it is over
           const stillWanted = () => turnRequest.isCurrent(data) || turnRequest.isSuspended(data);
-          try { url = await uploadWithRetry(picked.uri, uploadImage, TURN_UPLOAD_RETRY, stillWanted); }
+          try { url = await uploadWithRetry(picked.uri, uploadImage, retry, stillWanted); }
           catch { turnRequest.reportUnavailable("upload", data); return; }
           setPhotoUri(null);
           turnRequest.sendPhoto(data, url);
@@ -532,7 +533,7 @@ const GameScreen = () => {
             {/* Emoji reactions: own lane between the progress bar and the answer buttons */}
             <EmojiReactionLane
               reactions={emojiReactions}
-              top={progressBarRow.top + PROGRESS_BAR_AREA.height}
+              top={progressBarAreaBottom(insets)}
               answersTop={answersTop}
               screenshotLabel={t.tookScreenshot}
               onReactionEnd={removeEmoji}
@@ -547,7 +548,7 @@ const GameScreen = () => {
                     testID={TEST_IDS.roundProgress}
                     style={[
                       tw`absolute p-4 items-center`,
-                      progressBarRow,
+                      progressRow,
                       { height: PROGRESS_BAR_AREA.height },
                     ]}
                   >

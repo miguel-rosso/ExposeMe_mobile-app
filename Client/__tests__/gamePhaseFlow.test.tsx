@@ -167,6 +167,46 @@ describe("GameScreen: server phases drawn with the received duration (EXP-063)",
     expect(emitted("hold-end")).toHaveLength(1);
   });
 
+  // A quick release and press again: the server's answer to my release (hold-resume + hold-end) arrives while my finger
+  // is already down for the next hold, which the server then accepts (hold-start). Lifting the finger must still send
+  // its hold-end, or the room stays held until the server's hold budget runs out
+  it("release then press again before the release's answer: the second release still goes out", () => {
+    act(() => mockSocket.fire("round-start", START));
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "bob", duration: 3_000 }));
+    act(() => mockSocket.fire("round-scores", { scores: SCORES, round: 1, totalRounds: 10, duration: 5_000 }));
+    const button = () => r.root.find((n) => n.props.testID === TEST_IDS.holdButton && typeof n.props.onPressIn === "function");
+    act(() => button().props.onPressIn());
+    act(() => mockSocket.fire("hold-start"));
+    act(() => button().props.onPressOut());
+    act(() => button().props.onPressIn());
+    expect(emitted("hold-end")).toHaveLength(1);
+    expect(emitted("hold-start")).toHaveLength(2);
+
+    act(() => mockSocket.fire("hold-resume", { phase: "scores", duration: 3_000, phaseTotal: 5_000 })); // first release
+    act(() => mockSocket.fire("hold-end"));
+    act(() => mockSocket.fire("hold-start")); // the second press, accepted
+    expect(has(r.root, "score-modal-probe")).toBe(false); // held again: the photo shows
+    act(() => button().props.onPressOut());
+    expect(emitted("hold-end")).toHaveLength(2);
+  });
+
+  // The server releases a hold by itself (hold budget used up) while my finger is still down: lifting it sends a
+  // hold-end the server ignores (I hold nothing), and the next press works as usual
+  it("a hold the server releases while I press: the overlay comes back, and the next press is a new hold", () => {
+    act(() => mockSocket.fire("round-start", START));
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "bob", duration: 3_000 }));
+    act(() => mockSocket.fire("round-scores", { scores: SCORES, round: 1, totalRounds: 10, duration: 5_000 }));
+    const button = () => r.root.find((n) => n.props.testID === TEST_IDS.holdButton && typeof n.props.onPressIn === "function");
+    act(() => button().props.onPressIn());
+    act(() => mockSocket.fire("hold-start"));
+    act(() => mockSocket.fire("hold-resume", { phase: "scores", duration: 1_500, phaseTotal: 5_000 }));
+    act(() => mockSocket.fire("hold-end"));
+    expect(scoreModal(r.root).visible).toBe(true);
+    act(() => button().props.onPressOut());
+    act(() => button().props.onPressIn());
+    expect(emitted("hold-start")).toHaveLength(2);
+  });
+
   it("game-paused hides the bar behind the paused modal; game-resumed restarts it with the server's remaining time", () => {
     act(() => mockSocket.fire("round-start", START));
     act(() => mockSocket.fire("game-paused", { duration: 300_000, waitingFor: ["carol"], pause: 1, maxPauses: 3 }));

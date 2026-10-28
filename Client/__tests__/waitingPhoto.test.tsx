@@ -3,7 +3,7 @@ import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import { FakeSocket } from "../testUtils/fakeSocket";
 import { skipNoticeFor, skipNoticeText } from "../app/utils/waitingPhoto";
 import { TEST_IDS } from "../app/utils/testIds";
-import { TURN_UPLOAD_RETRY } from "../app/utils/uploadRetry";
+import { PhotoConversionError, TURN_UPLOAD_RETRY } from "../app/utils/uploadRetry";
 import en from "../app/i18n/en";
 import es from "../app/i18n/es";
 // Loaded with the file (jest.mock calls below are hoisted above it): a cold transform must not hit the test timeout
@@ -214,6 +214,36 @@ describe("GameScreen while a photo is awaited", () => {
       await advance(TURN_UPLOAD_RETRY.maxTotalWaitMs);
       expect(mockUploadPhoto).toHaveBeenCalledTimes(1);
       expect(reported()).toBe(false);
+    });
+
+    // EXP-076: retrying can't fix a photo that doesn't convert; the room is told at once instead of after ~6 s
+    it("a photo that can't be converted is reported unavailable after a single attempt", async () => {
+      mockPickGamePhoto.mockResolvedValue({ uri: "file:///broken.heic" });
+      mockUploadPhoto.mockRejectedValue(new PhotoConversionError(new Error("Could not decode image")));
+      act(() => mockSocket.fire("waiting-photo", { round: 1, duration: 15_000 }));
+      act(() => mockSocket.fire("your-turn", { round: 1, attempt: 1 }));
+      await flush();
+      expect(mockUploadPhoto).toHaveBeenCalledTimes(1);
+      expect(mockSocket.emitted).toEqual([["photo-unavailable", { round: 1, attempt: 1 }]]);
+      await advance(TURN_UPLOAD_RETRY.maxTotalWaitMs);
+      expect(mockUploadPhoto).toHaveBeenCalledTimes(1);
+    });
+
+    // EXP-076: the retries fit the photo wait the server gave: a rejoin with 5 s left gets 2.5 s of waits, not 7.5 s
+    it("with 5 s left of the photo wait, the retries stop within half of it", async () => {
+      mockPickGamePhoto.mockResolvedValue({ uri: "file:///p1.jpg" });
+      mockUploadPhoto.mockRejectedValue(new TypeError("Network request failed"));
+      act(() => mockSocket.fire("game-state", {
+        started: true, phase: "waiting-photo", round: 0, totalRounds: 10, photo: null, correctAnswer: null,
+        duration: 5_000, phaseTotal: 15_000, held: false, pause: null, scores: [], players: [],
+      }));
+      act(() => mockSocket.fire("your-turn", { round: 1, attempt: 1 }));
+      await flush();
+      await advance(1_000);
+      expect(mockUploadPhoto).toHaveBeenCalledTimes(2);
+      expect(mockSocket.emitted).toContainEqual(["photo-unavailable", { round: 1, attempt: 1 }]);
+      await advance(TURN_UPLOAD_RETRY.maxTotalWaitMs);
+      expect(mockUploadPhoto).toHaveBeenCalledTimes(2);
     });
   });
 

@@ -1,5 +1,6 @@
 import {
-  PLANT_UPLOAD_RETRY, TURN_UPLOAD_RETRY, UploadAbandonedError, UploadHttpError, parseRetryAfterMs, uploadWithRetry,
+  PLANT_UPLOAD_RETRY, PhotoConversionError, TURN_UPLOAD_RETRY, UploadAbandonedError, UploadHttpError, parseRetryAfterMs,
+  turnUploadRetry, uploadWithRetry,
 } from "../app/utils/uploadRetry";
 
 // EXP-232: the turn photo's retried upload, extracted from GameScreen. EXP-269: only network errors and a busy
@@ -102,6 +103,15 @@ describe("uploadWithRetry", () => {
     const outcome = await uploadWithRetry("file:///p.jpg", upload, OPTIONS).catch((e) => e);
     expect(upload).toHaveBeenCalledTimes(1);
     expect(outcome).toMatchObject({ status });
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  // EXP-076: the same photo fails to convert again: no retry
+  it("a photo that can't be converted is final: no retry", async () => {
+    const upload = jest.fn().mockRejectedValue(new PhotoConversionError(new Error("Could not decode image")));
+    const outcome = await uploadWithRetry("file:///p.jpg", upload, OPTIONS).catch((e) => e);
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(outcome).toBeInstanceOf(PhotoConversionError);
     expect(jest.getTimerCount()).toBe(0);
   });
 
@@ -243,6 +253,38 @@ describe("uploadWithRetry", () => {
     expect(outcome).toBeInstanceOf(UploadAbandonedError);
     expect(upload).toHaveBeenCalledTimes(1);
     expect(jest.getTimerCount()).toBe(0);
+  });
+});
+
+// EXP-076: the turn photo's waits are bounded by the photo wait the server gave, not a fixed 15 s
+describe("turnUploadRetry", () => {
+  it.each([
+    [15_000, 7_500], // the full photo wait
+    [5_000, 2_500], // what a resume leaves of it at least
+    [60_000, TURN_UPLOAD_RETRY.maxTotalWaitMs], // never more than the turn defaults
+  ])("a %i ms photo wait allows %i ms of waits in total", (photoWaitMs, totalMs) => {
+    expect(turnUploadRetry(photoWaitMs)).toEqual({ ...TURN_UPLOAD_RETRY, maxTotalWaitMs: totalMs });
+  });
+
+  it("an unknown photo wait keeps the turn defaults", () => {
+    expect(turnUploadRetry(0)).toBe(TURN_UPLOAD_RETRY);
+  });
+
+  it("a 5 s wait stops retrying a failing upload after 1 s of waits (the next 2 s would pass half the wait)", async () => {
+    const upload = jest.fn().mockRejectedValue(new TypeError("Network request failed"));
+    const outcome = uploadWithRetry("file:///p.jpg", upload, turnUploadRetry(5_000)).catch((e) => e);
+    await flush();
+    await advance(1000);
+    expect(upload).toHaveBeenCalledTimes(2);
+    expect(await outcome).toBeInstanceOf(TypeError);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it("a busy server's Retry-After longer than what is left of the wait ends the retries at once", async () => {
+    const upload = jest.fn().mockRejectedValue(busy(503, 3000));
+    const outcome = await uploadWithRetry("file:///p.jpg", upload, turnUploadRetry(5_000)).catch((e) => e);
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(outcome).toMatchObject({ status: 503 });
   });
 });
 

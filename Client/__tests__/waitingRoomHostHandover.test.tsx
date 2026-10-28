@@ -4,7 +4,8 @@ import { FakeSocket } from "../testUtils/fakeSocket";
 // Loaded with the file (jest.mock calls below are hoisted above it), not inside a test
 import WaitingRoom from "../app/screens/WaitingRoom";
 import { TEST_IDS, lobbyPlayerId, lobbyPlayerOfflineId } from "../app/utils/testIds";
-import { isHostIn, withConnection } from "../app/utils/roomPlayers";
+import { isHostIn, withConnection, withHost, withoutPlayer } from "../app/utils/roomPlayers";
+import type { GameContextProps, Player } from "../app/models/interfaces";
 
 // EXP-157: a host gone from the lobby hands the role over (new-host), so the host is whoever has the flag, not the
 // first player; gone players are shown as disconnected (player-connection).
@@ -81,9 +82,47 @@ describe("roomPlayers helpers", () => {
     expect(isHostIn([], "alice")).toBe(false);
   });
 
+  it("withoutPlayer drops only that player, withHost leaves a single host", () => {
+    const players = [player("alice", true), player("bob", false), player("carol", false)];
+    expect(withoutPlayer(players, "bob").map((p) => p.username)).toEqual(["alice", "carol"]);
+    expect(withoutPlayer(players, "nobody")).toEqual(players);
+    expect(withHost(players, "carol").map((p) => p.isHost)).toEqual([false, false, true]);
+  });
+
   it("withConnection only changes that player", () => {
     const out = withConnection([player("alice", true), player("bob", false)], "bob", false);
     expect(out.map((p) => p.connected)).toEqual([true, false]);
+  });
+});
+
+// EXP-138: the players setter is a React state setter, so callers can derive the next list from the latest one.
+// Type-level check (tsc --noEmit covers __tests__): fails to compile if the setter loses functional updates.
+const acceptsFunctionalUpdates: GameContextProps["setPlayersProvider"] extends React.Dispatch<React.SetStateAction<Player[]>>
+  ? true
+  : false = true;
+
+describe("WaitingRoom: player list bursts (EXP-138)", () => {
+  it("setPlayersProvider is typed as a state setter", () => {
+    expect(acceptsFunctionalUpdates).toBe(true);
+  });
+
+  it("joins, leaves, a kick and a host change fired in one batch all apply to the latest list", async () => {
+    const r = await mount([player("alice", true)]);
+    act(() => {
+      mockSocket.fire("player-joined", player("bob", false));
+      mockSocket.fire("player-joined", player("carol", false));
+      mockSocket.fire("player-joined", player("dave", false));
+      mockSocket.fire("player-left", "bob");
+      mockSocket.fire("player-removed", player("dave", false));
+      mockSocket.fire("new-host", player("carol", true));
+    });
+    expect(hasId(r, lobbyPlayerId("alice"))).toBe(true);
+    expect(hasId(r, lobbyPlayerId("carol"))).toBe(true);
+    expect(hasId(r, lobbyPlayerId("bob"))).toBe(false);
+    expect(hasId(r, lobbyPlayerId("dave"))).toBe(false);
+    // carol holds the flag now: alice lost the host controls
+    expect(hasId(r, TEST_IDS.startGameButton)).toBe(false);
+    act(() => r.unmount());
   });
 });
 

@@ -38,7 +38,7 @@ import PlantPhotoButton from "@/app/components/PlantPhotoButton";
 import { LinearGradient } from "expo-linear-gradient";
 import { useI18n } from "../i18n";
 import { TEST_IDS, lobbyPlayerId, lobbyPlayerOfflineId, roundsOptionId } from "../utils/testIds";
-import { isHostIn, withConnection, withHost } from "../utils/roomPlayers";
+import { isHostIn, withConnection, withHost, withoutPlayer } from "../utils/roomPlayers";
 import { attachHandlers, SocketHandlers } from "../utils/socketHandlers";
 import { emitWhileConnected } from "../utils/socketEmit";
 import { parseRoomCodeParam } from "../utils/roomCode";
@@ -349,7 +349,7 @@ const WaitingRoom = ({}) => {
 
       "rounds-updated": (rounds: number) => setRoundsOfGame(rounds),
       "player-joined": (p: Player) => setPlayers((prev) => [...prev, p]),
-      "player-left": (name: string) => setPlayers((prev) => prev.filter((p) => p.username !== name)),
+      "player-left": (name: string) => setPlayers((prev) => withoutPlayer(prev, name)),
       "new-host": (h: Player) => setPlayers((prev) => withHost(prev, h.username)),
       "player-connection": (d: PlayerConnectionData) =>
         setPlayers((prev) => withConnection(prev, d.username, d.connected)),
@@ -379,7 +379,7 @@ const WaitingRoom = ({}) => {
           clearRejoinToken();
           leaveWithMessage(KICKED_BY_HOST_MESSAGE);
         } else {
-          setPlayers((prev) => prev.filter((p) => p.username !== removed.username));
+          setPlayers((prev) => withoutPlayer(prev, removed.username));
         }
       },
     };

@@ -170,7 +170,7 @@ export interface GameContextProps {
   roundsOfGame: number;
   setGameCode: (code: string | null) => void;
   setUsername: (name: string | null) => void;
-  setPlayersProvider: (players: Player[]) => void;
+  setPlayersProvider: React.Dispatch<React.SetStateAction<Player[]>>;
   startSocket: () => void;
   endSocket: () => void;
   /** Leave the room for good: leave-room (socket closed once the server acks it), rejoin token forgotten */

@@ -389,7 +389,8 @@ After last round: game-over
 Short absences (app in the background, brief signal loss) are silent: socket.io reconnects on a **new** socket,
 the client re-sends `join-create-game` with its `rejoinToken`, and the server answers the rejoin with
 `room-of-game` followed by a **`game-state` snapshot** to that socket only (always on a rejoin, also in the lobby,
-where it is ignored). The snapshot is taken after the rejoin's effect on a pause (resume), so it is never stale. The client keeps the game screen meanwhile and shows a small "Reconnecting…" indicator.
+whose screen uses it only to finish loading: after a `room-of-game` with `room.started` it keeps its loading screen
+until the `game-state`, which then opens the game screen if `started`, or shows the lobby if not). The snapshot is taken after the rejoin's effect on a pause (resume), so it is never stale. The client keeps the game screen meanwhile and shows a small "Reconnecting…" indicator.
 
 Rejoining from the lobby screen (the app was closed and the player uses "Join" again with their stored
 `rejoinToken`): the WaitingRoom gets `room-of-game` + a `game-state` with `started: true`, opens the game screen

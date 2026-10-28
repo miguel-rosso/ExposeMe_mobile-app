@@ -142,6 +142,44 @@ describe("WaitingRoom: joining a game already in progress (EXP-097)", () => {
   });
 });
 
+// EXP-108: coming back to a started game, the lobby ("Waiting for host…") must never be painted between the join
+// answer and the game screen: the loading screen stays until the snapshot opens the game.
+describe("WaitingRoom: loading screen until the join answer settles (EXP-108)", () => {
+  const isLoading = (r: TestRenderer.ReactTestRenderer) =>
+    r.root.findAll((n) => n.props.testID === TEST_IDS.lobbyLoading).length > 0;
+  const startedRoom = { ...roomOfGame, room: { ...roomOfGame.room, started: true, phase: "answering", round: 3 } };
+
+  it("keeps loading when room-of-game says the game started, until the snapshot opens the game screen", async () => {
+    const r = await mount();
+    expect(isLoading(r)).toBe(true);
+
+    act(() => mockSocket.fire("room-of-game", startedRoom));
+    expect(isLoading(r)).toBe(true);
+    expect(mockReplace).not.toHaveBeenCalled();
+
+    act(() => mockSocket.fire("game-state", snapshot()));
+    expect(mockReplace).toHaveBeenCalledWith("/screens/GameScreen");
+    expect(isLoading(r)).toBe(true);
+    act(() => r.unmount());
+  });
+
+  it("shows the lobby once room-of-game says the game has not started", async () => {
+    const r = await mount();
+    act(() => mockSocket.fire("room-of-game", { ...roomOfGame, room: { ...roomOfGame.room, started: false } }));
+    expect(isLoading(r)).toBe(false);
+    act(() => r.unmount());
+  });
+
+  it("shows the lobby if the snapshot after a started room-of-game says the game is over", async () => {
+    const r = await mount();
+    act(() => mockSocket.fire("room-of-game", startedRoom));
+    act(() => mockSocket.fire("game-state", snapshot({ started: false, phase: null, photo: null })));
+    expect(isLoading(r)).toBe(false);
+    expect(mockReplace).not.toHaveBeenCalled();
+    act(() => r.unmount());
+  });
+});
+
 // EXP-118: no photo access / no photos → blocking overlay in the lobby (checked on mount and on every foreground);
 // the only way out is leaving the room.
 describe("WaitingRoom: gallery access guard (EXP-118)", () => {

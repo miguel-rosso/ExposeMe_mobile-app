@@ -25,6 +25,7 @@ export const TEST_IDS = {
   plantPhotoNotPlanted: "plant-photo-not-planted",
   startGameButton: "start-game-button",
   lobbyWaiting: "lobby-waiting",
+  lobbyLoading: "lobby-loading", // shown until the join answer says this is a lobby (a started game opens the game)
   chatInput: "chat-input",
   chatSendButton: "chat-send-button",
   // ── Game ──

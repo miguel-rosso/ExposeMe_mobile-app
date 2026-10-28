@@ -320,7 +320,8 @@ const WaitingRoom = ({}) => {
       "room-of-game": (data: RoomOfGameResponse) => {
         const { rejoinToken: _token, ...loggable } = data;
         console.log("Room data:", loggable);
-        setIsLoading(false);
+        // A started game never paints the lobby: keep loading until its snapshot opens the game screen (EXP-108)
+        setIsLoading(!!data.success && !!data.room?.started);
         if (!data.success) {
           leaveWithMessage(data.message);
         } else if (data.room) {
@@ -361,7 +362,12 @@ const WaitingRoom = ({}) => {
       // Every rejoin is followed by a snapshot; a started game means we came back to a game in progress
       // (e.g. "Join" after closing the app): go straight to the game screen
       "game-state": (snap: GameStateSnapshot) => {
-        if (!snap.started || resyncOnLeaveRef.current) return;
+        if (!snap.started) {
+          // A lobby rejoin's snapshot (not started, or the game is over): nothing more to wait for
+          setIsLoading(false);
+          return;
+        }
+        if (resyncOnLeaveRef.current) return;
         resyncOnLeaveRef.current = true;
         setPlayersProvider(snap.players);
         setRoundsOfGame(snap.totalRounds);
@@ -516,7 +522,7 @@ const WaitingRoom = ({}) => {
 
       {/* Loading overlay and notifications */}
       {isLoading && (
-        <View style={tw`absolute top-0 left-0 right-0 bottom-0 z-50 flex justify-center items-center bg-black bg-opacity-50`}>
+        <View testID={TEST_IDS.lobbyLoading} style={tw`absolute top-0 left-0 right-0 bottom-0 z-50 flex justify-center items-center bg-black bg-opacity-50`}>
           <View style={tw`px-8 py-6 rounded-xl bg-gray-800 flex items-center`}>
             <Animatable.View animation="rotate" iterationCount="infinite" easing="linear" duration={1500}>
               <Icon name="spinner" size={40} color="white" />

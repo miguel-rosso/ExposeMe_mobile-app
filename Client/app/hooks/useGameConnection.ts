@@ -27,7 +27,7 @@ interface GameConnectionOptions {
  * In-game connection handling. A dropped socket is not the end of the game: socket.io reconnects on its own
  * (and GameContext forces it when the app returns to the foreground), and every reconnect arrives on a new
  * server socket, so we rejoin with the rejoin token; the server answers with a `game-state` snapshot.
- * A planted photo the server lost meanwhile (sent offline, or before the rejoin bound the new socket) is planted again.
+ * A planted photo the server lacks (its upload ended offline or before the rejoin bound the new socket) is planted again.
  * Returns whether the socket is connected, to show a "Reconnecting…" indicator meanwhile.
  */
 export const useGameConnection = ({

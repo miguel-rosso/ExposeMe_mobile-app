@@ -11,7 +11,7 @@ jest.mock("@react-native-async-storage/async-storage", () =>
   require("@react-native-async-storage/async-storage/jest/async-storage-mock")
 );
 
-const makeSocket = () => ({ connected: true, connect: jest.fn(), disconnect: jest.fn(), removeAllListeners: jest.fn(), emit: jest.fn() });
+const makeSocket = () => ({ connected: true, connect: jest.fn(), disconnect: jest.fn(), removeAllListeners: jest.fn(), emit: jest.fn(), on: jest.fn() });
 type MockSocket = ReturnType<typeof makeSocket>;
 const mockSockets: MockSocket[] = [];
 const mockIo = jest.fn(() => { const s = makeSocket(); mockSockets.push(s); return s; });

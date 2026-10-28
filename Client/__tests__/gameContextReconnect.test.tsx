@@ -9,7 +9,7 @@ jest.mock("@react-native-async-storage/async-storage", () =>
   require("@react-native-async-storage/async-storage/jest/async-storage-mock")
 );
 
-const mockSocket = { connected: true, connect: jest.fn(), disconnect: jest.fn(), removeAllListeners: jest.fn() };
+const mockSocket = { connected: true, connect: jest.fn(), disconnect: jest.fn(), removeAllListeners: jest.fn(), on: jest.fn() };
 const mockIo = jest.fn((..._args: unknown[]) => mockSocket);
 jest.mock("socket.io-client", () => ({ io: (...args: unknown[]) => mockIo(...args) }));
 

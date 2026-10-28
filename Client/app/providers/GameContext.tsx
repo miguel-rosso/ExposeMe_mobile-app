@@ -2,12 +2,13 @@ import React, { createContext, useState, useContext, useRef, useEffect } from "r
 import { AppState } from "react-native";
 import { io, Socket } from "socket.io-client";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { GameContextProps, GameProviderProps, PlantUploadState, Player } from "@/app/models/interfaces";
+import { GameContextProps, GameProviderProps, PlantUploadState, Player, RoomOfGameResponse } from "@/app/models/interfaces";
 import getEnvVars from "@/config";
 import { uploadPhoto } from "@/app/utils/uploadPhoto";
 import { PLANT_UPLOAD_RETRY, uploadWithRetry } from "@/app/utils/uploadRetry";
 import { leaveAndClose } from "@/app/utils/leaveRoom";
 import { emitWhileConnected } from "@/app/utils/socketEmit";
+import type { PhotoAuth } from "@/app/utils/photoAuth";
 
 const { SERVER_URL } = getEnvVars();
 const REJOIN_TOKEN_KEY = "rejoinToken";
@@ -16,6 +17,14 @@ interface StoredRejoinToken {
   gameCode: string;
   username: string;
   token: string;
+}
+
+/** Upload of the picked planted photo in progress (one per picked photo at a time). */
+interface PlantRun {
+  uri: string;
+  /** The socket reconnected while it uploads: its answer may be a photo the server has already deleted. */
+  reuploadRequested: boolean;
+  done: Promise<boolean>;
 }
 
 const GameContext = createContext<GameContextProps | undefined>(undefined);
@@ -31,8 +40,10 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   const [plantedPhotoSent, setPlantedPhotoSent] = useState(false);
   const [plantUpload, setPlantUpload] = useState<PlantUploadState>("idle");
   const plantedUriRef = useRef<string | null>(null);
-  const plantingRef = useRef<string | null>(null); // uri being uploaded (one upload per picked photo at a time)
+  const plantRunRef = useRef<PlantRun | null>(null);
   const socketRef = useRef<Socket | null>(null);
+  // Socket whose current connection the server has bound to the room (its join answered by room-of-game)
+  const roomSocketRef = useRef<Socket | null>(null);
   const rejoinTokenRef = useRef<StoredRejoinToken | null>(null);
 
   // ── Rejoin token (server requires it to reconnect with an existing username) ──
@@ -85,9 +96,28 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
       reconnectionDelayMax: 5000,
     });
 
+    trackRoomBinding(newSocket);
     socketRef.current = newSocket;
     setSocket(newSocket);
   };
+
+  /**
+   * Every (re)connection is a new server socket, in no room until its join-create-game is answered: the server drops
+   * room events (e.g. plant-photo) sent on it before that. The screens send the join; this only follows its answer.
+   */
+  const trackRoomBinding = (s: Socket) => {
+    s.on("connect", () => {
+      if (roomSocketRef.current === s) roomSocketRef.current = null;
+      // Reconnected mid-upload (e.g. the app was suspended): its answer may come too late to be claimed
+      if (plantRunRef.current) plantRunRef.current.reuploadRequested = true;
+    });
+    s.on("room-of-game", (data: RoomOfGameResponse) => {
+      roomSocketRef.current = data.success && data.room ? s : null;
+    });
+  };
+
+  /** The app's socket, if the server has bound its current connection to the room (still check `connected`). */
+  const roomSocket = (): Socket | null => (roomSocketRef.current === socketRef.current ? socketRef.current : null);
 
   /**
    * Leaving the game flow (Exit, back home, kicked, room gone): the socket is no longer the app's and none of its
@@ -140,32 +170,50 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   /**
    * Upload the picked planted photo and send plant-photo, right away from the lobby (so im-ready never waits for
    * it), retrying while the server is busy. Returns true once the server has it (plantedPhotoSent: the lobby shows
-   * it planted only then). A photo replaced or dropped while uploading is not sent nor retried. Offline it is not sent
-   * (socket.io would only flush it before the rejoin, where the server drops it): the rejoin's room-of-game plants it
-   * again.
+   * it planted only then). A photo replaced or dropped while uploading is not sent nor retried. It is only sent on a
+   * connection the server has bound to the room: offline (socket.io would only flush it before the rejoin) or on a
+   * reconnected socket whose rejoin isn't answered yet, the server would drop it, so it stays not sent and the
+   * rejoin's room-of-game plants it again (the lobby's handler in WaitingRoom, the game's in useGameConnection).
+   * Asked again while that photo uploads, the caller gets the outcome of the upload in flight (one upload per photo);
+   * if the socket reconnected during it, the photo is uploaded once more before sending (see uploadAndPlant).
    */
-  const plantPhoto = async (): Promise<boolean> => {
+  const plantPhoto = (): Promise<boolean> => {
     const uri = plantedUriRef.current;
     // The server only accepts uploads from a member of the room (room code + rejoin token)
     const entry = rejoinTokenRef.current;
-    if (!uri || !entry || plantingRef.current === uri) return false;
-    plantingRef.current = uri;
+    if (!uri || !entry) return Promise.resolve(false);
+    const running = plantRunRef.current;
+    if (running?.uri === uri) return running.done;
+    const run: PlantRun = { uri, reuploadRequested: false, done: Promise.resolve(false) };
+    plantRunRef.current = run;
+    run.done = uploadAndPlant(run, { gameCode: entry.gameCode, token: entry.token });
+    return run.done;
+  };
+
+  const uploadAndPlant = async (run: PlantRun, auth: PhotoAuth): Promise<boolean> => {
+    const { uri } = run;
     setPlantedPhotoSent(false); // (re)planting: the server doesn't have it
     setPlantUpload("uploading");
-    const auth = { gameCode: entry.gameCode, token: entry.token };
     const stillPicked = () => plantedUriRef.current === uri;
+    const upload = () => uploadWithRetry(
+      uri,
+      (photoUri) => uploadPhoto(SERVER_URL, photoUri, auth, stillPicked),
+      PLANT_UPLOAD_RETRY,
+      stillPicked,
+    );
     try {
-      const url = await uploadWithRetry(
-        uri,
-        (photoUri) => uploadPhoto(SERVER_URL, photoUri, auth, stillPicked),
-        PLANT_UPLOAD_RETRY,
-        stillPicked,
-      );
+      let url: string;
+      // The socket reconnected during the upload: its answer may come too late to be claimed (an unclaimed planted
+      // upload is deleted after UPLOAD_PLANT_CLAIM_MS, e.g. while the app was suspended), and a plant-photo for a
+      // deleted photo is ignored. Upload it again rather than send a photo that may be gone (one extra upload per
+      // reconnection: the client can't tell whether the server still has it).
+      do {
+        run.reuploadRequested = false;
+        url = await upload();
+      } while (run.reuploadRequested && stillPicked());
       if (!stillPicked()) return false;
-      if (!emitWhileConnected(socketRef.current, "plant-photo", { photoUrl: url })) {
-        // Offline: not planted. The rejoin's room-of-game plants it again when the server lacks it (the lobby's
-        // handler in WaitingRoom, the game's in useGameConnection)
-        console.log("Planted photo uploaded while offline: it is sent again after the rejoin");
+      if (!emitWhileConnected(roomSocket(), "plant-photo", { photoUrl: url })) {
+        console.log("Planted photo uploaded while out of the room: it is sent again after the rejoin");
         setPlantUpload("idle");
         return false;
       }
@@ -178,7 +226,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
       if (stillPicked()) setPlantUpload("failed"); // a replaced photo's upload just stops
       return false;
     } finally {
-      if (plantingRef.current === uri) plantingRef.current = null;
+      if (plantRunRef.current === run) plantRunRef.current = null;
     }
   };
 

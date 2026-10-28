@@ -68,7 +68,11 @@ After last round: game-over
   picked (uncropped, like the game's gallery photos), so `im-ready` never waits for it. Only if that upload failed
   does the game screen retry it, **after** `im-ready` (accepted until round 1 is played; a photo planted after the
   planted rounds were drawn gets a free later round). `plant-photo` is never emitted offline (socket.io would flush
-  it on the new socket before the rejoin, where it is dropped): on a rejoin whose `room-of-game.hasPlantedPhoto` is
+  it on the new socket before the rejoin, where it is dropped), nor on a reconnected socket until its rejoin's
+  successful `room-of-game` (until then the server drops it too): such a photo counts as not sent. If the socket
+  reconnects while the planted photo is uploading, the app uploads it again before sending it (that upload's answer
+  may come after the server deleted it as unclaimed, `UPLOAD_PLANT_CLAIM_MS`), accepting one extra upload per
+  reconnection. On a rejoin whose `room-of-game.hasPlantedPhoto` is
   false while the room still accepts planted photos, the lobby and the game screen plant it again (the game screen
   only inside a started game: never after `game-over`, which also leaves no phase but clears the marks; once round 1's
   wait has started, only a photo the app never sent: a sent one may be the one being played, whose mark is cleared

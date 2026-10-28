@@ -219,7 +219,7 @@ After last round: game-over
     mid-game and `"Room is full"` at 12 players, **before** comparing names, so neither tells anything about the
     names in the room; then the two answers above.
 - On success the server answers **only to that socket** with
-  `room-of-game { success, room, rounds?, rejoinToken, hasPlantedPhoto }`. `hasPlantedPhoto` is the joining
+  `room-of-game { success, room, rejoinToken, hasPlantedPhoto }`. `hasPlantedPhoto` is the joining
   player's own planted-photo mark (never sent about anyone else). `rejoinToken` is a random secret per player
   (base64url, 18 bytes) that is never included in any other payload; clients keep it (the app stores it in
   AsyncStorage with the game code and username) to reconnect.
@@ -481,7 +481,7 @@ All game events are **atomic** — each contains everything the client needs.
 
 | Event | Phase | Data | Description |
 |-------|-------|------|-------------|
-| `room-of-game` | - | `{ success, room?, rounds?, message?, rejoinToken?, hasPlantedPhoto? }` | Join result (token and own planted mark only to the joiner) |
+| `room-of-game` | - | `{ success, room?, message?, rejoinToken?, hasPlantedPhoto? }` | Join result (token and own planted mark only to the joiner) |
 | `player-joined` | lobby | public player | A new player joined (not sent for rejoins; not to the joiner) |
 | `player-left` | any | `username` (string) | A player left (`leave-room`, a join to another room, or removed as gone at game start) |
 | `player-removed` | any | public player | The host removed this player (`remove-player`) |

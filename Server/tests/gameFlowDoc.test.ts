@@ -155,8 +155,15 @@ function calls(source: string, call: RegExp): Call[] {
   });
 }
 
-/** Keys of an object literal like `{ a: x, b }`; null if `text` is not one. Fails on keys it can't read (spreads). */
-function objectLiteralKeys(text: string): string[] | null {
+// A type check after an object literal, as in `{ a } satisfies Payload`: still that object literal
+const SATISFIES_SUFFIX = /\s+satisfies\s+\w+$/;
+
+/**
+ * Keys of an object literal like `{ a: x, b }` (optionally `satisfies SomeType`); null if `text` is not one. Fails on
+ * keys it can't read (spreads).
+ */
+function objectLiteralKeys(source: string): string[] | null {
+  const text = source.replace(SATISFIES_SUFFIX, "");
   if (!text.startsWith("{") || !text.endsWith("}")) return null;
   return topLevelItems(text.slice(1, -1)).map((property) => {
     const key = property.match(/^(\w+)\s*(?::|$)/)?.[1];
@@ -376,6 +383,8 @@ describe("GAME_FLOW.md socketRoutes payloads", () => {
     expect(emitted[1].args).toEqual(["player(p, room)"]);
     expect(objectLiteralKeys(emitted[1].args[0])).toBeNull();
     expect(emitted[2].args).toEqual([]);
+    expect(objectLiteralKeys("{ ok: true, why } satisfies Reply")).toEqual(["ok", "why"]);
+    expect(objectLiteralKeys("reply(x) satisfies Reply")).toBeNull();
 
     const handlers = calls(source, HANDLER_CALL);
     expect(handlers.map((h) => [h.event, fieldsRead(h.args[0])])).toEqual([

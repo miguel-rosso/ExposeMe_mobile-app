@@ -139,11 +139,12 @@ export interface SafeRoom {
   players: PublicPlayer[];
 }
 
+/** `room-of-game`: the answer to join-create-game, only to the joining socket (the room carries the round count) */
 export interface RoomOfGameResponse {
   success: boolean;
   room?: SafeRoom;
+  /** Why the join was refused (success false) */
   message?: string;
-  rounds?: number;
   /** Only in the response to the joining socket itself */
   rejoinToken?: string;
   /** The joining player's own planted-photo mark (never sent about anyone else) */

@@ -14,7 +14,7 @@ import {
   JOIN_MISS_PREFIX_MAX, JOIN_MISS_PRESSURE_MAX, JOIN_MISS_SOCKET_INTERVAL_MS, JOIN_MISS_WINDOW_MS, MAX_CONNECTIONS_PER_IP,
 } from "../managers/socketGuards";
 import { createQaTelemetry, isQaAck, QA_ACK_BURST, QA_ACK_RATE_PER_S } from "../managers/qaTelemetry";
-import { JoinCreateGameData, PhotoUnavailableData, Player, Room } from "../models/interfaces";
+import { JoinCreateGameData, PhotoUnavailableData, Player, Room, RoomOfGameResponse } from "../models/interfaces";
 
 const roomManager = new RoomManager();
 const gameEngine = new GameEngine(io, roomManager);
@@ -201,38 +201,42 @@ io.on("connection", (socket: Socket) => {
 
   socket.on("join-create-game", (data: JoinCreateGameData) => {
     try {
+      /** The join is refused: the socket keeps the binding it had (if any). */
+      const refuse = (message: string | undefined): void => {
+        socket.emit("room-of-game", { success: false, message } satisfies RoomOfGameResponse);
+      };
+
       const now = Date.now();
       while (joinAttempts.length && now - joinAttempts[0] >= JOIN_WINDOW_MS) joinAttempts.shift();
-      if (joinAttempts.length >= JOIN_MAX_ATTEMPTS) {
-        socket.emit("room-of-game", { success: false, message: "Too many attempts" });
-        return;
-      }
+      if (joinAttempts.length >= JOIN_MAX_ATTEMPTS) return refuse("Too many attempts");
       joinAttempts.push(now);
 
       const username = data?.username;
       const rawCode = data?.gameCode;
       // No invisible characters; lookalikes of a player's name are refused by RoomManager.joinRoom (EXP-032)
-      if (!isValidUsername(username)) {
-        socket.emit("room-of-game", { success: false, message: "Invalid username" });
-        return;
-      }
+      if (!isValidUsername(username)) return refuse("Invalid username");
       if (rawCode != null && typeof rawCode !== "string") {
         recordMiss();
-        socket.emit("room-of-game", { success: false, message: "Game not found" });
-        return;
+        return refuse("Game not found");
       }
       // No code (null/"") creates a room; any other string is a code to join, typed in any case
       const gameCode = rawCode ? normalizeRoomCode(rawCode) : null;
+
+      /** The join succeeded: the public room, plus the player's rejoinToken and own planted mark (only to this socket). */
+      const replyJoined = (room: Room, player: Player): void => {
+        socket.emit("room-of-game", {
+          success: true, room: roomManager.safeRoomData(room), rejoinToken: player.rejoinToken, hasPlantedPhoto: !!player.hasPlantedPhoto,
+        } satisfies RoomOfGameResponse);
+      };
 
       // One socket = one player in one room. The same live socket re-sending join for the room and username
       // it already owns (WaitingRoom effect re-run, duplicate join) is a no-op. Reconnects and "Play again"
       // arrive on a new socket and go through the normal rejoin (token) path below.
       const current = session(socket);
       if (current && gameCode === current.room.gameCode && username === current.player.username) {
-        const { room, player } = current;
-        socket.emit("room-of-game", { success: true, room: roomManager.safeRoomData(room), rounds: room.rounds, rejoinToken: player.rejoinToken, hasPlantedPhoto: !!player.hasPlantedPhoto });
+        replyJoined(current.room, current.player);
         // Game in progress: the app asks again from the game screen, which missed the rejoin snapshot
-        gameEngine.resendState(room, player);
+        gameEngine.resendState(current.room, current.player);
         return;
       }
 
@@ -240,64 +244,53 @@ io.on("connection", (socket: Socket) => {
       // (player removed, host handed over). A failed join keeps the socket where it was.
       const prevCode: string | null = socket.data.gameCode ?? null;
       const prevUsername: string | null = socket.data.username ?? null;
-      const leavePrevious = () => {
-        if (!prevCode || !prevUsername || (prevCode === gameCode && prevUsername === username)) return;
-        leaveBinding(socket, prevCode, prevUsername, current !== null);
+      /** Leave the previous binding (unless it is this same one), then bind this socket to `username` in `code`. */
+      const bindTo = (code: string): void => {
+        if (prevCode && prevUsername && !(prevCode === code && prevUsername === username)) {
+          leaveBinding(socket, prevCode, prevUsername, current !== null);
+        }
+        socket.join(code);
+        socket.data.gameCode = code;
+        socket.data.username = username;
       };
 
-      if (gameCode !== null) {
-        // This IP guessed too many unknown codes: no answer reveals whether this code exists, unless the sender
-        // proves it is a player of that room (rejoin with its token) or a connected player of the room is on the
-        // same IP (same network: they know the code anyway; see sameNetworkExempt). Misses still count.
-        // Same answer on a socket in its miss cooldown, so every "Game not found" below is a recorded miss.
-        // A malformed code matches no room: same "Game not found" answer, counted as a miss
-        const target = isRoomCode(gameCode) ? roomManager.getRoom(gameCode) : undefined;
-        if ((missCooldown() || joinMisses.locked(ip)) && !roomManager.canRejoin(gameCode, username, data.rejoinToken) && !sameNetworkExempt(target)) {
-          if (!target) recordMiss();
-          socket.emit("room-of-game", { success: false, message: "Too many attempts" });
-          return;
-        }
-        if (!target) {
-          recordMiss();
-          socket.emit("room-of-game", { success: false, message: "Game not found" });
-          return;
-        }
-        // Same room under another username: the socket's own player frees its slot
-        const replacing = current && current.room.gameCode === gameCode ? current.player.username : undefined;
-        const result = roomManager.joinRoom(gameCode, username, socket.id, data.rejoinToken, replacing);
-        if (result.success && result.room) {
-          const player = roomManager.getPlayer(gameCode, username)!;
-          leavePrevious();
-          socket.join(gameCode);
-          socket.data.gameCode = gameCode;
-          socket.data.username = username;
-          // rejoinToken and the player's own planted mark go only to this socket
-          socket.emit("room-of-game", {
-            success: true, room: roomManager.safeRoomData(result.room), rounds: result.room.rounds,
-            rejoinToken: player.rejoinToken, hasPlantedPhoto: !!player.hasPlantedPhoto,
-          });
-          // Only broadcast player-joined for new players, not rejoins
-          if (!result.rejoin) socket.broadcast.to(gameCode).emit("player-joined", roomManager.publicPlayer(player));
-          // A rejoin replaces the player's previous socket(s): they must not keep receiving the room's events
-          if (result.rejoin) socketsOf(gameCode, username, socket.id).forEach((old) => evictSocket(old, gameCode));
-          console.log(`[${gameCode}] ${username} ${result.rejoin ? "rejoined" : "joined"}`);
-          // Reconnect: snapshot of the current game to this socket, and resume a paused game
-          if (result.rejoin) gameEngine.onPlayerRejoined(result.room, player);
-        } else {
-          socket.emit("room-of-game", { success: false, message: result.message });
-        }
-      } else {
-        if (roomManager.isAtCapacity()) {
-          socket.emit("room-of-game", { success: false, message: "Server is busy" });
-          return;
-        }
+      if (gameCode === null) {
+        if (roomManager.isAtCapacity()) return refuse("Server is busy");
         const room = roomManager.createRoom(username, socket.id);
-        leavePrevious();
-        socket.join(room.gameCode);
-        socket.data.gameCode = room.gameCode;
-        socket.data.username = username;
-        socket.emit("room-of-game", { success: true, room: roomManager.safeRoomData(room), rejoinToken: room.players[0].rejoinToken, hasPlantedPhoto: false });
+        bindTo(room.gameCode);
+        replyJoined(room, room.players[0]);
+        return;
       }
+
+      // This IP guessed too many unknown codes: no answer reveals whether this code exists, unless the sender
+      // proves it is a player of that room (rejoin with its token) or a connected player of the room is on the
+      // same IP (same network: they know the code anyway; see sameNetworkExempt). Misses still count.
+      // Same answer on a socket in its miss cooldown, so every "Game not found" below is a recorded miss.
+      // A malformed code matches no room: same "Game not found" answer, counted as a miss
+      const target = isRoomCode(gameCode) ? roomManager.getRoom(gameCode) : undefined;
+      if ((missCooldown() || joinMisses.locked(ip)) && !roomManager.canRejoin(gameCode, username, data.rejoinToken) && !sameNetworkExempt(target)) {
+        if (!target) recordMiss();
+        return refuse("Too many attempts");
+      }
+      if (!target) {
+        recordMiss();
+        return refuse("Game not found");
+      }
+      // Same room under another username: the socket's own player frees its slot
+      const replacing = current && current.room.gameCode === gameCode ? current.player.username : undefined;
+      const result = roomManager.joinRoom(gameCode, username, socket.id, data.rejoinToken, replacing);
+      if (!result.success || !result.room) return refuse(result.message);
+
+      const player = roomManager.getPlayer(gameCode, username)!;
+      bindTo(gameCode);
+      replyJoined(result.room, player);
+      // Only broadcast player-joined for new players, not rejoins
+      if (!result.rejoin) socket.broadcast.to(gameCode).emit("player-joined", roomManager.publicPlayer(player));
+      // A rejoin replaces the player's previous socket(s): they must not keep receiving the room's events
+      if (result.rejoin) socketsOf(gameCode, username, socket.id).forEach((old) => evictSocket(old, gameCode));
+      console.log(`[${gameCode}] ${username} ${result.rejoin ? "rejoined" : "joined"}`);
+      // Reconnect: snapshot of the current game to this socket, and resume a paused game
+      if (result.rejoin) gameEngine.onPlayerRejoined(result.room, player);
     } catch (e) { console.error("join-create-game error:", e); }
   });
 

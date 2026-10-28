@@ -112,11 +112,21 @@ function phaseSync(r, ctx) {
       if (!es.some((e) => e.bot === name)) (missed[name] ||= []).push(k);
     }
     if (es.length > 1) skews.push(tSpan(es));
-    const sig = (e) => JSON.stringify(e.payload ?? null);
+    const sig = (e) => JSON.stringify(sharedPayload(e.payload));
     if (new Set(es.map(sig)).size > 1) errors.push(`${k}: players received different payloads`);
   }
   const waitSkews = [...byKey].filter(([k, es]) => isWaitKey(k) && es.length > 1).map(([, es]) => tSpan(es));
   return { skews, waitSkews, missed, errors };
+}
+
+// Fields of a phase event meant for its recipient only (round-reveal's own recorded answer, EXP-230): they differ
+// between players by design, so the sync check compares the rest
+const PER_RECIPIENT_FIELDS = ["yourGuess"];
+
+/** The part of a phase event's payload that must be the same for every player. */
+function sharedPayload(payload) {
+  if (!payload || typeof payload !== "object") return payload ?? null;
+  return Object.fromEntries(Object.entries(payload).filter(([key]) => !PER_RECIPIENT_FIELDS.includes(key)));
 }
 
 // ── Checks ──
@@ -189,6 +199,26 @@ function checkFrozenAnswers(r, ctx) {
       const expected = sent?.payload.guess ?? "";
       const late = r.events.some((e) => e.bot === row.username && e.ev === "late-submit" && e.round === round);
       if (row.lastGuess !== expected) out.push(`round ${round}: ${row.username} scored with "${row.lastGuess}" but its last pick while answering was "${expected}"${late ? " (a vote sent during the reveal counted)" : ""}`);
+    }
+  }
+  return out;
+}
+
+/**
+ * The reveal shows each player the answer the server recorded for them (EXP-230): the `yourGuess` of a bot's
+ * round-reveal, or of a game-state in reveal/scores, equals its lastGuess in that round's round-scores. Events recorded
+ * before yourGuess existed have no such key and are not checked.
+ */
+function checkRevealedOwnGuess(r) {
+  const out = [];
+  const firstScores = new Map();
+  for (const e of r.events) if (e.ev === "round-scores" && !firstScores.has(e.round)) firstScores.set(e.round, e);
+  const revealsOwnGuess = (e) => (e.ev === "round-reveal" || (e.ev === "game-state" && (e.payload?.phase === "reveal" || e.payload?.phase === "scores")))
+    && e.payload && "yourGuess" in e.payload;
+  for (const e of r.events.filter(revealsOwnGuess)) {
+    const row = firstScores.get(e.round)?.payload?.scores?.find((s) => s.username === e.bot);
+    if (row && row.lastGuess !== e.payload.yourGuess) {
+      out.push(`round ${e.round}: ${e.bot}'s ${e.ev} showed its answer as ${JSON.stringify(e.payload.yourGuess)} but round-scores has "${row.lastGuess}"`);
     }
   }
   return out;
@@ -567,6 +597,7 @@ export function analyseRoom(r, opts) {
     ...sync.errors,
     ...checkScoredLikeEveryone(r, ctx),
     ...checkFrozenAnswers(r, ctx),
+    ...checkRevealedOwnGuess(r),
     ...checkDuplicateRoundStarts(ctx),
     ...checkWaitBeforeRoundStart(r, ctx),
     ...checkPayloadLeaks(r),

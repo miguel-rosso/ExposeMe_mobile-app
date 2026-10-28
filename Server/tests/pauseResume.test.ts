@@ -102,7 +102,7 @@ describe("pause with fewer than 2 connected players", () => {
     vi.advanceTimersByTime(ANSWER_TIME - 3_000 - 1);
     expect(events("round-reveal")).toHaveLength(0);
     vi.advanceTimersByTime(1);
-    expect(events("round-reveal")).toHaveLength(1);
+    expect(events("round-reveal")).toHaveLength(room.players.length); // one per player
     expect(events("game-over")).toHaveLength(0);
     expect(vi.getTimerCount()).toBe(1); // only the phase timer: the pause countdown is gone
   });

@@ -108,8 +108,9 @@ After last round: game-over
 
 - The photo owner (the uploader, or the planter for a planted photo) is never named before `round-reveal`
   (DEC-031: the owner may not recognise the photo, so they play too). **`round-start { photo, round, duration }`** is
-  one room-wide payload, the same for every player, owner included, and so is the `game-state` snapshot (no
-  per-recipient field; its scores' order doesn't move with this round's answers either, see "Pause and reconnect").
+  one room-wide payload, the same for every player, owner included, and so is the `game-state` snapshot (its only
+  per-recipient field, `yourGuess`, is `null` before the reveal; its scores' order doesn't move with this round's
+  answers either, see "Pause and reconnect").
   So the unmodified app never shows the owner anything before the reveal, and other players can't infer it. The
   owner's own client necessarily knows: it receives `your-turn` and uploads the photo (the round's photo path is the
   one its `/upload` returned), so this protects the game's fun, not against a modified owner client.
@@ -127,7 +128,12 @@ After last round: game-over
   replaces the previous one and its point.
 - Answers are accepted **only in `answering`** (also while paused in it). The server freezes them when the answer
   timer ends, right before emitting `round-reveal`; anything that arrives in `reveal`/`scores` is ignored, since
-  `correctAnswer` is public by then. Nothing is sent at the reveal.
+  `correctAnswer` is public by then. The app sends nothing at the reveal.
+- **`round-reveal { correctAnswer, duration, yourGuess }`** goes to each player separately: `correctAnswer` and
+  `duration` are the same for everyone, `yourGuess` is the recipient's own answer as the server froze it (`""` = no
+  guess), never anyone else's (the others' guesses stay hidden until `round-scores`). The app colours that pick, not
+  its own last one: a change that left the phone but arrived after the freeze (high latency) never counted, and the
+  reveal shows it didn't.
 - **Grace for the last tap**: the answer timer is `ANSWER_TIME` (8 s), but every `duration` sent to clients for
   `answering` (`round-start`, `game-state`, `game-resumed`) is **`ANSWER_GRACE` (300 ms) less** than what is left of
   it. The app stops taking taps when its answer bar (drawn with that `duration`, not a separate game timer) ends,
@@ -139,9 +145,8 @@ After last round: game-over
   200 ms, with a trailing send of the latest pick), so the limit never drops the pick that counts. When the answer
   bar ends, a pick still waiting is sent at once (within ANSWER_GRACE) and later taps are ignored.
 - A rejoining client in `answering` re-sends its current pick of that round (one sent while offline was lost).
-  As with the live events, a `reveal` snapshot colours the last pick sent in that round (one made while
-  disconnected and never sent is cleared) and a `scores` snapshot the player's `lastGuess`, so the colours match
-  what the server recorded.
+  As with the live events, a `reveal` snapshot colours the snapshot's `yourGuess` (the recipient's recorded answer)
+  and a `scores` snapshot lists each player's `lastGuess`, so the colours match what the server recorded.
 - There are no other answer events (the legacy `correct-answer` / `incorrect-answer` aliases were removed).
 
 ## Join, rejoin and session
@@ -398,9 +403,10 @@ and, once the game screen listens, re-sends `join-create-game` on the **same** s
 fresh snapshot (and `your-turn` for an awaited photo), which the game screen renders like any reconnect. Events
 that reached the lobby screen in between are covered by that snapshot.
 
-- **`game-state`** = `{ started, phase, round, totalRounds, photo, correctAnswer, duration, phaseTotal, held, pause,
-  scores, players }`, the same for every recipient. `duration` is the remaining time of the current phase (frozen
-  while paused/held), `phaseTotal` its full duration (see "Phase totals in resync payloads"). `photo` is only set in `answering`/`reveal`/`scores` (the owner's name is never in it before
+- **`game-state`** = `{ started, phase, round, totalRounds, photo, correctAnswer, yourGuess, duration, phaseTotal, held,
+  pause, scores, players }`, the same for every recipient except `yourGuess`: the recipient's own recorded answer,
+  only in `reveal`/`scores` (as in their `round-reveal`; `""` = no guess), else `null`. `duration` is the remaining
+  time of the current phase (frozen while paused/held), `phaseTotal` its full duration (see "Phase totals in resync payloads"). `photo` is only set in `answering`/`reveal`/`scores` (the owner's name is never in it before
   the reveal: `correctAnswer` carries it from `reveal` on);
   in `waiting-photo`, `round` is the last played round (the awaited one is `round + 1`, as in `waiting-photo`) and
   `duration` what is left of the photo wait, so the client renders the same waiting screen as for `waiting-photo`;
@@ -491,7 +497,7 @@ All game events are **atomic** — each contains everything the client needs.
 | `waiting-photo` | waiting-photo | `{ round, duration }` | Whole room: a photo is awaited (owner not revealed), show wait bar |
 | `your-turn` | waiting-photo | `{ round, attempt }` | Only the picked player: pick and upload a photo (or send `photo-unavailable`) |
 | `round-start` | answering | `{ photo, round, duration }` | Show photo, start answer timer (`duration` = 7.7 s: 300 ms grace before answers freeze). Same payload for the whole room, owner included (never tells whose photo it is) |
-| `round-reveal` | reveal | `{ correctAnswer, duration }` | Show correct answer |
+| `round-reveal` | reveal | `{ correctAnswer, duration, yourGuess }` | Show correct answer. One per player: `yourGuess` is the recipient's own recorded answer (`""` = none), which the app colours |
 | `round-scores` | scores | `{ scores, round, totalRounds, duration }` | Show scoreboard (`scores`: `{ username, points, isHost, lastAnswerCorrect, lastGuess }[]`, highest first, ties in room order) |
 | `hold-start` | scores | - | Pause everything visually |
 | `hold-end` | scores | - | The hold is over (released, force-released or ended by a pause); `hold-resume` carries the time |

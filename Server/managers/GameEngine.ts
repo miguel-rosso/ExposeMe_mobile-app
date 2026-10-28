@@ -1,6 +1,7 @@
 import { Server } from "socket.io";
 import {
-  GameStateSnapshot, PauseInfo, PhaseResumeData, Player, PlayerConnectionData, Room, RoundPhase, RoundSkippedData, RoundStartData, ScoreRound, WaitingPhotoData, YourTurnData,
+  GameStateSnapshot, PauseInfo, PhaseResumeData, Player, PlayerConnectionData, Room, RoomStateSnapshot, RoundPhase, RoundRevealData,
+  RoundSkippedData, RoundStartData, ScoreRound, WaitingPhotoData, YourTurnData,
 } from "../models/interfaces";
 import { DISCONNECT_GRACE, RoomManager } from "./RoomManager";
 import { uploadStore } from "../middlewares/uploadStore";
@@ -411,7 +412,7 @@ export class GameEngine {
    */
   onPlayerRejoined(room: Room, player: Player): void {
     this.onConnectionChange(room, player);
-    this.io.to(player.socketId).emit("game-state", this.snapshot(room));
+    this.io.to(player.socketId).emit("game-state", this.gameStateFor(room, player));
     this.sendAwaitedTurn(room, player);
     this.reviewAwaitedOwner(room);
   }
@@ -422,7 +423,7 @@ export class GameEngine {
    */
   resendState(room: Room, player: Player): void {
     if (!room.started) return;
-    this.io.to(player.socketId).emit("game-state", this.snapshot(room));
+    this.io.to(player.socketId).emit("game-state", this.gameStateFor(room, player));
     this.sendAwaitedTurn(room, player);
   }
 
@@ -433,10 +434,15 @@ export class GameEngine {
     }
   }
 
-  /** `game-state`, the same for every recipient: the owner is only named from the reveal on (`correctAnswer`). */
-  snapshot(room: Room): GameStateSnapshot {
+  /** `game-state` for `player`: the room-wide snapshot plus their own answer once it is final (from the reveal on). */
+  gameStateFor(room: Room, player: Player): GameStateSnapshot {
+    return { ...this.snapshot(room), yourGuess: this.isRevealed(room) ? player.lastGuess : null };
+  }
+
+  /** The room-wide part of `game-state`: the owner is only named from the reveal on (`correctAnswer`). */
+  snapshot(room: Room): RoomStateSnapshot {
     const inRound = room.phase === "answering" || room.phase === "reveal" || room.phase === "scores";
-    const shown = room.phase === "reveal" || room.phase === "scores";
+    const shown = this.isRevealed(room);
     // Running timer: what is left of it; paused/held timer: the frozen remaining time
     const remaining = room._timer ? Math.max(0, room._timerDuration - (Date.now() - room._timerStartedAt)) : room._timerDuration;
     const { duration, phaseTotal } = room.started ? this.phaseTiming(room, remaining) : { duration: 0, phaseTotal: 0 };
@@ -840,16 +846,25 @@ export class GameEngine {
     return true;
   }
 
+  /** Answers are frozen and the owner is public: reveal and scores of the round in play. */
+  private isRevealed(room: Room): boolean {
+    return room.phase === "reveal" || room.phase === "scores";
+  }
+
+  /**
+   * Answers freeze: round-reveal to each player with the round's answer and their own recorded guess, so their reveal
+   * colours the pick that counted (one that arrived too late never did). Nobody gets anyone else's guess.
+   */
   private enterReveal(room: Room): void {
     room.phase = "reveal";
     const answer = room.currentPlayer?.username ?? "";
     console.log(`[${room.gameCode}] Reveal: ${answer}`);
     this.markPhaseEmitted(room, room.round);
 
-    this.io.to(room.gameCode).emit("round-reveal", {
-      correctAnswer: answer,
-      duration: REVEAL_TIME,
-    });
+    for (const p of room.players) {
+      const reveal: RoundRevealData = { correctAnswer: answer, duration: REVEAL_TIME, yourGuess: p.lastGuess };
+      this.io.to(p.socketId).emit("round-reveal", reveal);
+    }
 
     this.setTimer(room, REVEAL_TIME, () => this.enterScores(room));
   }

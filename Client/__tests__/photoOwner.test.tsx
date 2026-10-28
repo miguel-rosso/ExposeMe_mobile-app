@@ -81,7 +81,7 @@ describe("GameScreen: whose photo it is (EXP-128)", () => {
   });
 
   const toScores = (correctAnswer: string) => {
-    act(() => mockSocket.fire("round-reveal", { correctAnswer, duration: 3_000 }));
+    act(() => mockSocket.fire("round-reveal", { correctAnswer, duration: 3_000, yourGuess: "" }));
     act(() => mockSocket.fire("round-scores", { scores: [], round: 1, totalRounds: 10, duration: 5_000 }));
   };
 
@@ -94,7 +94,7 @@ describe("GameScreen: whose photo it is (EXP-128)", () => {
     // EXP-148: the pick is sent when tapped, during answering (the server ignores answers once the reveal is out)
     expect(answers()).toEqual([{ guess: "alice" }]);
 
-    act(() => mockSocket.fire("round-reveal", { correctAnswer: "alice", duration: 3_000 }));
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "alice", duration: 3_000, yourGuess: "alice" }));
     expect(answers()).toEqual([{ guess: "alice" }]); // nothing sent at the reveal
     expect(markOf(r.root, "alice")).toBe(GREEN);
     act(() => mockSocket.fire("round-scores", { scores: [], round: 1, totalRounds: 10, duration: 5_000 }));
@@ -110,7 +110,7 @@ describe("GameScreen: whose photo it is (EXP-128)", () => {
     press(r.root, "alice");
     expect(answers()).toEqual([{ guess: "carol" }, { guess: "alice" }]);
     expect(markOf(r.root, "alice")).toBe(BLUE);
-    act(() => mockSocket.fire("round-reveal", { correctAnswer: "alice", duration: 3_000 }));
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "alice", duration: 3_000, yourGuess: "alice" }));
     act(() => { jest.advanceTimersByTime(1_000); });
     expect(answers()).toEqual([{ guess: "carol" }, { guess: "alice" }]);
   });
@@ -170,29 +170,40 @@ describe("GameScreen: whose photo it is (EXP-128)", () => {
     expect(answers()).toHaveLength(2); // no trailing duplicate
     press(r.root, "bob"); // after the close: ignored
     expect(answers()).toHaveLength(2);
-    act(() => mockSocket.fire("round-reveal", { correctAnswer: "alice", duration: 3_000 }));
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "alice", duration: 3_000, yourGuess: "alice" }));
     expect(markOf(r.root, "alice")).toBe(GREEN);
   });
 
-  // EXP-227: the reveal and scores colour the pick the server can have counted, not a later local tap
-  it("the reveal colours the last pick sent, not one still waiting when answering ended", () => {
+  // EXP-227 / EXP-230: the reveal colours the pick the server recorded, not a later local tap
+  it("the reveal colours the recorded pick, not one still waiting when answering ended", () => {
     act(() => mockSocket.fire("round-start", START));
     press(r.root, "carol");
     press(r.root, "alice"); // waits for its throttle slot; the reveal arrives first
-    act(() => mockSocket.fire("round-reveal", { correctAnswer: "alice", duration: 3_000 }));
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "alice", duration: 3_000, yourGuess: "carol" }));
     expect(markOf(r.root, "carol")).toBe(RED);
     expect(markOf(r.root, "alice")).not.toBe(GREEN);
     act(() => { jest.advanceTimersByTime(1_000); });
     expect(answers()).toEqual([{ guess: "carol" }]); // too late: never sent in reveal
   });
 
-  // The scoreboard lists each player's recorded guess; no options are drawn under it (EXP-141), so none can show a stale pick
-  it("the scores show no stale colour: the options are gone under the scoreboard", () => {
+  // EXP-230: a change sent in time from the phone that reached the server after the close never counted: the reveal
+  // colours the answer the server recorded (the earlier pick), so it agrees with the scoreboard that follows
+  it("the reveal colours the server's recorded answer, not a change that arrived after the close", () => {
     act(() => mockSocket.fire("round-start", START));
     press(r.root, "carol");
     act(() => { jest.advanceTimersByTime(250); });
     press(r.root, "alice"); // sent, but it reached the server after the close
-    act(() => mockSocket.fire("round-reveal", { correctAnswer: "alice", duration: 3_000 }));
+    expect(answers()).toEqual([{ guess: "carol" }, { guess: "alice" }]);
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "alice", duration: 3_000, yourGuess: "carol" }));
+    expect(markOf(r.root, "carol")).toBe(RED);
+    expect(markOf(r.root, "alice")).not.toBe(GREEN);
+  });
+
+  // The scoreboard lists each player's recorded guess; no options are drawn under it (EXP-141), so none can show a stale pick
+  it("the scores show no stale colour: the options are gone under the scoreboard", () => {
+    act(() => mockSocket.fire("round-start", START));
+    press(r.root, "alice");
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "alice", duration: 3_000, yourGuess: "alice" }));
     expect(markOf(r.root, "alice")).toBe(GREEN);
     const score = (username: string, lastGuess: string) =>
       ({ username, points: 0, isHost: false, lastAnswerCorrect: false, lastGuess });
@@ -205,7 +216,7 @@ describe("GameScreen: whose photo it is (EXP-128)", () => {
   it("a wrong guess turns red at the reveal", () => {
     act(() => mockSocket.fire("round-start", START));
     press(r.root, "carol");
-    act(() => mockSocket.fire("round-reveal", { correctAnswer: "alice", duration: 3_000 }));
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "alice", duration: 3_000, yourGuess: "carol" }));
     expect(markOf(r.root, "carol")).toBe(RED);
     expect(markOf(r.root, "alice")).not.toBe(GREEN); // only my own selection is coloured
   });
@@ -222,7 +233,7 @@ describe("GameScreen: whose photo it is (EXP-128)", () => {
     expect(answers()).toEqual([{ guess: "bob" }]);
     expect(has(r.root, TEST_IDS.holdButton)).toBe(false);
 
-    act(() => mockSocket.fire("round-reveal", { correctAnswer: "bob", duration: 3_000 }));
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "bob", duration: 3_000, yourGuess: "bob" }));
     expect(markOf(r.root, "bob")).toBe(GREEN);
     expect(has(r.root, TEST_IDS.holdButton)).toBe(false); // the server takes holds in scores only
     act(() => mockSocket.fire("round-scores", { scores: [], round: 1, totalRounds: 10, duration: 5_000 }));
@@ -233,7 +244,8 @@ describe("GameScreen: whose photo it is (EXP-128)", () => {
   it("the hold button follows the revealed answer, also from a rejoin snapshot; the next round resets it", () => {
     const snapshot = (phase: string, correctAnswer: string | null) => ({
       started: true, phase, round: 1, totalRounds: 10, photo: "/temp/x.jpg",
-      correctAnswer, duration: 4_000, held: false, pause: null, scores: [], players: mockPlayers,
+      correctAnswer, yourGuess: correctAnswer === null ? null : "", duration: 4_000, held: false, pause: null, scores: [],
+      players: mockPlayers,
     });
     act(() => mockSocket.fire("game-state", snapshot("answering", null)));
     expect(has(r.root, TEST_IDS.holdButton)).toBe(false);

@@ -100,7 +100,7 @@ describe("GameScreen: server phases drawn with the received duration (EXP-063)",
     expect(bar(r.root)!.id).toBe(answering.id);
     expect(has(r.root, playerOptionId("alice"))).toBe(true);
 
-    act(() => mockSocket.fire("round-reveal", { correctAnswer: "carol", duration: 3_000 }));
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "carol", duration: 3_000, yourGuess: "" }));
     expect(bar(r.root)).toBeNull(); // no bar in reveal
     expect(scoreModal(r.root).visible).toBe(false);
     expect(scoreModal(r.root).correctAnswer).toBe("carol");
@@ -126,7 +126,7 @@ describe("GameScreen: server phases drawn with the received duration (EXP-063)",
 
   it("a hold hides the overlay and freezes; hold-resume draws a fresh bar with the remaining time", () => {
     act(() => mockSocket.fire("round-start", START));
-    act(() => mockSocket.fire("round-reveal", { correctAnswer: "carol", duration: 3_000 }));
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "carol", duration: 3_000, yourGuess: "" }));
     act(() => mockSocket.fire("round-scores", { scores: SCORES, round: 1, totalRounds: 10, duration: 5_000 }));
 
     act(() => mockSocket.fire("hold-start"));
@@ -151,7 +151,7 @@ describe("GameScreen: server phases drawn with the received duration (EXP-063)",
   it("the owner's hold button sends hold-start on press and hold-end on release, only in scores", () => {
     act(() => mockSocket.fire("round-start", START));
     expect(has(r.root, TEST_IDS.holdButton)).toBe(false); // not while answering
-    act(() => mockSocket.fire("round-reveal", { correctAnswer: "bob", duration: 3_000 }));
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "bob", duration: 3_000, yourGuess: "" }));
     expect(has(r.root, TEST_IDS.holdButton)).toBe(false);
     act(() => mockSocket.fire("round-scores", { scores: SCORES, round: 1, totalRounds: 10, duration: 5_000 }));
 
@@ -172,7 +172,7 @@ describe("GameScreen: server phases drawn with the received duration (EXP-063)",
   // its hold-end, or the room stays held until the server's hold budget runs out
   it("release then press again before the release's answer: the second release still goes out", () => {
     act(() => mockSocket.fire("round-start", START));
-    act(() => mockSocket.fire("round-reveal", { correctAnswer: "bob", duration: 3_000 }));
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "bob", duration: 3_000, yourGuess: "" }));
     act(() => mockSocket.fire("round-scores", { scores: SCORES, round: 1, totalRounds: 10, duration: 5_000 }));
     const button = () => r.root.find((n) => n.props.testID === TEST_IDS.holdButton && typeof n.props.onPressIn === "function");
     act(() => button().props.onPressIn());
@@ -194,7 +194,7 @@ describe("GameScreen: server phases drawn with the received duration (EXP-063)",
   // hold-end the server ignores (I hold nothing), and the next press works as usual
   it("a hold the server releases while I press: the overlay comes back, and the next press is a new hold", () => {
     act(() => mockSocket.fire("round-start", START));
-    act(() => mockSocket.fire("round-reveal", { correctAnswer: "bob", duration: 3_000 }));
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "bob", duration: 3_000, yourGuess: "" }));
     act(() => mockSocket.fire("round-scores", { scores: SCORES, round: 1, totalRounds: 10, duration: 5_000 }));
     const button = () => r.root.find((n) => n.props.testID === TEST_IDS.holdButton && typeof n.props.onPressIn === "function");
     act(() => button().props.onPressIn());
@@ -221,7 +221,7 @@ describe("GameScreen: server phases drawn with the received duration (EXP-063)",
 
   it("the next round drops a hold still pressed (the button goes), and the owner can hold again later", () => {
     act(() => mockSocket.fire("round-start", START));
-    act(() => mockSocket.fire("round-reveal", { correctAnswer: "bob", duration: 3_000 }));
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "bob", duration: 3_000, yourGuess: "" }));
     act(() => mockSocket.fire("round-scores", { scores: SCORES, round: 1, totalRounds: 10, duration: 5_000 }));
     const button = () => r.root.find((n) => n.props.testID === TEST_IDS.holdButton && typeof n.props.onPressIn === "function");
     act(() => button().props.onPressIn());
@@ -232,7 +232,7 @@ describe("GameScreen: server phases drawn with the received duration (EXP-063)",
     act(() => mockSocket.fire("round-start", { ...START, photo: "/temp/y.jpg", round: 2 }));
     expect(has(r.root, TEST_IDS.holdButton)).toBe(false);
 
-    act(() => mockSocket.fire("round-reveal", { correctAnswer: "bob", duration: 3_000 }));
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "bob", duration: 3_000, yourGuess: "" }));
     act(() => mockSocket.fire("round-scores", { scores: SCORES, round: 2, totalRounds: 10, duration: 5_000 }));
     act(() => button().props.onPressIn());
     expect(emitted("hold-start")).toHaveLength(2);
@@ -246,7 +246,7 @@ describe("GameScreen: server phases drawn with the received duration (EXP-063)",
       const check = (phase: string) => { if (has(r.root, TEST_IDS.holdButton)) seen.push(phase); };
       act(() => mockSocket.fire("round-start", START));
       check("answering");
-      act(() => mockSocket.fire("round-reveal", { correctAnswer: mine ? "bob" : "carol", duration: 3_000 }));
+      act(() => mockSocket.fire("round-reveal", { correctAnswer: mine ? "bob" : "carol", duration: 3_000, yourGuess: "" }));
       check("reveal");
       act(() => mockSocket.fire("round-scores", { scores: SCORES, round: 1, totalRounds: 10, duration: 5_000 }));
       check("scores");
@@ -266,7 +266,7 @@ describe("GameScreen: server phases drawn with the received duration (EXP-063)",
   // EXP-141: with many players the answer list reached under the scoreboard; it is not drawn in scores at all
   it("the answer options are not rendered while the scoreboard shows, and come back with the next round", () => {
     act(() => mockSocket.fire("round-start", START));
-    act(() => mockSocket.fire("round-reveal", { correctAnswer: "carol", duration: 3_000 }));
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "carol", duration: 3_000, yourGuess: "" }));
     expect(has(r.root, playerOptionId("alice"))).toBe(true); // the reveal colours them
 
     act(() => mockSocket.fire("round-scores", { scores: SCORES, round: 1, totalRounds: 10, duration: 5_000 }));
@@ -287,7 +287,7 @@ describe("GameScreen: server phases drawn with the received duration (EXP-063)",
   it("the owner answers like everyone, and their scoreboard keeps room for the hold button", () => {
     act(() => mockSocket.fire("round-start", START));
     expect(has(r.root, playerOptionId("bob"))).toBe(true); // my own name too: I'm not told it's my photo
-    act(() => mockSocket.fire("round-reveal", { correctAnswer: "bob", duration: 3_000 }));
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "bob", duration: 3_000, yourGuess: "" }));
     act(() => mockSocket.fire("round-scores", { scores: SCORES, round: 1, totalRounds: 10, duration: 5_000 }));
     expect(has(r.root, playerOptionId("alice"))).toBe(false);
     expect(scoreModal(r.root).reserveHoldButton).toBe(true);
@@ -348,7 +348,7 @@ describe("GameScreen: qa-ack render telemetry (EXP-012)", () => {
     await act(async () => { r = TestRenderer.create(<GameScreen />); });
     act(() => mockSocket.fire("waiting-photo", { round: 1, duration: 15_000 }));
     act(() => mockSocket.fire("round-start", START));
-    act(() => mockSocket.fire("round-reveal", { correctAnswer: "carol", duration: 3_000 }));
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "carol", duration: 3_000, yourGuess: "" }));
     act(() => mockSocket.fire("round-scores", { scores: SCORES, round: 1, totalRounds: 10, duration: 5_000 }));
     act(() => r.unmount());
   }

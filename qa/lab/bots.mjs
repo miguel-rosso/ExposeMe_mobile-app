@@ -119,7 +119,9 @@
 //   Answers (EXP-148): like the app, a bot sends submit-answer while answering (sometimes a first pick changed once:
 //   the last one counts), never at the reveal. At each round-reveal the first bot also sends the revealed answer, which
 //   the server must ignore: every bot's lastGuess in round-scores equals its last pick sent while answering ("" if
-//   none) ("consistency"; bots that went offline are left out). round-start's duration is the answer time minus a
+//   none) ("consistency"; bots that went offline are left out). Each bot's round-reveal (and a reveal/scores
+//   game-state) carries its own recorded answer, `yourGuess` (EXP-230): it must equal that bot's lastGuess in the
+//   round's round-scores ("consistency"). round-start's duration is the answer time minus a
 //   300 ms grace (answers are taken until the real end); bots send at most 3 picks per round (server limit: 10 per
 //   socket, refilled 5/s), and there are no correct-answer / incorrect-answer aliases.
 //   Turns: like the app, a bot drops the photo (or photo-unavailable) of a your-turn whose request ended before it was
@@ -761,7 +763,8 @@ function runRoom(roomIdx, fixedCode) {
       };
       socket.on("round-reveal", (d) => {
         bot.phase = "reveal";
-        rec("round-reveal", bot.round, { correctAnswer: d.correctAnswer });
+        // yourGuess: our own answer as the server froze it (null if missing, so the check reports it)
+        rec("round-reveal", bot.round, { correctAnswer: d.correctAnswer, yourGuess: d.yourGuess ?? null });
         // Fair play: a vote sent once the answer is public must be ignored (checked against round-scores)
         if (i === 0 && d.correctAnswer) {
           socket.emit("submit-answer", { guess: d.correctAnswer });
@@ -773,7 +776,10 @@ function runRoom(roomIdx, fixedCode) {
       socket.on("round-skipped", (d) => rec("round-skipped", d?.round ?? bot.round, d));
       // Rejoin snapshot: catch up like the app does (pick again in answering, im-ready in the ready phase)
       socket.on("game-state", (d) => {
-        rec("game-state", d.round, { phase: d.phase, paused: !!d.pause, pause: d.pause?.pause, maxPauses: d.pause?.maxPauses, started: d.started });
+        rec("game-state", d.round, {
+          phase: d.phase, paused: !!d.pause, pause: d.pause?.pause, maxPauses: d.pause?.maxPauses, started: d.started,
+          yourGuess: d.yourGuess ?? null,
+        });
         // Offline when game-over was sent (EXP-092): the rejoin snapshot of our game says it is no longer started
         if (!d.started && bot.inGame) { rec("game-over-missed", bot.round); onGameOver(); return; }
         if (!d.started) return;

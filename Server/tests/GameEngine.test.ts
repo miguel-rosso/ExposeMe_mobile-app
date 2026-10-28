@@ -285,7 +285,10 @@ describe("round phases", () => {
     expect(events("round-reveal")).toHaveLength(0);
     vi.advanceTimersByTime(1);
     expect(room.phase).toBe("reveal");
-    expect(lastEvent("round-reveal")!.args[0]).toEqual({ correctAnswer: owner, duration: REVEAL_TIME });
+    // One per player: the answer, and their own recorded guess (nobody answered)
+    expect(events("round-reveal")).toEqual(room.players.map((p) => ({
+      target: p.socketId, event: "round-reveal", args: [{ correctAnswer: owner, duration: REVEAL_TIME, yourGuess: "" }],
+    })));
 
     vi.advanceTimersByTime(REVEAL_TIME - 1);
     expect(events("round-scores")).toHaveLength(0);

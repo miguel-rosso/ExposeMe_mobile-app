@@ -21,10 +21,10 @@ describe("round-start (EXP-001)", () => {
   });
 
   it("sets the new round photo/phase and resets per-round answer state", () => {
-    const prev = view({ phaseKey: 4, correctAnswer: "alice", scores: [], mySelection: "bob", sentGuess: "bob" });
+    const prev = view({ phaseKey: 4, correctAnswer: "alice", scores: [], mySelection: "bob" });
     expect(start(prev)).toEqual({
       photo: "http://srv/temp/a.jpg", round: 3, phase: "answering", phaseDuration: 10000, phaseTotal: 10000, phaseKey: 5,
-      correctAnswer: "", scores: null, mySelection: "", sentGuess: "", gameHeld: false, pressing: false,
+      correctAnswer: "", scores: null, mySelection: "", gameHeld: false, pressing: false,
     });
   });
 
@@ -50,7 +50,7 @@ describe("isRevealedOwner", () => {
   it("follows the round: true after the reveal of my photo, false again when the next round starts", () => {
     let state = roundReducer(view(), { type: "round-start", data: { photo: "/temp/a.jpg", round: 1, duration: 7_700 }, serverUrl: "" });
     expect(isRevealedOwner(state.correctAnswer, "bob")).toBe(false);
-    state = roundReducer(state, { type: "round-reveal", data: { correctAnswer: "bob", duration: 3_000 } });
+    state = roundReducer(state, { type: "round-reveal", data: { correctAnswer: "bob", duration: 3_000, yourGuess: "" } });
     expect(isRevealedOwner(state.correctAnswer, "bob")).toBe(true);
     state = roundReducer(state, { type: "waiting-photo", data: { round: 2, duration: 15_000 } });
     expect(isRevealedOwner(state.correctAnswer, "bob")).toBe(false);
@@ -85,6 +85,7 @@ const snapshot = (over: Partial<GameStateSnapshot> = {}): GameStateSnapshot => (
   totalRounds: 10,
   photo: "/temp/1-a.jpg",
   correctAnswer: null,
+  yourGuess: null,
   duration: 4200,
   phaseTotal: 8000,
   held: false,
@@ -94,9 +95,9 @@ const snapshot = (over: Partial<GameStateSnapshot> = {}): GameStateSnapshot => (
   ...over,
 });
 
-/** The screen before the reconnect showed round 3 with this photo, and my pick "carol" (sent) */
+/** The screen before the reconnect showed round 3 with this photo, and my pick "carol" */
 const shown = (over: Partial<RoundView> = {}) =>
-  view({ round: 3, photo: "http://srv/temp/1-a.jpg", phase: "answering", mySelection: "carol", sentGuess: "carol", ...over });
+  view({ round: 3, photo: "http://srv/temp/1-a.jpg", phase: "answering", mySelection: "carol", ...over });
 
 const applyGameState = (snap: GameStateSnapshot, serverUrl: string, current: RoundView) => ({
   state: roundReducer(current, { type: "game-state", snap, serverUrl }),
@@ -135,25 +136,26 @@ describe("game-state", () => {
     expect(scores.state.scores).toEqual(snapshot().scores);
   });
 
-  // EXP-148: a pick made while offline never reached the server; once answers are frozen it must not be coloured
-  it("clears a pick that was never sent when a same-round snapshot is past answering", () => {
-    const unsent = shown({ sentGuess: "" });
+  // EXP-148 / EXP-230: once answers are frozen the snapshot's yourGuess (what the server recorded) is coloured, not
+  // my local pick: one made offline, or sent too late, never counted
+  it("shows the server's recorded answer in a reveal/scores snapshot, whatever my local pick", () => {
     for (const phase of ["reveal", "scores"] as const) {
-      const snap = snapshot({ phase, correctAnswer: "alice" });
-      expect(applyGameState(snap, "http://srv", unsent).state.mySelection).toBe("");
-      expect(applyGameState(snap, "http://srv", shown()).state.mySelection).toBe("carol");
+      const unrecorded = snapshot({ phase, correctAnswer: "alice", yourGuess: "" });
+      expect(applyGameState(unrecorded, "http://srv", shown()).state.mySelection).toBe("");
+      const recorded = snapshot({ phase, correctAnswer: "alice", yourGuess: "bob" });
+      expect(applyGameState(recorded, "http://srv", shown()).state.mySelection).toBe("bob");
     }
-    // Still answering: kept (and re-sent by the screen)
-    expect(applyGameState(snapshot(), "http://srv", unsent).state.mySelection).toBe("carol");
+    // Still answering: my pick is kept (and re-sent by the screen)
+    expect(applyGameState(snapshot(), "http://srv", shown()).state.mySelection).toBe("carol");
   });
 
-  // EXP-227: a reveal snapshot colours the same pick the live round-reveal would
-  it("shows the last pick sent in a reveal snapshot, and nothing of mine for a round played while away", () => {
-    const tappedLate = shown({ mySelection: "alice", sentGuess: "carol" });
-    const reveal = snapshot({ phase: "reveal", correctAnswer: "alice" });
-    expect(applyGameState(reveal, "http://srv", tappedLate).state.mySelection).toBe("carol");
+  // EXP-230: a reveal snapshot colours the same pick the live round-reveal would, also for a round I didn't see start
+  it("shows the recorded answer in a reveal snapshot of a round played while away", () => {
     const otherRound = shown({ round: 2, photo: "http://srv/temp/0-b.jpg" });
-    expect(applyGameState(reveal, "http://srv", otherRound).state.mySelection).toBe("");
+    const none = snapshot({ phase: "reveal", correctAnswer: "alice", yourGuess: "" });
+    expect(applyGameState(none, "http://srv", otherRound).state.mySelection).toBe("");
+    const recorded = snapshot({ phase: "reveal", correctAnswer: "alice", yourGuess: "alice" });
+    expect(applyGameState(recorded, "http://srv", otherRound).state.mySelection).toBe("alice");
   });
 
   it("shows the server's pause countdown, and clears a pause when the snapshot has none", () => {
@@ -189,10 +191,10 @@ describe("game-state", () => {
 // ── Phase updates within a round ─────────────────────────
 
 describe("reveal, scores, hold and pause", () => {
-  const answering = view({ round: 2, photo: "http://srv/temp/a.jpg", phase: "answering", phaseKey: 7, mySelection: "bob", sentGuess: "bob" });
+  const answering = view({ round: 2, photo: "http://srv/temp/a.jpg", phase: "answering", phaseKey: 7, mySelection: "bob" });
 
   it("reveal and scores restart the progress bar with the server's duration", () => {
-    const reveal = roundReducer(answering, { type: "round-reveal", data: { correctAnswer: "alice", duration: 3_000 } });
+    const reveal = roundReducer(answering, { type: "round-reveal", data: { correctAnswer: "alice", duration: 3_000, yourGuess: "bob" } });
     expect(reveal).toMatchObject({ phase: "reveal", correctAnswer: "alice", phaseDuration: 3_000, phaseKey: 8, mySelection: "bob" });
     const scores = roundReducer(reveal, {
       type: "round-scores", data: { scores: [], round: 2, totalRounds: 5, duration: 5_000 },
@@ -200,12 +202,13 @@ describe("reveal, scores, hold and pause", () => {
     expect(scores).toMatchObject({ phase: "scores", scores: [], round: 2, phaseDuration: 5_000, phaseKey: 9 });
   });
 
-  // EXP-227: the reveal colours the guess that counted, not a later local tap
-  it("the reveal shows the last pick sent", () => {
-    const sent = roundReducer({ ...answering, mySelection: "", sentGuess: "" }, { type: "pick", guess: "carol" });
-    const late = roundReducer(roundReducer(sent, { type: "pick-sent", guess: "carol" }), { type: "pick", guess: "alice" });
-    const reveal = roundReducer(late, { type: "round-reveal", data: { correctAnswer: "alice", duration: 3_000 } });
+  // EXP-230: the reveal colours the guess the server recorded, not my last local pick (sent too late to count)
+  it("the reveal shows the answer the server recorded for me", () => {
+    const late = roundReducer(roundReducer(answering, { type: "pick", guess: "carol" }), { type: "pick", guess: "alice" });
+    const reveal = roundReducer(late, { type: "round-reveal", data: { correctAnswer: "alice", duration: 3_000, yourGuess: "carol" } });
     expect(reveal.mySelection).toBe("carol");
+    const none = roundReducer(late, { type: "round-reveal", data: { correctAnswer: "alice", duration: 3_000, yourGuess: "" } });
+    expect(none.mySelection).toBe("");
   });
 
 
@@ -317,7 +320,7 @@ describe("phaseElapsed: where the progress bar of a resumed phase starts", () =>
     const same = applyGameState(snapshot({ phase: "waiting-photo", photo: null, round: 3, duration: 5_000, phaseTotal: 15_000 }), "", waiting);
     expect(same.state).toMatchObject({ phase: "waiting-photo", round: 4, phaseDuration: 5_000, phaseTotal: 15_000 });
     expect(phaseElapsed(same.state)).toBeCloseTo(2 / 3);
-    const fromReveal = roundReducer(roundStart(), { type: "round-reveal", data: { correctAnswer: "alice", duration: 3_000 } });
+    const fromReveal = roundReducer(roundStart(), { type: "round-reveal", data: { correctAnswer: "alice", duration: 3_000, yourGuess: "" } });
     const next = applyGameState(snapshot({ phase: "waiting-photo", photo: null, duration: 12_000, phaseTotal: 15_000 }), "", fromReveal);
     expect(next.state).toMatchObject({ phase: "waiting-photo", round: 4, photo: null, correctAnswer: "" });
     expect(phaseElapsed(next.state)).toBeCloseTo(0.2);

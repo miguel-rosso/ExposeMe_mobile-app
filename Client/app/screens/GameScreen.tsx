@@ -108,7 +108,7 @@ const GameScreen = () => {
   // Rapid taps are coalesced: at most one send per PICK_SEND_INTERVAL, then a trailing send of the latest pick, so the
   // server's per-socket rate limit never drops the pick that counts. When the answer bar ends, a pick still waiting
   // goes at once (within the server's 300 ms grace) and later taps are ignored.
-  // A pick is only emitted (and recorded as sent) while connected: one made offline goes from the rejoin's snapshot.
+  // A pick is only emitted while connected: one made offline goes from the rejoin's snapshot.
   const lastPickSentAt = useRef(0);
   const pickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sendPick = () => {
@@ -116,7 +116,7 @@ const GameScreen = () => {
     pickTimer.current = null;
     lastPickSentAt.current = Date.now();
     const guess = roundRef.current.mySelection;
-    if (emitWhileConnected(socket, "submit-answer", { guess })) dispatchRound({ type: "pick-sent", guess });
+    emitWhileConnected(socket, "submit-answer", { guess });
   };
   const pickGuess = (val: string) => {
     dispatchRound({ type: "pick", guess: val });
@@ -309,10 +309,10 @@ const GameScreen = () => {
         dispatchRound({ type: "round-start", data, serverUrl: SERVER_URL });
       },
 
-      // Atomic: answer revealed (the server froze answers before this: only a pick already sent can have counted)
+      // Atomic: answer revealed, with my answer as the server froze it (the pick the reveal colours)
       "round-reveal": (data: RoundRevealData) => {
         markPhaseHandled("reveal");
-        console.log(`[GAME] round-reveal: ${data.correctAnswer}, my guess: ${roundRef.current.sentGuess}`);
+        console.log(`[GAME] round-reveal: ${data.correctAnswer}, my guess: ${data.yourGuess}`);
         dispatchRound({ type: "round-reveal", data });
       },
 

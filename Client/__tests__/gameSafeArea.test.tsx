@@ -94,7 +94,7 @@ describe("GameScreen rows keep clear of the screen's unsafe edges (EXP-205)", ()
     const banner = flat(byId(r.root, TEST_IDS.reconnectingBanner));
     act(() => { mockSocket.connected = true; });
     // My photo: the hold button shows in scores
-    act(() => mockSocket.fire("round-reveal", { correctAnswer: "bob", duration: 3_000 }));
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "bob", duration: 3_000, yourGuess: "" }));
     act(() => mockSocket.fire("round-scores", { scores: [], round: 1, totalRounds: 10, duration: 5_000 }));
     const hold = placedAncestor(byId(r.root, TEST_IDS.holdButton), "bottom");
     act(() => r.unmount());
@@ -223,7 +223,7 @@ describe("Round scoreboard under the progress bar (EXP-158)", () => {
     ["landscape", LANDSCAPE_INSETS],
   ])("with %s, neither the title nor the card's highest place reach the bar, with the hold button's space kept", async (_name, insets) => {
     const r = await playRoundToScores(insets);
-    act(() => mockSocket.fire("round-reveal", { correctAnswer: "bob", duration: 3_000 }));
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "bob", duration: 3_000, yourGuess: "" }));
     act(() => mockSocket.fire("round-scores", { scores: [], round: 1, totalRounds: 10, duration: 5_000 }));
     expect(byId(r.root, TEST_IDS.holdButton)).toBeTruthy();
     const strip = flat(byId(r.root, TEST_IDS.roundProgress)) as Box & { height: number };

@@ -105,10 +105,14 @@ export interface RoundStartData {
   duration: number;
 }
 
-/** `round-reveal`: whose photo it was, shown for `duration` ms */
+/**
+ * `round-reveal` (one per player): whose photo it was, shown for `duration` ms, and my own answer as the server froze
+ * it (`""` = no guess): the pick the reveal colours, even if a later change of mine arrived too late to count
+ */
 export interface RoundRevealData {
   correctAnswer: string;
   duration: number;
+  yourGuess: string;
 }
 
 /** `round-scores`: the scores after round `round`, shown for `duration` ms */
@@ -148,6 +152,8 @@ export interface GameStateSnapshot extends ResyncTiming {
   photo: string | null;
   /** Whose photo it was, only from the reveal on (nobody, the owner included, is told earlier) */
   correctAnswer: string | null;
+  /** My own answer as the server recorded it (`""` = no guess), only from the reveal on, like my `round-reveal` */
+  yourGuess: string | null;
   held: boolean;
   pause: GamePausedData | null;
   scores: ScoreRound[];

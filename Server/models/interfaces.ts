@@ -171,6 +171,17 @@ export interface RoundStartData {
 }
 
 /**
+ * `round-reveal`, one per player: whose photo it was (the same for everyone), shown for `duration` ms, and the
+ * recipient's own answer as the server recorded it when answers froze (`""` = no guess), so the reveal colours the
+ * pick that counted, not one still in flight.
+ */
+export interface RoundRevealData {
+  correctAnswer: string;
+  duration: number;
+  yourGuess: string;
+}
+
+/**
  * `game-resumed` / `hold-resume`: the paused or held `phase` continues with `duration` ms left of its `phaseTotal`
  * (the full countdown its start event sent).
  */
@@ -181,11 +192,11 @@ export interface PhaseResumeData {
 }
 
 /**
- * `game-state`: sent only to a player who rejoins, so a reconnecting client can render the current phase.
+ * The room-wide part of `game-state`, the same for every recipient.
  * `duration` is the remaining time of the current phase (frozen while paused or held), `phaseTotal` its full
  * countdown as its start event sent it, so the client's bar resumes at the right point.
  */
-export interface GameStateSnapshot {
+export interface RoomStateSnapshot {
   started: boolean;
   phase: RoundPhase | null;
   round: number;
@@ -201,4 +212,13 @@ export interface GameStateSnapshot {
   pause: PauseInfo | null;
   scores: ScoreRound[];
   players: PublicPlayer[];
+}
+
+/**
+ * `game-state`: sent only to a player who rejoins, so a reconnecting client can render the current phase. The room-wide
+ * snapshot plus the recipient's own recorded answer, only from the reveal on (as in their `round-reveal`).
+ */
+export interface GameStateSnapshot extends RoomStateSnapshot {
+  /** Only in reveal/scores: the recipient's answer as recorded when answers froze (`""` = no guess) */
+  yourGuess: string | null;
 }

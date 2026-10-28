@@ -50,7 +50,7 @@ beforeAll(() => { jest.spyOn(console, "log").mockImplementation(() => {}); });
 afterAll(() => jest.restoreAllMocks());
 
 const snapshot = (over: Partial<GameStateSnapshot> = {}): GameStateSnapshot => ({
-  started: true, phase: "answering", round: 3, totalRounds: 10, photo: "/temp/1-a.jpg", correctAnswer: null,
+  started: true, phase: "answering", round: 3, totalRounds: 10, photo: "/temp/1-a.jpg", correctAnswer: null, yourGuess: null,
   duration: 4_000, phaseTotal: 8_000, held: false, pause: null, scores: [], players: mockPlayers, ...over,
 });
 const ROUND_START = { photo: "/temp/1-a.jpg", round: 3, duration: 8_000 };
@@ -142,7 +142,7 @@ describe("GameScreen emits nothing while offline (EXP-081)", () => {
   it("the photo owner's hold pressed offline is not buffered", async () => {
     const r = await mountGame();
     act(() => mockSocket.fire("round-start", ROUND_START));
-    act(() => mockSocket.fire("round-reveal", { correctAnswer: "bob", duration: 2_000 }));
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "bob", duration: 2_000, yourGuess: "" }));
     act(() => mockSocket.fire("round-scores", { scores: [], round: 3, totalRounds: 10, duration: 6_000 }));
     goOffline();
     mockSocket.emitted = [];

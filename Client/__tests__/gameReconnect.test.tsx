@@ -32,6 +32,7 @@ const snapshot = (over: Partial<GameStateSnapshot> = {}): GameStateSnapshot => (
   totalRounds: 10,
   photo: "/temp/1-a.jpg",
   correctAnswer: null,
+  yourGuess: null,
   duration: 4200,
   phaseTotal: 7700,
   held: false,

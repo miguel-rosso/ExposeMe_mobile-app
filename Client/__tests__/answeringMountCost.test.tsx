@@ -199,7 +199,7 @@ describe("GameScreen: reveal and scoreboard render cost on Android (EXP-265)", (
     const option = r.root.find((n) => n.props.testID === `player-option-${name}` && typeof n.props.onPress === "function");
     act(() => option.props.onPress());
   };
-  const reveal = () => act(() => mockSocket.fire("round-reveal", { correctAnswer: "player2", duration: REVEAL_MS }));
+  const reveal = () => act(() => mockSocket.fire("round-reveal", { correctAnswer: "player2", duration: REVEAL_MS, yourGuess: "player3" }));
   const showScores = () =>
     act(() => mockSocket.fire("round-scores", { scores: roundScores, round: 1, totalRounds: 10, duration: 5_000 }));
   // The answer bar runs out (the options are disabled) as the server reveals the answer

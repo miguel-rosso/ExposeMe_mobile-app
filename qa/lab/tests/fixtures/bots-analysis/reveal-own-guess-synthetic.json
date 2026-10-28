@@ -1,0 +1,71 @@
+{
+"scenario": "synthetic: 3 bots, 1 round; bot2's round-reveal shows no answer although round-scores has its vote (EXP-230), bot3's reveal and its rejoin snapshot in reveal agree with round-scores; reveals differing only in yourGuess are no sync error",
+"opts": {"host":true,"rounds":1,"playAgainLingerS":0,"lingerBot":0,"startNextGameS":0},
+"room": {"code":"QAROOM","reason":"game-over","players":["bot1","bot2","bot3"],"errors":[],"uploads":[],"rateLimited":0,"events": [
+{"bot":"bot1","ev":"game-started","round":0,"t":100,"payload":{"rounds":1}},
+{"bot":"bot2","ev":"game-started","round":0,"t":110,"payload":{"rounds":1}},
+{"bot":"bot3","ev":"game-started","round":0,"t":120,"payload":{"rounds":1}},
+{"bot":"bot1","ev":"waiting-photo","round":1,"t":1100,"payload":{"round":1,"duration":15000}},
+{"bot":"bot2","ev":"waiting-photo","round":1,"t":1110,"payload":{"round":1,"duration":15000}},
+{"bot":"bot3","ev":"waiting-photo","round":1,"t":1120,"payload":{"round":1,"duration":15000}},
+{"bot":"bot1","ev":"round-start","round":1,"t":3000,"payload":{"photo":"/temp/photo-1.jpg","duration":7700}},
+{"bot":"bot2","ev":"round-start","round":1,"t":3010,"payload":{"photo":"/temp/photo-1.jpg","duration":7700}},
+{"bot":"bot3","ev":"round-start","round":1,"t":3020,"payload":{"photo":"/temp/photo-1.jpg","duration":7700}},
+{"bot":"bot2","ev":"guess-sent","round":1,"t":4000,"payload":{"guess":"bot1"}},
+{"bot":"bot3","ev":"guess-sent","round":1,"t":4100,"payload":{"guess":"bot2"}},
+{"bot":"bot1","ev":"round-reveal","round":1,"t":11000,"payload":{"correctAnswer":"bot1","yourGuess":""}},
+{"bot":"bot2","ev":"round-reveal","round":1,"t":11010,"payload":{"correctAnswer":"bot1","yourGuess":""}},
+{"bot":"bot3","ev":"round-reveal","round":1,"t":11020,"payload":{"correctAnswer":"bot1","yourGuess":"bot2"}},
+{"bot":"bot3","ev":"game-state","round":1,"t":11500,"payload":{"phase":"reveal","paused":false,"started":true,"yourGuess":"bot2"}},
+{"bot":"bot1","ev":"round-scores","round":1,"t":14000,"payload":{"scores":[{"username":"bot2","points":1,"isHost":false,"lastAnswerCorrect":true,"lastGuess":"bot1"},{"username":"bot1","points":0,"isHost":true,"lastAnswerCorrect":false,"lastGuess":""},{"username":"bot3","points":0,"isHost":false,"lastAnswerCorrect":false,"lastGuess":"bot2"}]}},
+{"bot":"bot2","ev":"round-scores","round":1,"t":14010,"payload":{"scores":[{"username":"bot2","points":1,"isHost":false,"lastAnswerCorrect":true,"lastGuess":"bot1"},{"username":"bot1","points":0,"isHost":true,"lastAnswerCorrect":false,"lastGuess":""},{"username":"bot3","points":0,"isHost":false,"lastAnswerCorrect":false,"lastGuess":"bot2"}]}},
+{"bot":"bot3","ev":"round-scores","round":1,"t":14020,"payload":{"scores":[{"username":"bot2","points":1,"isHost":false,"lastAnswerCorrect":true,"lastGuess":"bot1"},{"username":"bot1","points":0,"isHost":true,"lastAnswerCorrect":false,"lastGuess":""},{"username":"bot3","points":0,"isHost":false,"lastAnswerCorrect":false,"lastGuess":"bot2"}]}},
+{"bot":"bot1","ev":"game-over","round":1,"t":19000},
+{"bot":"bot2","ev":"game-over","round":1,"t":19010},
+{"bot":"bot3","ev":"game-over","round":1,"t":19020}
+]},
+"expected": {
+ "code": "QAROOM",
+ "reason": "game-over",
+ "players": 3,
+ "rounds_played": 1,
+ "rounds_skipped": 0,
+ "planted_sent": 0,
+ "planted_rounds": [],
+ "skipped_unavailable": 0,
+ "unavailable_skip_ms": {
+  "max": null
+ },
+ "waiting_photo": 1,
+ "waiting_photo_skew_ms": {
+  "p50": "20.0",
+  "max": "20.0"
+ },
+ "disconnects": 0,
+ "resyncs": 1,
+ "pauses": 0,
+ "max_pause_number": 0,
+ "resumes": 0,
+ "linger_turns_reported": 0,
+ "second_game_rounds": 0,
+ "second_game_ready_ms": null,
+ "skew_ms": {
+  "p50": "20.0",
+  "p95": "20.0",
+  "max": "20.0"
+ },
+ "answer_phase_overrun_ms": {
+  "p50": "0.0",
+  "max": "0.0"
+ },
+ "upload_ms": {
+  "max": null
+ },
+ "uploads_rate_limited": 0,
+ "missed_events": {},
+ "consistency_errors": [
+  "round 1: bot2's round-reveal showed its answer as \"\" but round-scores has \"bot1\""
+ ],
+ "errors": []
+}
+}

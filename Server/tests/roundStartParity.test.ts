@@ -121,8 +121,14 @@ describe("normal and planted rounds start the same way (EXP-249)", () => {
       expect(roomWideTimeline()).toEqual([
         { event: "waiting-photo", args: [{ round: 1, duration: PHOTO_WAIT_TIMEOUT }], after: 0 },
         { event: "round-start", args: [{ photo: "<photo>", round: 1, duration: ANSWER_TIME - ANSWER_GRACE }], after: PLANTED_DELAY },
-        { event: "round-reveal", args: [{ correctAnswer: owner.username, duration: REVEAL_TIME }], after: PLANTED_DELAY + ANSWER_TIME },
       ]);
+      // round-reveal goes to each player (their own recorded guess, none here), the same for both kinds of round
+      const reveals = emits.filter((e) => e.event === "round-reveal");
+      expect(reveals.map((e) => e.target)).toEqual(room.players.map((p) => p.socketId));
+      for (const e of reveals) {
+        expect(e.args).toEqual([{ correctAnswer: owner.username, duration: REVEAL_TIME, yourGuess: "" }]);
+        expect(e.at - roundStartAt).toBe(ANSWER_TIME);
+      }
     });
   }
 

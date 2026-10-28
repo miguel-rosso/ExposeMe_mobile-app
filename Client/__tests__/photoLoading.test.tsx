@@ -155,7 +155,7 @@ describe("GameScreen prefetches the round photo (EXP-119)", () => {
     expect(getSizeWithHeaders).toHaveBeenCalledTimes(1);
     expect(getSizeWithHeaders).toHaveBeenCalledWith(`${SERVER_URL}/temp/1.jpg`, HEADERS);
     // Same photo through the rest of the round: no new download
-    act(() => mockSocket.fire("round-reveal", { correctAnswer: "alice", duration: 3_000 }));
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "alice", duration: 3_000, yourGuess: "" }));
     expect(getSizeWithHeaders).toHaveBeenCalledTimes(1);
   });
 

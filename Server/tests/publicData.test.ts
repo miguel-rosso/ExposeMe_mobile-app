@@ -114,7 +114,7 @@ describe("public player data", () => {
   it("game-state snapshot players have only public fields", () => {
     room.players[1].plantedPhoto = PLANTED;
     answeringRoom();
-    const snap: GameStateSnapshot = engine.snapshot(room);
+    const snap: GameStateSnapshot = engine.gameStateFor(room, room.players[0]);
     expectNoSecrets({ ...snap, photo: null });
     expect(snap.players.map((p) => Object.keys(p).sort())).toEqual(room.players.map(() => PUBLIC_KEYS));
   });

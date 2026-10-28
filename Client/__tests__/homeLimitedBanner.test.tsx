@@ -1,10 +1,19 @@
 import React from "react";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
-import { AppState, Text } from "react-native";
+import { AppState, Image, StyleSheet, Text } from "react-native";
 import { TEST_IDS } from "../app/utils/testIds";
 import { BRAND_RED } from "../app/theme/brand";
 import en from "../app/i18n/en";
 import es from "../app/i18n/es";
+import {
+  HOME_TOP_ROW_TOP,
+  LOGO_BOX_HEIGHT,
+  LOGO_EMOJI_BANNER_CLEARANCE,
+  LOGO_EMOJI_BOX_PERCENT,
+  LOGO_EMOJI_FACE_TOP_INSET,
+  LOGO_EMOJI_SIZE,
+  LOGO_EMOJI_TOP,
+} from "../app/utils/homeLayout";
 
 // EXP-270: home banner for players who only share some photos (iOS limited, Android 14+ selected photos), with a
 // button that opens the system picker to share more. Hidden with full access or no access at all.
@@ -185,5 +194,86 @@ describe("Home limited-access banner (EXP-270)", () => {
     expect(has(r.root, TEST_IDS.homeLimitedBanner)).toBe(true);
     act(() => r.unmount());
     expect(appStateHandlers).toHaveLength(0);
+  });
+
+});
+
+// EXP-281: the banner pill touched the logo emoji. With the banner, the emoji shrinks towards its bottom edge to clear
+// the measured banner; the logo box and the title keep exactly the layout they have without it, so the form below is
+// never pushed down (jest has no layout engine: positions are fed through onLayout).
+describe("Home logo vs the limited-access banner (EXP-281)", () => {
+  const layout = (y: number, height: number) => ({ nativeEvent: { layout: { x: 0, y, width: 300, height } } });
+  const logo = (root: ReactTestInstance) =>
+    root.find((n) => n.props.animation === "slideInDown" && typeof n.props.onLayout === "function" && typeof n.type !== "string");
+  const bannerWrapper = (root: ReactTestInstance) =>
+    root.find((n) => typeof n.props.onLayout === "function" && n.parent?.props.pointerEvents === "box-none");
+  const emoji = (root: ReactTestInstance) =>
+    root.find((n) => n.type === Image && StyleSheet.flatten(n.props.style)?.top === LOGO_EMOJI_TOP);
+  const title = (root: ReactTestInstance) => root.find((n) => n.type === Text && n.props.children === en.appName);
+  const emojiTransform = (root: ReactTestInstance) => StyleSheet.flatten(emoji(root).props.style);
+
+  /** Mounts home and lays out the logo at top-[10%] of `height`, and the banner wrapper (0 high when hidden) */
+  async function mountLaidOut(height: number, banner: { y: number; height: number }) {
+    const r = await mount();
+    act(() => logo(r.root).props.onLayout(layout(height * 0.1, LOGO_BOX_HEIGHT)));
+    act(() => bannerWrapper(r.root).props.onLayout(layout(banner.y, banner.height)));
+    return r;
+  }
+  const faceTop = (logoTop: number, scale: number) =>
+    logoTop + LOGO_EMOJI_TOP + LOGO_EMOJI_SIZE - scale * LOGO_EMOJI_SIZE * (1 - LOGO_EMOJI_FACE_TOP_INSET);
+
+  it.each([["360x592", 592], ["360x640", 640]])("%s: the emoji clears the banner, the title does not move", async (_, height) => {
+    mockPerm = FULL;
+    const full = await mountLaidOut(height, { y: 0, height: 0 });
+    const fullLogoStyle = StyleSheet.flatten(logo(full.root).props.style);
+    const fullTitleStyle = StyleSheet.flatten(title(full.root).props.style);
+    expect(emojiTransform(full.root).transform).toBeUndefined(); // full access: the usual layout
+    act(() => full.unmount());
+
+    mockPerm = LIMITED;
+    const pill = { y: 5, height: 30 }; // centred in the 40 pt row
+    const r = await mountLaidOut(height, pill);
+    expect(StyleSheet.flatten(logo(r.root).props.style)).toEqual(fullLogoStyle);
+    expect(StyleSheet.flatten(title(r.root).props.style)).toEqual(fullTitleStyle);
+    const style = emojiTransform(r.root);
+    expect(style.transformOrigin).toBe("bottom"); // its bottom edge stays put: it only gets smaller upwards
+    const [{ scale }] = style.transform;
+    expect(scale).toBeLessThan(1);
+    const bannerBottom = HOME_TOP_ROW_TOP + pill.y + pill.height;
+    expect(faceTop(height * 0.1, scale)).toBeGreaterThanOrEqual(bannerBottom + LOGO_EMOJI_BANNER_CLEARANCE - 0.001);
+    act(() => r.unmount());
+  });
+
+  it("a banner grown by a large system font is measured, and the emoji shrinks further", async () => {
+    const height = 844;
+    const normal = await mountLaidOut(height, { y: 5, height: 30 });
+    const normalScale = emojiTransform(normal.root).transform[0].scale;
+    act(() => normal.unmount());
+
+    const large = { y: 0, height: 60 }; // 2x font: the pill outgrows the 40 pt row
+    const r = await mountLaidOut(height, large);
+    const [{ scale }] = emojiTransform(r.root).transform;
+    expect(scale).toBeLessThan(normalScale);
+    const bannerBottom = HOME_TOP_ROW_TOP + large.y + large.height;
+    expect(faceTop(height * 0.1, scale)).toBeGreaterThanOrEqual(bannerBottom + LOGO_EMOJI_BANNER_CLEARANCE - 0.001);
+    act(() => r.unmount());
+  });
+
+  it("the logo box and the emoji are laid out from the same constants logoEmojiScale uses", async () => {
+    mockPerm = FULL;
+    const r = await mount();
+    const emojiStyle = StyleSheet.flatten(emoji(r.root).props.style);
+    expect(emojiStyle).toMatchObject({ top: LOGO_EMOJI_TOP, width: LOGO_EMOJI_BOX_PERCENT, height: LOGO_EMOJI_BOX_PERCENT });
+    expect(StyleSheet.flatten(emoji(r.root).parent!.props.style).height).toBe(LOGO_BOX_HEIGHT);
+    expect(LOGO_EMOJI_SIZE).toBe((LOGO_BOX_HEIGHT * parseFloat(LOGO_EMOJI_BOX_PERCENT)) / 100);
+    act(() => r.unmount());
+  });
+
+  it("access becomes full: the banner wrapper collapses and the emoji goes back to its usual size", async () => {
+    const r = await mountLaidOut(640, { y: 5, height: 30 });
+    expect(emojiTransform(r.root).transform).toBeDefined();
+    act(() => bannerWrapper(r.root).props.onLayout(layout(0, 0)));
+    expect(emojiTransform(r.root).transform).toBeUndefined();
+    act(() => r.unmount());
   });
 });

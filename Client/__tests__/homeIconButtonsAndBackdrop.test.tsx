@@ -1,12 +1,13 @@
 import React from "react";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
-import { Image } from "react-native";
+import { Image, Text } from "react-native";
 import { TEST_IDS } from "../app/utils/testIds";
 import en from "../app/i18n/en";
 import es from "../app/i18n/es";
 
 // EXP-046: the home screen's icon-only buttons (clear the name, clear the room code, open the Photo Explorer) have a
 // translated name for TalkBack / VoiceOver instead of being announced as a bare "button".
+// EXP-283: the "Photo Explorer" text under the dice still opens it on tap, but screen readers only get the dice button.
 // EXP-262: the blurred background is a single <Image blurRadius>, with no hidden ImageBlur layers under it.
 
 jest.mock("@react-native-async-storage/async-storage", () => {
@@ -91,6 +92,31 @@ describe("Home: icon-only buttons have a screen reader name (EXP-046)", () => {
   it("the labels are translated, not the same text in both languages", () => {
     expect(es.clearUsername).not.toBe(en.clearUsername);
     expect(es.clearGameCode).not.toBe(en.clearGameCode);
+  });
+});
+
+describe("Home: Photo Explorer is announced once (EXP-283)", () => {
+  const ancestors = (node: ReactTestInstance) => {
+    const list: ReactTestInstance[] = [];
+    for (let n = node.parent; n; n = n.parent) list.push(n);
+    return list;
+  };
+
+  it.each([["en", en], ["es", es]] as const)("%s: the label under the dice is tappable but hidden from screen readers", async (lang, t) => {
+    mockLang = lang;
+    const r = await mount();
+    const label = r.root.find((n) => n.type === Text && n.props.children === t.photoExplorer);
+    const hostAncestors = ancestors(label).filter((n) => typeof n.type === "string");
+    // Not a second "Photo Explorer" button, and hidden together with its text on both platforms
+    expect(hostAncestors.some((n) => n.props.accessibilityRole === "button")).toBe(false);
+    const hidden = hostAncestors.find(
+      (n) => n.props.importantForAccessibility === "no-hide-descendants" && n.props.accessibilityElementsHidden === true
+    );
+    expect(hidden).toBeDefined();
+    expect(hidden!.props.accessible).toBe(false);
+    // Still opens the Photo Explorer for sighted users (EXP-240)
+    expect(ancestors(label).some((n) => typeof n.props.onPress === "function")).toBe(true);
+    act(() => r.unmount());
   });
 });
 

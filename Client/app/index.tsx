@@ -10,6 +10,7 @@ import {
   Keyboard,
   Dimensions,
   Alert,
+  LayoutChangeEvent,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import tw from "twrnc";
@@ -37,6 +38,14 @@ import { TEST_IDS } from "./utils/testIds";
 import { handleHomeBackPress } from "./utils/homeBackPress";
 import { isRoomCode, sanitizeRoomCodeInput } from "./utils/roomCode";
 import { translateServerMessage } from "./utils/serverMessage";
+import {
+  HOME_TOP_ROW_HEIGHT,
+  HOME_TOP_ROW_TOP,
+  LOGO_BOX_HEIGHT,
+  LOGO_EMOJI_BOX_PERCENT,
+  LOGO_EMOJI_TOP,
+  logoEmojiScale,
+} from "./utils/homeLayout";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -188,6 +197,17 @@ const Index = () => {
   // Playing needs photo access (full or limited) and at least one photo: checked on Create / Search room
   const galleryGuard = useGalleryAccessGuard({ watch: false });
   const ensureGalleryAccess = async () => (await galleryGuard.check({ ask: true }))?.status === "ok";
+
+  // Measured so the logo emoji can shrink clear of the limited-access banner (EXP-281); null = not shown / not laid out
+  const [logoTop, setLogoTop] = useState<number | null>(null);
+  const [bannerBottom, setBannerBottom] = useState<number | null>(null);
+  const emojiScale = logoEmojiScale(logoTop, bannerBottom);
+  const handleLogoLayout = (e: LayoutChangeEvent) => setLogoTop(e.nativeEvent.layout.y);
+  // The banner renders nothing with full (or no) access: its wrapper is then 0 high
+  const handleBannerLayout = (e: LayoutChangeEvent) => {
+    const { y, height: bannerHeight } = e.nativeEvent.layout;
+    setBannerBottom(bannerHeight > 0 ? HOME_TOP_ROW_TOP + y + bannerHeight : null);
+  };
 
   // Get screen dimensions
   const { width, height } = Dimensions.get('window');
@@ -343,17 +363,31 @@ const Index = () => {
       </View>
       <View style={tw`flex-1 justify-center items-center `}>
         {/* Language toggle */}
-        <View style={tw`absolute top-12 left-4 z-20`}>
+        <View style={[tw`absolute left-4 z-20`, { top: HOME_TOP_ROW_TOP }]}>
           <LanguageToggle />
         </View>
         {/* Only part of the gallery shared: same row as the language toggle, clear of the form and Photo Explorer */}
-        <View style={tw`absolute top-12 left-20 right-4 z-20 min-h-10 justify-center items-end`} pointerEvents="box-none">
-          <LimitedAccessBanner />
+        <View
+          style={[
+            tw`absolute left-20 right-4 z-20 justify-center items-end`,
+            { top: HOME_TOP_ROW_TOP, minHeight: HOME_TOP_ROW_HEIGHT },
+          ]}
+          pointerEvents="box-none"
+        >
+          <View onLayout={handleBannerLayout}>
+            <LimitedAccessBanner />
+          </View>
         </View>
 
         {/* Logo en la parte superior */}
-        <Animatable.View ref={topLogoRef} animation="slideInDown" duration={600} style={tw`absolute top-[10%]`}>
-          <View style={tw` flex-1 items-center  max-w-[300px] w-[100%] h-70`}>
+        <Animatable.View
+          ref={topLogoRef}
+          animation="slideInDown"
+          duration={600}
+          style={tw`absolute top-[10%]`}
+          onLayout={handleLogoLayout}
+        >
+          <View style={[tw` flex-1 items-center  max-w-[300px] w-[100%]`, { height: LOGO_BOX_HEIGHT }]}>
             <Text
               style={[
                 tw`text-white ${getTitleFontSize()}  z-10 text-center pt-15`,
@@ -369,7 +403,12 @@ const Index = () => {
             </Text>
             <Image
               source={require("@/assets/images/carasonrojada.png")}
-              style={tw` z-4 top-[-10] right-[-20] size-[70%] absolute`}
+              style={[
+                tw` z-4 right-[-20] absolute`,
+                { top: LOGO_EMOJI_TOP, width: LOGO_EMOJI_BOX_PERCENT, height: LOGO_EMOJI_BOX_PERCENT },
+                // Shrinks towards its bottom edge to clear the limited-access banner (EXP-281)
+                emojiScale < 1 && { transform: [{ scale: emojiScale }], transformOrigin: "bottom" },
+              ]}
               resizeMode="contain"
             />
           </View>
@@ -527,7 +566,8 @@ const Index = () => {
           </TouchableOpacity>
         </Animatable.View>
         <Animatable.View ref={textRef} animation="slideInUp" duration={600} style={tw`absolute bottom-15`}>
-          <TouchableOpacity accessibilityRole="button" onPress={openPhotoExplorer}>
+          {/* Tappable for sighted users; hidden from screen readers, which already get the dice button (EXP-283) */}
+          <TouchableOpacity accessible={false} aria-hidden onPress={openPhotoExplorer}>
             <Text style={tw`text-white font-bold`}>{t.photoExplorer}</Text>
           </TouchableOpacity>
         </Animatable.View>

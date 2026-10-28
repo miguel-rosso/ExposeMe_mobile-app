@@ -663,9 +663,11 @@ reject_bots_server_override() { # play option, its bots.mjs flags: dies if they 
 # and running the flow again (open-app.yaml relaunches it) saves the run.
 BUNDLE_DOWNLOAD_TEXT_RE='"text" *: *"Downloading [0-9]+(\.[0-9]+)?%'
 # The devices that did join wait in the lobby (wait-game-start.yaml, env LOBBY_WAIT_MS) for the retried one, so that
-# wait must cover it: the stuck attempt fails when open-app.yaml's 120 s waits run out (~190 s after the flow started
-# in it51-r2) and the retry opens the app and joins again (<= ~150 s). Counted from the other devices' own join, which
-# comes after their own open, it is below 190 + 150 s; the margin covers slower machines.
+# wait must cover it: the stuck attempt fails when dev-client-boot.yaml's bundle wait runs out. Its 120 s deadline is
+# absolute (EXP-288), so in the worst case that is ~20 s to launch and open the link + 120 s + the poll under way at the
+# deadline (<= ~21 s of screen lookups, ~31 s more if it is picking the server in the launcher): <= ~190 s after the
+# flow started (~190 s measured in it51-r2). The retry opens the app and joins again (<= ~150 s). Counted from the
+# other devices' own join, which comes after their own open, it is below 190 + 150 s; the margin covers slower machines.
 STUCK_ATTEMPT_S=190
 RETRY_OPEN_JOIN_S=150
 LOBBY_WAIT_MARGIN_S=80

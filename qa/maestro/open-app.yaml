@@ -19,46 +19,31 @@ appId: com.socketNull.ExposeMe
       # The dev client's floating Tools button is hidden by the app on launch (EXP-200), so the toggle is tappable
       # EXP-122: the onboarding offers the language toggle. Tap it twice (net no change, so later
       # flows keep the device language) and check the title switches language each time ((?s): it spans two lines).
+      # EXP-282: a tap can be lost (it55, iOS: swallowed by a system gesture), so each switch is retried. The wait is
+      # long enough that a slow switch is not taken for a lost tap (a second tap would undo it).
+      - evalScript: "${output.titles = { en: '(?s)YOUR GALLERY.*', es: '(?s)TU GALER.*' }}"
+      - evalScript: "${output.languageSwitch = { from: output.titles.es, to: output.titles.en }}"
       - runFlow:
           when:
             visible:
               id: "initial-title"
-              text: "(?s)YOUR GALLERY.*"
+              text: ${output.titles.en}
           commands:
-            - tapOn:
-                id: "language-toggle"
-            - extendedWaitUntil:
-                visible:
-                  id: "initial-title"
-                  text: "(?s)TU GALER.*"
-                timeout: 5000
-            - tapOn:
-                id: "language-toggle"
-            - extendedWaitUntil:
-                visible:
-                  id: "initial-title"
-                  text: "(?s)YOUR GALLERY.*"
-                timeout: 5000
-      - runFlow:
-          when:
-            visible:
-              id: "initial-title"
-              text: "(?s)TU GALER.*"
+            - evalScript: "${output.languageSwitch = { from: output.titles.en, to: output.titles.es }}"
+      - repeat:
+          times: 2
           commands:
-            - tapOn:
-                id: "language-toggle"
-            - extendedWaitUntil:
-                visible:
-                  id: "initial-title"
-                  text: "(?s)YOUR GALLERY.*"
-                timeout: 5000
-            - tapOn:
-                id: "language-toggle"
-            - extendedWaitUntil:
-                visible:
-                  id: "initial-title"
-                  text: "(?s)TU GALER.*"
-                timeout: 5000
+            - retry:
+                maxRetries: 2
+                commands:
+                  - tapOn:
+                      id: "language-toggle"
+                  - extendedWaitUntil:
+                      visible:
+                        id: "initial-title"
+                        text: ${output.languageSwitch.to}
+                      timeout: 10000
+            - evalScript: "${output.languageSwitch = { from: output.languageSwitch.to, to: output.languageSwitch.from }}"
       # Fixed footer above the bottom inset: on screen without scrolling (a scroll would hide a sliver regression)
       - assertVisible:
           id: "initial-continue-button"

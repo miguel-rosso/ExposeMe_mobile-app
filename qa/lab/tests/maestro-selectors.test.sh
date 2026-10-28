@@ -50,7 +50,7 @@ app_strings() {
 }
 
 # app_text_hits SELECTORS STRINGS -> "<line>\t<pattern>\t<app string>" for each selector that matches an app string
-# (Maestro matches the whole text, also with line breaks read as spaces)
+# (Maestro matches the whole text, case-insensitively with . matching line breaks, also with line breaks read as spaces)
 app_text_hits() {
   perl -e '
     my ($selectors, $strings) = @ARGV;
@@ -58,7 +58,7 @@ app_text_hits() {
     open $fh, "<", $selectors or die; $/ = "\n";
     while (<$fh>) {
       chomp; my ($line, $pattern) = split /\t/, $_, 2;
-      my $re = eval { qr/^(?:$pattern)\z/ } or next;
+      my $re = eval { qr/\A(?:$pattern)\z/ism } or next;
       for my $s (@app) { (my $flat = $s) =~ s/\n/ /g; if ($s =~ $re || $flat =~ $re) { $s =~ s/\n/\\n/g; print "$line\t$pattern\t$s\n"; last } }
     }
   ' "$1" "$2"
@@ -71,7 +71,7 @@ unknown_ids() {
   perl -e '
     open my $fh, "<", $ARGV[1] or die; chomp(my @known = <$fh>); close $fh;
     open $fh, "<", $ARGV[0] or die;
-    while (my $id = <$fh>) { chomp $id; my $re = qr/^(?:$id)\z/; print "$id\n" unless grep { $_ =~ $re } @known }
+    while (my $id = <$fh>) { chomp $id; my $re = qr/\A(?:$id)\z/ism; print "$id\n" unless grep { $_ =~ $re } @known }
   ' "$TMP/ids" "$TMP/known-ids"
 }
 
@@ -98,15 +98,16 @@ cat >"$TMP/flow.yaml" <<'EOF'
 - assertVisible:
     id: "join-game-button|initial-screen"
 - tapOn: YOUR GALLERY IS THE GAME
+- tapOn: "join game"
 EOF
 app_strings "$TMP/strings" "$TMP/app"
 text_selectors "$TMP/flow.yaml" >"$TMP/selectors"
 app_text_hits "$TMP/selectors" "$TMP/strings" >"$TMP/hits"
 for hit in "2	This is the developer menu.*|Join Game	Join Game" "11	Unirse a Partida	Unirse a Partida" \
-  "12	Continue	Continue" "17	YOUR GALLERY IS THE GAME	YOUR GALLERY\\nIS THE GAME"; do
+  "12	Continue	Continue" "17	YOUR GALLERY IS THE GAME	YOUR GALLERY\\nIS THE GAME" "18	join game	Join Game"; do
   grep -qxF "$hit" "$TMP/hits" && ok "checker flags: ${hit//	/ -> }" || ko "checker flags: ${hit//	/ -> }" "$(cat "$TMP/hits")"
 done
-[ "$(wc -l <"$TMP/hits" | tr -d ' ')" = 4 ] \
+[ "$(wc -l <"$TMP/hits" | tr -d ' ')" = 5 ] \
   && ok "checker skips id+text, dev-client text and comments" || ko "checker reports only app text" "$(cat "$TMP/hits")"
 [ "$(unknown_ids "$TMP/flow.yaml" "$TMP/app")" = initial-screen ] \
   && ok "checker flags an id missing from testIds.ts" || ko "checker flags unknown ids" "$(unknown_ids "$TMP/flow.yaml" "$TMP/app")"
@@ -128,38 +129,37 @@ longest_ms="$(grep -oE 'timeout: [0-9]+' "$BOOT" | grep -oE '[0-9]+$' | sort -n 
 [ -n "$loop_ms" ] && [ "$loop_ms" = "$longest_ms" ] && grep -qF 'id: "join-game-button|initial-screen"' "$BOOT" \
   && ok "dev-client-boot.yaml: the bundle wait ($loop_ms ms) polls the app by testID and is the wait lab.sh budgets" \
   || ko "dev-client-boot.yaml: bundle wait timeout is its longest" "loop=$loop_ms longest=$longest_ms"
-# The dev-menu onboarding sheet never shows, so its "Continue" (also the InitialScreen button) is never tapped
-grep -qE '^- openLink: "exp\+expose-me://expo-development-client/\?url=\$\{METRO_URL\}(&[^"]*)?&disableOnboarding=1(&[^"]*)?"$' "$BOOT" \
-  && ok "dev-client-boot.yaml: the dev-client link disables the dev-menu onboarding" || ko "dev-client-boot.yaml: openLink carries disableOnboarding=1"
+# The dev-client link turns off the dev-menu sheets that open over the app at launch: the onboarding (its "Continue"
+# reads like the InitialScreen button) and the menu itself, which can open after the app's testIDs show and then take
+# the onboarding taps (EXP-282)
+link_params="$(sed -nE 's/^- openLink: "exp\+expose-me:\/\/expo-development-client\/\?([^"]*)"$/\1/p' "$BOOT" | tr '&' '\n')"
+for param in 'url=${METRO_URL}' disableOnboarding=1 disableAutoLaunch=1 __expo_disable_auto_launch=1; do
+  grep -qxF "$param" <<<"$link_params" && ok "dev-client-boot.yaml: the dev-client link carries $param" \
+    || ko "dev-client-boot.yaml: openLink carries $param" "$(tr '\n' '&' <<<"$link_params")"
+done
 
-# ── The launcher can't hang the bundle wait ──
-# Runs the loop's own JS (dev-client-boot.yaml) with a launcher that keeps coming back and an app that never loads:
-# each server pick restarts the deadline, so the picks must be capped for the loop to end
-picks="$(node -e '
-  const lines = require("fs").readFileSync(process.argv[1], "utf8").split("\n");
-  const script = (re) => { const l = lines.find((x) => re.test(x)); if (!l) throw new Error("missing " + re); return l.match(/\$\{(.*)\}"?$/)[1]; };
-  const launcher = lines.findIndex((l) => /visible: "Development servers/.test(l));
-  const pickCondition = lines[launcher - 1].match(/true: \$\{(.*)\}$/)[1];
-  const end = lines.findIndex((l, i) => i > launcher && /^- /.test(l));
-  const pickScripts = lines.slice(launcher, end).filter((l) => /evalScript: \$\{/.test(l)).map((l) => l.match(/\$\{(.*)\}$/)[1]);
-  let now = 0;
-  const output = {};
-  const Clock = { now: () => now };
-  const run = (js) => new Function("output", "Date", `"use strict"; return (${js});`)(output, Clock);
-  run(script(/evalScript: "\$\{output\.devClientBoot = /));
-  run(script(/evalScript: \$\{output\.devClientBoot\.deadline = /));
-  const whileCondition = lines[lines.findIndex((l) => /^    while:/.test(l)) + 1].match(/true: \$\{(.*)\}$/)[1];
-  let picks = 0;
-  for (let i = 0; i < 10000 && run(whileCondition); i++) {
-    if (run(pickCondition)) { pickScripts.forEach(run); picks++; }
-    now += 1000;
-  }
-  console.log(run(whileCondition) ? "hangs" : picks + " " + output.devClientBoot.maxServerPicks);
-' "$BOOT" 2>&1)"
-read -r picked max <<<"$picks"
-[ -n "${max:-}" ] && [ "$picked" = "$max" ] && [ "$max" -ge 1 ] && [ "$max" -le 2 ] \
-  && ok "dev-client-boot.yaml: a launcher that keeps coming back is picked $picked times, then the wait ends" \
-  || ko "dev-client-boot.yaml: server picks capped at <= 2" "$picks"
+# ── Flow simulator ──
+# maestro-sim.mjs runs a flow's own YAML and JS against a fake device with Maestro 2.11's semantics (see its header)
+SIM="$HERE/maestro-sim.mjs"
+sim() { # sim SCENARIO FLOW LABEL: one ok/ko per scenario line, or one ko with the simulator's error
+  local out name verdict detail
+  if ! out="$(node "$SIM" "$1" "$2" "$CLIENT_APP" 2>&1)"; then
+    ko "$3: the simulator runs the flow" "$(tr '\n' ' ' <<<"$out")"; return
+  fi
+  while IFS=$'\t' read -r name verdict detail; do
+    [ "$verdict" = ok ] && ok "$3: $name" || ko "$3: $name" "$detail"
+  done <<<"$out"
+}
+
+# ── The launcher can't stretch the bundle wait (EXP-288) ──
+# A launcher that comes back after the first server pick and then a download that stalls: the wait still ends on its
+# own deadline, which lab.sh's STUCK_ATTEMPT_S budgets, instead of a fresh 120 s per pick
+sim boot "$BOOT" "dev-client-boot.yaml"
+
+# ── The onboarding language check survives a lost tap (EXP-282) ──
+# On iOS a tap on the toggle can be swallowed (it55: by a system gesture window): each switch is retried, a bounded
+# number of times, and the check still ends in the device language
+sim toggle "$MAESTRO_DIR/open-app.yaml" "open-app.yaml"
 
 echo "# $pass passed, $fail failed"
 [ $fail = 0 ]

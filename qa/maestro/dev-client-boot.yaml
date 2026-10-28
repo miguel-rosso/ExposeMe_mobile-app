@@ -1,11 +1,15 @@
-# Load the bundle from local Metro in a freshly launched dev client and close the Expo dev menu, ending on the app
+# Load the bundle from local Metro in a freshly launched dev client, keeping the Expo dev menu closed, ending on the app
 # (home or the first-run InitialScreen). Shared by open-app.yaml and flows that launch with other permissions.
 # The app is matched by testID (Client/app/utils/testIds.ts); only the Expo dev-client UI (always English) and the iOS
 # link alert use text (checked by qa/lab/tests/maestro-selectors.test.sh). env: METRO_URL (url-encoded)
-# disableOnboarding=1 skips the dev-menu onboarding sheet, whose "Continue" button reads like the app's InitialScreen one
+# disableOnboarding=1 skips the dev-menu onboarding sheet, whose "Continue" button reads like the app's InitialScreen one.
+# The dev menu itself opens over the app at launch, which can happen after the app's testIDs show, and would then take
+# the onboarding taps (EXP-282): disableAutoLaunch=1 turns that off in the saved preferences and
+# __expo_disable_auto_launch=1 for this process, which also covers an app loaded by picking the server in the launcher
+# (Android applies the former only when it loads this link).
 appId: com.socketNull.ExposeMe
 ---
-- openLink: "exp+expose-me://expo-development-client/?url=${METRO_URL}&disableOnboarding=1"
+- openLink: "exp+expose-me://expo-development-client/?url=${METRO_URL}&disableOnboarding=1&disableAutoLaunch=1&__expo_disable_auto_launch=1"
 - waitForAnimationToEnd:
     timeout: 5000
 # iOS 26+/Xcode 27 simulators confirm custom-scheme links with a system alert
@@ -16,11 +20,12 @@ appId: com.socketNull.ExposeMe
     commands:
       - tapOn: "Open|Abrir"
 # ── Bundle wait ──
-# Poll until the app (by testID) or the Expo dev menu, which opens at launch over it, shows up: one selector can't OR a
-# testID with text. After clearState the dev client may stay on its launcher instead of loading the bundle, sometimes
-# only after a while (seen on Android): pick the local server when it shows, which restarts the wait for the download,
-# up to maxServerPicks times so a launcher that keeps coming back fails the flow instead of hanging it.
-# lab.sh's STUCK_ATTEMPT_S counts on this timeout (lab-play.test.sh reads its `timeout: <ms>`).
+# Poll until the app (by testID) or the Expo dev menu, if it still opens at launch over it, shows up: one selector can't
+# OR a testID with text. After clearState the dev client may stay on its launcher instead of loading the bundle,
+# sometimes only after a while (seen on Android): pick the local server when it shows, up to maxServerPicks times.
+# The deadline is set once (EXP-288): a pick doesn't restart it, so the wait gives up `timeout` after it starts (plus
+# the poll under way, at most one server pick) however often the launcher comes back. lab.sh's STUCK_ATTEMPT_S counts
+# on this timeout (lab-play.test.sh reads its `timeout: <ms>`).
 - evalScript: "${output.devClientBoot = { timeout: 120000, maxServerPicks: 2, serverPicks: 0, loaded: false }}"
 - evalScript: ${output.devClientBoot.deadline = Date.now() + output.devClientBoot.timeout}
 - repeat:
@@ -50,9 +55,8 @@ appId: com.socketNull.ExposeMe
                 timeout: 30000
             - tapOn: "http://.*:8081"
             - evalScript: ${output.devClientBoot.serverPicks += 1}
-            - evalScript: ${output.devClientBoot.deadline = Date.now() + output.devClientBoot.timeout}
 - assertTrue: ${output.devClientBoot.loaded}
-# The dev menu opens at launch (showsAtLaunch defaults to true): close it (SDK 58 menu header shows "Runtime version")
+# If the dev menu still opened at launch (a dev client without the link's flags), close it (SDK 58 header: "Runtime version")
 - runFlow:
     when:
       visible: "Connected to:|Runtime version:.*"

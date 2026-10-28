@@ -592,23 +592,24 @@ unknown room or a token that is not a current member of it → **403**.
   when stored) and kind that were neither planted nor shown, keeping the newest earlier one (it may still be about
   to be planted/sent: the app can run its planted-photo retry and its round-1 upload at once). A turn upload thus
   never drops a lobby pick. A new `plant-photo` deletes the planted photo it replaces; planted and played photos stay
-  until `game-over`. A *planted* upload that no `plant-photo` claims within `UPLOAD_PLANT_CLAIM_MS` (default 2 min;
-  the app sends it as soon as the upload answers) is deleted then, e.g. a turn upload retried after background that
-  only arrives once the game is over, back in the lobby. A `plant-photo` sent after that is ignored like any other
-  path that is no longer stored (the player then has no planted photo, as `room-of-game`'s `hasPlantedPhoto` tells
-  them). So one member can't fill the room (re-picking in the lobby, retries on their turn). At most 100
-  stored photos per room (**429** beyond, a backstop). If the game ends, the room closes or the player
-  leaves while the image is being processed, nothing is stored (**409**).
+  until `game-over` (unless their uploader leaves, see Deletion). A *planted* upload that no `plant-photo` claims
+  within `UPLOAD_PLANT_CLAIM_MS` (default 2 min; the app sends it as soon as the upload answers) is deleted then, e.g.
+  a turn upload retried after background that only arrives once the game is over, back in the lobby. A `plant-photo`
+  sent after that is ignored like any other path that is no longer stored (the player then has no planted photo, as
+  `room-of-game`'s `hasPlantedPhoto` tells them). So one member can't fill the room (re-picking in the lobby, retries
+  on their turn). At most 100 stored photos per room (**429** beyond, a backstop). If the game ends, the room closes
+  or the player leaves while the image is being processed, nothing is stored (**409**).
 - `GET /temp/<photo>` serves the photo only to members of the room it was uploaded in (`Cache-Control: no-store,
   private`); a photo of another room, a deleted/expired one or any other path under `/temp` → **404**. A player who
   left or was removed is no longer a member (403).
 - **Deletion**: all of a room's photos (played and planted) are deleted at `game-over`, when its last player leaves,
   and when the room is deleted. A player's own photos are deleted when they leave or are removed, except the photo
-  on screen this round (deleted with the rest at `game-over`). The 30-min TTL stays as a backstop (`UPLOAD_TTL_MS`, by file mtime: a sweep at
-  startup and every 5 min deletes expired uploads and schedules exact deletion for those expiring before the next
-  sweep, so restarts don't leave photos behind). The sweep only deletes regular files directly in the upload dir
-  named like an upload (`<32 hex>.jpg|png|webp`) or a legacy upload (`<13-digit epoch ms>-<name>.jpg|jpeg|png|webp`);
-  symlinks, subdirectories, dotfiles (`.gitkeep`) and any other name are never touched.
+  on screen this round, deleted once that round is over (next photo wait). The 30-min TTL stays as a backstop
+  (`UPLOAD_TTL_MS`, by file mtime: a sweep at startup and every 5 min deletes expired uploads and schedules exact
+  deletion for those expiring before the next sweep, so restarts don't leave photos behind). The sweep only deletes
+  regular files directly in the upload dir named like an upload (`<32 hex>.jpg|png|webp`) or a legacy upload
+  (`<13-digit epoch ms>-<name>.jpg|jpeg|png|webp`); symlinks, subdirectories, dotfiles (`.gitkeep`) and any other name
+  are never touched.
 - `photo-sent` / `plant-photo` take the returned `/temp/...` path, and only a photo that **the sender uploaded in
   this room** (and that still exists); anything else (another player's or another room's photo, a path never
   uploaded) is ignored. `photo-sent` additionally takes only the owner's turn upload for the photo awaited now: an

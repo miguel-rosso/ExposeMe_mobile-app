@@ -234,7 +234,7 @@ export class GameEngine {
    */
   private announcePhotoWait(room: Room): void {
     room.phase = "waiting-photo";
-    room.currentPhoto = null;
+    this.roomManager.clearShownPhoto(room);
     this.turnAttempts.set(room, (this.turnAttempts.get(room) ?? 0) + 1); // new photo request, planted or not
     const waiting: WaitingPhotoData = { round: room.round + 1, duration: PHOTO_WAIT_TIMEOUT };
     this.markPhaseEmitted(room, waiting.round);

@@ -1,6 +1,6 @@
 import { randomBytes, timingSafeEqual } from "crypto";
 import { Player, PublicPlayer, Room, SafeRoom } from "../models/interfaces";
-import { uploadStore } from "../middlewares/uploadStore";
+import { uploadNameOf, uploadStore } from "../middlewares/uploadStore";
 import { nameClash, NameKeys, nameKeys } from "./playerName";
 import { randomRoomCode } from "./roomCode";
 
@@ -192,10 +192,27 @@ export class RoomManager {
     return player;
   }
 
-  /** A player left / was removed: their photos go, except the one on screen this round (deleted at game over). */
+  /** A player left / was removed: their photos go, except the one on screen this round (see clearShownPhoto). */
   private releasePlayerUploads(room: Room, player: Player): void {
-    const onScreen = room.currentPhoto?.startsWith("/temp/") ? room.currentPhoto.slice("/temp/".length) : null;
-    uploadStore.releasePlayer(room.gameCode, player.username, onScreen);
+    uploadStore.releasePlayer(room.gameCode, player.username, this.shownUploadName(room));
+  }
+
+  /**
+   * The round's photo leaves the screen (its round is over): forget it, and delete its upload now if its owner left
+   * the room meanwhile, so it isn't kept until game over (EXP-116). An owner still in the room keeps it until then.
+   */
+  clearShownPhoto(room: Room): void {
+    const name = this.shownUploadName(room);
+    room.currentPhoto = null;
+    if (!name) return;
+    const record = uploadStore.get(name);
+    if (record?.gameCode !== room.gameCode) return; // only ever this room's own uploads
+    if (!room.players.some((p) => p.username === record.username)) uploadStore.remove(name);
+  }
+
+  /** Stored upload name of the photo on screen, if any. */
+  private shownUploadName(room: Room): string | null {
+    return room.currentPhoto ? uploadNameOf(room.currentPhoto) : null;
   }
 
   setRounds(gameCode: string, rounds: number): boolean {

@@ -99,8 +99,15 @@ const deletionDeadline = (record: UploadRecord, now: number) =>
 /** Counts against the lobby-photo limits: anything but the awaited owner's turn photo. */
 const isLobbyPhoto = (record: Pick<UploadRecord, "kind">) => record.kind !== "turn";
 
+/** URL path prefix of the photos POST /upload returns (`/temp/<name>`). */
+const UPLOAD_PATH_PREFIX = "/temp/";
+
+/** Store name of a `/temp/<name>` photo path, or null for any other value. */
+export const uploadNameOf = (photoPath: string): string | null =>
+  photoPath.startsWith(UPLOAD_PATH_PREFIX) ? photoPath.slice(UPLOAD_PATH_PREFIX.length) : null;
+
 /** Store name of a `/temp/<name>` path (or the name itself). */
-const nameOf = (pathOrName: string) => (pathOrName.startsWith("/temp/") ? pathOrName.slice("/temp/".length) : pathOrName);
+const nameOf = (pathOrName: string) => uploadNameOf(pathOrName) ?? pathOrName;
 
 export class UploadStore {
   /**
@@ -264,7 +271,7 @@ export class UploadStore {
 
   /**
    * A player left or was removed: deletes their photos in the room, except `keep` (the photo on screen right now,
-   * released with the rest of the room's photos at game over).
+   * deleted once its round is over, see RoomManager.clearShownPhoto).
    */
   releasePlayer(gameCode: string, username: string, keep?: string | null): void {
     for (const name of [...(this.byRoom.get(gameCode) ?? [])]) {

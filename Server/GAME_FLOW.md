@@ -35,7 +35,8 @@ After last round: game-over
   Every client shows "someone is choosing a photo" with a progress bar of that `duration`, **the owner's too**: the
   app picks and uploads the photo for `your-turn` in the background, with no different text or timing on screen, so
   the owner can't tell it's their turn (see "Whose photo it is").
-- If the owner can't provide a photo (no gallery access, no photos, upload failed after retries) the client sends
+- If the owner can't provide a photo (no gallery access, no photos, upload failed after retries; a photo that can't
+  be converted is replaced by another pick, up to 3, within the photo wait) the client sends
   **`photo-unavailable { round, attempt }`**, echoing the `your-turn` it answers. It is accepted only from the
   session player who is the awaited owner, in `waiting-photo`, not while paused, and only when both are integers
   equal to the request in force; anything else (late report for an earlier request, duplicate, malformed) is

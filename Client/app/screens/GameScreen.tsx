@@ -29,7 +29,7 @@ import { useI18n } from "../i18n";
 import { uploadPhoto } from "@/app/utils/uploadPhoto";
 import { photoAuthHeaders, resolvePhotoAuth } from "@/app/utils/photoAuth";
 import { prefetchImage } from "@/app/utils/image";
-import { turnUploadRetry, uploadWithRetry } from "../utils/uploadRetry";
+import { photoWaitOf, pickAndUploadTurnPhoto } from "../utils/turnPhoto";
 import { SkipNotice, skipNoticeFor, skipNoticeText } from "../utils/waitingPhoto";
 import {
   gameStateFollowUps, initialRoundView, isRevealedOwner, phaseElapsed, RoundAction, roundReducer, RoundView,
@@ -282,19 +282,20 @@ const GameScreen = () => {
         const needsUpload = turnRequest.start(data); // a re-sent request re-sends or awaits its photo
         dispatchRound({ type: "your-turn", round: data.round });
         if (!needsUpload) return;
-        // The photo wait the server gave (waiting-photo, or what a resume or snapshot left of it) bounds the retries
-        const { phase: turnPhase, phaseDuration: photoWaitMs } = roundRef.current;
-        const retry = turnUploadRetry(turnPhase === "waiting-photo" ? photoWaitMs : 0);
         try {
-          const picked = await pickGamePhoto();
-          if ("error" in picked) { turnRequest.reportUnavailable(picked.error, data); return; }
-          let url: string;
-          // Retries go on while this request is in force or paused, and stop once it is over
-          const stillWanted = () => turnRequest.isCurrent(data) || turnRequest.isSuspended(data);
-          try { url = await uploadWithRetry(picked.uri, uploadImage, retry, stillWanted); }
-          catch { turnRequest.reportUnavailable("upload", data); return; }
+          const result = await pickAndUploadTurnPhoto({
+            pick: pickGamePhoto,
+            upload: uploadImage,
+            // Retries go on while this request is in force or paused, and stop once it is over
+            stillWanted: () => turnRequest.isCurrent(data) || turnRequest.isSuspended(data),
+            // The photo wait the server gave (waiting-photo, or what a resume or snapshot left of it) bounds the
+            // retries and the re-picks of a photo that can't be converted (EXP-292); a pause freezes it
+            photoWait: () => photoWaitOf(roundRef.current),
+            paused: () => turnRequest.isSuspended(data),
+          });
+          if ("error" in result) { turnRequest.reportUnavailable(result.error, data); return; }
           setPhotoUri(null);
-          turnRequest.sendPhoto(data, url);
+          turnRequest.sendPhoto(data, result.url);
           return;
         } catch (e) { console.log("your-turn error:", e); } // never a device toast: my turn must not show (EXP-252)
         turnRequest.reportUnavailable("failed", data);

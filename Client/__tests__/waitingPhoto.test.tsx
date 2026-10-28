@@ -4,6 +4,7 @@ import { FakeSocket } from "../testUtils/fakeSocket";
 import { skipNoticeFor, skipNoticeText } from "../app/utils/waitingPhoto";
 import { TEST_IDS } from "../app/utils/testIds";
 import { PhotoConversionError, TURN_UPLOAD_RETRY } from "../app/utils/uploadRetry";
+import { MAX_TURN_PHOTO_PICKS } from "../app/utils/turnPhoto";
 import en from "../app/i18n/en";
 import es from "../app/i18n/es";
 // Loaded with the file (jest.mock calls below are hoisted above it): a cold transform must not hit the test timeout
@@ -216,17 +217,19 @@ describe("GameScreen while a photo is awaited", () => {
       expect(reported()).toBe(false);
     });
 
-    // EXP-076: retrying can't fix a photo that doesn't convert; the room is told at once instead of after ~6 s
-    it("a photo that can't be converted is reported unavailable after a single attempt", async () => {
+    // EXP-076: retrying can't fix a photo that doesn't convert: each one gets a single attempt, with no wait.
+    // EXP-292: another photo is picked instead; the room is told once MAX_TURN_PHOTO_PICKS of them failed that way
+    it("photos that can't be converted get a single attempt each, then the turn is reported unavailable", async () => {
       mockPickGamePhoto.mockResolvedValue({ uri: "file:///broken.heic" });
       mockUploadPhoto.mockRejectedValue(new PhotoConversionError(new Error("Could not decode image")));
       act(() => mockSocket.fire("waiting-photo", { round: 1, duration: 15_000 }));
       act(() => mockSocket.fire("your-turn", { round: 1, attempt: 1 }));
       await flush();
-      expect(mockUploadPhoto).toHaveBeenCalledTimes(1);
+      expect(mockPickGamePhoto).toHaveBeenCalledTimes(MAX_TURN_PHOTO_PICKS);
+      expect(mockUploadPhoto).toHaveBeenCalledTimes(MAX_TURN_PHOTO_PICKS);
       expect(mockSocket.emitted).toEqual([["photo-unavailable", { round: 1, attempt: 1 }]]);
       await advance(TURN_UPLOAD_RETRY.maxTotalWaitMs);
-      expect(mockUploadPhoto).toHaveBeenCalledTimes(1);
+      expect(mockUploadPhoto).toHaveBeenCalledTimes(MAX_TURN_PHOTO_PICKS);
     });
 
     // EXP-076: the retries fit the photo wait the server gave: a rejoin with 5 s left gets 2.5 s of waits, not 7.5 s

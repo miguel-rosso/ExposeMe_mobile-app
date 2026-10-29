@@ -28,7 +28,7 @@ const RETURN_WINDOW_SLACK_MS = 500; // an owner away about as long as the window
 const OWNER_REPICK_SLACK_MS = 2_000; // that new pick comes this long after the window at most (not after the 15 s wait)
 // Answer grace, as in Server/managers/GameEngine.ts (GAME_FLOW.md; bots-cli.test.sh checks the copy): round-start
 // announces ANSWER_GRACE_MS less than the server's answer timer, which keeps taking answers until it fires
-const ANSWER_GRACE_MS = 300;
+const ANSWER_GRACE_MS = 800;
 // A holder who lets go or goes away (leaves, drops, rejoins on a new socket) releases the hold at once (GAME_FLOW.md
 // "Hold"): every player still in the room gets hold-end and hold-resume within this
 const HOLD_RELEASE_MAX_MS = 1_000;

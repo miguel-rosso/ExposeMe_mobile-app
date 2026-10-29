@@ -2,7 +2,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GameEngine } from "../managers/GameEngine";
+import { ANSWER_TIME, GameEngine } from "../managers/GameEngine";
 import { PLANTED_DELAY_MAX } from "../managers/plantedDelay";
 import { RoomManager } from "../managers/RoomManager";
 import { uploadStore } from "../middlewares/uploadStore";
@@ -13,7 +13,6 @@ import { CapturedEmit, createFakeIo, plantPhoto } from "./helpers";
 // EXP-117: a planted photo whose upload expired (UPLOAD_TTL_MS after it was stored) or will expire before its round
 // is over is never drawn: its planter's planted photo is dropped and the round is played with a normal photo.
 
-const ANSWER_TIME = 8_000;
 const REVEAL_TIME = 3_000;
 const GAME_START_DELAY = 1_000;
 const PHOTO_WAIT_TIMEOUT = 15_000;

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GameEngine, HOLD_BUDGET_PER_ROUND, MAX_HOLDS_PER_ROUND } from "../managers/GameEngine";
+import { ANSWER_TIME, GameEngine, HOLD_BUDGET_PER_ROUND, MAX_HOLDS_PER_ROUND } from "../managers/GameEngine";
 import { RoomManager } from "../managers/RoomManager";
 import { Player, Room } from "../models/interfaces";
 import { CapturedEmit, createFakeIo } from "./helpers";
@@ -7,7 +7,6 @@ import { CapturedEmit, createFakeIo } from "./helpers";
 // EXP-299: a rejoin force-releases a hold only when the rejoiner is the photo owner holding the scores screen.
 // Anyone else's rejoin leaves the hold alone, and an owner's rejoin with no hold active changes nothing.
 
-const ANSWER_TIME = 8_000;
 const REVEAL_TIME = 3_000;
 const GAME_START_DELAY = 1_000;
 const PHOTO = "/temp/" + "a".repeat(32) + ".jpg"; // shape of a POST /upload result

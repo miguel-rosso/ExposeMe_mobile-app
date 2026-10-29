@@ -2,7 +2,7 @@
 # Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
 #
 # Timing (EXP-238, EXP-267, EXP-312): on a slow Android emulator every step that reads the screen takes 1-4 s, while the
-# server shows the options for 8 s (answering) + 3 s (reveal) and the scoreboard for 5 s. So each phase gets a few cheap
+# server shows the options for 8.5 s (answering) + 3 s (reveal) and the scoreboard for 5 s. So each phase gets a few cheap
 # steps, the one that matters first: the guess as soon as the options show, the score card as soon as the
 # scoreboard opens. No settle waits (the progress bar never settles) and no `when: visible` before a timed check (a
 # false condition costs up to 7 s). The steps between `timed:` markers are budgeted by qa/lab/tests/maestro-timing.test.sh,
@@ -28,7 +28,7 @@ appId: com.socketNull.ExposeMe
 # The server's phase lengths (Server/managers/GameEngine.ts: ANSWER_TIME, REVEAL_TIME, SCORE_DISPLAY_TIME, checked by
 # maestro-timing.test.sh); how long to wait for the next round's options (up to 3 photo waits of 15 s in a row, skips,
 # end the game); the share of scoreboards that must be checked
-- evalScript: "${output.timing = { answeringMs: 8000, revealMs: 3000, scoresMs: 5000, optionsWaitMs: 90000, minCheckedShare: 0.5 }}"
+- evalScript: "${output.timing = { answeringMs: 8500, revealMs: 3000, scoresMs: 5000, optionsWaitMs: 90000, minCheckedShare: 0.5 }}"
 - evalScript: ${output.timing.roundMs = output.timing.answeringMs + output.timing.revealMs + output.timing.scoresMs}
 # No round played yet: no scoreboard to check, no options of its own on screen. Scoreboards counted: those shown
 # (every pass after the first) and those whose card was checked

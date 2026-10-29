@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { io as connect, Socket as ClientSocket } from "socket.io-client";
 import { io, server } from "../app";
 import { roomManager } from "../routes/socketRoutes";
-import { MAX_PAUSES, PAUSE_TIMEOUT } from "../managers/GameEngine";
+import { ANSWER_GRACE, ANSWER_TIME, MAX_PAUSES, PAUSE_TIMEOUT } from "../managers/GameEngine";
 import { registerTurnUpload } from "./helpers";
 
 // EXP-006: a player who drops mid-round and comes back on a new socket (socket.io reconnect) rejoins
@@ -101,8 +101,8 @@ describe("reconnect mid-round", () => {
     expect(res.success).toBe(true);
     const s = await snap;
     expect(s).toMatchObject({ started: true, phase: "answering", round: 1, photo: PHOTO, pause: null });
-    expect(s.duration as number).toBeGreaterThan(2_000); // 8 s answer time minus the ~0.5 s away (and load)
-    expect(s.duration as number).toBeLessThanOrEqual(8_000);
+    expect(s.duration as number).toBeGreaterThan(2_000); // 7.7 s answer bar minus the ~0.5 s away (and load)
+    expect(s.duration as number).toBeLessThanOrEqual(ANSWER_TIME - ANSWER_GRACE);
 
     // The returning socket keeps receiving the round
     const reveal = await once<{ correctAnswer: string }>(back, "round-reveal", 12_000);
@@ -140,7 +140,7 @@ describe("reconnect mid-round", () => {
     const [rb, ro] = await Promise.all([resumedBack, resumedOwner]);
     expect(rb).toEqual(ro);
     expect(rb.phase).toBe("answering");
-    expect(rb.duration).toBeGreaterThan(2_000); // the answer time frozen at the pause, ~8 s
+    expect(rb.duration).toBeGreaterThan(2_000); // the answer time frozen at the pause, ~7.7 s
 
     const reveal = await once<{ correctAnswer: string }>(back, "round-reveal", 12_000);
     expect(reveal.correctAnswer).toBe(owner);

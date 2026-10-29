@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Step budget of the Maestro flows inside the server's timed phases (EXP-238, EXP-257, EXP-267, EXP-312). On a slow
-# Android emulator every step that reads the screen takes 1-4 s, while the options are up for 8 s (answering) + 3 s
+# Android emulator every step that reads the screen takes 1-4 s, while the options are up for 8.5 s (answering) + 3 s
 # (reveal) and the scoreboard for 5 s, so the steps between `# ── timed: <phase> ──` and `# ── end timed ──` must be few
 # and cheap: no settle waits, no conditional reads (a `runFlow` whose `when` is only a `true:` script reads nothing),
 # no text search (a testID filtered by an env variable, like `text: "${USERNAME}"`, is no UI string and is allowed).
@@ -111,8 +111,8 @@ check_flow() {
   done <"$TMP/blocks"
 }
 
-engine_ms() { # CONSTANT -> its value in ms, from GameEngine.ts (e.g. "const ANSWER_TIME = 8_000;")
-  grep -E "^const $1 = [0-9_]+;" "$GAME_ENGINE" | sed -E 's/.*= ([0-9_]+);.*/\1/' | tr -d _
+engine_ms() { # CONSTANT -> its value in ms, from GameEngine.ts (e.g. "export const ANSWER_TIME = 8_500;")
+  grep -E "^(export )?const $1 = [0-9_]+;" "$GAME_ENGINE" | sed -E 's/.*= ([0-9_]+);.*/\1/' | tr -d _
 }
 
 # ── The checker catches the slow patterns (fixture flows) ──
@@ -245,7 +245,7 @@ blocks_of() { timed_blocks "$MAESTRO_DIR/$1" | grep -c "^BLOCK $2 "; } # FLOW, p
 # ── play-rounds.yaml's scoreboard bounds fit the server's phases (EXP-267, EXP-312) ──
 ROUNDS="$MAESTRO_DIR/play-rounds.yaml"
 answer="$(engine_ms ANSWER_TIME)" reveal="$(engine_ms REVEAL_TIME)" scores="$(engine_ms SCORE_DISPLAY_TIME)"
-# The flow's own copy: `- evalScript: "${output.timing = { answeringMs: 8000, ... }}"`
+# The flow's own copy: `- evalScript: "${output.timing = { answeringMs: 8500, ... }}"`
 flow_timing="$(sed -nE 's/^- evalScript: "\$\{output\.timing = \{ (.*) \}\}"$/\1/p' "$ROUNDS")"
 flow_ms() { tr ',' '\n' <<<"$flow_timing" | sed -nE "s/^ *$1: ([0-9]+) *$/\1/p"; } # KEY -> its value in the flow
 # flow_has LINE: exit 0 if the flow has that exact line (leading spaces aside)

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GameEngine, PAUSE_MIN_DURATION } from "../managers/GameEngine";
+import { ANSWER_TIME, GameEngine, PAUSE_MIN_DURATION } from "../managers/GameEngine";
 import { RoomManager } from "../managers/RoomManager";
 import { uploadStore } from "../middlewares/uploadStore";
 import { GameStateSnapshot, PhaseResumeData, Player, Room, RoundPhase } from "../models/interfaces";
@@ -10,7 +10,6 @@ import { CapturedEmit, createFakeIo, plantPhoto } from "./helpers";
 // phase it never saw start draws its bar from where the phase is instead of from empty. Pauses and holds never change
 // it; before any start event (ready phase, round boundary) the countdown is whole: phaseTotal = duration.
 
-const ANSWER_TIME = 8_000;
 const REVEAL_TIME = 3_000;
 const SCORE_DISPLAY_TIME = 5_000;
 const GAME_START_DELAY = 1_000;

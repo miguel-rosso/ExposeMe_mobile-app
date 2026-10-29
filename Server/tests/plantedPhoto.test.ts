@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ANSWER_GRACE, GameEngine, PAUSE_MIN_DURATION } from "../managers/GameEngine";
+import { ANSWER_GRACE, ANSWER_TIME, GameEngine, PAUSE_MIN_DURATION } from "../managers/GameEngine";
 import { PLANTED_DELAY_MAX, TYPICAL_WAIT_MIN } from "../managers/plantedDelay";
 import { RoomManager } from "../managers/RoomManager";
 import { GameStateSnapshot, Player, Room } from "../models/interfaces";
@@ -10,7 +10,6 @@ import { CapturedEmit, createFakeIo, plantPhoto, receivedBy } from "./helpers";
 // round-start after a realistic upload-like delay, no your-turn to anyone), and a planted photo is cleared
 // once it is used.
 
-const ANSWER_TIME = 8_000;
 const REVEAL_TIME = 3_000;
 const SCORE_DISPLAY_TIME = 5_000;
 const GAME_START_DELAY = 1_000;

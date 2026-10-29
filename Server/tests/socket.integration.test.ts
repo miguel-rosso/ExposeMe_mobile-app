@@ -4,7 +4,7 @@ import { io as connect, Socket as ClientSocket } from "socket.io-client";
 import { io, server } from "../app";
 import { roomManager } from "../routes/socketRoutes";
 import { registerTurnUpload } from "./helpers";
-import { ANSWER_GRACE } from "../managers/GameEngine";
+import { ANSWER_GRACE, ANSWER_TIME } from "../managers/GameEngine";
 
 // Real server on an ephemeral port + 3 real socket.io clients.
 // Production timings are kept; this only covers lobby → first round-start (~1s, GAME_START_DELAY).
@@ -81,7 +81,7 @@ describe("socket flow", () => {
     byName[owner].emit("photo-sent", { photo: PHOTO, gameCode });
     const payloads = await Promise.all(roundStarts);
     // Same payload for everyone, owner included: nobody is told whose photo it is (EXP-128, EXP-252)
-    payloads.forEach((p) => expect(p).toEqual({ photo: PHOTO, round: 1, duration: 8_000 - ANSWER_GRACE }));
+    payloads.forEach((p) => expect(p).toEqual({ photo: PHOTO, round: 1, duration: ANSWER_TIME - ANSWER_GRACE }));
 
     // Everybody leaves → room reset (its deletion timer is cleared in afterAll)
     for (const c of [alice, bob, carol]) c.emit("leave-room");

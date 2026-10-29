@@ -7,10 +7,11 @@ import { DISCONNECT_GRACE, RoomManager } from "./RoomManager";
 import { uploadStore } from "../middlewares/uploadStore";
 import { drawPlantedDelay, PhotoWaitHistory } from "./plantedDelay";
 
-const ANSWER_TIME = 8_000;
-// Clients are shown ANSWER_TIME minus this, while answers are taken until ANSWER_TIME: a tap at the very end of the
-// bar still reaches the server in "answering" (latency margin)
-export const ANSWER_GRACE = 300;
+export const ANSWER_TIME = 8_500;
+// Clients are shown ANSWER_TIME minus this (a 7.7 s bar), while answers are taken until ANSWER_TIME: a tap at the very
+// end of the bar still reaches the server in "answering". The bar starts when round-start reaches the phone, which on
+// Android was measured up to ~770 ms late (EXP-306, DEC-042), so the margin covers that delivery delay
+export const ANSWER_GRACE = 800;
 const SHOWN_ANSWER_TIME = ANSWER_TIME - ANSWER_GRACE;
 const REVEAL_TIME = 3_000;
 const SCORE_DISPLAY_TIME = 5_000;
@@ -36,7 +37,7 @@ export const MAX_PAUSES = 3; // Counted pauses per game; when another one would 
 export const PAUSE_GRACE = 10_000; // A pause resumed sooner than this is refunded (doesn't count toward MAX_PAUSES)
 export const MAX_TOTAL_PAUSES = 10; // Pauses per game counted or not, so quick flaps can't freeze a game forever
 export const PAUSE_MIN_DURATION = 2_000; // A pause is never shorter than this (flapping connections)
-const RESUME_MIN_REMAINING = 1_500; // A resumed phase gets at least this much time
+const RESUME_MIN_REMAINING = 1_500; // A resumed phase shows at least this much on its countdown (see resumeMinimum)
 // ...and a photo wait, normal or planted alike, at least this much on its countdown (the owner can (re)send the photo)
 const PHOTO_RESUME_MIN_REMAINING = 5_000;
 // The awaited owner disconnected: another player is asked for the round's photo unless they are back within this (a
@@ -558,8 +559,7 @@ export class GameEngine {
         : Math.min(Math.max(room._timerDuration, this.resendDelay()), wait.shown - PLANTED_DELAY_MARGIN);
       wait.shownSince = Date.now();
     } else {
-      const min = room.phase === "waiting-photo" && room.currentPlayer ? PHOTO_RESUME_MIN_REMAINING : RESUME_MIN_REMAINING;
-      room._timerDuration = Math.max(min, room._timerDuration);
+      room._timerDuration = Math.max(this.resumeMinimum(room), room._timerDuration);
     }
     console.log(`[${room.gameCode}] RESUMED "${room.phase}" with ${room._timerDuration}ms (${room._pauseCount}/${MAX_PAUSES} pauses counted)`);
     const resumed: PhaseResumeData = { phase: room.phase, ...this.phaseTiming(room, room._timerDuration) };
@@ -570,6 +570,15 @@ export class GameEngine {
       this.io.to(owner.socketId).emit("your-turn", this.yourTurn(room));
     }
     this.resumeTimer(room);
+  }
+
+  /**
+   * Least time a (non-planted) phase timer resumes with: PHOTO_RESUME_MIN_REMAINING for a photo wait, else
+   * RESUME_MIN_REMAINING on the players' countdown, which in answering is ANSWER_GRACE shorter than the timer.
+   */
+  private resumeMinimum(room: Room): number {
+    if (room.phase === "waiting-photo" && room.currentPlayer) return PHOTO_RESUME_MIN_REMAINING;
+    return room.phase === "answering" ? RESUME_MIN_REMAINING + ANSWER_GRACE : RESUME_MIN_REMAINING;
   }
 
   /**

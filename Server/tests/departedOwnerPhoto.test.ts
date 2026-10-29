@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GameEngine } from "../managers/GameEngine";
+import { ANSWER_TIME, GameEngine } from "../managers/GameEngine";
 import { RoomManager } from "../managers/RoomManager";
 import { uploadStore } from "../middlewares/uploadStore";
 import { Player, Room } from "../models/interfaces";
@@ -10,7 +10,6 @@ import { createFakeIo, plantPhoto, registerTurnUpload } from "./helpers";
 // whose owner is still in the room keeps the usual lifetime (deleted with the rest at game over).
 
 const GAME_START_DELAY = 1_000;
-const ANSWER_TIME = 8_000;
 const REVEAL_TIME = 3_000;
 const SCORE_DISPLAY_TIME = 5_000;
 const PLANTED_DELAY = 2_000; // with Math.random() = 0 and no past waits in the room

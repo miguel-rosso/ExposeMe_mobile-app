@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ANSWER_GRACE, GameEngine } from "../managers/GameEngine";
+import { ANSWER_GRACE, ANSWER_TIME, GameEngine } from "../managers/GameEngine";
 import { PLANTED_DELAY_MAX } from "../managers/plantedDelay";
 import { RoomManager } from "../managers/RoomManager";
 import { Player, Room } from "../models/interfaces";
@@ -10,7 +10,6 @@ import { CapturedEmit, createFakeIo, plantPhoto, receivedBy } from "./helpers";
 // and planted photos alike. The owner's answer is recorded and scored like any other; only from the reveal on
 // (correctAnswer) can the owner tell it was theirs, and only then can they hold the scores screen.
 
-const ANSWER_TIME = 8_000;
 const REVEAL_TIME = 3_000;
 const GAME_START_DELAY = 1_000;
 const PHOTO = "/temp/0123456789abcdef0123456789abcdef.jpg";

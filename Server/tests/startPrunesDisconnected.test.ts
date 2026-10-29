@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GameEngine } from "../managers/GameEngine";
+import { ANSWER_TIME, GameEngine } from "../managers/GameEngine";
 import { DISCONNECT_GRACE, RoomManager } from "../managers/RoomManager";
 import { uploadStore } from "../middlewares/uploadStore";
 import { Room } from "../models/interfaces";
@@ -9,7 +9,6 @@ import { CapturedEmit, createFakeIo, registerTurnUpload, registerUpload } from "
 // (answer options, tied winners with 0). If they come back they join as new players. Only players disconnected for
 // longer than DISCONNECT_GRACE count (EXP-149, see lobbyDisconnectGrace.test.ts): these tests let it run out.
 
-const ANSWER_TIME = 8_000;
 const GAME_START_DELAY = 1_000;
 const PHOTO = "/temp/0123456789abcdef0123456789abcdef.jpg";
 const GHOST_PHOTO = "/temp/fedcba9876543210fedcba9876543210.jpg";

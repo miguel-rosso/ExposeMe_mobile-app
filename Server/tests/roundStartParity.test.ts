@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ANSWER_GRACE, GameEngine } from "../managers/GameEngine";
+import { ANSWER_GRACE, ANSWER_TIME, GameEngine } from "../managers/GameEngine";
 import { RoomManager } from "../managers/RoomManager";
 import { Player, Room } from "../models/interfaces";
 import { CapturedEmit, createFakeIo, plantPhoto } from "./helpers";
@@ -8,7 +8,6 @@ import { CapturedEmit, createFakeIo, plantPhoto } from "./helpers";
 // share their photo-wait notice and their transition to answering, so this pins what both produce: the same
 // room-wide events and payloads (photo aside), the same timers and the same round state.
 
-const ANSWER_TIME = 8_000;
 const REVEAL_TIME = 3_000;
 const SCORE_DISPLAY_TIME = 5_000;
 const GAME_START_DELAY = 1_000;

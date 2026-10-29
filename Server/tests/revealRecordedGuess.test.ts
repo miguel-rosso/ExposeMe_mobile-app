@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GameEngine } from "../managers/GameEngine";
+import { ANSWER_TIME, GameEngine } from "../managers/GameEngine";
 import { RoomManager } from "../managers/RoomManager";
 import { GameStateSnapshot, Player, Room } from "../models/interfaces";
 import { CapturedEmit, createFakeIo } from "./helpers";
@@ -9,7 +9,6 @@ import { CapturedEmit, createFakeIo } from "./helpers";
 // nobody gets anyone else's guess before round-scores. A rejoin during the reveal gets the same in its snapshot.
 
 const GAME_START_DELAY = 1_000;
-const ANSWER_TIME = 8_000;
 const REVEAL_TIME = 3_000;
 const PHOTO = "/temp/" + "c".repeat(32) + ".jpg";
 

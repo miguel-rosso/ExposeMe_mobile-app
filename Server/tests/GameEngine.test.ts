@@ -1,11 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ANSWER_GRACE, GameEngine } from "../managers/GameEngine";
+import { ANSWER_GRACE, ANSWER_TIME, GameEngine } from "../managers/GameEngine";
 import { PLANTED_DELAY_MAX } from "../managers/plantedDelay";
 import { RoomManager } from "../managers/RoomManager";
 import { Room } from "../models/interfaces";
 import { CapturedEmit, createFakeIo, plantPhoto } from "./helpers";
 
-const ANSWER_TIME = 8_000;
 const REVEAL_TIME = 3_000;
 const SCORE_DISPLAY_TIME = 5_000;
 const GAME_START_DELAY = 1_000;
@@ -268,7 +267,7 @@ describe("round phases", () => {
     vi.advanceTimersByTime(GAME_START_DELAY);
   });
 
-  it("photo → answering (8s) → reveal (3s) → scores (5s) → next your-turn", () => {
+  it("photo → answering (8.5s) → reveal (3s) → scores (5s) → next your-turn", () => {
     const owner = room.currentPlayer!.username;
     engine.onPhotoReceived(room, PHOTO, owner);
 
@@ -523,6 +522,35 @@ describe("recordAnswer", () => {
     vi.advanceTimersByTime(1);
     expect(room.phase).toBe("reveal");
     expect(player(guessers[0])).toMatchObject({ points: 1, lastGuess: owner });
+  });
+
+  // EXP-306 / DEC-042: Android phones got round-start up to ~770 ms late, so their bar (and last tap) ended that much
+  // after the server's; the bar players see stays 7.7 s while the server takes answers for 800 ms more
+  describe("late round-start delivery (EXP-306)", () => {
+    const SHOWN_BAR = 7_700;
+    const COVERED_DELAY = 700;
+    const UNCOVERED_DELAY = 900;
+    const startRoundAndReachBarEnd = (deliveryDelay: number): void => {
+      engine.onPhotoReceived(room, PHOTO, owner);
+      expect((events("round-start")[0].args[0] as { duration: number }).duration).toBe(SHOWN_BAR);
+      vi.advanceTimersByTime(SHOWN_BAR + deliveryDelay); // the phone's bar ends deliveryDelay after the server's
+    };
+
+    it("counts a pick sent as the bar ended on a phone that got round-start 700 ms late", () => {
+      startRoundAndReachBarEnd(COVERED_DELAY);
+      expect(room.phase).toBe("answering");
+      engine.recordAnswer(room, guessers[0], owner);
+      vi.advanceTimersByTime(ANSWER_TIME - SHOWN_BAR - COVERED_DELAY);
+      expect(room.phase).toBe("reveal");
+      expect(player(guessers[0])).toMatchObject({ points: 1, lastGuess: owner });
+    });
+
+    it("drops a pick sent as the bar ended on a phone that got round-start 900 ms late", () => {
+      startRoundAndReachBarEnd(UNCOVERED_DELAY);
+      expect(room.phase).toBe("reveal");
+      engine.recordAnswer(room, guessers[0], owner);
+      expect(player(guessers[0])).toMatchObject({ points: 0, lastGuess: "" });
+    });
   });
 
   // EXP-148: only the round's options can be voted for

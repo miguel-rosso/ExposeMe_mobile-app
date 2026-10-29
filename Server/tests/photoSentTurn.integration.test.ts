@@ -20,7 +20,7 @@ const UPLOAD_DIR = vi.hoisted(() => {
 });
 
 const QUIET_MS = 500;
-// Round 1 answering (8 s) + reveal (3 s) + scores (5 s) before round 2's photo request, plus margin
+// Round 1 answering (8.5 s) + reveal (3 s) + scores (5 s) before round 2's photo request, plus margin
 const NEXT_TURN_TIMEOUT_MS = 22_000;
 
 interface Member { name: string; socket: ClientSocket; token: string; gameCode: string }

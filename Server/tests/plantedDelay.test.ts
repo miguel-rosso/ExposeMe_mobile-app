@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GameEngine } from "../managers/GameEngine";
+import { ANSWER_TIME, GameEngine } from "../managers/GameEngine";
 import {
   drawPlantedDelay, PhotoWaitHistory, TYPICAL_WAIT_MAX, TYPICAL_WAIT_MEDIAN, TYPICAL_WAIT_MIN, typicalPhotoWait, WAITS_PER_PLAYER,
 } from "../managers/plantedDelay";
@@ -16,7 +16,7 @@ const GAME_START_DELAY = 1_000;
 const MAX_DELAY = 14_000;
 const PHOTO = "/temp/" + "a".repeat(32) + ".jpg";
 const PLANTED = "/temp/" + "b".repeat(32) + ".jpg";
-const ROUND_TIME = 8_000 + 3_000 + 5_000; // answering, reveal, scores
+const ROUND_TIME = ANSWER_TIME + 3_000 + 5_000; // answering, reveal, scores
 
 let emits: CapturedEmit[];
 let engine: GameEngine;

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GameEngine } from "../managers/GameEngine";
+import { ANSWER_TIME, GameEngine } from "../managers/GameEngine";
 import { DISCONNECT_GRACE, RoomManager } from "../managers/RoomManager";
 import { uploadStore } from "../middlewares/uploadStore";
 import { Room } from "../models/interfaces";
@@ -9,7 +9,6 @@ import { CapturedEmit, createFakeIo, registerTurnUpload } from "./helpers";
 // and the lobby is told who is gone. EXP-149: a game start only removes players gone for longer than the grace.
 // Short absences (DEC-009) go unnoticed.
 
-const ANSWER_TIME = 8_000;
 const GAME_START_DELAY = 1_000;
 const PHOTO = "/temp/0123456789abcdef0123456789abcdef.jpg";
 

@@ -12,7 +12,7 @@ import { registerTurnUpload } from "./helpers";
 
 const NAMES = ["alice", "bob", "carol"];
 const RELEASE_WITHIN_MS = 1_000;
-const SCORES_TIMEOUT_MS = 15_000; // waiting-photo → answering (8 s) → reveal (3 s) → scores
+const SCORES_TIMEOUT_MS = 15_000; // waiting-photo → answering (8.5 s) → reveal (3 s) → scores
 const NEXT_ROUND_TIMEOUT_MS = 8_000; // the resumed scores phase (≤ 5 s) then the next round's waiting-photo
 
 let url: string;

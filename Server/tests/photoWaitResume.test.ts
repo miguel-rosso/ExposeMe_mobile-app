@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GameEngine, PAUSE_MIN_DURATION } from "../managers/GameEngine";
+import { ANSWER_TIME, GameEngine, PAUSE_MIN_DURATION } from "../managers/GameEngine";
 import { PLANTED_DELAY_MAX } from "../managers/plantedDelay";
 import { RoomManager } from "../managers/RoomManager";
 import { uploadStore } from "../middlewares/uploadStore";
@@ -10,7 +10,6 @@ import { CapturedEmit, createFakeIo, plantPhoto } from "./helpers";
 // EXP-144: a photo wait resumed with little time left gets the same minimum on screen whether it is a normal or a
 // planted round, so a game-resumed countdown can't tell them apart.
 
-const ANSWER_TIME = 8_000;
 const REVEAL_TIME = 3_000;
 const GAME_START_DELAY = 1_000;
 const PHOTO_WAIT_TIMEOUT = 15_000;

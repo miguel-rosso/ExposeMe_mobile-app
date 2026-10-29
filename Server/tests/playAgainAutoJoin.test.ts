@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GameEngine } from "../managers/GameEngine";
+import { ANSWER_TIME, GameEngine } from "../managers/GameEngine";
 import { RoomManager } from "../managers/RoomManager";
 import { GameStateSnapshot, Room } from "../models/interfaces";
 import { CapturedEmit, createFakeIo } from "./helpers";
@@ -10,7 +10,6 @@ import { CapturedEmit, createFakeIo } from "./helpers";
 // next game's ready phase waits for that player's im-ready (isReady was reset), and once it arrives the first round
 // starts right away (GAME_START_DELAY), not after READY_TIMEOUT.
 
-const ANSWER_TIME = 8_000;
 const REVEAL_TIME = 3_000;
 const SCORE_DISPLAY_TIME = 5_000;
 const GAME_START_DELAY = 1_000;

@@ -45,7 +45,7 @@ export function usePickSender(socket: Socket | null | undefined, roundRef: { rea
       }, wait);
     };
 
-    /** The answer bar ended: a pick waiting for its throttle slot leaves at once (within the server's grace) */
+    /** The answer bar ended: a pick waiting for its throttle slot leaves at once (within the server's ANSWER_GRACE) */
     const flushPending = () => { if (trailingRef.current) sendNow(); };
 
     /** A rejoin snapshot of answering: my current pick, if any, again (one sent while offline was dropped) */

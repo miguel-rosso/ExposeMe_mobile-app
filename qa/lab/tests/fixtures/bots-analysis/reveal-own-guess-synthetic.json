@@ -59,8 +59,8 @@
   "max": "20.0"
  },
  "answer_phase_overrun_ms": {
-  "p50": "0.0",
-  "max": "0.0"
+  "p50": "-500.0",
+  "max": "-500.0"
  },
  "upload_ms": {
   "max": null

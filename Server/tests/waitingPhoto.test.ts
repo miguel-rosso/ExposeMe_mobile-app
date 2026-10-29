@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GameEngine } from "../managers/GameEngine";
+import { ANSWER_TIME, GameEngine } from "../managers/GameEngine";
 import { RoomManager } from "../managers/RoomManager";
 import { Room } from "../models/interfaces";
 import { CapturedEmit, createFakeIo } from "./helpers";
@@ -9,7 +9,6 @@ import { CapturedEmit, createFakeIo } from "./helpers";
 // only in the owner's own copy, EXP-110), and the owner can report `photo-unavailable` to skip at once instead of
 // making everyone wait 15 s.
 
-const ANSWER_TIME = 8_000;
 const REVEAL_TIME = 3_000;
 const SCORE_DISPLAY_TIME = 5_000;
 const GAME_START_DELAY = 1_000;

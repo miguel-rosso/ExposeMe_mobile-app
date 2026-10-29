@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GameEngine, MAX_FREE_OWNER_CHANGES, OWNER_RETURN_WINDOW, PAUSE_MIN_DURATION } from "../managers/GameEngine";
+import { ANSWER_TIME, GameEngine, MAX_FREE_OWNER_CHANGES, OWNER_RETURN_WINDOW, PAUSE_MIN_DURATION } from "../managers/GameEngine";
 import { RoomManager } from "../managers/RoomManager";
 import { Player, Room, WaitingPhotoData, YourTurnData } from "../models/interfaces";
 import { CapturedEmit, createFakeIo, receivedBy } from "./helpers";
@@ -14,7 +14,7 @@ import { CapturedEmit, createFakeIo, receivedBy } from "./helpers";
 const GAME_START_DELAY = 1_000;
 const PHOTO_WAIT_TIMEOUT = 15_000;
 const MAX_CONSECUTIVE_SKIPS = 3;
-const ROUND_TIME = 8_000 + 3_000 + 5_000; // answering, reveal, scores
+const ROUND_TIME = ANSWER_TIME + 3_000 + 5_000; // answering, reveal, scores
 const PHOTO = "/temp/" + "a".repeat(32) + ".jpg";
 
 let emits: CapturedEmit[];
@@ -195,7 +195,7 @@ describe("the awaited photo owner goes away (EXP-029, DEC-035)", () => {
     ownerDropsForGood();
     for (let r = 1; r <= rounds; r++) {
       engine.onPhotoReceived(room, PHOTO, room.currentPlayer!.username);
-      vi.advanceTimersByTime(8_000 + 3_000 + 5_000); // answering, reveal, scores
+      vi.advanceTimersByTime(ANSWER_TIME + 3_000 + 5_000); // answering, reveal, scores
     }
     expect(events("round-start").map((e) => (e.args[0] as { round: number }).round)).toEqual(
       Array.from({ length: rounds }, (_, i) => i + 1),

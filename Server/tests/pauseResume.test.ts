@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ANSWER_GRACE, GameEngine, MAX_PAUSES, MAX_TOTAL_PAUSES, PAUSE_GRACE, PAUSE_MIN_DURATION, PAUSE_TIMEOUT } from "../managers/GameEngine";
+import { ANSWER_GRACE, ANSWER_TIME, GameEngine, MAX_PAUSES, MAX_TOTAL_PAUSES, PAUSE_GRACE, PAUSE_MIN_DURATION, PAUSE_TIMEOUT } from "../managers/GameEngine";
 import { DISCONNECT_GRACE, RoomManager } from "../managers/RoomManager";
 import { GameStateSnapshot, Player, Room } from "../models/interfaces";
 import { CapturedEmit, createFakeIo, receivedBy } from "./helpers";
@@ -7,7 +7,6 @@ import { CapturedEmit, createFakeIo, receivedBy } from "./helpers";
 // EXP-006 / DEC-009: short absences are silent (rejoin + game-state snapshot); with fewer than 2 players
 // connected the game pauses with a server-driven 5 min countdown, resumes when someone returns, or ends.
 
-const ANSWER_TIME = 8_000;
 const REVEAL_TIME = 3_000;
 const SCORE_DISPLAY_TIME = 5_000;
 const GAME_START_DELAY = 1_000;
@@ -105,6 +104,28 @@ describe("pause with fewer than 2 connected players", () => {
     expect(events("round-reveal")).toHaveLength(room.players.length); // one per player
     expect(events("game-over")).toHaveLength(0);
     expect(vi.getTimerCount()).toBe(1); // only the phase timer: the pause countdown is gone
+  });
+
+  // EXP-306: the answer bar hides ANSWER_GRACE of the real timer, so a resume late in answering must still show the
+  // players RESUME_SHOWN_MIN on the bar (the grace on top), not RESUME_SHOWN_MIN - ANSWER_GRACE
+  it("resumes a nearly over answering phase with at least 1.5 s on the bar, plus the grace", () => {
+    const RESUME_SHOWN_MIN = 1_500;
+    room = startedRoom(["alice", "bob"]);
+    const owner = room.currentPlayer!.username;
+    const other = owner === "alice" ? "bob" : "alice";
+    engine.onPhotoReceived(room, PHOTO, owner);
+    vi.advanceTimersByTime(ANSWER_TIME - 100); // the bar has already run out
+
+    drop(other);
+    vi.advanceTimersByTime(PAUSE_MIN_DURATION);
+    rejoin(other);
+    expect(last("game-resumed")).toMatchObject({ args: [{ phase: "answering", duration: RESUME_SHOWN_MIN }] });
+
+    engine.recordAnswer(room, owner, owner);
+    vi.advanceTimersByTime(RESUME_SHOWN_MIN + ANSWER_GRACE - 1);
+    expect(room.phase).toBe("answering");
+    vi.advanceTimersByTime(1);
+    expect(room.phase).toBe("reveal");
   });
 
   it("ends the game when the countdown runs out, and stops every game timer", () => {

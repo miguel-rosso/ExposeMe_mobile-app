@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GameEngine } from "../managers/GameEngine";
+import { ANSWER_TIME, GameEngine } from "../managers/GameEngine";
 import { PLANTED_DELAY_MAX } from "../managers/plantedDelay";
 import { RoomManager } from "../managers/RoomManager";
 import { GameStateSnapshot, Room } from "../models/interfaces";
@@ -8,7 +8,6 @@ import { CapturedEmit, createFakeIo } from "./helpers";
 // EXP-017 / EXP-027: every player list sent to clients goes through one allowlist (no socketId, rejoinToken,
 // plantedPhoto), and the answers of the round in play stay hidden until round-scores (same rule as the snapshot).
 
-const ANSWER_TIME = 8_000;
 const REVEAL_TIME = 3_000;
 const GAME_START_DELAY = 1_000;
 const PHOTO = "/temp/" + "a".repeat(32) + ".jpg";

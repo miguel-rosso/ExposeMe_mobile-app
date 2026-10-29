@@ -12,7 +12,7 @@ LOBBY → start-game → im-ready (every connected player, ≥2 connected, or 10
 
 Each round:
   ┌─ waiting-photo ──→ (player uploads) ──→ answering ──→ reveal ──→ scores ──→ next round
-  │     (≤15s)                               (8s)         (3s)       (5s)
+  │     (≤15s)                              (8.5s)        (3s)       (5s)
   │  No photo after 15s, or the owner sends photo-unavailable:
   │  └─ round-skipped ──→ next round (same round number, no penalty)
   │  The owner leaves, or stays disconnected 3s:
@@ -148,12 +148,14 @@ After last round: game-over
   guess), never anyone else's (the others' guesses stay hidden until `round-scores`). The app colours that pick, not
   its own last one: a change that left the phone but arrived after the freeze (high latency) never counted, and the
   reveal shows it didn't.
-- **Grace for the last tap**: the answer timer is `ANSWER_TIME` (8 s), but every `duration` sent to clients for
-  `answering` (`round-start`, `game-state`, `game-resumed`) is **`ANSWER_GRACE` (300 ms) less** than what is left of
-  it. The app stops taking taps when its answer bar (drawn with that `duration`, not a separate game timer) ends,
-  and the server keeps taking answers for ANSWER_GRACE after that, so every tap the app accepted arrives in time.
-  The bar ends `duration` after the event **arrived on the device**, however late the phase is painted (a slow phone
-  mounts the bar already partly full, EXP-300): only the delivery delay counts against the grace, never the paint.
+- **Grace for the last tap**: the answer timer is `ANSWER_TIME` (8.5 s), but every `duration` sent to clients for
+  `answering` (`round-start`, `game-state`, `game-resumed`) is **`ANSWER_GRACE` (800 ms) less** than what is left of
+  it (a 7.7 s bar). The app stops taking taps when its answer bar (drawn with that `duration`, not a separate game
+  timer) ends, and the server keeps taking answers for ANSWER_GRACE after that, so every tap the app accepted arrives
+  in time. The bar ends `duration` after the event **arrived on the device**, however late the phase is painted (a
+  slow phone mounts the bar already partly full, EXP-300): only the delivery delay counts against the grace, never
+  the paint. 800 ms covers the worst delivery delays measured on Android phones (up to ~770 ms; iOS ≤ 11 ms,
+  EXP-306 / DEC-042); the price is a `round-reveal` that comes 0.8 s after the bar ends.
 - **The round's options** are the players in the room at its `round-start`; only they can be voted for (any other
   name is ignored and the previous pick stays). **A player who leaves during the round (`leave-room`, removed by the
   host) stays one of its options until the next `waiting-photo`** (DEC-038, EXP-301): if they owned the photo they
@@ -489,9 +491,10 @@ that reached the lobby screen in between are covered by that snapshot.
   `game-paused` is sent again with the new `waitingFor` and the remaining `duration` (same pause, same `pause` number).
 - **Resume**: as soon as 2 players are connected again (a rejoin), but never before the pause lasted
   **2 s** (`PAUSE_MIN_DURATION`; an earlier rejoin schedules the resume, a new drop cancels it), the server sends
-  `game-resumed { phase, duration, phaseTotal }` and the frozen phase continues with its remaining time (at least 1.5 s;
-  at least 5 s when waiting for a photo, normal or planted alike, so the countdown never tells them apart; the owner
-  gets `your-turn` again). A pause at a round boundary
+  `game-resumed { phase, duration, phaseTotal }` and the frozen phase continues with its remaining time (at least 1.5 s
+  on the countdown players see: in answering the server's timer gets ANSWER_GRACE more, EXP-306; at least 5 s when
+  waiting for a photo, normal or planted alike, so the countdown never tells them apart; the owner gets `your-turn`
+  again). A pause at a round boundary
   resumes by starting that round (new owner, same round number). Scores and round numbers are untouched.
 - **Expiry**: when a pause's countdown runs out, `game-over`.
 - With 2 or more players connected the game goes on without the missing ones (never picked as photo owner).
@@ -543,7 +546,7 @@ All game events are **atomic** — each contains everything the client needs.
 | `game-started` | - | `players, rounds` | Navigate to game screen (public player data only, see "Public player data") |
 | `waiting-photo` | waiting-photo | `{ round, duration }` | Whole room: a photo is awaited (owner not revealed), show wait bar |
 | `your-turn` | waiting-photo | `{ round, attempt }` | Only the picked player: pick and upload a photo (or send `photo-unavailable`) |
-| `round-start` | answering | `{ photo, round, duration }` | Show photo, start answer timer (`duration` = 7.7 s: 300 ms grace before answers freeze). Same payload for the whole room, owner included (never tells whose photo it is) |
+| `round-start` | answering | `{ photo, round, duration }` | Show photo, start answer timer (`duration` = 7.7 s: 800 ms grace before answers freeze, at 8.5 s). Same payload for the whole room, owner included (never tells whose photo it is) |
 | `round-reveal` | reveal | `{ correctAnswer, duration, yourGuess }` | Show correct answer. One per player: `yourGuess` is the recipient's own recorded answer (`""` = none), which the app colours |
 | `round-scores` | scores | `{ scores, round, totalRounds, duration }` | Show scoreboard (`scores`: `{ username, points, isHost, lastAnswerCorrect, lastGuess }[]`, highest first, ties in room order) |
 | `hold-start` | scores | - | Pause everything visually |

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GameEngine } from "../managers/GameEngine";
+import { ANSWER_TIME, GameEngine } from "../managers/GameEngine";
 import { PLANTED_DELAY_MAX } from "../managers/plantedDelay";
 import { RoomManager } from "../managers/RoomManager";
 import { uploadStore } from "../middlewares/uploadStore";
@@ -10,7 +10,6 @@ import { CapturedEmit, createFakeIo, plantPhoto } from "./helpers";
 // disconnected planter keeps their photo: the slot is played as a normal round and the photo gets a later free
 // round, where it is shown if they are back. Nothing tells the others that a round was (or would have been) planted.
 
-const ANSWER_TIME = 8_000;
 const REVEAL_TIME = 3_000;
 const SCORE_DISPLAY_TIME = 5_000;
 const GAME_START_DELAY = 1_000;

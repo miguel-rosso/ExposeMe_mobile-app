@@ -145,7 +145,7 @@
 //   none) ("consistency"; bots that went offline are left out). Each bot's round-reveal (and a reveal/scores
 //   game-state) carries its own recorded answer, `yourGuess` (EXP-230): it must equal that bot's lastGuess in the
 //   round's round-scores ("consistency"). round-start's duration is the answer time minus a
-//   300 ms grace (answers are taken until the real end); bots send at most 3 picks per round (server limit: 10 per
+//   800 ms grace (answers are taken until the real end); bots send at most 3 picks per round (server limit: 10 per
 //   socket, refilled 5/s), and there are no correct-answer / incorrect-answer aliases.
 //   Turns: like the app, a bot drops the photo (or photo-unavailable) of a your-turn whose request ended before it was
 //   ready (waiting-photo, round-start, round-skipped, game-paused, game-state, game-over in between): "turn-dropped".

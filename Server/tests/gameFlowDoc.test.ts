@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync } from "fs";
 import { join } from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GameEngine, PAUSE_MIN_DURATION, PAUSE_TIMEOUT } from "../managers/GameEngine";
+import { ANSWER_TIME, GameEngine, PAUSE_MIN_DURATION, PAUSE_TIMEOUT } from "../managers/GameEngine";
 import { DISCONNECT_GRACE, RoomManager } from "../managers/RoomManager";
 import { Room, YourTurnData } from "../models/interfaces";
 import { CapturedEmit, createFakeIo } from "./helpers";
@@ -222,7 +222,6 @@ describe("GAME_FLOW.md event tables", () => {
 // ── Payloads ─────────────────────────────────────────
 
 const GAME_START_DELAY = 1_000;
-const ANSWER_TIME = 8_000;
 const REVEAL_TIME = 3_000;
 const SCORE_DISPLAY_TIME = 5_000;
 const HOLD_TIME = 1_000;

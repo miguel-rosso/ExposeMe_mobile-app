@@ -3,7 +3,9 @@
 # - characterization (EXP-247): every fixture in fixtures/bots-analysis/ (anonymised events of real runs, plus broken
 #   variants and synthetic games so that each check function reports at least one error: dropping any of them from
 #   analyseRoom fails this test) must give exactly the summary the original analyse() of bots.mjs gave (`expected`),
-#   errors in the same order. lab.sh, bots-cli.test.sh and the dashboard read that JSON.
+#   errors in the same order. lab.sh, bots-cli.test.sh and the dashboard read that JSON. The fixtures were recorded
+#   with an 8 s answer timer (300 ms grace); EXP-306 made it 8.5 s (800 ms grace) with the same 7.7 s `duration`, so
+#   their answer_phase_overrun_ms reads ~500 ms early (reveals came sooner than today's server sends them).
 # - players out of the room (EXP-139): leave (--leave-round) and lobby kick (--kick) checks on small synthetic games, and the
 #   photo owner leaving during their round (--leave-owner, EXP-301 / DEC-038): still the answer, voters score.
 # - holds of the scoreboard (--hold, EXP-303): everyone let go within 1 s of the holder releasing or going away.
@@ -168,10 +170,10 @@ owner_drop() { # bots, away secs, outcome (kept|repicked|skipped|lost), new pick
     if (outcome !== "lost") {
       at(owner, "photo-sent", 1, start - 50, { attempt });
       all(players, "round-start", 1, start, { photo: "/temp/p1.jpg", duration: 7700 });
-      all(players, "round-reveal", 1, start + 8000, { correctAnswer: owner });
-      all(players, "round-scores", 1, start + 11000, { round: 1, scores: players.map((u) => ({ username: u, points: 0, lastGuess: "", lastAnswerCorrect: false })) });
+      all(players, "round-reveal", 1, start + 8500, { correctAnswer: owner });
+      all(players, "round-scores", 1, start + 11500, { round: 1, scores: players.map((u) => ({ username: u, points: 0, lastGuess: "", lastAnswerCorrect: false })) });
     }
-    all(players, "game-over", 1, start + 16000, { finalScore: [] });
+    all(players, "game-over", 1, start + 16500, { finalScore: [] });
     const r = { code: "QAROOM", reason: "game-over", players, errors: [], uploads: [], rateLimited: 0, events };
     console.log(analyseRoom(r, { host: true, rounds: 1, playAgainLingerS: 0, lingerBot: 0, startNextGameS: 0 }).consistency_errors.join("\n"));
   ' "$ANALYSIS" "$@"

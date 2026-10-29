@@ -4,7 +4,7 @@ import { io as connect, Socket as ClientSocket } from "socket.io-client";
 import { io, server } from "../app";
 import { roomManager } from "../routes/socketRoutes";
 import { registerTurnUpload } from "./helpers";
-import { ANSWER_GRACE } from "../managers/GameEngine";
+import { ANSWER_GRACE, ANSWER_TIME } from "../managers/GameEngine";
 
 // EXP-128 / EXP-252: real server + real clients, every event each socket receives is recorded. Until round-reveal,
 // nobody, the owner included, receives the photo owner's identity (no `owner` / `isOwner` key, the owner's name
@@ -99,7 +99,7 @@ describe("photo owner secrecy over the socket (EXP-128, EXP-252)", () => {
     registerTurnUpload(gameCode, owner, PHOTO, 1);
     socks[owner].emit("photo-sent", { photo: PHOTO });
     const startData = await Promise.all(starts);
-    startData.forEach((data) => expect(data).toEqual({ photo: PHOTO, round: 1, duration: 8_000 - ANSWER_GRACE }));
+    startData.forEach((data) => expect(data).toEqual({ photo: PHOTO, round: 1, duration: ANSWER_TIME - ANSWER_GRACE }));
 
     // The owner recognises their photo and votes for themselves, like any player could
     socks[owner].emit("submit-answer", { guess: owner });

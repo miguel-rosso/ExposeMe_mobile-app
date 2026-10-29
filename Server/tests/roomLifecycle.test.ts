@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GameEngine } from "../managers/GameEngine";
+import { ANSWER_TIME, GameEngine } from "../managers/GameEngine";
 import { MAX_PLAYERS_PER_ROOM, MAX_ROOMS, RoomManager } from "../managers/RoomManager";
 import { Room } from "../models/interfaces";
 import { CapturedEmit, createFakeIo } from "./helpers";
@@ -8,7 +8,6 @@ import { CapturedEmit, createFakeIo } from "./helpers";
 
 const ROOM_CLEANUP_DELAY = 30 * 60 * 1000;
 const SOLO_ROOM_CLEANUP_DELAY = 2 * 60 * 1000;
-const ANSWER_TIME = 8_000;
 const REVEAL_TIME = 3_000;
 const SCORE_DISPLAY_TIME = 5_000;
 const GAME_START_DELAY = 1_000;

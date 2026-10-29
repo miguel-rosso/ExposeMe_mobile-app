@@ -64,20 +64,22 @@ const textOf = (root: ReactTestInstance, id: string) => root.find((n) => n.props
 // ── Pure helpers ─────────────────────────────────────────
 
 describe("waiting-photo helpers", () => {
-  it("the owner who reported photo-unavailable gets their own reason; everyone else the room's", () => {
-    expect(skipNoticeFor({ round: 2, reason: "timeout" }, null)).toBe("timeout");
-    expect(skipNoticeFor({ round: 2, reason: "unavailable" }, null)).toBe("unavailable");
+  // EXP-110: the room's copy has no reason, so it gets one notice whatever the cause; only my own copy has a reason
+  it("the room gets one generic notice; the owner their own (the reason they reported, or their timeout)", () => {
+    expect(skipNoticeFor({ round: 2 }, null)).toBe("skipped");
+    expect(skipNoticeFor({ round: 2, reason: "timeout" }, null)).toBe("own-timeout");
     expect(skipNoticeFor({ round: 2, reason: "unavailable" }, "permission")).toBe("own-permission");
-    expect(skipNoticeFor({ round: 2, reason: "timeout" }, "upload")).toBe("timeout");
+    expect(skipNoticeFor({ round: 2, reason: "timeout" }, "upload")).toBe("own-timeout"); // my report came too late
+    expect(skipNoticeFor({ round: 2, reason: "unavailable" }, null)).toBe("skipped"); // no report of mine to explain
   });
 
   it("every notice is translated in en and es", () => {
-    const notices = ["timeout", "unavailable", "own-permission", "own-no-photos", "own-failed", "own-upload"] as const;
+    const notices = ["skipped", "own-timeout", "own-permission", "own-no-photos", "own-failed", "own-upload"] as const;
     for (const t of [en, es]) {
       for (const n of notices) expect(skipNoticeText(t, n)).toEqual(expect.any(String));
       expect(t.someoneChoosingPhoto).toBeTruthy();
     }
-    expect(skipNoticeText(es, "timeout")).not.toBe(skipNoticeText(en, "timeout"));
+    for (const n of notices) expect(skipNoticeText(es, n)).not.toBe(skipNoticeText(en, n));
   });
 });
 
@@ -115,11 +117,12 @@ describe("GameScreen while a photo is awaited", () => {
 
   it("a skipped round shows a translated notice on the waiting screen until the next round starts", () => {
     act(() => mockSocket.fire("waiting-photo", { round: 1, duration: 15_000 }));
-    act(() => mockSocket.fire("round-skipped", { round: 1, reason: "timeout" }));
+    act(() => mockSocket.fire("round-skipped", { round: 1 }));
     act(() => mockSocket.fire("waiting-photo", { round: 1, duration: 15_000 }));
-    expect(textOf(r.root, TEST_IDS.roundSkippedNotice)).toBe(en.roundSkippedTimeout);
-    act(() => mockSocket.fire("round-skipped", { round: 1, reason: "unavailable" }));
-    expect(textOf(r.root, TEST_IDS.roundSkippedNotice)).toBe(en.roundSkippedUnavailable);
+    expect(textOf(r.root, TEST_IDS.roundSkippedNotice)).toBe(en.roundSkipped);
+    // My own turn timed out: only my copy says so
+    act(() => mockSocket.fire("round-skipped", { round: 1, reason: "timeout" }));
+    expect(textOf(r.root, TEST_IDS.roundSkippedNotice)).toBe(en.ownPhotoTimeout);
     act(() => mockSocket.fire("round-start", { photo: "/temp/y.jpg", round: 1, duration: 8_000 }));
     expect(has(r.root, TEST_IDS.roundSkippedNotice)).toBe(false);
   });
@@ -261,9 +264,9 @@ describe("GameScreen while a photo is awaited", () => {
     act(() => mockSocket.fire("waiting-photo", { round: 1, duration: 15_000 }));
     await act(async () => { rejectPick(new Error("gallery closed")); });
     await flush();
-    act(() => mockSocket.fire("round-skipped", { round: 1, reason: "unavailable" })); // someone else's report
+    act(() => mockSocket.fire("round-skipped", { round: 1 })); // someone else's turn: the room's copy
     expect(mockSocket.emitted.some(([ev]) => ev === "photo-unavailable")).toBe(false);
-    expect(textOf(r.root, TEST_IDS.roundSkippedNotice)).toBe(en.roundSkippedUnavailable);
+    expect(textOf(r.root, TEST_IDS.roundSkippedNotice)).toBe(en.roundSkipped);
   });
 
   // EXP-237: my report was answered by a round-skipped lost while offline; the rejoin snapshot ends that turn
@@ -278,8 +281,8 @@ describe("GameScreen while a photo is awaited", () => {
       started: true, phase: "waiting-photo", round: 1, totalRounds: 10, photo: null, correctAnswer: null,
       duration: 9_000, held: false, pause: null, scores: [], players: [],
     }));
-    act(() => mockSocket.fire("round-skipped", { round: 1, reason: "unavailable" })); // someone else's report
-    expect(textOf(r.root, TEST_IDS.roundSkippedNotice)).toBe(en.roundSkippedUnavailable);
+    act(() => mockSocket.fire("round-skipped", { round: 1 })); // someone else's turn: the room's copy
+    expect(textOf(r.root, TEST_IDS.roundSkippedNotice)).toBe(en.roundSkipped);
   });
 
   it("re-picked for the same round: the old flow neither reports nor sends, and doesn't break the new turn", async () => {

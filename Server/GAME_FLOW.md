@@ -43,10 +43,14 @@ After last round: game-over
   ignored. The round is skipped at once. The app also drops the result of a your-turn flow whose request ended
   (next `waiting-photo`, `round-start`, `round-skipped`, `game-paused`, `game-state`, `game-over`): it neither sends
   that photo nor reports it unavailable (a photo uploaded meanwhile is re-sent if the same request is asked again).
-- Every skip is announced with **`round-skipped { round, reason }`**, `reason` = `"timeout"` (no photo in 15 s, or
-  every player went away as its owner, below) or `"unavailable"` (owner reported photo-unavailable); it never names
-  the owner. The next round (same number) follows right away with a new `waiting-photo`. After an `"unavailable"`
-  skip the same player is not picked for the next attempt when another connected player can be.
+- Every skip is announced with **`round-skipped { round }`**, which never names the owner nor says why (EXP-110).
+  Only the awaited owner, while still in the room and connected, gets its own copy with the cause,
+  **`round-skipped { round, reason }`**, `reason` = `"timeout"` (no photo in 15 s) or `"unavailable"` (it reported
+  photo-unavailable); a planted round has no owner, so its timeout reaches everyone without a reason. The app shows
+  the room a generic notice and the owner its own cause (for `"unavailable"`, the one it reported: no access, no
+  photos, a photo that couldn't be opened or uploaded). A photo-unavailable skips the round at once (DEC-041). The next
+  round (same number) follows right away with a new `waiting-photo`. After an `"unavailable"` skip the same player is
+  not picked for the next attempt when another connected player can be.
 - **The owner goes away** (DEC-035; while the game runs, not paused): the owner *goes away* when they leave the
   room (`leave-room`) or stay disconnected for **3 s** (`OWNER_RETURN_WINDOW`; a brief flap goes
   unnoticed, and an owner back in time gets `your-turn` again and keeps the rest of the wait; a later drop gets a
@@ -63,8 +67,8 @@ After last round: game-over
     window: when they disconnect as owner the normal 15 s wait applies and its timeout is a counted skip; if they
     leave, the round still goes to another player at once, but that counts as a skip.
   - When every connected player has already gone away as owner of that round, the round is played again from
-    scratch: `round-skipped { reason: "timeout" }`, then a new `waiting-photo` with the same `round`, and anyone may
-    be picked. That replay counts as a skip, so a round nobody keeps can't stall the game forever.
+    scratch: `round-skipped { round }` to everyone (that round's last owner is gone, so nobody gets a reason), then
+    a new `waiting-photo` with the same `round`, and anyone may be picked. That replay counts as a skip, so a round nobody keeps can't stall the game forever.
 - **Planting.** The app uploads the chosen photo and sends `plant-photo` from the **lobby**, as soon as it is
   picked (uncropped, like the game's gallery photos), so `im-ready` never waits for it. Only if that upload failed
   does the game screen retry it, **after** `im-ready` (accepted until round 1 is played; a photo planted after the
@@ -537,7 +541,7 @@ All game events are **atomic** — each contains everything the client needs.
 | `hold-start` | scores | - | Pause everything visually |
 | `hold-end` | scores | - | The hold is over (released, force-released or ended by a pause); `hold-resume` carries the time |
 | `hold-resume` | scores | `{ phase, duration, phaseTotal }` | Resume with remaining time (`phaseTotal`: the phase's full duration) |
-| `round-skipped` | - | `{ round, reason: "timeout" \| "unavailable" }` | No photo for this round; the next `waiting-photo` follows |
+| `round-skipped` | - | `{ round, reason?: "timeout" \| "unavailable" }` | No photo for this round; the next `waiting-photo` follows. `reason` only in the awaited owner's own copy (the room gets `{ round }`) |
 | `game-paused` | any | `{ duration, waitingFor, pause, maxPauses }` | Fewer than 2 connected: freeze, show countdown and "pause N of M" |
 | `game-resumed` | any | `{ phase, duration, phaseTotal }` | Paused phase continues with remaining time (`phaseTotal`: the phase's full duration) |
 | `game-state` | any | snapshot (see "Pause and reconnect") | Only to a rejoining socket (or one re-sending its join in a started game): render current phase |

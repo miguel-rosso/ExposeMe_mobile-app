@@ -41,9 +41,11 @@
 //                           on the same socket, like the app going from its lobby to the game screen (EXP-097)
 //   node qa/lab/bots.mjs --bots 2 --host --drop-round 2 --drop-secs 8 --app-resync
 //            --photo-unavailable P   on its turn a bot reports photo-unavailable { round, attempt } with probability P (like a phone with no
-//                           gallery access / no photos / failed uploads): the round must be skipped at once for everyone
-//                           (round-skipped reason "unavailable"), not after the 15 s wait. --upload-fail P instead stays
-//                           silent, so the server skips by timeout (reason "timeout").
+//                           gallery access / no photos / failed uploads): the round must be skipped at once for everyone,
+//                           not after the 15 s wait. --upload-fail P instead stays silent, so the server skips by timeout.
+//                           Only the owner's own round-skipped copy says reason ("unavailable" / "timeout"); the room's
+//                           has none (EXP-110), and a reason in a copy for a bot not asked for that round's photo is
+//                           a "payload-leak".
 //   node qa/lab/bots.mjs --bots 3 --host --photo-unavailable 0.3
 //            --plant K      the first K bots plant a photo like the app: upload + plant-photo in the lobby, right after
 //                           joining (im-ready never waits for it). Planted rounds must look like any other (EXP-126):
@@ -155,7 +157,7 @@
 import { io } from "socket.io-client";
 import fs from "node:fs";
 import path from "node:path";
-import { analyseRoom, DISCONNECT_GRACE_MS } from "./bots-analysis.mjs";
+import { analyseRoom, DISCONNECT_GRACE_MS, skipReasonLeak } from "./bots-analysis.mjs";
 
 // ── Command line ──
 // Parsed and validated before anything touches the network (EXP-197): --help and bad arguments never connect
@@ -591,13 +593,18 @@ function runRoom(roomIdx, fixedCode) {
       });
       // Privacy check of every received event. Runs before the event's own handler, so `phase` is the phase this
       // bot was in when it arrived; `baseline` = points per player at the last round-scores (null when unknown)
-      const priv = { phase: null, baseline: null };
+      // `askedRound`: round of the last your-turn since the last waiting-photo (only its round-skipped has a reason)
+      const priv = { phase: null, baseline: null, askedRound: null };
       // `duration` of the last start event of each phase this bot saw: what a resync's phaseTotal must repeat
       const phaseStartDurations = new Map();
       socket.on("disconnect", () => { priv.baseline = null; }); // round-scores may be missed while away
       socket.onAny((ev, ...payload) => {
         const tokens = new Map(bots.map((b) => [b.name, b.token]));
         for (const leak of payloadLeaks(name, ev, payload, socketIds, tokens, priv)) rec("payload-leak", bot.round, { leak });
+        if (ev === "round-skipped") {
+          const leak = skipReasonLeak(payload[0], priv.askedRound);
+          if (leak) rec("payload-leak", bot.round, { leak });
+        }
         const d = payload[0];
         if (PHASE_START_EVENTS[ev]) phaseStartDurations.set(PHASE_START_EVENTS[ev], d?.duration);
         if (RESYNC_EVENTS.has(ev)) {
@@ -605,6 +612,8 @@ function runRoom(roomIdx, fixedCode) {
           if (problem) errors.push(`${name}: ${problem}`);
         }
         if (TURN_ENDING_EVENTS.has(ev)) bot.turn = null;
+        if (ev === "your-turn") priv.askedRound = d?.round ?? null;
+        else if (["waiting-photo", "game-state", "game-started", "game-over"].includes(ev)) priv.askedRound = null;
         if (ev === "game-started") { priv.phase = null; priv.baseline = new Map((d ?? []).map((p) => [p.username, 0])); }
         else if (ev === "waiting-photo") priv.phase = "waiting-photo";
         else if (ev === "round-start") priv.phase = "answering";
@@ -869,6 +878,7 @@ function runRoom(roomIdx, fixedCode) {
       socket.on("game-state", (d) => {
         rec("game-state", d.round, {
           phase: d.phase, paused: !!d.pause, pause: d.pause?.pause, maxPauses: d.pause?.maxPauses, started: d.started,
+          duration: d.duration, // a missed waiting-photo's remaining wait (bots-analysis isTimeoutSkip)
           yourGuess: d.yourGuess ?? null,
         });
         // Offline when game-over was sent (EXP-092): the rejoin snapshot of our game says it is no longer started

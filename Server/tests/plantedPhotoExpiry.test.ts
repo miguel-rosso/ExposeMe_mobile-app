@@ -155,7 +155,8 @@ describe("expired planted photos are not drawn", () => {
 
     vi.advanceTimersByTime(PHOTO_WAIT_TIMEOUT);
     expect(roundStartPhotos()).not.toContain(PLANTED);
-    expect(events("round-skipped").map((e) => e.args[0])).toEqual([{ round: 1, reason: "timeout" }]);
+    // A planted round has no owner: one room-wide announcement, without a reason (EXP-110)
+    expect(events("round-skipped").map((e) => e.args[0])).toEqual([{ round: 1 }]);
     expect(uploadStore.get(PLANTED.slice("/temp/".length))).toBeUndefined();
     expect(room.plantedPhotosShown).toBe(0);
   });

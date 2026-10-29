@@ -113,8 +113,13 @@ describe("the awaited photo owner goes away (EXP-029, DEC-035)", () => {
     ownerDropsForGood();
     vi.advanceTimersByTime(PHOTO_WAIT_TIMEOUT - 1);
     expect(events("round-skipped")).toHaveLength(0);
+    const newOwner = room.currentPlayer!;
     vi.advanceTimersByTime(1);
-    expect(events("round-skipped").map((e) => e.args[0])).toEqual([{ round: 1, reason: "timeout" }]);
+    // Room-wide without a reason, the new owner's own copy with it (EXP-110)
+    expect(events("round-skipped").map((e) => [e.target, e.args[0]])).toEqual([
+      [room.gameCode, { round: 1 }],
+      [newOwner.socketId, { round: 1, reason: "timeout" }],
+    ]);
   });
 
   it("an owner back within the window keeps their turn: no new pick, your-turn again, the photo is played", () => {
@@ -164,7 +169,8 @@ describe("the awaited photo owner goes away (EXP-029, DEC-035)", () => {
     expect(new Set([first, second, third]).size).toBe(3);
 
     // Everyone had round 1 once: it starts over (announced like any repeated round), anyone back may be picked again
-    expect(events("round-skipped").map((e) => e.args[0])).toEqual([{ round: 1, reason: "timeout" }]);
+    // Its last owner is away: one room-wide announcement, no reason to anyone (EXP-110)
+    expect(events("round-skipped").map((e) => e.args[0])).toEqual([{ round: 1 }]);
     expect(waits().map((w) => w.round)).toEqual([1, 1, 1, 1]);
     expect([first, second]).toContain(room.currentPlayer);
     expect(room.round).toBe(0);
@@ -250,7 +256,8 @@ describe("the awaited photo owner goes away (EXP-029, DEC-035)", () => {
     vi.advanceTimersByTime(PHOTO_WAIT_TIMEOUT - 1);
     expect(waits()).toHaveLength(waitsBefore);
     vi.advanceTimersByTime(1);
-    expect(events("round-skipped").map((e) => e.args[0])).toEqual([{ round: MAX_FREE_OWNER_CHANGES + 1, reason: "timeout" }]);
+    // alice is disconnected: only the room-wide announcement, without a reason (EXP-110)
+    expect(events("round-skipped").map((e) => e.args[0])).toEqual([{ round: MAX_FREE_OWNER_CHANGES + 1 }]);
     expect(room._consecutiveSkips).toBe(1);
   });
 

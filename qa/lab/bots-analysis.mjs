@@ -7,6 +7,8 @@ import { percentile } from "./stats.mjs";
 
 // ── Limits the checks use ──
 const UNAVAILABLE_SKIP_MAX_MS = 2_000; // photo-unavailable → round-skipped must be immediate (the wait is 15 s)
+// A timeout skip comes the waiting-photo's whole `duration` (not paused) after it; a bot may timestamp it this much sooner
+const TIMEOUT_SKIP_SLACK_MS = 1_000;
 // A second game whose players all sent im-ready starts its first round ~1 s after game-started; the ready timeout is 10 s
 const NEXT_GAME_READY_MAX_MS = 8_000;
 // Server/managers/RoomManager.ts DISCONNECT_GRACE: a player disconnected this long is gone (lobby shows it, host hands
@@ -149,6 +151,56 @@ function checkWaitingPhotoPayloads(r) {
     if (keys !== "duration,round") out.push(`${e.bot}: waiting-photo payload has keys [${keys}] (owner must stay secret)`);
   }
   return out;
+}
+
+/**
+ * round-skipped privacy (EXP-110): only the awaited owner's copy has a `reason`. `askedRound` is the round of the last
+ * your-turn this bot got since the last waiting-photo (null if none). Returns the payload-leak, or null.
+ */
+export function skipReasonLeak(payload, askedRound) {
+  if (payload?.reason === undefined || askedRound === payload.round) return null;
+  return `round-skipped: reason "${payload.reason}" for round ${payload.round}, which this bot wasn't asked to photo`;
+}
+
+/** A pause start: game-paused, or a rejoin snapshot of a paused game (with the event `prefix`). */
+const isPauseStart = (e, prefix) => e.ev === `${prefix}game-paused` || (e.ev === `${prefix}game-state` && e.payload?.paused);
+
+/** Time `bot` spent paused (a pause start → `game-resumed`, with the event `prefix`) between `from` and `to`. */
+function pausedMs(r, bot, prefix, from, to) {
+  let total = 0, pausedAt = null;
+  for (const e of r.events) {
+    if (e.bot !== bot || e.t < from || e.t > to) continue; // a paused snapshot may be the wait's start itself
+    if (isPauseStart(e, prefix) && pausedAt === null) pausedAt = e.t;
+    else if (e.ev === `${prefix}game-resumed` && pausedAt !== null) { total += e.t - pausedAt; pausedAt = null; }
+  }
+  return total;
+}
+
+/**
+ * Start of the photo wait a `skip` ended, as `{ t, duration }` (time it had left): the latest waiting-photo that bot got
+ * for the round or, if it missed it (offline), a later rejoin snapshot of that wait (`game-state` in waiting-photo with
+ * its remaining `duration`; its `round` is the rounds played, one less). Null when the bot saw neither.
+ */
+function photoWaitStart(r, skip, prefix) {
+  const starts = r.events.filter((e) => e.bot === skip.bot && e.t <= skip.t && e.payload?.duration && (
+    (e.ev === `${prefix}waiting-photo` && e.round === skip.round)
+    || (e.ev === `${prefix}game-state` && e.payload?.phase === "waiting-photo" && e.round === skip.round - 1)));
+  const latest = starts.reduce((last, e) => (!last || e.t > last.t ? e : last), null);
+  return latest && { t: latest.t, duration: latest.payload.duration };
+}
+
+/**
+ * A `round-skipped` (or `g2-round-skipped`) that ended its photo wait by the timeout. Only the awaited owner's copy
+ * says why (EXP-110); a copy without a reason is classed by when it came: one that ran the whole wait (pauses left
+ * out) is a timeout.
+ */
+function isTimeoutSkip(r, skip) {
+  if (skip.payload?.reason) return skip.payload.reason === "timeout";
+  const prefix = skip.ev.slice(0, -"round-skipped".length);
+  const wait = photoWaitStart(r, skip, prefix);
+  if (!wait) return false;
+  const waited = skip.t - wait.t - pausedMs(r, skip.bot, prefix, wait.t, skip.t);
+  return waited >= wait.duration - TIMEOUT_SKIP_SLACK_MS;
 }
 
 /** photo-unavailable: the reporter gets round-skipped (reason "unavailable") right away, not after the 15 s wait. */
@@ -336,7 +388,7 @@ function twoPlayerDropErrors(r, drops) {
  */
 function ownerDropErrors(r, d) {
   const after = (ev) => r.events.filter((e) => e.ev === ev && e.round === d.round && e.t > d.t);
-  const timeoutSkips = after("round-skipped").filter((e) => e.payload?.reason === "timeout");
+  const timeoutSkips = after("round-skipped").filter((e) => isTimeoutSkip(r, e));
   const awayMs = d.payload.secs * 1000;
   const pauses = r.players.length === 2;
   if (!pauses && awayMs >= OWNER_RETURN_WINDOW_MS + RETURN_WINDOW_SLACK_MS) return repickErrors(r, d, after);
@@ -390,7 +442,7 @@ function checkDroppedTurns(r) {
     const { attempt, turnAt } = e.payload;
     const askedAgain = r.events.some((x) => x.ev === "your-turn" && x.bot === e.bot && x.round === e.round && x.t > turnAt);
     const skippedOtherwise = r.events.some((x) => x.ev === "round-skipped" && x.bot === e.bot && x.round === e.round
-      && x.t > turnAt && x.payload?.reason !== "timeout");
+      && x.t > turnAt && !isTimeoutSkip(r, x));
     if (!askedAgain && !skippedOtherwise) out.push(`${e.bot}: dropped its round ${e.round} turn (attempt ${attempt}) and was never asked again`);
   }
   return out;
@@ -488,7 +540,7 @@ function checkSecondGame(r, opts) {
     }
     if (!r.events.some((e) => e.bot === n && e.ev === "g2-game-over")) out.push(`${n}: the second game never ended`);
   }
-  for (const e of r.events.filter((x) => x.ev === "g2-round-skipped" && x.payload?.reason === "timeout")) {
+  for (const e of r.events.filter((x) => x.ev === "g2-round-skipped" && isTimeoutSkip(r, x))) {
     out.push(`${e.bot}: second game round ${e.round} skipped by timeout (${who} kept it waiting)`);
   }
   return out;

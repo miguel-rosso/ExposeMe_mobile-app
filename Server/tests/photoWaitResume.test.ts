@@ -106,7 +106,8 @@ describe("a photo wait resumed with less than PHOTO_RESUME_MIN_REMAINING left (E
     vi.advanceTimersByTime(PHOTO_RESUME_MIN_REMAINING - 1);
     expect(events("round-skipped")).toHaveLength(0);
     vi.advanceTimersByTime(1);
-    expect(events("round-skipped").map((e) => e.args[0])).toEqual([{ round: 1, reason: "timeout" }]);
+    // A planted round has no owner: one room-wide announcement, without a reason (EXP-110)
+    expect(events("round-skipped").map((e) => e.args[0])).toEqual([{ round: 1 }]);
   });
 });
 

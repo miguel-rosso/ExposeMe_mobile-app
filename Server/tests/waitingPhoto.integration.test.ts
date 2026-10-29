@@ -88,7 +88,7 @@ describe("waiting for the chosen player's photo", () => {
     // The owner's malformed or mismatched reports are ignored; the one for the current request skips at once for
     // everyone (events of one socket are handled in order, so the bad ones were processed first)
     const t0 = Date.now();
-    const skipped = names.map((n) => once<{ round: number; reason: string }>(socks[n], "round-skipped", 2_000));
+    const skipped = names.map((n) => once<{ round: number; reason?: string }>(socks[n], "round-skipped", 2_000));
     const again = names.map((n) => once<{ round: number }>(socks[n], "waiting-photo", 2_000));
     const ownerTurnAgain = silent(socks[owner], "your-turn", 300);
     socks[owner].emit("photo-unavailable");
@@ -97,11 +97,15 @@ describe("waiting for the chosen player's photo", () => {
     socks[owner].emit("photo-unavailable", { round: 2, attempt: 1 });
     socks[owner].emit("photo-unavailable", turn);
     socks[owner].emit("photo-unavailable", turn); // duplicate: ignored
-    (await Promise.all(skipped)).forEach((s) => expect(s).toEqual({ round: 1, reason: "unavailable" }));
+    // Only the owner learns why (EXP-110): the others can't tell it from a timeout
+    const received = await Promise.all(skipped);
+    names.forEach((n, i) => expect(received[i]).toEqual(n === owner ? { round: 1, reason: "unavailable" } : { round: 1 }));
     expect(Date.now() - t0).toBeLessThan(1_500);
     (await Promise.all(again)).forEach((w) => expect(w).toEqual({ round: 1, duration: 15_000 }));
     expect(await ownerTurnAgain).toBe(true);
+    // One copy each: the owner is left out of the room-wide one
     expect(await silent(socks[other], "round-skipped", 300)).toBe(true);
+    expect(await silent(socks[owner], "round-skipped", 300)).toBe(true);
     Object.values(socks).forEach((c) => c.emit("leave-room"));
   }, 20_000);
 });

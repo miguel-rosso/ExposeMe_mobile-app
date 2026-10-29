@@ -64,10 +64,16 @@ export interface YourTurnData {
 /** `photo-unavailable` (client → server): the owner of request `attempt` for `round` has no photo to send */
 export type PhotoUnavailableData = YourTurnData;
 
-/** `round-skipped`: no photo for `round` — the wait ran out, or the owner sent photo-unavailable */
+/** Why a photo wait was skipped: the wait ran out, or the owner sent photo-unavailable */
+export type RoundSkipReason = "timeout" | "unavailable";
+
+/**
+ * `round-skipped`: no photo for `round`. Only the copy sent to the awaited owner says why: the room can't tell an owner
+ * without photos from a slow one (EXP-110).
+ */
 export interface RoundSkippedData {
   round: number;
-  reason: "timeout" | "unavailable";
+  reason?: RoundSkipReason;
 }
 
 export interface Room {

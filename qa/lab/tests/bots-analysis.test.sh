@@ -134,8 +134,9 @@ got="$(exits left missed-before-exit)"
 # ── --drop-on-turn: the photo owner drops while its photo is awaited (EXP-226, EXP-029 / DEC-035) ──
 # A synthetic 1-round game of N bots where bot1, the round's owner, is away S seconds. Outcome "kept": it comes back
 # and its photo is played; "repicked": AFTER ms after the drop the others get a new waiting-photo of round 1 and bot2's
-# photo is played; "skipped": the same, preceded by round-skipped "timeout"; "lost": like "repicked", but the game ends
-# without playing round 1. Prints the consistency errors, one per line (a game as the server plays it prints nothing).
+# photo is played; "skipped": the same, preceded by the room's round-skipped (no reason: only the owner's own copy has
+# one, EXP-110); "lost": like "repicked", but the game ends without playing round 1. Prints the consistency errors, one
+# per line (a game as the server plays it prints nothing).
 owner_drop() { # bots, away secs, outcome (kept|repicked|skipped|lost), new pick after ms
   node --input-type=module -e '
     const { analyseRoom } = await import(process.argv[1]);
@@ -155,7 +156,7 @@ owner_drop() { # bots, away secs, outcome (kept|repicked|skipped|lost), new pick
     let attempt = 1;
     const repicked = outcome !== "kept";
     if (repicked) {
-      if (outcome === "skipped") all(others, "round-skipped", 1, DROP + skipAfter, { round: 1, reason: "timeout" });
+      if (outcome === "skipped") all(others, "round-skipped", 1, DROP + skipAfter, { round: 1 });
       all(others, "waiting-photo", 1, DROP + skipAfter + 1, { round: 1, duration: 15000 });
       owner = "bot2";
       attempt = 2;
@@ -189,6 +190,12 @@ owner_drop_case "3 bots, owner away 6 s: its round is skipped instead" "round 1 
 owner_drop_case "3 bots, owner away 6 s: the game ends without that round" "game over after 0 of 1 rounds" 3 6 lost 3000
 owner_drop_case "3 bots, owner back within the window but replaced" "bot1: never sent its round 1 photo (attempt 1) after returning" 3 1 repicked 3000
 owner_drop_case "3 bots, owner away about the window: either outcome" "" 3 3 repicked 3000
+# EXP-110: the others' copies have no reason; a skip the whole 15 s wait after the waiting-photo is still a timeout
+owner_drop_case "3 bots, owner back within the window, then its round times out (copies without a reason)" \
+  "round 1 skipped by timeout after its owner bot1 returned" 3 1 skipped 14500
+got="$(owner_drop 3 1 skipped 1500)"
+[[ "$got" != *"skipped by timeout"* ]] && ok "3 bots, owner back within the window, round skipped at once: not taken for a timeout" \
+  || ko "3 bots, owner back within the window, round skipped at once: not taken for a timeout" "$got"
 
 # ── planted_rounds: only the bots' own plants (EXP-163) ──
 # A 3-round game of bot1, bot2 and the device ios-a: round 1 is bot1's upload (your-turn), round 2 the device's (its
@@ -276,6 +283,73 @@ next_game_case "quit: a stayer guessed the ghost" ghost-guessed "bot1: guessed b
 next_game_case "quit: the ghost still gets game events" ghost-gets-events "bot3: got g2-game-started after quitting"
 next_game_case "quit: the next game never ends" no-second-game-over "bot2: the next game never ended"
 next_game_case "quit: nobody quit" no-quit "nobody quit after game-over"
+
+# ── Second game: a device's photo turn skipped (EXP-110) ──
+# The recorded device-linger-next-game room (bot1, bot2 and a lingering device that plays the second game), with its
+# second game's round 1 skipped AFTER ms after the bots' g2-waiting-photo: the bots only get the room's copy, without a
+# reason (the device was the awaited owner). Prints the consistency errors, one per line.
+# Variants for bot1 only: "paused" (a rejoin snapshot of the paused wait 2 s in, resumed 58 s later: AFTER counts from
+# the waiting-photo, pause included); "missed" (bot1 missed that waiting-photo and rejoined 2 s in with a snapshot of
+# the wait, 13 s left: AFTER counts from the snapshot).
+device_turn_skipped() { # after ms, variant (none|paused|missed)
+  node --input-type=module -e '
+    import fs from "node:fs";
+    const { analyseRoom } = await import(process.argv[1]);
+    const { opts, room } = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+    const after = Number(process.argv[3]);
+    const variant = process.argv[4] ?? "none";
+    const SNAPSHOT_AT = 2_000, RESUMED_AT = 60_000;
+    const snapshot = (bot, t, paused) => ({ bot, ev: "g2-game-state", round: 0, t,
+      payload: { phase: "waiting-photo", paused, started: true, duration: 15_000 - SNAPSHOT_AT } });
+    for (const wait of room.events.filter((e) => e.ev === "g2-waiting-photo" && e.round === 1)) {
+      const mine = wait.bot === "bot1" && variant !== "none";
+      if (mine && variant === "paused") {
+        room.events.push(snapshot(wait.bot, wait.t + SNAPSHOT_AT, true));
+        room.events.push({ bot: wait.bot, ev: "g2-game-resumed", round: 0, t: wait.t + RESUMED_AT, payload: { phase: "waiting-photo" } });
+      }
+      if (mine && variant === "missed") {
+        wait.ev = "g2-waiting-photo-missed"; // never received
+        room.events.push(snapshot(wait.bot, wait.t + SNAPSHOT_AT, false));
+      }
+      const from = mine && variant === "missed" ? wait.t + SNAPSHOT_AT : wait.t;
+      room.events.push({ bot: wait.bot, ev: "g2-round-skipped", round: 1, t: from + after, payload: { round: 1 } });
+    }
+    room.events.sort((a, b) => a.t - b.t);
+    console.log(analyseRoom(room, opts).consistency_errors.join("\n"));
+  ' "$ANALYSIS" "$FIXTURES/device-linger-next-game.json" "$@"
+}
+device_turn_case() { # label, has|lacks, expected text, device_turn_skipped args...
+  local label="$1" mode="$2" want="$3" got; shift 3
+  got="$(device_turn_skipped "$@")"
+  if [ "$mode" = has ]; then [[ "$got" == *"$want"* ]] && ok "$label" || ko "$label" "expected [$want] in [$got]"
+  else [[ "$got" != *"$want"* ]] && ok "$label" || ko "$label" "unexpected [$want] in [$got]"; fi
+}
+BOT1_TIMEOUT="bot1: second game round 1 skipped by timeout"
+device_turn_case "second game: the device's turn timing out is reported though the bots' copies have no reason" \
+  has "$BOT1_TIMEOUT (the lingering device kept it waiting)" 15000
+device_turn_case "second game: the device's turn skipped at once is not a timeout" lacks "skipped by timeout" 300
+device_turn_case "paused wait (rejoin snapshot of the pause): a skip right after the resume is not a timeout" \
+  lacks "$BOT1_TIMEOUT" 60300 paused
+device_turn_case "paused wait (rejoin snapshot of the pause): the wait running out after the resume is a timeout" \
+  has "$BOT1_TIMEOUT" 73000 paused
+device_turn_case "missed waiting-photo: the wait counts from the rejoin snapshot, a skip when it runs out is a timeout" \
+  has "$BOT1_TIMEOUT" 13000 missed
+device_turn_case "missed waiting-photo: a skip right after the rejoin snapshot is not a timeout" lacks "$BOT1_TIMEOUT" 300 missed
+
+# ── round-skipped privacy (EXP-110): only the copy of a bot asked for that round's photo has a reason ──
+skip_leak() { # payload JSON, asked round (or null)
+  node --input-type=module -e '
+    const { skipReasonLeak } = await import(process.argv[1]);
+    console.log(skipReasonLeak(JSON.parse(process.argv[2]), JSON.parse(process.argv[3])) ?? "none");
+  ' "$ANALYSIS" "$1" "$2"
+}
+[ "$(skip_leak '{"round":2}' null)" = none ] && ok "skip privacy: the room's copy (no reason) is fine" || ko "skip privacy: room copy" "$(skip_leak '{"round":2}' null)"
+[ "$(skip_leak '{"round":2,"reason":"unavailable"}' 2)" = none ] && ok "skip privacy: the owner's copy has the reason" \
+  || ko "skip privacy: owner copy" "$(skip_leak '{"round":2,"reason":"unavailable"}' 2)"
+got="$(skip_leak '{"round":2,"reason":"timeout"}' null)"
+[[ "$got" == *'reason "timeout" for round 2'* ]] && ok "skip privacy: a reason to a bot not asked for a photo is a leak" || ko "skip privacy: not asked" "$got"
+got="$(skip_leak '{"round":2,"reason":"unavailable"}' 1)"
+[[ "$got" == *'reason "unavailable" for round 2'* ]] && ok "skip privacy: a reason for another round than the one asked is a leak" || ko "skip privacy: other round" "$got"
 
 # ── --hold: everyone is let go within 1 s of the holder releasing or going away (EXP-303) ──
 # A 1-round game of bot1, bot2, bot3: bot1, the round's owner, holds the scoreboard at 10 s and its hold ends at 15 s

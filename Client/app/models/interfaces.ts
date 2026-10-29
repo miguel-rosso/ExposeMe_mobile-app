@@ -137,10 +137,16 @@ export interface YourTurnData {
   attempt: number;
 }
 
-/** `round-skipped`: no photo for `round` (it is awaited again from another player) */
+/** Why a photo wait was skipped: the wait ran out, or the owner sent photo-unavailable */
+export type RoundSkipReason = "timeout" | "unavailable";
+
+/**
+ * `round-skipped`: no photo for `round` (it is awaited again from another player). Only the awaited owner's own copy
+ * has a `reason`: the room never learns why (EXP-110).
+ */
 export interface RoundSkippedData {
   round: number;
-  reason: "timeout" | "unavailable";
+  reason?: RoundSkipReason;
 }
 
 /** `game-state`: snapshot sent to a player who rejoins (see Server/GAME_FLOW.md) */

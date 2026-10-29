@@ -5,8 +5,9 @@ import { Room } from "../models/interfaces";
 import { CapturedEmit, createFakeIo } from "./helpers";
 
 // EXP-039 / EXP-040: while the server waits for the chosen player's photo the whole room gets
-// `waiting-photo { round, duration }` (owner kept secret), skips say why (`round-skipped { round, reason }`),
-// and the owner can report `photo-unavailable` to skip at once instead of making everyone wait 15 s.
+// `waiting-photo { round, duration }` (owner kept secret), skips are announced (`round-skipped { round }`, the reason
+// only in the owner's own copy, EXP-110), and the owner can report `photo-unavailable` to skip at once instead of
+// making everyone wait 15 s.
 
 const ANSWER_TIME = 8_000;
 const REVEAL_TIME = 3_000;
@@ -23,6 +24,8 @@ let room: Room;
 
 const events = (name: string) => emits.filter((e) => e.event === name);
 const last = (name: string) => events(name)[events(name).length - 1];
+/** Room-wide round-skipped announcements: one per skip (the owner's own copy with the reason is left out) */
+const skips = () => events("round-skipped").filter((e) => e.target === room.gameCode);
 const owner = () => room.currentPlayer!;
 /** The photo request in force (last your-turn sent) */
 const turn = () => last("your-turn")!.args[0] as { round: number; attempt: number };
@@ -81,9 +84,12 @@ describe("waiting-photo broadcast (EXP-039)", () => {
     expect(last("waiting-photo")!.args[0]).toEqual({ round: 2, duration: PHOTO_WAIT_TIMEOUT });
   });
 
-  it("a timed-out round is announced with its number and reason, then the round is awaited again", () => {
-    vi.advanceTimersByTime(GAME_START_DELAY + PHOTO_WAIT_TIMEOUT);
-    expect(last("round-skipped")!).toEqual({ target: room.gameCode, event: "round-skipped", args: [{ round: 1, reason: "timeout" }] });
+  it("a timed-out round is announced with its number (the reason only to its owner), then the round is awaited again", () => {
+    vi.advanceTimersByTime(GAME_START_DELAY);
+    const timedOut = owner();
+    vi.advanceTimersByTime(PHOTO_WAIT_TIMEOUT);
+    expect(skips()).toEqual([{ target: room.gameCode, except: timedOut.socketId, event: "round-skipped", args: [{ round: 1 }] }]);
+    expect(last("round-skipped")!).toEqual({ target: timedOut.socketId, event: "round-skipped", args: [{ round: 1, reason: "timeout" }] });
     expect(events("waiting-photo")).toHaveLength(2);
     expect(last("waiting-photo")!.args[0]).toEqual({ round: 1, duration: PHOTO_WAIT_TIMEOUT });
   });
@@ -100,7 +106,8 @@ describe("photo-unavailable (EXP-040)", () => {
     vi.advanceTimersByTime(GAME_START_DELAY);
     const first = owner();
     report(first.username);
-    expect(last("round-skipped")!.args[0]).toEqual({ round: 1, reason: "unavailable" });
+    expect(skips().map((e) => e.args[0])).toEqual([{ round: 1 }]);
+    expect(last("round-skipped")!).toEqual({ target: first.socketId, event: "round-skipped", args: [{ round: 1, reason: "unavailable" }] });
     expect(room.phase).toBe("waiting-photo");
     expect(room.round).toBe(0);
     expect(events("waiting-photo")).toHaveLength(2);
@@ -134,7 +141,7 @@ describe("photo-unavailable (EXP-040)", () => {
     report(first, t);
     report(first, t);
     report(first, t);
-    expect(events("round-skipped")).toHaveLength(1);
+    expect(skips()).toHaveLength(1);
     expect(events("your-turn")).toHaveLength(2);
   });
 
@@ -157,10 +164,10 @@ describe("photo-unavailable (EXP-040)", () => {
     report(first, stale);
     report(first, { round: 2, attempt: turn().attempt });
     report(first, { round: 1, attempt: turn().attempt + 1 });
-    expect(events("round-skipped")).toHaveLength(1); // only the timeout
+    expect(skips()).toHaveLength(1); // only the timeout
 
     report(first); // the current request
-    expect(events("round-skipped")).toHaveLength(2);
+    expect(skips()).toHaveLength(2);
     expect(last("round-skipped")!.args[0]).toEqual({ round: 1, reason: "unavailable" });
   });
 
@@ -168,16 +175,16 @@ describe("photo-unavailable (EXP-040)", () => {
     vi.advanceTimersByTime(GAME_START_DELAY + 10_000);
     report(owner().username);
     vi.advanceTimersByTime(PHOTO_WAIT_TIMEOUT - 1);
-    expect(events("round-skipped")).toHaveLength(1);
+    expect(skips()).toHaveLength(1);
     vi.advanceTimersByTime(1);
-    expect(events("round-skipped")).toHaveLength(2);
+    expect(skips()).toHaveLength(2);
     expect(last("round-skipped")!.args[0]).toEqual({ round: 1, reason: "timeout" });
   });
 
   it(`counts toward the ${MAX_CONSECUTIVE_SKIPS} consecutive skips that end the game`, () => {
     vi.advanceTimersByTime(GAME_START_DELAY);
     for (let i = 0; i < MAX_CONSECUTIVE_SKIPS; i++) report(owner().username);
-    expect(events("round-skipped")).toHaveLength(MAX_CONSECUTIVE_SKIPS);
+    expect(skips()).toHaveLength(MAX_CONSECUTIVE_SKIPS);
     expect(events("game-over")).toHaveLength(1);
     expect(vi.getTimerCount()).toBe(0);
   });

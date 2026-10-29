@@ -327,9 +327,13 @@ describe("round phases", () => {
     vi.advanceTimersByTime(PHOTO_WAIT_TIMEOUT - 1);
     expect(events("round-skipped")).toHaveLength(0);
 
+    const owner = room.currentPlayer!;
     vi.advanceTimersByTime(1);
-    const skipped = lastEvent("round-skipped")!;
-    expect(skipped.target).toBe(room.gameCode);
+    // The room learns no reason (EXP-110); the owner gets theirs in their own copy
+    expect(events("round-skipped")).toEqual([
+      { target: room.gameCode, except: owner.socketId, event: "round-skipped", args: [{ round: 1 }] },
+      { target: owner.socketId, event: "round-skipped", args: [{ round: 1, reason: "timeout" }] },
+    ]);
     expect(room.round).toBe(0);
     expect(room.phase).toBe("waiting-photo");
     expect(events("your-turn")).toHaveLength(2);
@@ -836,17 +840,17 @@ describe("offline players and skip cap", () => {
     vi.advanceTimersByTime(GAME_START_DELAY);
 
     vi.advanceTimersByTime(PHOTO_WAIT_TIMEOUT * (MAX_CONSECUTIVE_SKIPS - 1));
-    expect(events("round-skipped")).toHaveLength(MAX_CONSECUTIVE_SKIPS - 1);
+    expect(roomEvents("round-skipped")).toHaveLength(MAX_CONSECUTIVE_SKIPS - 1);
     expect(events("game-over")).toHaveLength(0);
 
     vi.advanceTimersByTime(PHOTO_WAIT_TIMEOUT);
-    expect(events("round-skipped")).toHaveLength(MAX_CONSECUTIVE_SKIPS);
+    expect(roomEvents("round-skipped")).toHaveLength(MAX_CONSECUTIVE_SKIPS);
     expect(events("game-over")).toHaveLength(1);
     expect(room.phase).toBeNull();
     expect(vi.getTimerCount()).toBe(0);
 
     vi.advanceTimersByTime(PHOTO_WAIT_TIMEOUT * 10);
-    expect(events("round-skipped")).toHaveLength(MAX_CONSECUTIVE_SKIPS);
+    expect(roomEvents("round-skipped")).toHaveLength(MAX_CONSECUTIVE_SKIPS);
   });
 
   it("a played round resets the consecutive skip counter", () => {
@@ -857,7 +861,7 @@ describe("offline players and skip cap", () => {
     playFullRound();
     vi.advanceTimersByTime(PHOTO_WAIT_TIMEOUT * (MAX_CONSECUTIVE_SKIPS - 1));
 
-    expect(events("round-skipped")).toHaveLength((MAX_CONSECUTIVE_SKIPS - 1) * 2);
+    expect(roomEvents("round-skipped")).toHaveLength((MAX_CONSECUTIVE_SKIPS - 1) * 2);
     expect(events("game-over")).toHaveLength(0);
     expect(room.phase).toBe("waiting-photo");
   });

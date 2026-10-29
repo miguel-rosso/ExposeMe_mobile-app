@@ -1,7 +1,7 @@
 import { Server } from "socket.io";
 import {
   GameStateSnapshot, PauseInfo, PhaseResumeData, Player, PlayerConnectionData, PublicPlayer, Room, RoomStateSnapshot, RoundPhase, RoundRevealData,
-  RoundSkippedData, RoundStartData, ScoreRound, WaitingPhotoData, YourTurnData,
+  RoundSkipReason, RoundSkippedData, RoundStartData, ScoreRound, WaitingPhotoData, YourTurnData,
 } from "../models/interfaces";
 import { DISCONNECT_GRACE, RoomManager } from "./RoomManager";
 import { uploadStore } from "../middlewares/uploadStore";
@@ -869,12 +869,28 @@ export class GameEngine {
   /**
    * The awaited photo won't be played: announce it, then the next round (same number) or game over.
    */
-  private skipRound(room: Room, reason: RoundSkippedData["reason"]): void {
+  private skipRound(room: Room, reason: RoundSkipReason): void {
     const owner = room.currentPlayer ?? undefined;
-    const skipped: RoundSkippedData = { round: room.round + 1, reason };
-    this.io.to(room.gameCode).emit("round-skipped", skipped);
+    this.announceSkip(room, reason);
     if (this.countSkip(room)) return;
     this.startRound(room, new Set(reason === "unavailable" && owner ? [owner] : []));
+  }
+
+  /**
+   * `round-skipped` without a reason to the room, so nobody can tell the owner had no photo (EXP-110); the awaited
+   * owner, if still in the room and connected, gets their own copy with the reason.
+   */
+  private announceSkip(room: Room, reason: RoundSkipReason): void {
+    const round = room.round + 1;
+    const owner = room.currentPlayer;
+    const toRoom: RoundSkippedData = { round };
+    if (!owner?.connected || !room.players.includes(owner)) {
+      this.io.to(room.gameCode).emit("round-skipped", toRoom);
+      return;
+    }
+    const toOwner: RoundSkippedData = { round, reason };
+    this.io.to(room.gameCode).except(owner.socketId).emit("round-skipped", toRoom);
+    this.io.to(owner.socketId).emit("round-skipped", toOwner);
   }
 
   /** One more photo wait lost in a row: true if that ends the game (MAX_CONSECUTIVE_SKIPS). */

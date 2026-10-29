@@ -360,7 +360,7 @@ const GameScreen = () => {
 
       // No photo for this round: say why on the waiting screen until the next round starts
       "round-skipped": (data: RoundSkippedData) => {
-        console.log(`[GAME] round-skipped: round ${data.round} (${data.reason})`);
+        console.log(`[GAME] round-skipped: round ${data.round} (${data.reason ?? "room copy, no reason"})`);
         setSkipNotice(skipNoticeFor(data, turnRequest.takeReportedReason()));
         turnRequest.endTurn();
       },

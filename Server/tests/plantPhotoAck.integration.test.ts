@@ -155,14 +155,16 @@ describe("plant-photo acknowledgement", () => {
   // owner who never sends, so the planter's re-planted copy is a new photo for a later round, not a duplicate.
   it("ok for the planter once their awaited planted photo expired; it gets a later round", async () => {
     const { alice, bob, gameCode } = await lobby();
+    const room = roomManager.getRoom(gameCode)!;
     const delay = vi.spyOn(GameEngine.prototype as any, "plantedDelay").mockReturnValue(EXPIRY_CHECK_DELAY_MS);
     const expiryCheck = vi.spyOn(GameEngine.prototype as any, "startPlantedRound");
     await startPlantedRound1(alice, bob, gameCode, photo("4"));
     delay.mockRestore();
     uploadStore.remove(photo("4")); // expired before round-start
-    await vi.waitFor(() => expect(expiryCheck).toHaveBeenCalled(), { timeout: ACK_WAIT_MS });
+    // This room's check only: the engine is shared, and earlier tests' rooms still run their own planted rounds
+    const checkedThisRoom = () => expiryCheck.mock.calls.some(([checked]) => checked === room);
+    await vi.waitFor(() => expect(checkedThisRoom()).toBe(true), { timeout: ACK_WAIT_MS });
     expiryCheck.mockRestore();
-    const room = roomManager.getRoom(gameCode)!;
     expect(room.phase).toBe("waiting-photo"); // no round-start: the wait now runs out and the round is skipped
 
     registerUpload(gameCode, "bob", photo("5"));

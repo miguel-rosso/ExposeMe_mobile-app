@@ -63,8 +63,9 @@ const withoutAllowedFormatChars = (text: string) => text
 /**
  * A name the server accepts: a string of 1–20 UTF-16 units (at most 60 after NFKC), not blank, with no invisible
  * characters or spaces other than U+0020, no combining mark at the start or on a trailing space, at most four
- * combining marks in a row and no mix of Latin-lookalike scripts (see mixesLookalikeScripts). Emoji, symbols,
- * punctuation and digits are free: a name may be made only of them.
+ * combining marks in a row, no mark on a kana with a voiced form but the voicing mark it takes (marksKanaOddly) and
+ * no mix of Latin-lookalike scripts (see mixesLookalikeScripts). Emoji, symbols, punctuation and digits are free: a
+ * name may be made only of them.
  */
 export function isValidUsername(value: unknown): value is string {
   if (typeof value !== "string" || !value.trim() || value.length > MAX_USERNAME_LENGTH) return false;
@@ -73,6 +74,7 @@ export function isValidUsername(value: unknown): value is string {
     && !LEADING_MARK.test(value)
     && !TRAILING_MARK.test(value)
     && !MARK_PILE.test(value)
+    && !marksKanaOddly(value)
     && !mixesLookalikeScripts(value);
 }
 
@@ -110,9 +112,9 @@ function mixesLookalikeScripts(name: string): boolean {
 
 // ── Lookalike keys ──────────────────────────────────
 
-// Marks on a letter or symbol. A mark on a space stays: NFKC turns spacing accents (the arms of "¯\_(ツ)_/¯", ´, ¨)
-// into a space plus a mark, and that mark is all they draw
-const COMBINING_MARK = /(?<!\s)\p{Mn}/gu;
+// Marks on a letter or symbol, voicing marks aside (see withoutMarks). A mark on a space stays: NFKC turns spacing
+// accents (the arms of "¯\_(ツ)_/¯", ´, ¨) into a space plus a mark, and that mark is all they draw
+const COMBINING_MARK = /(?<!\s)(?![\u3099\u309A])\p{Mn}/gu;
 // Joiners and subdivision tags an accepted name may still carry (variation selectors go with the marks)
 const IGNORABLE_IN_KEY = /[\u200C\u200D\u{E0020}-\u{E007F}]/gu;
 const WHITESPACE_RUN = /\s+/gu;
@@ -123,6 +125,95 @@ const VISUAL_LOOKALIKES: ReadonlyArray<[RegExp, string]> = [[/rn/g, "m"], [/vv/g
 /** `text` with each character found in `table` replaced by its entry. */
 const replaceChars = (text: string, table: ReadonlyMap<string, string>) =>
   Array.from(text, (char) => table.get(char) ?? char).join("");
+
+// ── Japanese voicing marks ──────────────────────────
+
+// Dakuten and handakuten (EXP-287) turn a kana that takes them into another kana: たいき and だいき, はな, ばな and ぱな
+// are different names. On any other character (a Latin letter, ん, a kanji) they are dropped like any other mark, so
+// they can't make a lookalike of a name read as a different one; other marks on a kana with a voiced form are refused
+// (marksKanaOddly).
+const VOICING_MARKS = ["\u3099", "\u309A"];
+const KANA_CLASS = "[\\p{Script=Hiragana}\\p{Script=Katakana}]";
+const KANA = new RegExp(KANA_CLASS, "gu");
+const KANA_LETTER = new RegExp(`^${KANA_CLASS}$`, "u");
+// The spacing dakuten and handakuten typed after a kana (captured), which voice it like the combining ones if it
+// takes them
+const SPACING_VOICING_MARK_ON_KANA = new RegExp(`(?<=(${KANA_CLASS}))[\\u309B\\u309C]`, "gu");
+const COMBINING_FORM_OF: Readonly<Record<string, string>> = { "\u309B": "\u3099", "\u309C": "\u309A" };
+const LETTER_WITH_MARKS = /(\P{M})(\p{M}+)/gu;
+// A voicing mark that NFC left out of a kana, with the character before it (none at the start)
+const LOOSE_VOICING_MARK = /(?<=(.?))[\u3099\u309A]/gsu;
+const WHITESPACE = /^\s$/u;
+const [KANA_BLOCKS_START, KANA_BLOCKS_END] = [0x3040, 0x30ff]; // the Hiragana and Katakana blocks
+const KANA_BLOCKS = Array.from(
+  { length: KANA_BLOCKS_END - KANA_BLOCKS_START + 1 },
+  (_, i) => String.fromCodePoint(KANA_BLOCKS_START + i),
+);
+
+/** Whether NFC joins `mark` with `letter` into one kana (た + dakuten is だ; a, ん or 漢 + dakuten aren't). */
+const joinsVoicingMark = (letter: string, mark: string) => (letter + mark).normalize("NFC").length === 1;
+
+/** Whether `letter` is a kana with a voiced form (た, は, ウ, ゝ; not あ, ん or a voiced kana). */
+const takesVoicingMark = (letter: string) => VOICING_MARKS.some((mark) => joinsVoicingMark(letter, mark));
+
+/**
+ * Voiced kana as their kana and a combining voicing mark, so the lookalike tables see the kana (ぐ as く + dakuten),
+ * also when typed with a spacing mark after a kana that takes it (は + ゛ as ば, like half-width ﾊﾞ).
+ */
+const separateVoicing = (text: string) => text
+  .replace(SPACING_VOICING_MARK_ON_KANA, (mark, kana: string) => {
+    const combining = COMBINING_FORM_OF[mark];
+    return joinsVoicingMark(kana.normalize("NFKC"), combining) ? combining : mark;
+  })
+  .replace(KANA, (kana) => kana.normalize("NFD"));
+
+/**
+ * Characters that `table` reads like a kana that takes a voicing mark, each with that kana: in the visual key "〈" or
+ * "❬" + dakuten reads as ぐ, as "〈" and "❬" read as く there.
+ */
+function voicingStandIns(table: ReadonlyMap<string, string>): ReadonlyMap<string, string> {
+  const kanaByPrototype = new Map<string, string>();
+  for (const kana of KANA_BLOCKS) {
+    const prototype = table.get(kana);
+    if (prototype && takesVoicingMark(kana)) kanaByPrototype.set(prototype, kana);
+  }
+  const standIns = new Map(kanaByPrototype);
+  for (const [char, prototype] of table) {
+    const kana = kanaByPrototype.get(prototype);
+    if (kana) standIns.set(char, kana);
+  }
+  return standIns;
+}
+
+const NO_STAND_INS: ReadonlyMap<string, string> = new Map();
+const SYMBOL_VOICING_STAND_INS = voicingStandIns(SYMBOL_CONFUSABLES);
+
+/**
+ * Whether `name` puts on a kana with a voiced form, or on a symbol drawn like one (SYMBOL_VOICING_STAND_INS), any mark
+ * but the one voicing mark it takes: two voicing marks (ぱ + dakuten), or a mark drawn like one (は + ring above looks
+ * like ぱ, た + diaeresis like だ), would read as a voiced kana the keys don't see. Japanese puts no other marks on
+ * kana; on other kana (ノ in the kaomoji "(ﾉﾟ∀ﾟ)ﾉ", あ, ん) marks are dropped from the keys like on any letter.
+ */
+function marksKanaOddly(name: string): boolean {
+  const decomposed = separateVoicing(name).normalize("NFKC").normalize("NFD");
+  return Array.from(decomposed.matchAll(LETTER_WITH_MARKS)).some(([, letter, marks]) => {
+    const kana = KANA_LETTER.test(letter) && takesVoicingMark(letter) ? letter : SYMBOL_VOICING_STAND_INS.get(letter);
+    return kana !== undefined && !(VOICING_MARKS.includes(marks) && joinsVoicingMark(kana, marks));
+  });
+}
+
+/**
+ * `decomposed` (NFD) without the combining marks on a letter or symbol, composed (NFC), keeping a voicing mark that
+ * joins its kana or the kana `standIns` reads the letter before it as. The other marks go first, so one between a kana
+ * and its voicing mark doesn't keep NFC from joining them.
+ */
+function withoutMarks(decomposed: string, standIns: ReadonlyMap<string, string>): string {
+  const composed = decomposed.replace(COMBINING_MARK, "").normalize("NFC");
+  return composed.replace(LOOSE_VOICING_MARK, (mark, before: string) => {
+    const kana = standIns.get(before);
+    return WHITESPACE.test(before) || (kana !== undefined && joinsVoicingMark(kana, mark)) ? mark : "";
+  });
+}
 
 /** Each character drawn like ASCII letters or digits replaced by them (UTS #39 table, see asciiConfusables.ts). */
 const toAscii = (text: string) => replaceChars(text, ASCII_CONFUSABLES);
@@ -135,12 +226,14 @@ const foldCase = (text: string) => text.toUpperCase().toLowerCase();
 
 /**
  * Lookalikes read as ASCII (case kept: Greek small nu reads as "v" but capital nu as "N"), then NFKC (full-width,
- * styled letters), accents and other combining marks on a letter or symbol dropped, the table again for what NFKC and
- * the marks uncovered, joiners dropped, whitespace trimmed and collapsed. The table runs before NFKC too because NFKC
- * can lose the look: long s reads as "f" but NFKC turns it into "s".
+ * styled letters), accents and other combining marks on a letter or symbol dropped (but a voicing mark on a kana that
+ * takes it, or on a letter `voicingStandIns` reads as one), the table again for what NFKC and the marks uncovered,
+ * joiners dropped, whitespace trimmed and collapsed. The table runs before NFKC too because NFKC can lose the look:
+ * long s reads as "f" but NFKC turns it into "s".
  */
-function skeleton(name: string): string {
-  const bare = toAscii(name).normalize("NFKC").normalize("NFD").replace(COMBINING_MARK, "").normalize("NFC");
+function skeleton(name: string, voicingStandIns = NO_STAND_INS): string {
+  const decomposed = toAscii(separateVoicing(name)).normalize("NFKC").normalize("NFD");
+  const bare = withoutMarks(decomposed, voicingStandIns).normalize("NFC");
   return toAscii(bare).replace(IGNORABLE_IN_KEY, "").replace(WHITESPACE_RUN, " ").trim();
 }
 
@@ -159,10 +252,12 @@ export function nameKey(name: string): string {
  * their UTS #39 prototype of the same size ("(∙_∙)" as "(•_•)", "ǃǃ" as "!!", "¯" as "ˉ", curly quotes as straight
  * ones), I / l / | / 1 as "l", then "rn" as "m", "vv" as "w", "cl" as "d" and 0 as "o" ("AIice" reads as "Alice",
  * "rnike" as "mike"). The symbol table runs before the skeleton too because NFKC can lose the look: the macron "¯"
- * becomes a space and a combining macron.
+ * becomes a space and a combining macron. A voicing mark on a symbol read as a kana counts as on that kana: "〈" +
+ * dakuten reads as ぐ.
  */
 export function visualKey(name: string): string {
-  const folded = toAscii(foldCase(foldSymbols(skeleton(foldSymbols(name))).replace(LOOKS_LIKE_L, "l")));
+  const symbols = foldSymbols(separateVoicing(name));
+  const folded = toAscii(foldCase(foldSymbols(skeleton(symbols, SYMBOL_VOICING_STAND_INS)).replace(LOOKS_LIKE_L, "l")));
   return VISUAL_LOOKALIKES.reduce((key, [pattern, replacement]) => key.replace(pattern, replacement), folded);
 }
 

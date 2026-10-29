@@ -192,7 +192,10 @@ After last round: game-over
   no letter at all (`¯\_(ツ)_/¯`, `(•_•)`, `<3 <3`, `🔥🔥`). It must be a string of 1–20 chars (UTF-16 units) and at
   most 60 after NFKC (one Arabic ligature such as U+FDFA expands to 18 letters), not blank, with no combining mark at
   the start (after any leading spaces) or on a trailing space, at most four combining marks in a row (Tibetan and
-  pointed Hebrew stack three; more is "Zalgo" text), and none of: controls, format characters (zero-width characters,
+  pointed Hebrew stack three; more is "Zalgo" text), no mark on a kana with a voiced form (`た`, `は`, `ウ`; or on a
+  symbol drawn like one, such as `〈` for `く`) other than the one voicing mark it takes (so `は` + ring above, `た` +
+  diaeresis, or two voicing marks such as `ぱ` + dakuten, which read like another voiced kana, are refused; marks on
+  `あ`, `ん` or the `ﾉ` of `(ﾉﾟ∀ﾟ)ﾉ` are free), and none of: controls, format characters (zero-width characters,
   bidi overrides/isolates, BOM), default-ignorable characters (fillers, variation selectors, combining grapheme
   joiner), private-use/unassigned code points, characters drawn blank (U+2800, U+16FE4, U+1D159, U+FFFC) or spaces
   other than U+0020 (no-break, ideographic, em...). Allowed where they belong: inside an emoji the zero-width joiner
@@ -208,11 +211,13 @@ After last round: game-over
   ASCII letters or digits replaced by them (a table generated from UTS #39 `confusables.txt` covering every script,
   symbol and spacing mark, plus the lowercase forms of letters it only lists as capitals, such as Cyrillic small ka;
   `managers/asciiConfusables.ts`, regenerated with `scripts/generateAsciiConfusables.mjs`), then NFKC, combining
-  marks and accents dropped unless they sit on a space, the table again, case-folded, joiners dropped, whitespace
-  trimmed and collapsed. The table runs before NFKC too, so long s still reads as `f`. `visualKey`: the same, but
+  marks and accents dropped unless they sit on a space or are a Japanese voicing mark (dakuten, handakuten) on a kana
+  that takes it (NFC joins them: `た` + dakuten is `だ`; on a Latin letter, `ん` or a kanji it is dropped), the
+  table again, case-folded, joiners dropped, whitespace trimmed and collapsed. The table runs before NFKC too, so long s still reads as `f`. `visualKey`: the same, but
   symbols drawn like other symbols read as their UTS #39 prototype first (a second table in the same file,
   `SYMBOL_CONFUSABLES`, applied before and after the skeleton because NFKC turns `¯`, `´` or `¸` into a space and a
-  mark), then I / l / | / 1 read as `l`, `rn` as `m`, `vv` as `w`, `cl` as `d` and `0` as `o`. The symbol table
+  mark; a voicing mark on a symbol that this table reads as a kana counts as on that kana, so `〈` + dakuten reads as
+  `ぐ`), then I / l / | / 1 read as `l`, `rn` as `m`, `vv` as `w`, `cl` as `d` and `0` as `o`. The symbol table
   leaves out what reads as a different name: a clearly different size (measured in Roboto and SF: `•` and `∙` apart
   from `·` and `・`, `○` and `◦` from `°`, `█` and `■` from `∎`, `–` and `−` from `-` and from `—`, `˜` from `~`,
   full-width `－` from `ー`), emoji (drawn in colour: `🍎` and `🍏`), combining and spacing marks (Indic and Khmer
@@ -231,7 +236,10 @@ After last round: game-over
     capital A or in Cherokee letters, `ᗅlice` (Canadian Syllabics) or `A│ice` (box drawing) next to `Alice`, `Raſe`
     next to `Rafe`, `Mike` in Cyrillic or Greek letters, `Bంb` (Telugu anusvara) next to `Bob`, `Mi` + Hebrew
     samekh and vav next to `Milo`, and `(•_•) ` or full-width `<3` next to `(•_•)` or `<3`. This holds even with the
-    existing player's token: a rejoin needs the exact stored name.
+    existing player's token: a rejoin needs the exact stored name. Kana that only differ by a voicing mark are
+    different names (`たいき` and `だいき`, `はな`, `ばな` and `ぱな`, `ハル` and `バル`, also in half-width katakana),
+    while `だ` typed precomposed, as `た` + combining dakuten or as `た` + spacing `゛` is the same name (a spacing
+    `゛` or `゜` after a kana that takes it voices it, like half-width `ﾞ`; anywhere else it stays a separate mark).
   - Only the same `visualKey` = a **different name that looks too alike**: `AIice` next to `Alice`, `b0b` next to
     `bob`, real names such as `Clara` next to `Dara` or `Arnie` next to `Amie`, and symbol lookalikes such as
     `(∙_∙)` next to `(•_•)`, `ǃǃ` next to `!!`, `ˉ\_(ツ)_/ˉ` next to `¯\_(ツ)_/¯`, `(˚_˚)` or `(º_º)` next to `(°_°)`,

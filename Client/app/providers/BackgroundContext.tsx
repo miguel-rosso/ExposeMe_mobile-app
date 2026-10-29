@@ -1,29 +1,7 @@
-import React, { createContext, useState, useRef, useEffect, useCallback, useContext } from "react";
-import { ImageSourcePropType } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useGameContext } from "./GameContext";
+import React, { useState, useRef, useEffect, useContext } from "react";
+import { BackgroundContext, backgrounds } from "./BackgroundContextInstance";
 
-import bg1 from "@/assets/images/bg1.jpg";
-import bg2 from "@/assets/images/bg2.jpg";
-import bg3 from "@/assets/images/bg3.jpeg";
-import bg4 from "@/assets/images/bg4.jpg";
-import bg5 from "@/assets/images/bg5.jpg";
-import bg6 from "@/assets/images/bg6.jpg";
-
-const backgrounds = [bg1, bg2, bg3, bg4, bg5, bg6];
-
-/** Bundled backgrounds are Metro asset ids (see images.d.ts). */
-type BackgroundAsset = number;
-
-interface BackgroundContextProps {
-  backgroundImage: BackgroundAsset;
-  setBackgroundImage: (backgroundImage: BackgroundAsset) => void;
-}
-
-export const BackgroundContext = createContext<BackgroundContextProps>({
-  backgroundImage: backgrounds[0],
-  setBackgroundImage: () => {},
-});
+export { BackgroundContext };
 
 export const useBackgroundContext = () => useContext(BackgroundContext);
 

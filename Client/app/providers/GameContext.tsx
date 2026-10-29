@@ -1,14 +1,15 @@
-import React, { createContext, useState, useContext, useRef, useEffect } from "react";
+import React, { useState, useContext, useRef, useEffect } from "react";
 import { AppState } from "react-native";
 import { io, Socket } from "socket.io-client";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { GameContextProps, GameProviderProps, PlantUploadState, Player, RoomOfGameResponse } from "@/app/models/interfaces";
+import { GameProviderProps, PlantUploadState, Player, RoomOfGameResponse } from "@/app/models/interfaces";
 import getEnvVars from "@/config";
 import { uploadPhoto } from "@/app/utils/uploadPhoto";
 import { PLANT_UPLOAD_RETRY, uploadWithRetry } from "@/app/utils/uploadRetry";
 import { leaveAndClose } from "@/app/utils/leaveRoom";
 import { isFinalRefusal, isPhotoUnavailable, PlantPhotoAck, sendPlantPhoto } from "@/app/utils/plantPhotoAck";
 import type { PhotoAuth } from "@/app/utils/photoAuth";
+import { GameContext } from "./GameContextInstance";
 
 const { SERVER_URL } = getEnvVars();
 const REJOIN_TOKEN_KEY = "rejoinToken";
@@ -24,8 +25,6 @@ interface PlantRun {
   uri: string;
   done: Promise<boolean>;
 }
-
-const GameContext = createContext<GameContextProps | undefined>(undefined);
 
 export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   const [socket, setSocket] = useState<Socket | null>(null);

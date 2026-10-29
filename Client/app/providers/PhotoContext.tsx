@@ -1,8 +1,9 @@
-import React, { createContext, useContext, useState, useCallback, useMemo, useEffect, useRef } from "react";
+import React, { useContext, useState, useCallback, useMemo, useEffect, useRef } from "react";
 import * as MediaLibrary from "expo-media-library";
-import { GamePhotoResult, PhotoContextProps, PhotoProviderProps } from "@/app/models/interfaces";
+import { GamePhotoResult, PhotoProviderProps } from "@/app/models/interfaces";
 import { checkGalleryAccess as checkAccess, GalleryAccess, isLimitedPermission } from "@/app/utils/galleryAccess";
 import { createRandomPhotoPicker } from "@/app/utils/randomGalleryPhoto";
+import { PhotoContext } from "./PhotoContextInstance";
 
 /** Id of the visible image at `offset`: a one-row query, never a full gallery read (EXP-174) */
 const photoIdAt = async (offset: number): Promise<string | null> => {
@@ -13,8 +14,6 @@ const photoIdAt = async (offset: number): Promise<string | null> => {
     .exeForMetadata();
   return page[0]?.id ?? null;
 };
-
-const PhotoContext = createContext<PhotoContextProps | undefined>(undefined);
 
 export const PhotoProvider: React.FC<PhotoProviderProps> = ({ children }) => {
   const [photoUri, setPhotoUri] = useState<string | null>(null);

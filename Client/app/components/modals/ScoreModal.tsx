@@ -9,6 +9,7 @@ import { TEST_IDS, scoreGuessId, scoreRankId } from "@/app/utils/testIds";
 import { rankScores } from "@/app/utils/ranking";
 import { isRevealedOwner } from "@/app/utils/roundState";
 import PhotoOwnerCard from "@/app/components/PhotoOwnerCard";
+import { useReduceMotion } from "@/app/hooks/useReduceMotion";
 import { topClearOfInset } from "@/app/utils/safeAreaRows";
 import { HOLD_BUTTON_BOTTOM, HOLD_BUTTON_HEIGHT } from "@/app/utils/gameRows";
 import { progressBarAreaBottom, progressBarBand } from "@/app/utils/progressBarRow";
@@ -60,6 +61,9 @@ const ScoreModal: React.FC<ScoreModalProps> = ({
 }) => {
   const { t } = useI18n();
   const insets = useSafeAreaInsets();
+  // Read from the app-wide cache (EXP-315): known on the first frame even when the scoreboard mounts already visible
+  // (after a hold is released, or rejoining during scores), so the owner card never bounces in on a stale value
+  const reduceMotion = useReduceMotion();
 
   if (!visible) {
     return null;
@@ -91,7 +95,11 @@ const ScoreModal: React.FC<ScoreModalProps> = ({
       </Text>
 
       {correctAnswer !== "" && (
-        <PhotoOwnerCard owner={correctAnswer} isMine={isRevealedOwner(correctAnswer, myUsername)} />
+        <PhotoOwnerCard
+          owner={correctAnswer}
+          isMine={isRevealedOwner(correctAnswer, myUsername)}
+          animate={!reduceMotion}
+        />
       )}
 
       {/* Shrinks to the space left (never grows past its rows) and scrolls: 12 players don't fit small phones */}

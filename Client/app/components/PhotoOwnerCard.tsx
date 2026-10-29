@@ -17,20 +17,23 @@ const MIN_NAME_SCALE = 0.5;
 /**
  * The card's entrance, all on the native driver: it starts after the scoreboard's first commit and no frame of it comes
  * back through React. (react-native-animatable set its first frame as the card mounted, which re-rendered the card in a
- * second commit before the scoreboard could be painted, EXP-311.)
+ * second commit before the scoreboard could be painted, EXP-311.) Without `animate` the card is drawn at its final
+ * opacity and scale from the first frame.
  */
-const useBounceIn = () => {
-  const progress = useRef(new Animated.Value(0)).current;
+const useBounceIn = (animate: boolean) => {
+  const progress = useRef(new Animated.Value(animate ? 0 : 1)).current;
   const style = useMemo(() => ({
     opacity: progress.interpolate(ENTRANCE_OPACITY),
     transform: [{ scale: progress.interpolate(ENTRANCE_SCALE) }],
   }), [progress]);
 
   useEffect(() => {
+    if (!animate) return;
     Animated.timing(progress, {
       toValue: 1, duration: ENTRANCE_DURATION_MS, easing: ENTRANCE_EASING, useNativeDriver: true,
     }).start();
-  }, [progress]);
+    // Only when the card mounts (the scoreboard appears): a later change of the setting doesn't replay it
+  }, []);
 
   return style;
 };
@@ -40,12 +43,14 @@ interface PhotoOwnerCardProps {
   owner: string;
   /** The photo was mine: says "It was your photo!" instead of my name (I only learn it now, EXP-252) */
   isMine: boolean;
+  /** False when the system asks to reduce motion: the card appears without bouncing in */
+  animate: boolean;
 }
 
 /** Highlighted card at the top of the round scoreboard: whose photo it was, with the name in large type. */
-const PhotoOwnerCard: React.FC<PhotoOwnerCardProps> = ({ owner, isMine }) => {
+const PhotoOwnerCard: React.FC<PhotoOwnerCardProps> = ({ owner, isMine, animate }) => {
   const { t } = useI18n();
-  const entrance = useBounceIn();
+  const entrance = useBounceIn(animate);
   return (
     <Animated.View
       testID={TEST_IDS.scoreAnswerCard}

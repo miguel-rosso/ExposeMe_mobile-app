@@ -1,5 +1,5 @@
 import React, { Profiler } from "react";
-import { NativeModules } from "react-native";
+import { AccessibilityInfo, NativeModules } from "react-native";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import { ScoreRound } from "../app/models/interfaces";
 import { TEST_IDS, scoreGuessId } from "../app/utils/testIds";
@@ -7,6 +7,7 @@ import { getWinners } from "../app/utils/ranking";
 import ScoreModal from "../app/components/modals/ScoreModal";
 import WinnerModal from "../app/components/modals/WinnerModal";
 import FinalScoreModal from "../app/components/modals/FinalScoreModal";
+import { resetReduceMotionSettingForTests, useReduceMotion } from "../app/hooks/useReduceMotion";
 import en from "../app/i18n/en";
 import es from "../app/i18n/es";
 
@@ -143,6 +144,75 @@ describe("ScoreModal: the owner card's entrance (EXP-311)", () => {
     act(() => jest.advanceTimersByTime(1_000));
     expect(commits).toEqual(["mount"]);
     act(() => r.unmount());
+  });
+});
+
+// EXP-314: with iOS Reduce Motion / Android Remove animations on, the card appears without bouncing in. The setting is
+// cached app-wide once the system answers (EXP-315), so the card reads it on its first frame however the scoreboard
+// mounts: hidden during the round and then shown, or already visible (after a hold is released, or rejoining in scores).
+describe("ScoreModal: the owner card with reduce motion on (EXP-314)", () => {
+  let onSettingChange: ((enabled: boolean) => void) | undefined;
+  const startAnimation = () => NativeModules.NativeAnimatedModule.startAnimatingNode as jest.Mock;
+  const fullSize = expect.objectContaining({ opacity: 1, transform: [{ scale: 1 }] });
+  const cardStyle = (r: TestRenderer.ReactTestRenderer) => byId(r.root, TEST_IDS.scoreAnswerCard)[0].props.style;
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    resetReduceMotionSettingForTests();
+    jest.spyOn(AccessibilityInfo, "isReduceMotionEnabled").mockResolvedValue(true);
+    jest.spyOn(AccessibilityInfo, "addEventListener").mockImplementation(((_: string, fn: (enabled: boolean) => void) => {
+      onSettingChange = fn;
+      return { remove: jest.fn() };
+    }) as unknown as typeof AccessibilityInfo.addEventListener);
+  });
+  afterEach(() => {
+    resetReduceMotionSettingForTests();
+    jest.clearAllTimers();
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
+  const phases: string[] = [];
+  const scoreboard = (visible: boolean) => (
+    <Profiler id="scores" onRender={(_id, phase) => { phases.push(phase); }}>
+      <ScoreModal visible={visible} scoreRound={scores} rounds={{ round: 1, roundsOfGame: 10 }} correctAnswer="ana" myUsername="bob" />
+    </Profiler>
+  );
+  beforeEach(() => { phases.length = 0; });
+
+  it("shown after being hidden during the round: full opacity and size from the first frame, no animation", async () => {
+    let r!: TestRenderer.ReactTestRenderer;
+    await act(async () => { r = TestRenderer.create(scoreboard(false)); });
+    startAnimation().mockClear();
+    phases.length = 0;
+
+    act(() => r.update(scoreboard(true)));
+    expect(phases).toEqual(["update"]);
+    expect(cardStyle(r)).toEqual(fullSize);
+    expect(startAnimation()).not.toHaveBeenCalled();
+
+    // Turning the setting off while the scoreboard is up doesn't bounce the card in late
+    act(() => onSettingChange!(false));
+    act(() => jest.advanceTimersByTime(1_000));
+    expect(startAnimation()).not.toHaveBeenCalled();
+    expect(cardStyle(r)).toEqual(fullSize);
+    act(() => r.unmount());
+  });
+
+  it("mounted already visible (hold released, rejoin in scores): full opacity and size from the first frame", async () => {
+    // The game screen asked first, earlier in the game, and the system answered
+    const EarlierConsumer = () => { useReduceMotion(); return null; };
+    let game!: TestRenderer.ReactTestRenderer;
+    await act(async () => { game = TestRenderer.create(<EarlierConsumer />); });
+    startAnimation().mockClear();
+
+    const r = render(scoreboard(true));
+    expect(phases).toEqual(["mount"]);
+    expect(cardStyle(r)).toEqual(fullSize);
+    act(() => jest.advanceTimersByTime(1_000));
+    expect(startAnimation()).not.toHaveBeenCalled();
+    expect(phases).toEqual(["mount"]);
+    act(() => { r.unmount(); game.unmount(); });
   });
 });
 

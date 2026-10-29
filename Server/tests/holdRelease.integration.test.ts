@@ -5,8 +5,8 @@ import { io, server } from "../app";
 import { roomManager } from "../routes/socketRoutes";
 import { registerTurnUpload } from "./helpers";
 
-// EXP-218: whenever the photo owner goes away while holding the scores screen (kicked by the host, leave-room or a
-// dropped connection), the hold ends at once for everyone (hold-end + hold-resume) and the game goes on, instead of
+// EXP-218: whenever the photo owner goes away while holding the scores screen (leave-room or a dropped connection;
+// the host can't kick players mid-game, EXP-316), the hold ends at once for everyone (hold-end + hold-resume) and the game goes on, instead of
 // staying frozen until the hold budget runs out. EXP-299: the same when they rejoin on a new socket while the old one
 // is still open (the new socket isn't pressing anything, so nobody would ever send hold-end).
 
@@ -94,16 +94,6 @@ afterAll(async () => {
 
 // One room each, run side by side: reaching the scores phase takes ~12 s of real game time
 describe.concurrent("the photo owner going away releases their hold (EXP-218, EXP-299)", () => {
-  it("when the host kicks them", async () => {
-    const { socks, gameCode, owner, others } = await ownerHoldingScores("a");
-    // The host can't kick itself: make sure someone else is host (random owner)
-    const room = roomManager.getRoom(gameCode)!;
-    const host = others[0];
-    room.players.forEach((p) => { p.isHost = p.username === host; });
-
-    await expectReleasedAndContinues(socks, others, () => socks[host].emit("remove-player", { username: owner }));
-  }, 30_000);
-
   it("when they leave the room", async () => {
     const { socks, owner, others } = await ownerHoldingScores("b");
     await expectReleasedAndContinues(socks, others, () => socks[owner].emit("leave-room"));

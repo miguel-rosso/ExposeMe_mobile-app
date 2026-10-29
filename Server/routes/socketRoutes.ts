@@ -130,7 +130,7 @@ function isHolding(room: Room, socketId: string): boolean {
 }
 
 /**
- * The photo owner on `socketId` is going away (leave, kick, disconnect): end their hold of the scores screen now
+ * The photo owner on `socketId` is going away (leave, disconnect): end their hold of the scores screen now
  * (hold-end + hold-resume) instead of leaving everyone frozen until the hold budget runs out.
  */
 function releaseHoldOf(room: Room, socketId: string): void {
@@ -487,24 +487,23 @@ io.on("connection", (socket: Socket) => {
     } catch (e) { console.error("chat error:", e); }
   });
 
-  // Host kicks a player by username (socket ids are never sent to clients); the host can't kick itself
+  // Host kicks a player by username (socket ids are never sent to clients); the host can't kick itself.
+  // Lobby only (also between games), like set-rounds: the app only offers it in the waiting room
   socket.on("remove-player", (data: { username: string }) => {
     try {
       if (!gameEvents.take("remove-player")) return;
       const s = session(socket);
-      if (!s || !s.player.isHost || typeof data?.username !== "string" || data.username === s.player.username) return;
+      if (!s || !s.player.isHost || s.room.started) return;
+      if (typeof data?.username !== "string" || data.username === s.player.username) return;
       const { room } = s;
       const removed = roomManager.removePlayerByUsername(room.gameCode, data.username);
       if (removed) {
-        // Here, not on its disconnect: the eviction below clears the socket's session, so that handler skips it
-        releaseHoldOf(room, removed.socketId);
         io.to(room.gameCode).emit("player-removed", roomManager.publicPlayer(removed, room));
         // The kicked player's current socket and any other socket still bound to them in this room
         const target = io.sockets.sockets.get(removed.socketId);
         if (target) evictSocket(target, room.gameCode);
         socketsOf(room.gameCode, removed.username).forEach((old) => evictSocket(old, room.gameCode));
-        gameEngine.checkReady(room);
-        gameEngine.onConnectionChange(room);
+        gameEngine.onConnectionChange(room); // lobby review; the kicked player's waits are forgotten
       }
     } catch (e) { console.error("remove-player error:", e); }
   });

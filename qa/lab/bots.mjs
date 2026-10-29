@@ -103,14 +103,15 @@
 //                           round-scores, and a round where nobody did is reported ("consistency", EXP-301).
 //   node qa/lab/bots.mjs --bots 3 --host --rounds 3 --leave-round 2
 //   node qa/lab/bots.mjs --bots 4 --host --rounds 3 --leave-round 2 --leave-owner
-//            --kick NAME[@R]  the host bot removes NAME (remove-player, EXP-139): in the lobby 5 s after NAME is in (the
-//                           game then starts without it), or at round R's round-start. Every bot gets player-removed
-//                           { NAME }; NAME is in no later game-started, round-scores or answer, and nobody guesses it. A
-//                           kicked bot gets player-removed itself, then the server closes its connection ("kicked-out")
-//                           and it gets no more game events ("consistency"). NAME may be a device's: with one bot host and
-//                           the device alone (qa/maestro/kicked-notice.yaml) nobody is left to play, so the run ends right
-//                           after the kick (reason "lobby-kick") and the device checks its notice.
-//   node qa/lab/bots.mjs --bots 3 --host --rounds 3 --kick bot3@2
+//            --kick NAME    the host bot removes NAME (remove-player, EXP-139) in the lobby 5 s after NAME is in; the
+//                           game then starts without it. The server only accepts it in the lobby (EXP-316), so there is
+//                           no mid-game form (NAME@R is refused). Every bot gets player-removed { NAME }; NAME is in no
+//                           game-started, round-scores or answer, and nobody guesses it. A kicked bot gets player-removed
+//                           itself, then the server closes its connection ("kicked-out") and it gets no more game events
+//                           ("consistency"). NAME may be a device's: with one bot host and the device alone
+//                           (qa/maestro/kicked-notice.yaml) nobody is left to play, so the run ends right after the kick
+//                           (reason "lobby-kick") and the device checks its notice.
+//   node qa/lab/bots.mjs --bots 4 --host --rounds 3 --kick bot4
 //            --hold P       like the app's hold button (EXP-303): on the scoreboard of a round whose revealed answer is its
 //                           own name, a bot presses hold (hold-start) with probability P and lets go (hold-end) after a
 //                           random time within the server's hold budget. With --chaos C it goes away instead of letting go
@@ -189,7 +190,7 @@ Headless ExposeMe players (see the header of qa/lab/bots.mjs for every scenario)
   --app-resync  --lobby-host-drop
   --leave-round R [--leave-owner]  the last bot (or, with --leave-owner, round R's photo owner) leaves the room
                              (leave-room) at round R's round-start
-  --kick NAME[@R]            the host bot removes NAME (remove-player): in the lobby once NAME is in, or at round R
+  --kick NAME                the host bot removes NAME (remove-player) in the lobby once NAME is in (lobby only)
   --play-again-linger S [--play-again-linger-bot K] [--start-next-game D]
   --quit-after-game-over     the last bot quits at game-over; the next game must drop it (needs --host, 3+ bots)
   --hold P                   the round's owner bot holds the scoreboard with probability P (0 to 1) and lets go within
@@ -387,18 +388,22 @@ function withinHostedGame(option, round) {
   if (args.host && round > ROUNDS) exitUsage(`${option}: round ${round} is beyond the game's ${ROUNDS} rounds (--rounds)`);
   return round;
 }
-/** --kick NAME[@R] -> { name, round } (round 0: in the lobby, once NAME is in), null without --kick. */
+// The retired mid-game form of --kick (NAME@R: at round R): the server ignores remove-player once a game started
+const MID_GAME_KICK = /@[1-9][0-9]*$/;
+/** --kick NAME -> NAME, removed in the lobby once it is in; null without --kick. */
 function plannedKick() {
-  const value = args.kick;
-  if (value === undefined) return null;
-  const [, name = "", round] = value.match(/^(.*?)(?:@([1-9][0-9]*))?$/s);
+  const name = args.kick;
+  if (name === undefined) return null;
   if (!args.host) exitUsage("--kick needs --host (only the host can remove a player)");
   if (N_ROOMS > 1) exitUsage("--kick takes a single room (bot names differ per room)");
-  if (!name || name.trim() !== name || name.length > MAX_USERNAME_LENGTH) {
-    exitUsage(`--kick "${value}": "${name}" is not a username (1-${MAX_USERNAME_LENGTH} characters, no surrounding spaces)`);
+  if (MID_GAME_KICK.test(name)) {
+    exitUsage(`--kick "${name}": the host can only remove players in the lobby (EXP-316), there is no NAME@R form`);
   }
-  if (name === botName(0, 0)) exitUsage(`--kick "${value}": the host can't remove itself`);
-  return { name, round: round ? withinHostedGame("--kick", Number(round)) : 0 };
+  if (!name || name.trim() !== name || name.length > MAX_USERNAME_LENGTH) {
+    exitUsage(`--kick "${name}" is not a username (1-${MAX_USERNAME_LENGTH} characters, no surrounding spaces)`);
+  }
+  if (name === botName(0, 0)) exitUsage(`--kick "${name}": the host can't remove itself`);
+  return name;
 }
 const LEAVE_ROUND = plannedLeaveRound();
 const LEAVER = N_BOTS - 1; // the bot that leaves with --leave-round
@@ -411,8 +416,7 @@ const PLANT_ACK_TIMEOUT_MS = 5_000;
 // A lobby kick waits this long after NAME joined, like a host reading the list (and so a device's flow sees its lobby)
 const LOBBY_KICK_DELAY_MS = 5_000;
 const KICK_SETTLE_MS = 1_000; // after a lobby kick that ends the run: time for the kicked player to get its notice
-const KICK = plannedKick();
-const LOBBY_KICK = KICK?.round === 0;
+const KICK = plannedKick(); // --kick: the username the host bot removes in the lobby, or null
 // What the room checks need to know about this run (qa/lab/bots-analysis.mjs)
 const ANALYSIS_OPTS = {
   host: !!args.host, rounds: ROUNDS, playAgainLingerS: PLAY_AGAIN_LINGER_S, lingerBot: LINGER_BOT, startNextGameS: START_NEXT_GAME_S,
@@ -542,7 +546,7 @@ function runRoom(roomIdx, fixedCode) {
     };
     const timer = setTimeout(() => {
       errors.push(`timeout after ${TIMEOUT_S}s`);
-      if (LOBBY_KICK && !kick.scheduled) errors.push(kickTargetMissing());
+      if (KICK && !kick.scheduled) errors.push(kickTargetMissing());
       done("timeout");
     }, TIMEOUT_S * 1000);
 
@@ -680,7 +684,7 @@ function runRoom(roomIdx, fixedCode) {
         rec("player-removed", bot.round, { username: p.username });
         if (p.username === name) { bot.gone = true; bot.kicked = true; return; }
         dropPlayer(p.username);
-        if (bot.isHost && p.username === KICK?.name) onKickConfirmed();
+        if (bot.isHost && p.username === KICK) onKickConfirmed();
       });
       socket.on("disconnect", (reason) => {
         if (bot.kicked && reason === "io server disconnect") rec("kicked-out", bot.round, { reason });
@@ -789,7 +793,6 @@ function runRoom(roomIdx, fixedCode) {
         if (bot.lingering) return; // not playing: no guesses
         bot.round = d.round;
         bot.leavers = []; // a new round: its options are the players in the room
-        if (KICK?.round === d.round && bot.isHost && !kick.sent) sendKick(bot, d.round);
         const leaves = LEAVE_OWNER ? bot.photoRound === d.round : i === LEAVER;
         if (LEAVE_ROUND === d.round && leaves && !bot.gone) { leaveRoom(d.round); return; }
         bot.guess = pickGuess(bot);
@@ -981,19 +984,18 @@ function runRoom(roomIdx, fixedCode) {
       return bot;
     };
 
-    // --kick (EXP-139): the host removes KICK.name once (in the lobby, or at round KICK.round's round-start)
-    const kick = { scheduled: false, sent: false, confirmed: false };
-    const kickTargetMissing = () => `--kick ${KICK.name} never joined the lobby`;
-    const sendKick = (host, round) => {
-      kick.sent = true;
-      host.socket.emit("remove-player", { username: KICK.name });
-      events.push({ bot: host.name, ev: "kick-sent", round, t: now(), payload: { username: KICK.name } });
+    // --kick (EXP-139): the host removes KICK once, in the lobby
+    const kick = { scheduled: false, confirmed: false };
+    const kickTargetMissing = () => `--kick ${KICK} never joined the lobby`;
+    const sendKick = (host) => {
+      host.socket.emit("remove-player", { username: KICK });
+      events.push({ bot: host.name, ev: "kick-sent", round: 0, t: now(), payload: { username: KICK } });
     };
-    // The host got player-removed for KICK.name. A lobby kick that leaves nobody to play with (one bot host and the
+    // The host got player-removed for KICK. A lobby kick that leaves nobody to play with (one bot host and the
     // kicked device, qa/maestro/kicked-notice.yaml) ends the run: the device checks its notice
     const onKickConfirmed = () => {
       kick.confirmed = true;
-      if (LOBBY_KICK && WAIT_PLAYERS - 1 < 2) setTimeout(() => done("lobby-kick"), KICK_SETTLE_MS);
+      if (WAIT_PLAYERS - 1 < 2) setTimeout(() => done("lobby-kick"), KICK_SETTLE_MS);
       else maybeStart();
     };
     // --quit-after-game-over (EXP-151): once the quitter is gone and every other bot is back in the lobby, the host
@@ -1017,20 +1019,20 @@ function runRoom(roomIdx, fixedCode) {
       if (!host || started || !code) return;
       // Lobby kick: NAME goes LOBBY_KICK_DELAY_MS after it is in, and the game starts without it once the server
       // confirmed it
-      if (LOBBY_KICK && !kick.confirmed) {
+      if (KICK && !kick.confirmed) {
         // Everyone the host waits for is in, and NAME is not one of them (a wrong name): nobody to kick
-        if (!kick.scheduled && !host.players.includes(KICK.name) && host.players.length >= WAIT_PLAYERS) {
+        if (!kick.scheduled && !host.players.includes(KICK) && host.players.length >= WAIT_PLAYERS) {
           errors.push(kickTargetMissing());
           done("kick-target-missing");
           return;
         }
-        if (!kick.scheduled && host.players.includes(KICK.name)) {
+        if (!kick.scheduled && host.players.includes(KICK)) {
           kick.scheduled = true;
-          setTimeout(() => sendKick(host, 0), LOBBY_KICK_DELAY_MS);
+          setTimeout(() => sendKick(host), LOBBY_KICK_DELAY_MS);
         }
         return;
       }
-      if (host.players.length >= WAIT_PLAYERS - (LOBBY_KICK ? 1 : 0)) {
+      if (host.players.length >= WAIT_PLAYERS - (KICK ? 1 : 0)) {
         // EXP-157: the host drops in the lobby for good; whoever gets new-host starts instead
         if (LOBBY_HOST_DROP && !host.gone && !bots.some((b) => b.gone)) {
           host.gone = true;
@@ -1057,7 +1059,7 @@ const results = await Promise.all(Array.from({ length: N_ROOMS }, (_, i) => runR
 const rooms = results.map((r) => analyseRoom(r, ANALYSIS_OPTS));
 // How a room may end and pass: at game-over, or on purpose before it, leaving only real devices behind
 const expectedEnd = (reason) => reason === "game-over" || (LOBBY_HOST_DROP && reason === "lobby-host-drop")
-  || (LOBBY_KICK && reason === "lobby-kick") || (LEAVE_ROUND > 0 && reason === "all-out");
+  || (KICK !== null && reason === "lobby-kick") || (LEAVE_ROUND > 0 && reason === "all-out");
 const summary = {
   server: SERVER,
   rooms: rooms.length,

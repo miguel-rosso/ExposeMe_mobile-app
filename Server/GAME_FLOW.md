@@ -48,7 +48,7 @@ After last round: game-over
   the owner. The next round (same number) follows right away with a new `waiting-photo`. After an `"unavailable"`
   skip the same player is not picked for the next attempt when another connected player can be.
 - **The owner goes away** (DEC-035; while the game runs, not paused): the owner *goes away* when they leave the
-  room (`leave-room`, removed by the host) or stay disconnected for **3 s** (`OWNER_RETURN_WINDOW`; a brief flap goes
+  room (`leave-room`) or stay disconnected for **3 s** (`OWNER_RETURN_WINDOW`; a brief flap goes
   unnoticed, and an owner back in time gets `your-turn` again and keeps the rest of the wait; a later drop gets a
   whole new window). The round is then **not skipped**: another connected player is picked for the **same round**
   right away, with the normal events (a new room-wide `waiting-photo { round, duration: 15 s }` with the same
@@ -338,12 +338,13 @@ After last round: game-over
   has: no `rounds-updated` for it. **QA-only:** 3 rounds is also accepted
   when the server runs with `ALLOW_QA_ROUNDS=1`, which `qa/lab/lab.sh server` sets for short device runs; it is off
   by default, so production rejects it, and the app never offers it), `start-game` (not while a game is running), `remove-player { username }`
-  (by username, socket ids are never sent to clients; the host can't remove itself; evicts every socket bound to
-  the removed player in that room, like a rejoin evicts the replaced one).
+  (lobby only, also between games: ignored while a game is running; by username, socket ids are never sent to
+  clients; the host can't remove itself; evicts every socket bound to the removed player in that room, like a
+  rejoin evicts the replaced one).
 - `im-ready` only counts between `game-started` and the first round (`started && phase === null`).
   The first round is scheduled (after `GAME_START_DELAY`, 1 s) as soon as **at least 2 players are connected
-  and all connected players are ready** (checked on `im-ready` and when a player disconnects, leaves or is
-  removed during this phase), or after **10 s** (`READY_TIMEOUT`, started by `start-game`) with whoever is
+  and all connected players are ready** (checked on `im-ready` and when a player disconnects or leaves during
+  this phase), or after **10 s** (`READY_TIMEOUT`, started by `start-game`) with whoever is
   ready, so a player who
   backgrounds the app or drops before the game screen mounts can't block the game. The photo owner is still
   picked only among connected players (ready or not); later `im-ready`s are ignored. If fewer than 2 players
@@ -464,8 +465,8 @@ that reached the lobby screen in between are covered by that snapshot.
   indefinitely. When a pause would exceed either cap (a 4th counted one, or an 11th in all) the game ends at once
   (`game-over`, no `game-paused`). "Play again" starts with no pauses used.
   If the players who are gone left for good (nobody disconnected remains), the game ends right away instead,
-  also while already paused. While paused, when the list of awaited players changes (someone awaited leaves
-  or is removed) `game-paused` is sent again with the new `waitingFor` and the remaining `duration` (same pause, same `pause` number).
+  also while already paused. While paused, when the list of awaited players changes (someone awaited leaves)
+  `game-paused` is sent again with the new `waitingFor` and the remaining `duration` (same pause, same `pause` number).
 - **Resume**: as soon as 2 players are connected again (a rejoin), but never before the pause lasted
   **2 s** (`PAUSE_MIN_DURATION`; an earlier rejoin schedules the resume, a new drop cancels it), the server sends
   `game-resumed { phase, duration, phaseTotal }` and the frozen phase continues with its remaining time (at least 1.5 s;
@@ -497,7 +498,7 @@ As with the start events, the bar ends `duration` after the payload arrived on t
   hold button in `scores` to the player whose username is the round's `correctAnswer` (nobody is told earlier)
 - Press: game pauses for everyone (server stops timer)
 - Release: game resumes from where it paused
-- An owner who goes away while holding (`leave-room`, removed by the host, connection lost) or rejoins on a new
+- An owner who goes away while holding (`leave-room`, connection lost) or rejoins on a new
   socket releases the hold at once: `hold-end` + `hold-resume`, as a force-release (a rejoiner gets its `game-state`
   after it, with `held: false`)
 - Limits per round: at most **3 holds**, **30 s held in total** (`MAX_HOLDS_PER_ROUND`, `HOLD_BUDGET_PER_ROUND`).
@@ -545,7 +546,7 @@ All game events are **atomic** — each contains everything the client needs.
 | `join-create-game` | `{ gameCode \| null, username, rejoinToken? }` | Create/join; rejoin needs `rejoinToken` (also after every reconnect in game) |
 | `set-rounds` | `{ rounds }` (10/15/20; 3 only with `ALLOW_QA_ROUNDS=1`, QA-only) | Host only, lobby only |
 | `start-game` | - | Host only |
-| `remove-player` | `{ username }` | Host only: removes that player (not the host) and evicts their sockets |
+| `remove-player` | `{ username }` | Host only, lobby only (ignored while a game is running): removes that player (not the host) and evicts their sockets |
 | `leave-room` | - (with an ack callback) | Explicit leave (Exit button): player removed, host handed over, `player-left` to the room; from a socket replaced by a rejoin it only detaches that socket. Acked (no data) once handled, also from a socket bound to no room; not acked when dropped by the rate limit |
 | `im-ready` | - | Player ready to start (session player; payload ignored) |
 | `photo-sent` | `{ photo }` | Photo uploaded; only from the current owner, `photo` must be a path the owner got from `/upload` in this room (`/temp/<32 hex>.jpg\|png\|webp`) for the photo awaited now (uploaded during this `waiting-photo`'s round as their turn photo; not a planted photo, not one from an earlier round) |

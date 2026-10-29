@@ -202,8 +202,8 @@ function checkDepartedOwnerScored(r, ctx) {
     else if (sc && !sc.payload?.scores?.some((row) => row.lastGuess === exit.bot)) out.add(`round ${exit.round}: nobody voted ${exit.bot}, the owner who left`);
   }
   for (const [round, answer] of ctx.answerOf) {
-    const left = r.events.some((e) => e.round === round
-      && ((e.ev === "left-room" && e.bot === answer) || (e.ev === "kick-sent" && e.payload?.username === answer)));
+    // Only a leave: the host can't remove players mid-game (EXP-316), so a kick never takes a round's owner
+    const left = r.events.some((e) => e.round === round && e.ev === "left-room" && e.bot === answer);
     if (!left) continue;
     for (const sc of r.events.filter((e) => e.ev === "round-scores" && e.round === round && !ctx.wentOffline.has(e.bot))) {
       const previous = r.events.filter((e) => e.bot === sc.bot && e.ev === "round-scores" && e.t < sc.t).pop();
@@ -547,10 +547,10 @@ function checkGoneAtNextGame(r, opts) {
 
 /**
  * Players out of the room (EXP-139): a bot that left (--leave-round, "left-room") or a player the host removed
- * (--kick, "kick-sent"). Every other bot still in the room (not offline meanwhile) is told (player-left /
- * player-removed); from then on the player is in no player list, score table or answer, and nobody guesses it in a
- * later round (in the round of the exit they are still an option, DEC-038); a
- * mid-game exit doesn't stop the game while 2 players remain. A kicked bot gets player-removed itself, then the server
+ * in the lobby (--kick, "kick-sent"; never mid-game, EXP-316). Every other bot still in the room (not offline
+ * meanwhile) is told (player-left / player-removed); from then on the player is in no player list, score table or
+ * answer, and nobody guesses it in a later round (in the round of the exit they are still an option, DEC-038); a
+ * mid-game leave doesn't stop the game while 2 players remain. A kicked bot gets player-removed itself, then the server
  * closes its connection ("kicked-out") and it gets no more game events.
  */
 function checkRoomExits(r, ctx) {

@@ -184,7 +184,7 @@ export class GameEngine {
 
   /**
    * Ready phase: start early once at least 2 players are connected and all of them are ready.
-   * Call after im-ready and whenever a player disconnects, leaves or is kicked during the ready phase.
+   * Call after im-ready and whenever a player disconnects or leaves during the ready phase (kicks are lobby only).
    * Otherwise READY_TIMEOUT decides (a lone player waits for the others to come back).
    */
   checkReady(room: Room): void {

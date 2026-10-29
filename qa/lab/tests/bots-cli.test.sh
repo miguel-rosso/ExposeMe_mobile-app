@@ -133,15 +133,16 @@ run 2 "--kick of the host itself exits 2" --bots 3 --host --kick bot1 --timeout 
 [[ "$err" == *"the host can't remove itself"* ]] && ok "--kick of the host is named" || ko "--kick of the host is named" "$err"
 run 2 "--kick with several rooms exits 2" --bots 3 --host --rooms 2 --kick bot2 --timeout 1
 run 2 "--kick of a name longer than the server's 20 exits 2" --bots 3 --host --kick abcdefghijklmnopqrstu --timeout 1
-run 2 "--kick of an empty name exits 2" --bots 3 --host --kick "@2" --timeout 1
+run 2 "--kick of an empty name exits 2" --bots 3 --host --kick "" --timeout 1
+# Lobby only (EXP-316): the server ignores remove-player once a game started, so the old NAME@R form is refused
+run 2 "--kick NAME@R (mid-game) exits 2" --bots 3 --host --rounds 3 --kick bot3@2 --timeout 1
+[[ "$err" == *"--kick \"bot3@2\": the host can only remove players in the lobby"* ]] && ok "--kick NAME@R is named as lobby only" || ko "--kick NAME@R is named as lobby only" "$err"
 run 2 "--kick of a name with surrounding spaces exits 2" --bots 3 --host --kick " ios-a" --timeout 1
 # A planned exit must fall inside the hosted game (--rounds), or it never happens
 run 2 "--leave-round beyond --rounds exits 2" --bots 3 --host --rounds 3 --leave-round 4 --timeout 1
 [[ "$err" == *"--leave-round: round 4 is beyond the game's 3 rounds"* ]] && ok "--leave-round beyond --rounds is named" || ko "--leave-round beyond --rounds is named" "$err"
 run 2 "--leave-round beyond the default 10 rounds exits 2" --bots 3 --host --leave-round 11 --timeout 1
-run 2 "--kick NAME@R beyond --rounds exits 2" --bots 3 --host --rounds 3 --kick bot3@4 --timeout 1
-[[ "$err" == *"--kick: round 4 is beyond the game's 3 rounds"* ]] && ok "--kick @R beyond --rounds is named" || ko "--kick @R beyond --rounds is named" "$err"
-for good in "--rounds 3 --leave-round 3" "--rounds 3 --kick bot3@3"; do
+for good in "--rounds 3 --leave-round 3"; do
   # shellcheck disable=SC2086
   SERVER_URL="$URL" node "$BOTS" --bots 3 --host $good --timeout 1 >/dev/null 2>"$TMP/err"; rc=$?
   [[ "$rc" != 2 ]] && ok "$good is accepted" || ko "$good is accepted" "$(cat "$TMP/err")"
@@ -149,12 +150,12 @@ done
 # Joining a room (--code): its length is not ours to know
 SERVER_URL="$URL" node "$BOTS" --bots 2 --code K7MQ4X --leave-round 15 --timeout 1 >/dev/null 2>"$TMP/err"; rc=$?
 [[ "$rc" != 2 ]] && ok "--leave-round 15 with --code is accepted" || ko "--leave-round 15 with --code is accepted" "$(cat "$TMP/err")"
-for good in "--leave-round 2" "--leave-round 2 --leave-owner" "--kick bot3" "--kick bot3@2" "--kick ios-a" "--kick a@b"; do
+for good in "--leave-round 2" "--leave-round 2 --leave-owner" "--kick bot3" "--kick ios-a" "--kick a@b"; do
   # shellcheck disable=SC2086
   SERVER_URL="$URL" node "$BOTS" --bots 3 --host $good --timeout 1 >/dev/null 2>"$TMP/err"; rc=$?
   [[ "$rc" != 2 ]] && ok "$good is accepted" || ko "$good is accepted" "$(cat "$TMP/err")"
 done
-[[ "$(node "$BOTS" --help)" == *"--leave-round R [--leave-owner]"* && "$(node "$BOTS" --help)" == *"--kick NAME[@R]"* ]] && ok "--help lists --leave-round, --leave-owner and --kick" || ko "--help lists --leave-round, --leave-owner and --kick"
+[[ "$(node "$BOTS" --help)" == *"--leave-round R [--leave-owner]"* && "$(node "$BOTS" --help)" == *"--kick NAME "* ]] && ok "--help lists --leave-round, --leave-owner and --kick" || ko "--help lists --leave-round, --leave-owner and --kick"
 
 # ── Loopback servers only: QA traffic never leaves the machine (EXP-220) ──
 # Reserved/unresolvable hosts only, so a broken guard can't reach a real server (--timeout 1 as well)

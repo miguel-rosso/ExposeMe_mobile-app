@@ -262,7 +262,8 @@ describe("im-ready", () => {
   });
 
   // EXP-010: the ready phase is re-checked when the only missing player goes away (well before READY_TIMEOUT)
-  for (const how of ["disconnects", "leaves", "is removed by the host"] as const) {
+  // (the host can't remove players once the game started: EXP-316)
+  for (const how of ["disconnects", "leaves"] as const) {
     it(`starts the first round right away when the only not-ready player ${how}`, async () => {
       const { gameCode, alice, bob } = await lobby();
       const carol = await newClient();
@@ -274,8 +275,7 @@ describe("im-ready", () => {
 
       const turn = Promise.race([once(alice, "your-turn", 3_000), once(bob, "your-turn", 3_000)]);
       if (how === "disconnects") carol.disconnect();
-      else if (how === "leaves") carol.emit("leave-room");
-      else alice.emit("remove-player", { username: "carol" });
+      else carol.emit("leave-room");
       expect(await turn).toEqual({ round: 1, attempt: 1 });
       for (const c of [alice, bob]) c.emit("leave-room");
     });
@@ -356,6 +356,66 @@ describe("stale sockets and membership changes", () => {
     expect(await quiet).toBe(true);
     expect(alice.connected).toBe(true);
   });
+});
+
+// ── Host kick: lobby only (EXP-316) ─────────────────────
+
+describe("remove-player is lobby only", () => {
+  const playerNames = (gameCode: string) => roomManager.getRoom(gameCode)!.players.map((p) => p.username);
+
+  /** The host kicks `username` and both the host and the kicked socket see it happen. */
+  async function expectKicked(host: ClientSocket, target: ClientSocket, username: string): Promise<void> {
+    const removed = once<{ username: string }>(host, "player-removed");
+    const kicked = once(target, "disconnect");
+    host.emit("remove-player", { username });
+    expect((await removed).username).toBe(username);
+    await kicked;
+  }
+
+  it("the host removes a player in the lobby", async () => {
+    const { gameCode, alice, bob } = await lobby();
+    const carol = await newClient();
+    await joinAs(carol, gameCode, "carol");
+    await expectKicked(alice, carol, "carol");
+    expect(playerNames(gameCode)).toEqual(["alice", "bob"]);
+    alice.emit("leave-room");
+    bob.emit("leave-room");
+  });
+
+  it("is ignored during a game (answering), and works again in the lobby after game over", async () => {
+    const { gameCode, alice, bob } = await lobby();
+    const carol = await newClient();
+    await joinAs(carol, gameCode, "carol");
+    const sockets: Record<string, ClientSocket> = { alice, bob, carol };
+    await startGame(gameCode, alice, Object.values(sockets));
+    const turn = Promise.race(Object.entries(sockets).map(([name, c]) => once(c, "your-turn").then(() => name)));
+    Object.values(sockets).forEach((c) => c.emit("im-ready"));
+    const ownerName = await turn;
+
+    const PHOTO = "/temp/" + "e".repeat(32) + ".jpg";
+    registerTurnUpload(gameCode, ownerName, PHOTO, 1);
+    const answering = once(alice, "round-start");
+    sockets[ownerName].emit("photo-sent", { photo: PHOTO });
+    await answering;
+    expect(roomManager.getRoom(gameCode)!.phase).toBe("answering");
+
+    const noRemoval = [alice, bob, carol].map((c) => silent(c, "player-removed"));
+    alice.emit("remove-player", { username: "carol" });
+    expect(await Promise.all(noRemoval)).toEqual([true, true, true]);
+    expect(carol.connected).toBe(true);
+    expect(playerNames(gameCode)).toEqual(["alice", "bob", "carol"]);
+
+    // Everyone else leaves for good: game over, alice is back in the (reused) lobby and can kick a newcomer
+    const over = once(alice, "game-over");
+    bob.emit("leave-room");
+    carol.emit("leave-room");
+    await over;
+    const dave = await newClient();
+    expect((await joinAs(dave, gameCode, "dave")).success).toBe(true);
+    await expectKicked(alice, dave, "dave");
+    expect(playerNames(gameCode)).toEqual(["alice"]);
+    alice.emit("leave-room");
+  }, 15_000);
 });
 
 // ── Photo submission ───────────────────────────────────

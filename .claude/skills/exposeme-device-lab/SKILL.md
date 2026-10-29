@@ -88,7 +88,7 @@ node qa/lab/bots.mjs --bots 3 --code K7MQ4X                                # joi
 node qa/lab/bots.mjs --bots 2 --code K7MQ4X --name-prefix b-               # 2nd bots process in a room: b-bot1, b-bot2
 node qa/lab/bots.mjs --bots 4 --host --rounds 3 --leave-round 2            # the last bot leaves (leave-room) at round 2
 #   a "never got player-left" failure (mostly with 2 players) is the known app bug EXP-254 (leave-room lost when emitted and disconnected in the same tick), not a new regression
-node qa/lab/bots.mjs --bots 4 --host --rounds 3 --kick bot3@2              # the host removes bot3 at round 2 (no @R: in the lobby)
+node qa/lab/bots.mjs --bots 4 --host --rounds 3 --kick bot4                # the host removes bot4 in the lobby (lobby only, EXP-316: NAME@R exits 2)
 node qa/lab/bots.mjs --bots 3 --host --rounds 10 --hold 0.5 --chaos 0.3     # owners hold the scoreboard; under chaos a holder drops or rejoins on a new socket instead of letting go
 node qa/lab/bots.mjs --help                                                # every option (no network); unknown options exit 2
 ```

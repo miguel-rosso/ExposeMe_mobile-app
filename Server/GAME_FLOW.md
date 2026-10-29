@@ -197,8 +197,9 @@ After last round: game-over
   most 60 after NFKC (one Arabic ligature such as U+FDFA expands to 18 letters), not blank, with no combining mark at
   the start (after any leading spaces) or on a trailing space, at most four combining marks in a row (Tibetan and
   pointed Hebrew stack three; more is "Zalgo" text), no mark on a kana with a voiced form (`た`, `は`, `ウ`; or on a
-  symbol drawn like one, such as `〈` for `く`) other than the one voicing mark it takes (so `は` + ring above, `た` +
-  diaeresis, or two voicing marks such as `ぱ` + dakuten, which read like another voiced kana, are refused; marks on
+  symbol or kanji drawn like one, such as `〈` for `く` or `力` for `カ`) other than one voicing mark it takes (so `は` +
+  ring above, `た` + diaeresis, `力` + handakuten, or two voicing marks such as `ぱ` + dakuten, which read like
+  another voiced kana, are refused; marks on
   `あ`, `ん` or the `ﾉ` of `(ﾉﾟ∀ﾟ)ﾉ` are free), and none of: controls, format characters (zero-width characters,
   bidi overrides/isolates, BOM), default-ignorable characters (fillers, variation selectors, combining grapheme
   joiner), private-use/unassigned code points, characters drawn blank (U+2800, U+16FE4, U+1D159, U+FFFC) or spaces
@@ -220,8 +221,11 @@ After last round: game-over
   table again, case-folded, joiners dropped, whitespace trimmed and collapsed. The table runs before NFKC too, so long s still reads as `f`. `visualKey`: the same, but
   symbols drawn like other symbols read as their UTS #39 prototype first (a second table in the same file,
   `SYMBOL_CONFUSABLES`, applied before and after the skeleton because NFKC turns `¯`, `´` or `¸` into a space and a
-  mark; a voicing mark on a symbol that this table reads as a kana counts as on that kana, so `〈` + dakuten reads as
-  `ぐ`), then I / l / | / 1 read as `l`, `rn` as `m`, `vv` as `w`, `cl` as `d` and `0` as `o`. The symbol table
+  mark; it also holds the kana and kanji that UTS #39 draws alike, such as `カ` and `力`, `ロ` and `口`, `ニ` and `二`,
+  katakana `ヘ` and hiragana `へ`, and `朩` and `ホ`; a voicing mark on a symbol or kanji that this table reads as a
+  kana counts as on that kana, also typed as a spacing `゛` or `゜`, so `〈` + dakuten reads as `ぐ` and `力` + dakuten
+  as `ガ`, while `力` stays apart from `ガ`), then I / l / | / 1 read as `l`, `rn` as `m`, `vv` as `w`, `cl` as `d` and
+  `0` as `o`. The symbol table
   leaves out what reads as a different name: a clearly different size (measured in Roboto and SF: `•` and `∙` apart
   from `·` and `・`, `○` and `◦` from `°`, `█` and `■` from `∎`, `–` and `−` from `-` and from `—`, `˜` from `~`,
   full-width `－` from `ー`), emoji (drawn in colour: `🍎` and `🍏`), combining and spacing marks (Indic and Khmer
@@ -247,8 +251,12 @@ After last round: game-over
   - Only the same `visualKey` = a **different name that looks too alike**: `AIice` next to `Alice`, `b0b` next to
     `bob`, real names such as `Clara` next to `Dara` or `Arnie` next to `Amie`, and symbol lookalikes such as
     `(∙_∙)` next to `(•_•)`, `ǃǃ` next to `!!`, `ˉ\_(ツ)_/ˉ` next to `¯\_(ツ)_/¯`, `(˚_˚)` or `(º_º)` next to `(°_°)`,
-    `it’s` or `it´s` next to `it's`, `(一_一)` or `(—_—)` next to `(ー_ー)` get `"Username too similar"`, so
-    the player knows the name isn't in use and only needs to differ more. Letters drawn like a capital I (Cyrillic
+    `it’s` or `it´s` next to `it's`, `(一_一)` or `(—_—)` next to `(ー_ー)`, and kana lookalikes such as `力イト`
+    (kanji) next to `カイト`, `二郎` next to `ニ郎` or `べル` next to `ベル` get `"Username too similar"`, so
+    the player knows the name isn't in use and only needs to differ more. Kana lookalikes stay different names
+    (`nameKey`): most fonts draw the kanji a little wider or heavier (`ヘ` and `へ` look the same, and are refused
+    all the same), and a kanji name only ever meets the name spelled with its kana lookalikes, never another real
+    name (`二郎` and `次郎`, `口田` and `山田` stay apart). Letters drawn like a capital I (Cyrillic
     І, Arabic alef) have the prototype `l` in UTS #39, so next to a name with I they also get `"Username too
     similar"` rather than `"Username already taken"`: both refuse the name.
   - Checked in this order: a valid rejoin (exact stored name and its token) first; then `"Game already started"`

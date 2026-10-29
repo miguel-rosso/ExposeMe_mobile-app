@@ -90,6 +90,7 @@ describe("join-create-game player names", () => {
     ["capital I as l", "Alice", "AIice"],
     ["cl as d", "Dara", "Clara"],
     ["bullet operator as a bullet", "(\u2022_\u2022)", "(\u2219_\u2219)"],
+    ["kanji power as katakana ka", "\u30ab\u30a4\u30c8", "\u529b\u30a4\u30c8"],
   ])("refuses a name that only looks like a player's (%s) as \"Username too similar\"", async (_label, existing, lookalike) => {
     const { room } = await joinAs(null, existing);
     expect(await joinAs(room!.gameCode, lookalike)).toEqual({ success: false, message: "Username too similar" });

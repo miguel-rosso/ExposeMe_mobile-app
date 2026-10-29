@@ -19,7 +19,9 @@
 //
 // SYMBOL_CONFUSABLES (EXP-268), for playerName.visualKey only: symbols drawn like other symbols. Keeps every character
 // whose prototype has no letters or digits other than modifier letters ("∙" as "•", "ǃ" as "!", "’" as "'", "¯"
-// as "ˉ", "一" and "ㅡ" as "ー"), and every punctuation mark or symbol whatever its prototype ("—" and "―" as "ー").
+// as "ˉ", "一" and "ㅡ" as "ー"), every punctuation mark or symbol whatever its prototype ("—" and "―" as "ー"), and
+// (EXP-317) the letters UTS #39 draws like a kana or a kana draws like ("カ" as "力", "ロ" as "口", "ヘ" as "へ", "朩"
+// as "ホ"), which are letters of words but read as one another in a name.
 // Each prototype is written as playerName's skeleton reads it (ASCII table, NFKC, combining marks dropped), so a name
 // typed with it gets the same key; playerName applies the table before NFKC too, which turns "¯" into a space and a
 // mark. Left out: ASCII letters and digits, ASCII_CONFUSABLES sources, marks (Indic vowel signs are letters of a
@@ -121,6 +123,12 @@ const ANY_MARK = /\p{M}/u;
 const EMOJI = /(?![\0-\x7F])\p{Emoji}/u;
 const WHITESPACE = /\s/u;
 const ASCII_ALPHANUMERIC = /^[A-Za-z0-9]$/;
+const LETTER = /^\p{L}$/u;
+const KANA = /^[\p{Script=Hiragana}\p{Script=Katakana}]$/u;
+
+/** A letter drawn like a letter, one of them a kana (UTS #39: "カ" as "力", "ヘ" as "へ", "朩" as "ホ"). */
+const isKanaLookalike = (source, prototype) => LETTER.test(source) && LETTER.test(prototype)
+  && (KANA.test(source) || KANA.test(prototype));
 
 // Drawn size (EXP-268): UTS #39 joins symbols of one shape whatever their size, but a clearly bigger, smaller or
 // bolder glyph reads as a different name. Measured ink boxes (Roboto and Noto Sans Symbols on Android, SF on iOS, in
@@ -161,7 +169,7 @@ const keepsSymbol = (source, rawPrototype, prototype) => !ASCII_ALPHANUMERIC.tes
   && !entries.has(source) && !ANY_MARK.test(source) && !EMOJI.test(source) && !WHITESPACE.test(source)
   && !UNASSIGNED.test(source + rawPrototype) && keepsMarks(rawPrototype)
   && prototype !== "" && prototype !== skeletonOf(source) && !WHITESPACE.test(prototype) && !isCased(prototype)
-  && (PUNCTUATION_OR_SYMBOL.test(source) || !WORD_CHARACTER.test(prototype));
+  && (PUNCTUATION_OR_SYMBOL.test(source) || !WORD_CHARACTER.test(prototype) || isKanaLookalike(source, prototype));
 
 const symbols = new Map();
 for (const { source, prototype: raw, name } of confusables) {
@@ -208,7 +216,8 @@ const out = [
   "// Character \u2192 the ASCII letters or digits it is drawn like (letters of any script, symbols, punctuation).",
   ...mapLines("ASCII_CONFUSABLES", entries),
   "",
-  "// Character \u2192 the symbols it is drawn like, as the name skeleton reads them (bullets, dashes, quotes...).",
+  "// Character \u2192 the symbols or kana it is drawn like, as the name skeleton reads them (bullets, dashes, quotes,",
+  "// kana and the kanji drawn like them...).",
   ...mapLines("SYMBOL_CONFUSABLES", symbols),
   "",
 ];

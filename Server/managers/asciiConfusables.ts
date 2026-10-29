@@ -1292,7 +1292,8 @@ export const ASCII_CONFUSABLES: ReadonlyMap<string, string> = new Map<string, st
   ["\u{1FBF1}", "l"], // SEGMENTED DIGIT ONE
 ]);
 
-// Character → the symbols it is drawn like, as the name skeleton reads them (bullets, dashes, quotes...).
+// Character → the symbols or kana it is drawn like, as the name skeleton reads them (bullets, dashes, quotes,
+// kana and the kanji drawn like them...).
 export const SYMBOL_CONFUSABLES: ReadonlyMap<string, string> = new Map<string, string>([
   ["\u0022", "''"], // QUOTATION MARK
   ["\u0025", "\u00B0/0"], // PERCENT SIGN
@@ -1757,10 +1758,24 @@ export const SYMBOL_CONFUSABLES: ReadonlyMap<string, string> = new Map<string, s
   ["\u3036", "\u20B8"], // CIRCLED POSTAL MARK
   ["\u304F", "\u276C"], // HIRAGANA LETTER KU
   ["\u30A0", "="], // KATAKANA-HIRAGANA DOUBLE HYPHEN
+  ["\u30A4", "\u4EBB"], // KATAKANA LETTER I
+  ["\u30A8", "\u5DE5"], // KATAKANA LETTER E
+  ["\u30AB", "\u529B"], // KATAKANA LETTER KA
+  ["\u30BF", "\u5915"], // KATAKANA LETTER TA
+  ["\u30C8", "\u535C"], // KATAKANA LETTER TO
+  ["\u30CB", "\u4E8C"], // KATAKANA LETTER NI
+  ["\u30CD", "\u793B"], // KATAKANA LETTER NE
   ["\u30CE", "/"], // KATAKANA LETTER NO
+  ["\u30CF", "\u516B"], // KATAKANA LETTER HA
+  ["\u30D2", "\u5315"], // KATAKANA LETTER HI
+  ["\u30D8", "\u3078"], // KATAKANA LETTER HE
+  ["\u30E0", "\u53B6"], // KATAKANA LETTER MU
+  ["\u30E8", "\u5F50"], // KATAKANA LETTER YO
+  ["\u30ED", "\u53E3"], // KATAKANA LETTER RO
   ["\u3111", "\u276C"], // BOPOMOFO LETTER Q
   ["\u3161", "\u30FC"], // HANGUL LETTER EU
   ["\u3192", "\u30FC"], // IDEOGRAPHIC ANNOTATION ONE MARK
+  ["\u31A4", "\u30BB"], // BOPOMOFO LETTER EE
   ["\u31C6", "\u{200CC}"], // CJK STROKE HZG
   ["\u31CF", "\u4E40"], // CJK STROKE N
   ["\u31D0", "\u30FC"], // CJK STROKE H
@@ -1786,6 +1801,9 @@ export const SYMBOL_CONFUSABLES: ReadonlyMap<string, string> = new Map<string, s
   ["\u4E00", "\u30FC"], // CJK UNIFIED IDEOGRAPH-4E00
   ["\u4E36", "\u005C"], // CJK UNIFIED IDEOGRAPH-4E36
   ["\u4E3F", "/"], // CJK UNIFIED IDEOGRAPH-4E3F
+  ["\u4E44", "\u30E1"], // CJK UNIFIED IDEOGRAPH-4E44
+  ["\u4E8E", "\u{1B122}"], // CJK UNIFIED IDEOGRAPH-4E8E
+  ["\u6729", "\u30DB"], // CJK UNIFIED IDEOGRAPH-6729
   ["\uA494", "\uA2CD"], // YI RADICAL CYP
   ["\uA49C", "\uA0C0"], // YI RADICAL MOP
   ["\uA49E", "\uA04A"], // YI RADICAL PUT
@@ -1808,6 +1826,7 @@ export const SYMBOL_CONFUSABLES: ReadonlyMap<string, string> = new Map<string, s
   ["\uA60C", "="], // VAI SYLLABLE LENGTHENER
   ["\uA60E", "."], // VAI FULL STOP
   ["\uA67E", "\u02C7"], // CYRILLIC KAVYKA
+  ["\uA6A7", "\u30B9"], // BAMUM LETTER O
   ["\uA6EB", "?"], // BAMUM LETTER NTUU
   ["\uA6F4", "\uA6F3\uA6F3"], // BAMUM COLON
   ["\uA714", "\u02EB"], // MODIFIER LETTER MID LEFT-STEM TONE BAR
@@ -1845,7 +1864,20 @@ export const SYMBOL_CONFUSABLES: ReadonlyMap<string, string> = new Map<string, s
   ["\uFF05", "\u00B0/0"], // FULLWIDTH PERCENT SIGN
   ["\uFF40", "'"], // FULLWIDTH GRAVE ACCENT
   ["\uFF61", "\u02F3"], // HALFWIDTH IDEOGRAPHIC FULL STOP
+  ["\uFF72", "\u4EBB"], // HALFWIDTH KATAKANA LETTER I
+  ["\uFF74", "\u5DE5"], // HALFWIDTH KATAKANA LETTER E
+  ["\uFF76", "\u529B"], // HALFWIDTH KATAKANA LETTER KA
+  ["\uFF80", "\u5915"], // HALFWIDTH KATAKANA LETTER TA
+  ["\uFF84", "\u535C"], // HALFWIDTH KATAKANA LETTER TO
+  ["\uFF86", "\u4E8C"], // HALFWIDTH KATAKANA LETTER NI
+  ["\uFF88", "\u793B"], // HALFWIDTH KATAKANA LETTER NE
   ["\uFF89", "/"], // HALFWIDTH KATAKANA LETTER NO
+  ["\uFF8A", "\u516B"], // HALFWIDTH KATAKANA LETTER HA
+  ["\uFF8B", "\u5315"], // HALFWIDTH KATAKANA LETTER HI
+  ["\uFF8D", "\u3078"], // HALFWIDTH KATAKANA LETTER HE
+  ["\uFF91", "\u53B6"], // HALFWIDTH KATAKANA LETTER MU
+  ["\uFF96", "\u5F50"], // HALFWIDTH KATAKANA LETTER YO
+  ["\uFF9B", "\u53E3"], // HALFWIDTH KATAKANA LETTER RO
   ["\uFFDA", "\u30FC"], // HALFWIDTH HANGUL LETTER EU
   ["\uFFE3", "\u02C9"], // FULLWIDTH MACRON
   ["\uFFEA", "\u16CF"], // HALFWIDTH UPWARDS ARROW

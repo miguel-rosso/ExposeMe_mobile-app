@@ -26,7 +26,8 @@
 #   shot <label>                Screenshot every device into qa/runs/<RUN_ID>/shots/<label>-<device>.png
 #   play [--bots N] [--rounds R] [--devices all|pair|ios|android|none|<label,label>] [--flow play-game] [--bot-args "..."]
 #                               Full multiplayer session: bots host a room, devices join and play; prints the bots
-#                               summary and the device render skew per phase (qa/runs/<RUN_ID>/render-skew.json)
+#                               summary and the device render skew per phase (qa/runs/<RUN_ID>/render-skew.json), and
+#                               keeps the game's raw telemetry rows (qa/runs/<RUN_ID>/telemetry.jsonl)
 #                               (--bot-args: extra bots.mjs flags, e.g. --flow tie-game --bot-args --no-answer);
 #                               a device whose flow failed while the dev client was still booting (stuck on its
 #                               "Downloading N%", or dev-client-boot.yaml's loaded check failed: launcher, ANR dialog,
@@ -648,9 +649,23 @@ rotate_telemetry() { # file: keep only the previous server session's telemetry (
 
 print_render_skew() { # dir, room code, [server port]: per-phase render skew of that room (QA builds only) -> dir/render-skew.json
   local file; file="$(telemetry_file "${3:-$SERVER_PORT}")"
+  rm -f "$1/render-skew.json"   # a reused RUN_ID must not keep an older game's skew
   [ -s "$file" ] || return 0
   log "device render skew (ms, spread of qa-ack receipt across devices):"
   node "$QA/lab/render-skew.mjs" "$file" "$2" | tee "$1/render-skew.json" || true
+}
+
+save_game_telemetry() { # dir, room code, [server port]: that room's raw telemetry rows -> dir/telemetry.jsonl (EXP-319)
+  # The server's file is rotated on its next start, so the run keeps its own copy for later per-round analysis.
+  # Rows are copied verbatim, in file order; malformed lines are skipped. No rows (no QA build played): no copy.
+  local file out="$1/telemetry.jsonl" rows; file="$(telemetry_file "${3:-$SERVER_PORT}")"
+  rm -f "$out"   # a reused RUN_ID must not keep an older game's rows
+  [ -s "$file" ] || return 0
+  jq -rR --arg code "$2" '. as $line | fromjson? | select(type == "object" and .gameCode == $code) | $line' \
+    "$file" >"$out.tmp" 2>/dev/null || true
+  rows="$(grep -c . "$out.tmp" || true)"
+  if [ "${rows:-0}" -gt 0 ]; then mv -f "$out.tmp" "$out"; log "telemetry of room $2: $rows rows saved in $out"
+  else rm -f "$out.tmp"; fi
 }
 
 # ── play helpers (sourceable: qa/lab/tests/lab-play.test.sh) ──
@@ -847,6 +862,7 @@ cmd_play() {
   stop_play_bots
   node -e 'const r=require(process.argv[1]);console.log(JSON.stringify(r.summary,null,2))' "$dir/bots.json" 2>/dev/null || true
   print_render_skew "$dir" "$code" "$server_port"
+  save_game_telemetry "$dir" "$code" "$server_port"
   [ $fail = 0 ] && log "RUN $RUN_ID PASS ($dir)" || { log "RUN $RUN_ID had failures ($dir)"; exit 1; }
 }
 

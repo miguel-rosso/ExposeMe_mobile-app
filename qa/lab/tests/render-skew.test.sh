@@ -105,6 +105,38 @@ grep -q "device render skew" <<<"$out" && grep -q '"answering"' <<<"$out" \
 [ "$(jget phases.answering.max <"$RUNS/run1/render-skew.json")" = 100 ] \
   && ok "render skew saved in the run dir" || ko "render skew saved in the run dir"
 
+# A reused RUN_ID whose new game had no QA build (server restarted: empty telemetry) drops the previous game's skew
+: >"$RUNS/telemetry.jsonl"
+out="$(print_render_skew "$RUNS/run1" ROOM1 2>&1)"
+[ -z "$out" ] && [ ! -e "$RUNS/run1/render-skew.json" ] \
+  && ok "no telemetry on a reused run dir: the previous game's render-skew.json is removed" \
+  || ko "stale render-skew.json removed" "$out $(cat "$RUNS/run1/render-skew.json" 2>&1 | head -3)"
+
+# ── save_game_telemetry (EXP-319): the game's raw rows outlive the server's next rotation ──
+rm -f "$RUNS/telemetry.jsonl"
+out="$(save_game_telemetry "$RUNS/run1" ROOM1 2>&1)"; rc=$?
+[ $rc = 0 ] && [ -z "$out" ] && [ ! -e "$RUNS/run1/telemetry.jsonl" ] \
+  && ok "no telemetry file: nothing saved, no error" || ko "no telemetry file: nothing saved" "rc=$rc $out"
+
+cp "$TMP/telemetry.jsonl" "$RUNS/telemetry.jsonl"
+out="$(save_game_telemetry "$RUNS/run1" ROOM1 2>&1)"; rc=$?
+expected="$(grep '"gameCode":"ROOM1"' "$TMP/telemetry.jsonl")"   # verbatim, in file order (incl. the row without receivedAt)
+[ $rc = 0 ] && [ "$(cat "$RUNS/run1/telemetry.jsonl")" = "$expected" ] \
+  && ok "only that game's rows saved verbatim in the run dir" || ko "game rows saved" "rc=$rc $(cat "$RUNS/run1/telemetry.jsonl" 2>&1)"
+grep -q "$RUNS/run1/telemetry.jsonl" <<<"$out" && grep -q "$(grep -c . <<<"$expected") rows" <<<"$out" \
+  && ok "play logs where the rows went" || ko "play logs where the rows went" "$out"
+[ "$(node "$SKEW" "$RUNS/run1/telemetry.jsonl" ROOM1)" = "$(node "$SKEW" "$TMP/telemetry.jsonl" ROOM1)" ] \
+  && ok "the saved rows reproduce the render skew later" || ko "saved rows reproduce the render skew"
+
+out="$(save_game_telemetry "$RUNS/run1" NOPE 2>&1)"; rc=$?
+[ $rc = 0 ] && [ -z "$out" ] && [ ! -e "$RUNS/run1/telemetry.jsonl" ] \
+  && ok "no rows of that game (reused RUN_ID): stale copy removed, nothing saved" || ko "no rows of that game" "rc=$rc $out"
+
+mkdir -p "$RUNS/run2"; cp "$TMP/latency.jsonl" "$RUNS/telemetry-3101.jsonl"
+save_game_telemetry "$RUNS/run2" LAT 3101 >/dev/null 2>&1
+[ "$(wc -l <"$RUNS/run2/telemetry.jsonl" | tr -d ' ')" = 8 ] \
+  && ok "worktree server: rows from its own telemetry file" || ko "worktree server telemetry" "$(cat "$RUNS/run2/telemetry.jsonl" 2>&1)"
+
 # Flags: the lab server records telemetry, Metro builds QA clients (bg_start/curl stubbed: nothing is started)
 bg_start() { echo "$*" >"$TMP/bg_start.args"; }
 curl() { echo "packager-status:running"; }

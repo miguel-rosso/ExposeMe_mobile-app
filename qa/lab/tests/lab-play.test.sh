@@ -149,6 +149,17 @@ rc=$?
 grep -q "^SKEW $RUNS/telemetry-3103.jsonl ROOM2$" "$TMP/play.out" && ok "--port P: render skew read from that server's telemetry" \
   || ko "--port P: telemetry of that server" "$(cat "$TMP/play.out")"
 grep -q "can't join" "$TMP/play.out" && ko "--devices none: no devices warning" || ok "--devices none: no devices warning"
+[ ! -e "$RUNS/r9/telemetry.jsonl" ] && ok "no rows of the game: no telemetry copy in the run dir" \
+  || ko "no rows of the game: no telemetry copy" "$(cat "$RUNS/r9/telemetry.jsonl")"
+
+# ── The game's telemetry rows are kept in the run dir (EXP-319): the next server start rotates the server's file ──
+{ echo '{"gameCode":"ROOM2","username":"ios-a","phase":"answering","round":1,"at":1,"receivedAt":10}'
+  echo '{"gameCode":"OTHER","username":"ios-a","phase":"answering","round":1,"at":1,"receivedAt":10}'
+} >"$RUNS/telemetry-3103.jsonl"
+play r9b --bots 2 --devices none --port 3103
+rc=$?
+[ $rc = 0 ] && completed r9b && [ "$(cat "$RUNS/r9b/telemetry.jsonl" 2>&1)" = "$(head -1 "$RUNS/telemetry-3103.jsonl")" ] \
+  && ok "play saves the game's telemetry rows in the run dir" || ko "play saves the game's rows" "rc=$rc $(cat "$TMP/play.out")"
 play r10 --bots 2 --devices ios-a --server http://localhost:3103/ --second-room "--bots 3 --host --wait-players 99"
 rc=$?
 [ $rc = 0 ] && [ "$(grep -c -- "--server http://localhost:3103 " "$TMP/node.args")" = 2 ] \

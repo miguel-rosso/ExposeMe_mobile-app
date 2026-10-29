@@ -2,6 +2,7 @@ import React from "react";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import { AppState } from "react-native";
 import { TEST_IDS } from "../app/utils/testIds";
+import { MAX_USERNAME_INPUT_LENGTH } from "../app/utils/protocolLimits";
 
 // EXP-118: Create / Search room require photo permission (full or limited) and at least one visible photo.
 // Limited access with photos plays; anything missing is explained on the home screen (never SettingsInstructions).
@@ -230,6 +231,16 @@ describe("Home join field: alphanumeric room codes (EXP-198)", () => {
     await press(r.root, TEST_IDS.joinGameButton);
     await press(r.root, TEST_IDS.searchRoomButton);
     expect(mockPush).not.toHaveBeenCalled();
+    act(() => r.unmount());
+  });
+});
+
+// EXP-217: the app's own name limit (protocol-constants.test.sh keeps it within the server's MAX_USERNAME_LENGTH)
+describe("Home name field: length limit (EXP-217)", () => {
+  it("takes at most MAX_USERNAME_INPUT_LENGTH characters", async () => {
+    const r = await mount();
+    const input = r.root.find((n) => n.props.testID === TEST_IDS.usernameInput && typeof n.props.onChange === "function");
+    expect(input.props.maxLength).toBe(MAX_USERNAME_INPUT_LENGTH);
     act(() => r.unmount());
   });
 });

@@ -43,6 +43,7 @@ import { attachHandlers, SocketHandlers } from "../utils/socketHandlers";
 import { emitWhileConnected } from "../utils/socketEmit";
 import { parseRoomCodeParam } from "../utils/roomCode";
 import { KICKED_BY_HOST_MESSAGE } from "../utils/serverMessage";
+import { CHAT_COOLDOWN_MS, MAX_CHAT_LENGTH, ROUND_OPTIONS } from "../utils/protocolLimits";
 import { dismissKeyboardOnBackPress } from "../utils/keyboardBackPress";
 import { GAME_SCREEN_PATH, RESYNC_GAME_SCREEN } from "../utils/gameScreenRoute";
 import { useBackHandler } from "@react-native-community/hooks";
@@ -104,9 +105,6 @@ const WaitingRoom = ({}) => {
   const [chatMessage, setChatMessage] = useState<string>("");
   const [chatMessages, setChatMessages] = useState<ChatMessageType[]>([]);
   const [lastSentTime, setLastSentTime] = useState<number>(0);
-  const COOLDOWN_TIME = 1000; // 1 second cooldown between messages
-
-  const roundOptions = [10, 15, 20];
 
   // Keyboard height animation — the professional way
   const keyboardPadding = useRef(new Animated.Value(0)).current;
@@ -159,7 +157,7 @@ const WaitingRoom = ({}) => {
     const currentTime = Date.now();
 
     // Check cooldown
-    if (currentTime - lastSentTime >= COOLDOWN_TIME) {
+    if (currentTime - lastSentTime >= CHAT_COOLDOWN_MS) {
       // Offline it is not sent (nor shown): the text stays in the input to send once back
       const sent = !!gameCode && emitWhileConnected(socket, "chat-message", {
         gameCode,
@@ -633,7 +631,7 @@ const WaitingRoom = ({}) => {
                 <>
                   {/* Round selector — pill style */}
                   <View style={[tw`flex-row justify-center mb-3 rounded-full p-1`, { backgroundColor: "rgba(255,255,255,0.08)" }]}>
-                    {roundOptions.map((rounds) => (
+                    {ROUND_OPTIONS.map((rounds) => (
                       <TouchableOpacity
                         key={rounds}
                         testID={roundsOptionId(rounds)}
@@ -707,7 +705,7 @@ const WaitingRoom = ({}) => {
                 placeholder={t.typeMessage}
                 placeholderTextColor="#999"
                 style={tw`flex-1 bg-gray-800/90 text-white px-4 py-3 rounded-full mr-2`}
-                maxLength={100}
+                maxLength={MAX_CHAT_LENGTH}
               />
               <TouchableOpacity
                 testID={TEST_IDS.chatSendButton}

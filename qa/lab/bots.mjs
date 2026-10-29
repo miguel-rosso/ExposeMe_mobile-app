@@ -233,12 +233,14 @@ if (cli.help) { console.log(USAGE); process.exit(0); }
 if (cli.error) exitUsage(cli.error);
 const args = cli.args;
 // Room codes: 6 characters of the server's alphabet (Server/managers/roomCode.ts), typed in any case like in the app
-// (ASCII-only normalization: toUpperCase would turn "ß" into "SS", so non-ASCII input stays malformed)
+// (ASCII-only normalization: toUpperCase would turn "ß" into "SS", so non-ASCII input stays malformed);
+// qa/lab/tests/bots-cli.test.sh checks the copies match
 const ROOM_CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
-const ROOM_CODE_RE = new RegExp(`^[${ROOM_CODE_ALPHABET}]{6}$`);
+const ROOM_CODE_LENGTH = 6;
+const ROOM_CODE_RE = new RegExp(`^[${ROOM_CODE_ALPHABET}]{${ROOM_CODE_LENGTH}}$`);
 const normalizeRoomCode = (code) => code.replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, "").replace(/[a-z]/g, (c) => c.toUpperCase());
 const FIXED_CODE = args.code ? normalizeRoomCode(args.code) : null;
-if (FIXED_CODE && !ROOM_CODE_RE.test(FIXED_CODE)) exitUsage(`--code "${args.code}" is not a room code (6 characters, e.g. K7MQ4X)`);
+if (FIXED_CODE && !ROOM_CODE_RE.test(FIXED_CODE)) exitUsage(`--code "${args.code}" is not a room code (${ROOM_CODE_LENGTH} characters, e.g. K7MQ4X)`);
 // Round counts set-rounds accepts, as in Server/managers/RoomManager.ts (ROUND_OPTIONS, and QA_ROUNDS only with
 // ALLOW_QA_ROUNDS=1 on the server); qa/lab/tests/bots-cli.test.sh checks the copies match (EXP-203)
 const ROUND_OPTIONS = [10, 15, 20];
@@ -366,6 +368,8 @@ const QUIT_AFTER_GAME_OVER = !!args["quit-after-game-over"];
 const QUITTER = N_BOTS - 1; // the bot that quits with --quit-after-game-over
 // The host starts the next game this long after the quitter became gone (DISCONNECT_GRACE_MS: the server's grace)
 const GONE_START_MARGIN_MS = 3_000;
+// --play-again-linger-bot 0: the bots stay in the lobby this long after the device's linger, so it finds them there
+const LOBBY_STAY_AFTER_DEVICE_LINGER_MS = 15_000;
 if (QUIT_AFTER_GAME_OVER) {
   if (!args.host) exitUsage("--quit-after-game-over needs --host (the host bot starts the next game)");
   if (N_BOTS < 3) exitUsage("--quit-after-game-over needs --bots 3 or more (2 must stay to play the next game)");
@@ -638,7 +642,7 @@ function runRoom(roomIdx, fixedCode) {
           }
           // --play-again-linger-bot 0: a device lingers instead, so the bots stay (connected, in the lobby) a while
           // longer than it does, then end
-          else if (live.every((b) => b.playAgainDone)) setTimeout(() => done("game-over"), LINGER_BOT < 0 ? PLAY_AGAIN_LINGER_S * 1000 + 15_000 : 500);
+          else if (live.every((b) => b.playAgainDone)) setTimeout(() => done("game-over"), LINGER_BOT < 0 ? PLAY_AGAIN_LINGER_S * 1000 + LOBBY_STAY_AFTER_DEVICE_LINGER_MS : 500);
           // A non-host still on the final screens: the host starts the next game once everyone else is back
           else if (lingerer && !lingerer.isHost && live.every((b) => b.playAgainDone || b === lingerer)) {
             const host = live.find((b) => b.isHost);

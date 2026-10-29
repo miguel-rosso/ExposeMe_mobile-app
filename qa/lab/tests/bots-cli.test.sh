@@ -97,6 +97,8 @@ mirrors() { # server file (from Server/), our file, our const, server const: sam
 }
 mirrors managers/RoomManager.ts "$BOTS" ROUND_OPTIONS ROUND_OPTIONS
 mirrors managers/RoomManager.ts "$BOTS" QA_ROUNDS QA_ROUNDS
+mirrors managers/roomCode.ts "$BOTS" ROOM_CODE_ALPHABET ROOM_CODE_ALPHABET
+mirrors managers/roomCode.ts "$BOTS" ROOM_CODE_LENGTH ROOM_CODE_LENGTH
 mirrors managers/GameEngine.ts "$ANALYSIS" MAX_PAUSES MAX_PAUSES
 mirrors managers/GameEngine.ts "$ANALYSIS" MAX_TOTAL_PAUSES MAX_TOTAL_PAUSES
 # Every /upload in-flight cap the server reads from the environment is named by bots.mjs's 429/503 hint

@@ -38,6 +38,7 @@ import { TEST_IDS } from "./utils/testIds";
 import { handleHomeBackPress } from "./utils/homeBackPress";
 import { isRoomCode, sanitizeRoomCodeInput } from "./utils/roomCode";
 import { translateServerMessage } from "./utils/serverMessage";
+import { MAX_USERNAME_INPUT_LENGTH } from "./utils/protocolLimits";
 import {
   HOME_TOP_ROW_HEIGHT,
   HOME_TOP_ROW_TOP,
@@ -433,7 +434,7 @@ const Index = () => {
                   placeholderTextColor="#3333"
                   value={username || ""}
                   onChange={(e) => handleUsernameChange(e.nativeEvent.text)}
-                  maxLength={15}
+                  maxLength={MAX_USERNAME_INPUT_LENGTH}
                 />
                 {username && username.length > 0 && (
                   <View style={tw`absolute flex items-center justify-center h-full absolute right-4`}>

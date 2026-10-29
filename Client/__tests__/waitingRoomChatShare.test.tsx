@@ -4,6 +4,7 @@ import { Alert, Keyboard, Share } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { FakeSocket } from "../testUtils/fakeSocket";
 import { TEST_IDS } from "../app/utils/testIds";
+import { CHAT_COOLDOWN_MS, MAX_CHAT_LENGTH } from "../app/utils/protocolLimits";
 import en from "../app/i18n/en";
 // Loaded with the file (jest.mock calls below are hoisted above it), not inside a test
 import WaitingRoom from "../app/screens/WaitingRoom";
@@ -51,8 +52,6 @@ jest.mock("@/app/components/IngameComunication/ChatMessage", () => "ChatMessage"
 jest.mock("@/app/components/SuccessAlert", () => "SuccessAlert");
 
 const ROOM_CODE = "K7MQ4X";
-// The lobby's minimum time between two messages of mine
-const CHAT_COOLDOWN_MS = 1_000;
 // How long the "code copied" notice stays
 const COPY_NOTICE_MS = 2_000;
 
@@ -112,6 +111,13 @@ describe("WaitingRoom: lobby chat (EXP-186)", () => {
     expect(chatShown(r)).toEqual([{ username: "alice", message: "hola a todos" }]);
     expect(byId(r, TEST_IDS.chatInput).props.value).toBe("");
     expect(dismissSpy).toHaveBeenCalledTimes(1);
+    act(() => r.unmount());
+  });
+
+  // EXP-217: longer messages are dropped by the server (protocol-constants.test.sh keeps MAX_CHAT_LENGTH equal to it)
+  it("the input takes at most the server's MAX_CHAT_LENGTH characters", async () => {
+    const r = await mount();
+    expect(byId(r, TEST_IDS.chatInput).props.maxLength).toBe(MAX_CHAT_LENGTH);
     act(() => r.unmount());
   });
 

@@ -26,8 +26,9 @@
 #                               Full multiplayer session: bots host a room, devices join and play; prints the bots
 #                               summary and the device render skew per phase (qa/runs/<RUN_ID>/render-skew.json)
 #                               (--bot-args: extra bots.mjs flags, e.g. --flow tie-game --bot-args --no-answer);
-#                               a device whose flow failed stuck on the dev client's "Downloading N%" is force-stopped
-#                               and runs the flow once more (maestro/<device>-retry)
+#                               a device whose flow failed while the dev client was still booting (stuck on its
+#                               "Downloading N%", or dev-client-boot.yaml's bundle wait ran out: launcher, ANR dialog)
+#                               is force-stopped and runs the flow once more (maestro/<device>-retry)
 #        [--second-room "<bots.mjs args>"]  also start a 2nd bots room; its code reaches the flows as NEW_CODE
 #        [--maestro-env KEY=VALUE]          extra Maestro variable for every device (repeatable)
 #        [--server http://localhost:P | --port P]  bots and render telemetry use that lab server (e.g. a worktree's
@@ -657,11 +658,15 @@ reject_bots_server_override() { # play option, its bots.mjs flags: dies if they 
     || die "$1 can't choose the bots' server (got '$2'): use play's own --server http://localhost:PORT or --port PORT"
 }
 
-# ── Device flows: one retry when the dev client got stuck downloading the JS bundle (EXP-256) ──
-# With 4 devices loading the bundle from Metro at once, a dev client sometimes freezes on "Downloading 55.0%…" and
-# open-app.yaml times out before the device ever joins. The room is still waiting for it, so force-stopping the app
-# and running the flow again (open-app.yaml relaunches it) saves the run.
+# ── Device flows: one retry when the dev client got stuck booting (EXP-256, EXP-297) ──
+# With 4 devices loading the bundle from Metro at once, a dev client sometimes freezes on "Downloading 55.0%…", stays
+# on its launcher or shows an "isn't responding" dialog, and open-app.yaml times out before the device ever joins.
+# The room is still waiting for it, so force-stopping the app and running the flow again (open-app.yaml relaunches
+# it) saves the run.
 BUNDLE_DOWNLOAD_TEXT_RE='"text" *: *"Downloading [0-9]+(\.[0-9]+)?%'
+# dev-client-boot.yaml's assertion that the bundle wait saw the app load (lab-play.test.sh checks the flow keeps it)
+# shellcheck disable=SC2016 # a Maestro expression, not a shell one
+BOOT_LOADED_CONDITION='${output.devClientBoot.loaded}'
 # The devices that did join wait in the lobby (wait-game-start.yaml, env LOBBY_WAIT_MS) for the retried one, so that
 # wait must cover it: the stuck attempt fails when dev-client-boot.yaml's bundle wait runs out. Its 120 s deadline is
 # absolute (EXP-288), so in the worst case that is ~20 s to launch and open the link + 120 s + the poll under way at the
@@ -684,6 +689,21 @@ stuck_on_bundle_download() { # maestro --test-output-dir: exit 0 when the failed
   [ -n "$h" ] && grep -Eq "$BUNDLE_DOWNLOAD_TEXT_RE" "$h"
 }
 
+boot_wait_ran_out() { # maestro --test-output-dir: exit 0 when the failed step was dev-client-boot.yaml's loaded check
+  # commands.json lists every command run, nested ones included, with its status
+  local f
+  while read -r f; do
+    jq -e --arg c "$BOOT_LOADED_CONDITION" \
+      'any(.[]; .metadata.status == "FAILED" and .command.assertConditionCommand.condition.scriptCondition == $c)' \
+      "$f" >/dev/null 2>&1 && return 0
+  done < <(find "$1" -name commands.json 2>/dev/null)
+  return 1
+}
+
+stuck_booting() { # maestro --test-output-dir: exit 0 when the failed run never got past the dev client's boot
+  stuck_on_bundle_download "$1" || boot_wait_ran_out "$1"
+}
+
 stop_app() { # platform, device id
   if [ "$1" = ios ]; then xcrun simctl terminate "$2" "$APP_ID" 2>/dev/null || true
   else adbs "$2" shell am force-stop "$APP_ID" || true; fi
@@ -697,12 +717,12 @@ run_maestro_flow() { # device id, flow file, output dir, run name, maestro args.
     --test-output-dir "$out/$name" --format junit --output "$out/$name.xml" >"$out/$name.log" 2>&1
 }
 
-run_device_flow() { # device json, flow file, output dir, maestro args...: the flow, re-run once after a stuck bundle download
+run_device_flow() { # device json, flow file, output dir, maestro args...: the flow, re-run once after a stuck boot
   local d=$1 flow=$2 out=$3 id label platform; shift 3
   id="$(jq -r .id <<<"$d")"; label="$(jq -r .label <<<"$d")"; platform="$(jq -r .platform <<<"$d")"
   run_maestro_flow "$id" "$flow" "$out" "$label" "$@" && return 0
-  stuck_on_bundle_download "$out/$label" || return 1
-  warn "$label: dev client stuck downloading the JS bundle; force-stopping the app and running $(basename "$flow") once more" \
+  stuck_booting "$out/$label" || return 1
+  warn "$label: dev client stuck loading the JS bundle; force-stopping the app and running $(basename "$flow") once more" \
     "(results in $out/$label-retry)"
   stop_app "$platform" "$id"
   run_maestro_flow "$id" "$flow" "$out" "$label-retry" "$@"

@@ -3,7 +3,7 @@
 # no devices, servers or network. Covers --second-room (2nd bots room -> NEW_CODE), --maestro-env KEY=VALUE and
 # --server/--port (EXP-220: bots and render telemetry on a worktree's own lab server), and the kicked-notice
 # invocation (EXP-139: --bot-args '--kick <device label>'), and the one retry of a device whose dev client got stuck
-# downloading the JS bundle (EXP-256).
+# downloading the JS bundle (EXP-256) or whose dev-client-boot.yaml bundle wait ran out (EXP-297).
 # Run: qa/lab/tests/lab-play.test.sh
 set -uo pipefail
 
@@ -40,7 +40,9 @@ echo $$ >"$STUB_LOG/main.pid"
 EOF
 # maestro stub: logs its argv; the runs whose --test-output-dir name is listed in STUB_MAESTRO_FAIL fail, leaving the
 # screen hierarchy of their failed steps like Maestro does: an optional step showing STUB_EARLIER_SCREEN, then the
-# last step (STUB_LAST_STEP, default 011) showing STUB_LAST_SCREEN (default: the dev client stuck on the bundle download)
+# last step (STUB_LAST_STEP, default 011) showing STUB_LAST_SCREEN (default: the dev client stuck on the bundle download).
+# With STUB_FAILED_CONDITION it also writes Maestro's commands.json: an assertTrue that passed (STUB_PASSED_CONDITION,
+# optional), then the failed one with that condition inside its failed parent runFlow
 cat >"$TMP/bin/maestro" <<'EOF'
 #!/usr/bin/env bash
 echo "$*" >>"$STUB_LOG/maestro.args"
@@ -49,6 +51,11 @@ case " ${STUB_MAESTRO_FAIL:-} " in *" ${out##*/} "*) ;; *) exit 0;; esac
 h="$out/2026-10-26_162536/play-game/screen-hierarchy"; mkdir -p "$h"
 printf '{"attributes" : {"text" : "%s"}}\n' "${STUB_EARLIER_SCREEN:-Join Game}" >"$h/step-009-tapOnElement-optional.json"
 printf '{"attributes" : {"text" : "%s"}}\n' "${STUB_LAST_SCREEN:-Downloading 55.0%…}" >"$h/step-${STUB_LAST_STEP:-011}-assertCondition.json"
+[ -z "${STUB_FAILED_CONDITION:-}" ] && exit 1
+assert() { jq -n --arg c "$1" --arg s "$2" '{command: {assertConditionCommand: {condition: {scriptCondition: $c}}}, metadata: {status: $s}}'; }
+{ jq -n '{command: {runFlowCommand: {}}, metadata: {status: "FAILED"}}'
+  [ -z "${STUB_PASSED_CONDITION:-}" ] || assert "$STUB_PASSED_CONDITION" COMPLETED
+  assert "$STUB_FAILED_CONDITION" FAILED; } | jq -s . >"${h%/screen-hierarchy}/commands.json"
 exit 1
 EOF
 chmod +x "$TMP/bin/node" "$TMP/bin/maestro"
@@ -174,7 +181,7 @@ runs_of() { grep -c -- "--test-output-dir $RUNS/$1/maestro/$2" "$TMP/maestro.arg
 STUB_MAESTRO_FAIL=android-a play r16 --bots 2 --devices ios-a,android-a
 rc=$?
 [ $rc = 0 ] && completed r16 && ok "stuck bundle download: the retry saves the run" || ko "stuck bundle download: retry saves the run" "rc=$rc $(cat "$TMP/play.out")"
-grep -q "android-a: dev client stuck downloading the JS bundle; force-stopping the app" "$TMP/play.out" \
+grep -q "android-a: dev client stuck loading the JS bundle; force-stopping the app" "$TMP/play.out" \
   && ok "stuck bundle download: the retry is logged" || ko "stuck bundle download: retry logged" "$(cat "$TMP/play.out")"
 [ "$(cat "$TMP/device-cmds.log" 2>/dev/null)" = "adb -s emulator-5554 shell am force-stop com.socketNull.ExposeMe" ] \
   && ok "stuck bundle download: only that app is force-stopped" || ko "stuck bundle download: force-stop" "$(cat "$TMP/device-cmds.log" 2>/dev/null)"
@@ -211,6 +218,27 @@ STUB_MAESTRO_FAIL=android-a play r22 --bots 2 --devices android-a
 leftover r23 "Downloading 80.0%…"
 STUB_MAESTRO_FAIL=android-a STUB_LAST_SCREEN="Join Game" play r23 --bots 2 --devices android-a
 [ "$(runs_of r23 android-a)" = 1 ] && ok "reused RUN_ID: an older run's stuck download doesn't trigger a retry" || ko "reused RUN_ID: false retry" "$(cat "$TMP/maestro.args")"
+
+# ── dev-client-boot.yaml's bundle wait ran out (EXP-297): launcher, ANR dialog... -> the same one retry ──
+grep -qxF -- "- assertTrue: $BOOT_LOADED_CONDITION" "$MAESTRO_DIR/dev-client-boot.yaml" \
+  && ok "dev-client-boot.yaml still asserts lab.sh's BOOT_LOADED_CONDITION" || ko "dev-client-boot.yaml loaded check in sync with lab.sh"
+STUB_MAESTRO_FAIL=android-a STUB_LAST_SCREEN="Expose Me isn't responding" STUB_FAILED_CONDITION="$BOOT_LOADED_CONDITION" \
+  play r25 --bots 2 --devices ios-a,android-a
+rc=$?
+[ $rc = 0 ] && completed r25 && [ "$(runs_of r25 android-a)" = 2 ] && [ "$(runs_of r25 ios-a)" = 1 ] \
+  && [ "$(cat "$TMP/device-cmds.log" 2>/dev/null)" = "adb -s emulator-5554 shell am force-stop com.socketNull.ExposeMe" ] \
+  && ok "boot wait ran out: force-stop + one retry saves the run" || ko "boot wait ran out: retry" "rc=$rc $(cat "$TMP/play.out" "$TMP/maestro.args")"
+STUB_MAESTRO_FAIL="android-a android-a-retry" STUB_LAST_SCREEN="DEVELOPMENT SERVERS" STUB_FAILED_CONDITION="$BOOT_LOADED_CONDITION" \
+  play r26 --bots 2 --devices android-a
+rc=$?
+[ $rc != 0 ] && [ "$(runs_of r26 android-a)" = 2 ] && ok "boot wait ran out again on the retry: only one retry, the run fails" \
+  || ko "boot wait ran out twice" "rc=$rc $(cat "$TMP/maestro.args")"
+# shellcheck disable=SC2016 # a Maestro expression
+STUB_MAESTRO_FAIL=android-a STUB_LAST_SCREEN="Join Game" STUB_PASSED_CONDITION="$BOOT_LOADED_CONDITION" \
+  STUB_FAILED_CONDITION='${output.round > 1}' play r27 --bots 2 --devices android-a
+rc=$?
+[ $rc != 0 ] && [ "$(runs_of r27 android-a)" = 1 ] && [ ! -s "$TMP/device-cmds.log" ] \
+  && ok "another assertTrue failed after the app loaded: no retry" || ko "other assertTrue: no retry" "rc=$rc $(cat "$TMP/maestro.args")"
 
 # ── Lobby wait covers one retry (EXP-256): the devices that joined keep waiting for the retried one ──
 play r24 --bots 2 --devices ios-a

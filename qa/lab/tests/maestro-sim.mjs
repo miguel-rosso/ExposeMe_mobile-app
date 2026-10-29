@@ -37,7 +37,9 @@ function readFlow(file) {
         const item = {};
         const line = lines[i++];
         lineOf.set(item, line.at);
-        entry(line, line.text.slice(2), indent + 2, item);
+        const text = line.text.slice(2);
+        if (/^[A-Za-z]\w*$/.test(text)) item[text] = null; // a command without arguments, e.g. `- stopApp`
+        else entry(line, text, indent + 2, item);
         while (i < lines.length && lines[i].indent === indent + 2) { const l = lines[i++]; entry(l, l.text, indent + 2, item); }
         items.push(item);
       }
@@ -111,7 +113,11 @@ function runFlow(commands, device, { skippableSubflows = [] } = {}) {
   };
   const step = () => device.tick(STEP_MS);
   const commandsByName = {
-    launchApp: step, openLink: step, waitForAnimationToEnd: step, pressKey: step, swipe: step,
+    launchApp: step, waitForAnimationToEnd: step, swipe: step,
+    // the device reacts to these only if it models them (see the fake devices)
+    openLink: (link) => { device.openLink?.(link); step(); },
+    stopApp: () => { device.stopApp?.(); step(); },
+    pressKey: (key) => { device.pressKey?.(key); step(); },
     evalScript: (arg) => { value(arg); },
     runFlow: (arg, command) => {
       if (typeof arg === "string") {
@@ -196,6 +202,53 @@ function launcherComesBackThenStalls() {
   return { d, state };
 }
 
+// Android dev client right after the caller's launchApp(clearState), as expo-dev-launcher 58 does it: MainActivity
+// starts on a redirect delegate whose onNewIntent drops any intent, so a link sent before it hands over to the launcher
+// is lost (EXP-296) and the launcher shows. A link that cold-starts the app loads the bundle and applies its
+// __expo_disable_auto_launch for the whole process; a server picked in the launcher carries no such flag, so without
+// it the dev menu opens over the app.
+const DEV_MENU = { text: "Connected to: http://localhost:8081" };
+function androidLinkRaceAfterLaunch() {
+  const state = { running: true, screen: "starting", autoLaunchDisabled: false, devMenu: false, devMenuOpened: false, picks: 0 };
+  const loadApp = (disablesAutoLaunch) => {
+    state.autoLaunchDisabled ||= disablesAutoLaunch;
+    state.screen = "app";
+    state.devMenu = !state.autoLaunchDisabled;
+    state.devMenuOpened ||= state.devMenu;
+  };
+  const d = device(
+    "android",
+    () => ({
+      starting: [],
+      launcher: [{ text: "Development servers" }, { text: SERVER_ENTRY }],
+      app: [{ id: "initial-screen" }, ...(state.devMenu ? [DEV_MENU] : [])],
+    })[state.screen],
+    (dev, sel) => {
+      if (state.screen !== "launcher" || !matches(sel.text || "", SERVER_ENTRY)) return;
+      state.picks++;
+      loadApp(false);
+    },
+  );
+  d.stopApp = () => Object.assign(state, { running: false, screen: "starting", autoLaunchDisabled: false, devMenu: false });
+  d.openLink = (link) => {
+    if (state.running) { state.screen = "launcher"; return; }
+    state.running = true;
+    loadApp(/[?&]__expo_disable_auto_launch=1(&|$)/.test(link));
+  };
+  d.pressKey = (key) => { if (/^back$/i.test(key)) state.devMenu = false; };
+  return { d, state };
+}
+
+// The dev client fails to load the bundle and shows its error screen (EXP-298, it122: iOS "URL in…" error)
+function loadErrorScreen(platform) {
+  const d = device(platform, () => [
+    { text: "There was a problem loading the project." },
+    { text: "This development build encountered the following error:" },
+    { text: "Reload" }, { text: "Go home" },
+  ], () => {});
+  return { d };
+}
+
 // InitialScreen (then home) whose language toggle obeys fate(n) for its n-th tap: "ok", "lost" or "late"
 const LATE_TAP_MS = 12000; // a late switch shows after the flow's 10 s wait for it (and the tap's own step)
 function onboarding(startLang, fate) {
@@ -232,6 +285,23 @@ function bootScenarios(flow) {
   report("stalled download fails the boot", Boolean(failure), failure || "flow passed");
   report(`launcher picked ${state.picks} times (max ${boot.maxServerPicks})`, state.picks === boot.maxServerPicks && boot.maxServerPicks <= 2, "");
   report(`boot gave up after ${d.now / 1000} s (wait ${boot.timeout / 1000} s)`, d.now <= boot.timeout + POLL_OVERRUN_MS, "the wait restarts on a server pick");
+
+  // EXP-296: the link must reach the dev client (not be dropped after launchApp), so its flags keep the dev menu shut
+  const race = androidLinkRaceAfterLaunch();
+  const raceRun = runFlow(flow, race.d);
+  report("Android: the link loads the app after launchApp without opening the dev menu",
+    !raceRun.failure && race.state.screen === "app" && !race.state.devMenuOpened && race.state.picks === 0,
+    raceRun.failure || `devMenuOpened=${race.state.devMenuOpened} serverPicks=${race.state.picks}`);
+
+  // EXP-298: the dev client's load error screen ends the wait at once, failing on the assert on `loaded`
+  const ERROR_EXIT_MS = 30000; // a couple of polls, far below the 120 s wait
+  for (const platform of ["android", "ios"]) {
+    const error = loadErrorScreen(platform);
+    const errorRun = runFlow(flow, error.d);
+    report(`${platform}: the load error screen fails the boot in ${error.d.now / 1000} s`,
+      /assertTrue .*devClientBoot\.loaded/.test(errorRun.failure || "") && error.d.now <= ERROR_EXIT_MS,
+      errorRun.failure || "flow passed");
+  }
 }
 
 function toggleScenarios(flow) {

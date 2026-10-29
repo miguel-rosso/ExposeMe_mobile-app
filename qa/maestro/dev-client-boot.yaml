@@ -9,6 +9,15 @@
 # (Android applies the former only when it loads this link).
 appId: com.socketNull.ExposeMe
 ---
+# Android (expo-dev-launcher 58): right after the caller's launchApp, MainActivity sits on a redirect delegate whose
+# onNewIntent drops any intent until it hands over to the launcher, so the link was lost, the launcher showed and the
+# server pick loaded the app without the link's flags: the dev menu opened (EXP-296). With the app stopped, the link
+# cold-starts it and is read in onCreate. Stopping keeps clearState and the granted permissions. iOS handles the link.
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - stopApp
 - openLink: "exp+expose-me://expo-development-client/?url=${METRO_URL}&disableOnboarding=1&disableAutoLaunch=1&__expo_disable_auto_launch=1"
 - waitForAnimationToEnd:
     timeout: 5000
@@ -23,14 +32,16 @@ appId: com.socketNull.ExposeMe
 # Poll until the app (by testID) or the Expo dev menu, if it still opens at launch over it, shows up: one selector can't
 # OR a testID with text. After clearState the dev client may stay on its launcher instead of loading the bundle,
 # sometimes only after a while (seen on Android): pick the local server when it shows, up to maxServerPicks times.
+# The dev client's load error screen ends the wait at once (EXP-298): nothing loads from there without a relaunch. It
+# shares the dev menu's lookup (each lookup that finds nothing costs seconds), told apart only when one of them shows.
 # The deadline is set once (EXP-288): a pick doesn't restart it, so the wait gives up `timeout` after it starts (plus
 # the poll under way, at most one server pick) however often the launcher comes back. lab.sh's STUCK_ATTEMPT_S counts
 # on this timeout (lab-play.test.sh reads its `timeout: <ms>`).
-- evalScript: "${output.devClientBoot = { timeout: 120000, maxServerPicks: 2, serverPicks: 0, loaded: false }}"
+- evalScript: "${output.devClientBoot = { timeout: 120000, maxServerPicks: 2, serverPicks: 0, loaded: false, loadFailed: false }}"
 - evalScript: ${output.devClientBoot.deadline = Date.now() + output.devClientBoot.timeout}
 - repeat:
     while:
-      true: ${!output.devClientBoot.loaded && Date.now() < output.devClientBoot.deadline}
+      true: ${!output.devClientBoot.loaded && !output.devClientBoot.loadFailed && Date.now() < output.devClientBoot.deadline}
     commands:
       - runFlow:
           when:
@@ -41,12 +52,18 @@ appId: com.socketNull.ExposeMe
       - runFlow:
           when:
             true: ${!output.devClientBoot.loaded}
-            visible: "Connected to:|Runtime version:.*"
+            visible: "Connected to:|Runtime version:.*|There was a problem loading the project.*"
           commands:
             - evalScript: ${output.devClientBoot.loaded = true}
+            - runFlow:
+                when:
+                  visible: "There was a problem loading the project.*"
+                commands:
+                  - evalScript: ${output.devClientBoot.loaded = false}
+                  - evalScript: ${output.devClientBoot.loadFailed = true}
       - runFlow:
           when:
-            true: ${!output.devClientBoot.loaded && output.devClientBoot.serverPicks < output.devClientBoot.maxServerPicks}
+            true: ${!output.devClientBoot.loaded && !output.devClientBoot.loadFailed && output.devClientBoot.serverPicks < output.devClientBoot.maxServerPicks}
             visible: "Development servers|DEVELOPMENT SERVERS"
           commands:
             # the server entry is discovered after the header renders (slow emulators)
@@ -55,8 +72,11 @@ appId: com.socketNull.ExposeMe
                 timeout: 30000
             - tapOn: "http://.*:8081"
             - evalScript: ${output.devClientBoot.serverPicks += 1}
+# Fails on the load error screen or when the wait runs out. Keep this exact line: lab.sh's BOOT_LOADED_CONDITION
+# (boot_check_failed / boot_wait_ran_out) force-stops the app and retries the attempt once when it fails
 - assertTrue: ${output.devClientBoot.loaded}
-# If the dev menu still opened at launch (a dev client without the link's flags), close it (SDK 58 header: "Runtime version")
+# Safety net: if the dev menu still opened at launch (a dev client that didn't get the link's flags), close it
+# (SDK 58 header: "Runtime version")
 - runFlow:
     when:
       visible: "Connected to:|Runtime version:.*"

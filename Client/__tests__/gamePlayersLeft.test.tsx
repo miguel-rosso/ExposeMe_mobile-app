@@ -2,11 +2,14 @@ import React from "react";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import { FakeSocket } from "../testUtils/fakeSocket";
 import { playerOptionId } from "../app/utils/testIds";
+import { GameStateSnapshot } from "../app/models/interfaces";
 // Loaded with the file (jest.mock calls below are hoisted above it): a cold transform must not hit the test timeout
 import GameScreen from "../app/screens/GameScreen";
 
 // EXP-042: a player who leaves (player-left) or is kicked (player-removed) mid-game stops being an answer option;
 // new-host moves the host flag. A player merely disconnected (still in the room) stays an option (DEC-016).
+// EXP-301 / DEC-038: one who leaves during a round stays its option, with my pick on them, until the next photo wait:
+// they may be the photo's owner (still the answer), and the app can't tell which leaver that is.
 
 jest.mock("@react-native-async-storage/async-storage", () =>
   require("@react-native-async-storage/async-storage/jest/async-storage-mock")
@@ -62,7 +65,19 @@ const optionPlayers = (root: ReactTestInstance) =>
     .props.players.map((p: { username: string; isHost: boolean }) => [p.username, p.isHost]);
 const press = (root: ReactTestInstance, name: string) =>
   act(() => root.find((n) => n.props.testID === playerOptionId(name) && typeof n.props.onPress === "function").props.onPress());
+// The answer option drawn for `name`, in the state the screen gives it (idle / selected / correct / wrong)
+const optionState = (root: ReactTestInstance, name: string) =>
+  root.find((n) => n.props.username === name && typeof n.props.state === "string").props.state;
+const submitted = () => mockSocket.emitted.filter(([ev]) => ev === "submit-answer").map(([, d]) => d);
 const START = { photo: "/temp/x.jpg", round: 1, duration: 8_000 };
+const NEXT_WAIT = { round: 2, duration: 15_000 };
+const NEXT_START = { photo: "/temp/y.jpg", round: 2, duration: 8_000 };
+// Rejoin snapshot of round 1 in answering: carol, one of its options, has left the room
+const roundSnapshot = (over: Partial<GameStateSnapshot> = {}): GameStateSnapshot => ({
+  started: true, phase: "answering", round: 1, totalRounds: 10, photo: START.photo, correctAnswer: null,
+  yourGuess: null, duration: 4_000, phaseTotal: 7_700, held: false, pause: null, scores: [],
+  players: mockPlayers.slice(0, 2), roundOptions: mockPlayers, ...over,
+});
 
 describe("GameScreen: players leaving mid-game (EXP-042)", () => {
   let r: TestRenderer.ReactTestRenderer;
@@ -80,31 +95,48 @@ describe("GameScreen: players leaving mid-game (EXP-042)", () => {
     jest.useRealTimers();
   });
 
-  it("removes a player who left from the answer options", () => {
+  it("keeps a player who left during the round as an option, in their place, until the next photo wait", () => {
     expect(optionNames(r.root)).toEqual(["alice", "bob", "carol"]);
+    act(() => mockSocket.fire("player-left", "alice"));
+    act(() => mockSocket.fire("player-removed", { ...mockPlayers[2] })); // kicked: the same
+    expect(optionNames(r.root)).toEqual(["alice", "bob", "carol"]);
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "alice", duration: 3_000, yourGuess: "" }));
+    expect(optionNames(r.root)).toEqual(["alice", "bob", "carol"]);
+    act(() => mockSocket.fire("waiting-photo", NEXT_WAIT));
+    act(() => mockSocket.fire("round-start", NEXT_START));
+    expect(optionNames(r.root)).toEqual(["bob"]);
+  });
+
+  it("removes a player who left between rounds", () => {
+    act(() => mockSocket.fire("waiting-photo", NEXT_WAIT));
     act(() => mockSocket.fire("player-left", "carol"));
+    act(() => mockSocket.fire("round-start", NEXT_START));
     expect(optionNames(r.root)).toEqual(["alice", "bob"]);
   });
 
-  it("removes a kicked player (player-removed carries the public player)", () => {
-    act(() => mockSocket.fire("player-removed", { ...mockPlayers[2] }));
-    expect(optionNames(r.root)).toEqual(["alice", "bob"]);
-  });
-
-  it("drops my pick if that player leaves before the reveal", () => {
+  // EXP-301: the owner who left is still the answer, so a right pick on them must not be withdrawn
+  it("keeps my pick on a player who left, and the reveal colours it", () => {
     press(r.root, "carol");
     act(() => mockSocket.fire("player-left", "carol"));
-    act(() => { jest.advanceTimersByTime(200); }); // coalesced: the withdrawal goes out 200 ms after the pick
-    act(() => mockSocket.fire("round-reveal", { correctAnswer: "alice", duration: 3_000, yourGuess: "" }));
-    // Sent when tapped, then withdrawn when carol left (EXP-148: nothing is sent at the reveal)
-    expect(mockSocket.emitted.filter(([ev]) => ev === "submit-answer").map(([, d]) => d)).toEqual([{ guess: "carol" }, { guess: "" }]);
+    act(() => { jest.advanceTimersByTime(1_000); });
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "carol", duration: 3_000, yourGuess: "carol" }));
+    // Sent once, when tapped: nothing withdraws it (EXP-148: nothing is sent at the reveal either)
+    expect(submitted()).toEqual([{ guess: "carol" }]);
+    expect(optionState(r.root, "carol")).toBe("correct");
+  });
+
+  it("still takes a pick on a player who left during the round", () => {
+    act(() => mockSocket.fire("player-left", "carol"));
+    press(r.root, "carol");
+    expect(submitted()).toEqual([{ guess: "carol" }]);
+    expect(optionState(r.root, "carol")).toBe("selected");
   });
 
   it("keeps my pick when somebody else leaves", () => {
     press(r.root, "alice");
     act(() => mockSocket.fire("player-left", "carol"));
     act(() => mockSocket.fire("round-reveal", { correctAnswer: "alice", duration: 3_000, yourGuess: "alice" }));
-    expect(mockSocket.emitted.filter(([ev]) => ev === "submit-answer").map(([, d]) => d)).toEqual([{ guess: "alice" }]);
+    expect(submitted()).toEqual([{ guess: "alice" }]);
   });
 
   it("new-host moves the host flag (sent right before player-left, handled in one batch)", () => {
@@ -113,15 +145,34 @@ describe("GameScreen: players leaving mid-game (EXP-042)", () => {
       mockSocket.fire("new-host", { ...mockPlayers[1], isHost: true });
       mockSocket.fire("player-left", "alice");
     });
+    act(() => mockSocket.fire("waiting-photo", NEXT_WAIT));
+    act(() => mockSocket.fire("round-start", NEXT_START));
     expect(optionPlayers(r.root)).toEqual([["bob", true], ["carol", false]]);
   });
 
+  // EXP-301: a reconnect in the same round re-sends my pick on the owner who left (the server still takes it)
+  it("keeps the round's leavers, and re-sends my pick on one, after a rejoin snapshot of the same round", () => {
+    press(r.root, "carol");
+    act(() => mockSocket.fire("player-left", "carol"));
+    mockSocket.emitted = [];
+    act(() => mockSocket.fire("game-state", roundSnapshot()));
+    expect(optionNames(r.root)).toEqual(["alice", "bob", "carol"]);
+    expect(submitted()).toEqual([{ guess: "carol" }]);
+  });
+
+  // EXP-301 / EXP-310: offline when the owner left, so the player-left never arrived: the snapshot brings them back
+  it("draws a leaver it never heard of from the snapshot's round options, and the reveal colours my pick on them", () => {
+    press(r.root, "carol");
+    act(() => mockSocket.fire("game-state", roundSnapshot()));
+    expect(optionNames(r.root)).toEqual(["alice", "bob", "carol"]);
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "carol", duration: 3_000, yourGuess: "carol" }));
+    expect(optionState(r.root, "carol")).toBe("correct");
+  });
+
   it("a merely disconnected player stays an option (DEC-016)", () => {
-    act(() => mockSocket.fire("game-state", {
-      started: true, phase: "answering", round: 1, totalRounds: 10, photo: "/temp/x.jpg",
-      correctAnswer: "", duration: 4_000, held: false, pause: null, scores: [],
+    act(() => mockSocket.fire("game-state", roundSnapshot({
       players: mockPlayers.map((p) => (p.username === "carol" ? { ...p, connected: false } : p)),
-    }));
+    })));
     expect(optionNames(r.root)).toEqual(["alice", "bob", "carol"]);
   });
 

@@ -158,6 +158,11 @@ export interface GameStateSnapshot extends ResyncTiming {
   pause: GamePausedData | null;
   scores: ScoreRound[];
   players: Player[];
+  /**
+   * The round's answer options in answering/reveal/scores (else empty): the players in the room at its round-start,
+   * those who left since included (DEC-038)
+   */
+  roundOptions: Player[];
 }
 
 export type PlantUploadState = "idle" | "uploading" | "failed";

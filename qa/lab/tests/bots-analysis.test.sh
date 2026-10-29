@@ -4,7 +4,8 @@
 #   variants and synthetic games so that each check function reports at least one error: dropping any of them from
 #   analyseRoom fails this test) must give exactly the summary the original analyse() of bots.mjs gave (`expected`),
 #   errors in the same order. lab.sh, bots-cli.test.sh and the dashboard read that JSON.
-# - players out of the room (EXP-139): leave (--leave-round) and kick (--kick) checks on small synthetic games.
+# - players out of the room (EXP-139): leave (--leave-round) and kick (--kick) checks on small synthetic games, and the
+#   photo owner leaving during their round (--leave-owner, EXP-301 / DEC-038): still the answer, voters score.
 # - holds of the scoreboard (--hold, EXP-303): everyone let go within 1 s of the holder releasing or going away.
 # Run: qa/lab/tests/bots-analysis.test.sh
 # A change meant to alter the summary: UPDATE_FIXTURES=1 qa/lab/tests/bots-analysis.test.sh rewrites every fixture's
@@ -43,9 +44,9 @@ done
 
 # ── Leave / kick (EXP-139) ──
 # A synthetic 3-round game of bot1 (host), bot2, bot3 where one player goes out at round 2 (or in the lobby); the
-# mutation breaks it. Prints the consistency errors, one per line, and who has missed events (a player out of the
+# mutation breaks it. In "owner-left" bot3 leaves while its own photo is round 2's, and bot2 votes for it after it left. Prints the consistency errors, one per line, and who has missed events (a player out of the
 # room misses the rest of the game on purpose, so a clean game prints nothing).
-exits() { # scenario (left|kicked|kicked-device|lobby-kick), mutation (none|...)
+exits() { # scenario (left|owner-left|kicked|kicked-device|lobby-kick), mutation (none|...)
   node --input-type=module -e '
     const { analyseRoom } = await import(process.argv[1]);
     const [scenario, mutation] = process.argv.slice(2);
@@ -58,6 +59,9 @@ exits() { # scenario (left|kicked|kicked-device|lobby-kick), mutation (none|...)
     const lobbyKick = scenario === "lobby-kick";
     const inGame = lobbyKick ? ["bot1", "bot2"] : [...players, ...(out === "ios-a" ? [out] : [])];
     const bots = (names) => names.filter((n) => players.includes(n));
+    const leaves = scenario === "left" || scenario === "owner-left";
+    const ownerLeftIn = (round) => scenario === "owner-left" && round === 2;
+    const points = new Map();
     if (lobbyKick) {
       at("bot1", "kick-sent", 0, { username: "bot3" });
       all(players, "player-removed", 0, { username: "bot3" });
@@ -71,7 +75,7 @@ exits() { # scenario (left|kicked|kicked-device|lobby-kick), mutation (none|...)
       all(room, "waiting-photo", round, { round, duration: 15000 });
       all(room, "round-start", round, { photo: `/temp/p${round}.jpg`, duration: 7700 });
       if (round === 2 && !lobbyKick) {
-        if (scenario === "left") { at("bot3", "left-room", 2); room = ["bot1", "bot2"]; }
+        if (leaves) { at("bot3", "left-room", 2, scenario === "owner-left" ? { owner: true } : undefined); room = ["bot1", "bot2"]; }
         else {
           at("bot1", "kick-sent", 2, { username: out });
           if (mutation !== "no-notice") all(bots(inGame), "player-removed", 2, { username: out });
@@ -79,14 +83,20 @@ exits() { # scenario (left|kicked|kicked-device|lobby-kick), mutation (none|...)
           if (mutation === "events-after-kick") at("bot3", "round-reveal", 2, { correctAnswer: "bot1" });
           room = bots(inGame).filter((n) => n !== out);
         }
-        if (scenario === "left" && mutation !== "no-notice") all(room, "player-left", 2, { username: "bot3" });
+        if (leaves && mutation !== "no-notice") all(room, "player-left", 2, { username: "bot3" });
       }
-      const answer = mutation === "answer-after-exit" && round === 3 ? out : "bot1";
-      all(room, "guess-sent", round, (n) => ({ guess: n === "bot1" ? "" : mutation === "guess-after-exit" && round === 3 ? out : "bot1" }));
+      const answer = mutation === "answer-after-exit" && round === 3 ? out
+        : ownerLeftIn(round) && mutation !== "owner-not-answer" ? "bot3" : "bot1";
+      const votesOwner = ownerLeftIn(round) && mutation !== "nobody-voted-owner";
+      const guessOf = (u) => (u === "bot1" ? "" : mutation === "guess-after-exit" && round === 3 ? out : votesOwner ? "bot3" : "bot1");
+      all(room, "guess-sent", round, (n) => ({ guess: guessOf(n) }));
       all(room, "round-reveal", round, { correctAnswer: answer });
       const rows = [...room, ...(mutation === "scores-after-exit" && round === 3 ? [out] : [])];
-      const guessOf = (u) => (u === "bot1" ? "" : mutation === "guess-after-exit" && round === 3 ? out : "bot1");
-      all(room, "round-scores", round, { round, scores: rows.map((u) => ({ username: u, points: 0, lastGuess: guessOf(u), lastAnswerCorrect: guessOf(u) === answer })) });
+      for (const u of rows) {
+        const pointMissing = mutation === "owner-point-missing" && ownerLeftIn(round);
+        if (guessOf(u) === answer && !pointMissing) points.set(u, (points.get(u) ?? 0) + 1);
+      }
+      all(room, "round-scores", round, { round, scores: rows.map((u) => ({ username: u, points: points.get(u) ?? 0, lastGuess: guessOf(u), lastAnswerCorrect: guessOf(u) === answer })) });
     }
     all(room, "game-over", 3, { finalScore: [] });
     // A phase event the leaver really missed while still in the room (before its exit) is still reported
@@ -106,6 +116,11 @@ expect_error() { # label, scenario, mutation, expected error text
   [[ "$got" == *"$4"* ]] && ok "$1" || ko "$1" "expected [$4] in [$got]"
 }
 expect_clean "a bot leaving at round 2: the game goes on without it" left
+expect_clean "the owner leaving during its round: still the answer, a vote for it after it left scores" owner-left
+expect_error "owner leaving: a vote for it scored without its point" owner-left owner-point-missing "round 2: bot2 voted bot3, the owner who left, but was scored correct with 0 point(s)"
+expect_error "owner leaving: still guessed in a later round" owner-left guess-after-exit "bot2: guessed bot3 after it left"
+expect_error "owner leaving: nobody voted for it (the rule not exercised)" owner-left nobody-voted-owner "round 2: nobody voted bot3, the owner who left"
+expect_error "owner leaving: the round's answer is someone else" owner-left owner-not-answer "round 2: bot3 left as its owner but the answer was bot1"
 expect_clean "a bot kicked at round 2: told, cut off, game goes on" kicked
 expect_clean "a device kicked at round 2 (bots only see the notice)" kicked-device
 expect_clean "a bot kicked in the lobby: not in the game" lobby-kick

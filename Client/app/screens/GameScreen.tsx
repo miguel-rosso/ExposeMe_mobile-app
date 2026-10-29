@@ -32,7 +32,8 @@ import { prefetchImage } from "@/app/utils/image";
 import { photoWaitOf, pickAndUploadTurnPhoto } from "../utils/turnPhoto";
 import { SkipNotice, skipNoticeFor, skipNoticeText } from "../utils/waitingPhoto";
 import {
-  gameStateFollowUps, initialRoundView, isRevealedOwner, phaseElapsed, RoundAction, roundReducer, RoundView,
+  gameStateFollowUps, initialRoundView, isRevealedOwner, phaseElapsed, RoundAction, roundOptions, roundReducer,
+  RoundView,
 } from "../utils/roundState";
 import { emitWhileConnected } from "../utils/socketEmit";
 import { useGameConnection } from "../hooks/useGameConnection";
@@ -108,7 +109,7 @@ const GameScreen = () => {
     if (currentPhoto && photoHeadersRef.current) prefetchImage(currentPhoto, photoHeadersRef.current);
   };
   const {
-    photo, round, phase, phaseDuration, phaseKey, correctAnswer, scores, mySelection, gameHeld, pressing,
+    photo, round, phase, phaseDuration, phaseKey, correctAnswer, scores, mySelection, gameHeld, pressing, leavers,
   } = roundView;
   // QA builds only: tells the server when this device rendered each phase (lab render-skew metrics); the phase
   // handlers below call markPhaseHandled first, so the ack also says when their event arrived
@@ -400,10 +401,14 @@ const GameScreen = () => {
       },
     };
 
-    // Someone left or was kicked: no longer an answer option (a disconnected player stays, they may come back)
+    // Someone left or was kicked: out of the room (a disconnected player stays, they may come back). During a round
+    // they stay one of its options, and my pick on them stands, until the next photo wait (DEC-038, see roundOptions)
     const dropPlayer = (name: string) => {
+      const player = playersRef.current.find((p) => p.username === name);
+      if (!player) return;
+      const index = roundOptions(playersRef.current, roundRef.current.leavers).indexOf(player);
+      dispatchRound({ type: "player-left", leaver: { player, index } });
       setPlayers(withoutPlayer(playersRef.current, name));
-      if (roundRef.current.phase === "answering" && roundRef.current.mySelection === name) pickGuess("");
     };
     // Kept on the final screens until unmount (still in the room)
     const roomHandlers: SocketHandlers = {
@@ -448,8 +453,9 @@ const GameScreen = () => {
   // Denser options in crowded rooms, in a bounded area that scrolls: the photo and the timer stay visible (EXP-250).
   // Kept stable for the memoised options grid
   const { height: windowHeight } = useWindowDimensions();
+  const answerPlayers = useMemo(() => roundOptions(playersProvider, leavers), [playersProvider, leavers]);
   const answersLayout = useMemo(
-    () => answerOptionsLayout(playersProvider.length, windowHeight), [playersProvider.length, windowHeight],
+    () => answerOptionsLayout(answerPlayers.length, windowHeight), [answerPlayers.length, windowHeight],
   );
 
   // ── Render helpers ───────────────────────────────────
@@ -466,7 +472,7 @@ const GameScreen = () => {
   };
   const onPickOption = useCallback((username: string) => pickOptionRef.current(username), []);
   // Each player's colour, fixed for the game and the same on every device (EXP-253)
-  const optionColors = usePlayerColors(playersProvider);
+  const optionColors = usePlayerColors(answerPlayers);
   const reduceMotion = useReduceMotion();
 
   const renderAnswerOption = useCallback((player: Player, index: number) => (
@@ -583,7 +589,7 @@ const GameScreen = () => {
                     style={[tw`absolute z-40 p-2 flex-row justify-center`, safeBottomRow(insets, ANSWERS_BOTTOM)]}
                     onLayout={onAnswersLayout}
                   >
-                    <AnswerOptionsGrid players={playersProvider} layout={answersLayout} renderOption={renderAnswerOption} />
+                    <AnswerOptionsGrid players={answerPlayers} layout={answersLayout} renderOption={renderAnswerOption} />
                   </View>
                 )}
 

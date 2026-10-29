@@ -91,10 +91,18 @@
 //                           ("consistency"; second-game events are recorded as "g2-<event>"). Needs --host and 3+ bots.
 //   node qa/lab/bots.mjs --bots 3 --host --rounds 3 --quit-after-game-over
 //            --leave-round R  the last bot leaves at round R's round-start exactly like the app's Exit (leave-room and
-//                           closes its socket once the server acks it, EXP-139 / EXP-254). Every other bot gets player-left and drops it
-//                           from its answer options; it is in no later round-scores nor answer, and the game goes on while
+//                           closes its socket once the server acks it, EXP-139 / EXP-254). Every other bot gets player-left;
+//                           like the app (DEC-038, EXP-301) it keeps the leaver as an answer option, and its pick on them,
+//                           until the next waiting-photo (one who leaves between rounds is dropped at once). It is in no
+//                           later round-scores nor answer, nobody guesses it in a later round, and the game goes on while
 //                           2 players remain (with 2 bots the other one gets game-over at once) ("consistency").
+//            --leave-owner  with --leave-round R, the bot that leaves is round R's photo owner (the one that sent its
+//                           photo), not the last bot: it stays the round's answer. The first bot still in the room votes
+//                           for it as soon as it gets player-left (a vote sent after the departure), so someone always
+//                           does; every bot that votes for it must be scored correct with one more point in that
+//                           round-scores, and a round where nobody did is reported ("consistency", EXP-301).
 //   node qa/lab/bots.mjs --bots 3 --host --rounds 3 --leave-round 2
+//   node qa/lab/bots.mjs --bots 4 --host --rounds 3 --leave-round 2 --leave-owner
 //            --kick NAME[@R]  the host bot removes NAME (remove-player, EXP-139): in the lobby 5 s after NAME is in (the
 //                           game then starts without it), or at round R's round-start. Every bot gets player-removed
 //                           { NAME }; NAME is in no later game-started, round-scores or answer, and nobody guesses it. A
@@ -120,7 +128,7 @@
 //   on each round-start one non-owner bot GETs the photo with them (must be 200) and without (must be 401): "photo-access".
 //   Payload privacy (EXP-017/EXP-027/EXP-126): every event a bot receives is scanned; no socketId / rejoinToken /
 //   plantedPhoto / hasPlantedPhoto / isReady key (except the bot's own token and planted mark at the top of room-of-game), no socket id or other bot's token as a value; during
-//   answering/reveal no player in room-of-game / game-state (players and scores) / new-host / player-removed shows
+//   answering/reveal no player in room-of-game / game-state (players, scores, roundOptions) / new-host / player-removed shows
 //   this round's guess or more points than at the last round-scores; a waiting-photo game-state has no owner/photo:
 //   "payload-leak".
 //   Photo owner secrecy (EXP-128, EXP-252): no payload has an `owner` / `isOwner` key; round-start is exactly
@@ -151,7 +159,7 @@ import { analyseRoom, DISCONNECT_GRACE_MS } from "./bots-analysis.mjs";
 // ── Command line ──
 // Parsed and validated before anything touches the network (EXP-197): --help and bad arguments never connect
 const BOOL_FLAGS = new Set([
-  "host", "no-answer", "app-resync", "lobby-host-drop", "drop-on-turn", "quit-after-game-over", "help",
+  "host", "no-answer", "app-resync", "lobby-host-drop", "drop-on-turn", "quit-after-game-over", "leave-owner", "help",
 ]);
 const VALUE_FLAGS = new Set([
   "server", "bots", "rooms", "rounds", "wait-players", "code", "code-file", "photos", "out", "chaos", "upload-fail",
@@ -179,7 +187,8 @@ Headless ExposeMe players (see the header of qa/lab/bots.mjs for every scenario)
   --chaos P  --upload-fail P  --photo-unavailable P  --no-ready K  --no-answer  --plant K
   --drop-round R | --drop-rounds R1,R2,...  --drop-secs S [--drop-bot K | --drop-on-turn (--drop-round only)]
   --app-resync  --lobby-host-drop
-  --leave-round R            the last bot leaves the room (leave-room) at round R's round-start
+  --leave-round R [--leave-owner]  the last bot (or, with --leave-owner, round R's photo owner) leaves the room
+                             (leave-room) at round R's round-start
   --kick NAME[@R]            the host bot removes NAME (remove-player): in the lobby once NAME is in, or at round R
   --play-again-linger S [--play-again-linger-bot K] [--start-next-game D]
   --quit-after-game-over     the last bot quits at game-over; the next game must drop it (needs --host, 3+ bots)
@@ -308,11 +317,15 @@ const NO_READY = Number(args["no-ready"] || 0);
 const PLANT = Number(args.plant || 0);
 const NO_ANSWER = !!args["no-answer"];
 // --no-answer: bots submit an empty guess like a player who never taps, so nobody scores (tie at 0).
-// Nobody is told whose photo it is, the owner included (EXP-252): every bot guesses at random among all players.
+// Nobody is told whose photo it is, the owner included (EXP-252): every bot guesses at random among all the round's
+// options, those who left during the round included (DEC-038).
 const pickGuess = (bot) => {
   if (NO_ANSWER) return "";
-  return bot.players[Math.floor(Math.random() * bot.players.length)] || "";
+  const options = [...bot.players, ...bot.leavers];
+  return options[Math.floor(Math.random() * options.length)] || "";
 };
+// The phases of a round in play: a player who leaves then stays one of its options until the next waiting-photo
+const ROUND_PHASES = new Set(["answering", "reveal", "scores"]);
 const TIMEOUT_S = Number(args.timeout || 900);
 const DROP_ROUND = DROP_ROUNDS[0] ?? 0; // --drop-on-turn: the first round whose turn triggers the drop
 const DROP_SECS = Number(args["drop-secs"] || 5);
@@ -389,6 +402,8 @@ function plannedKick() {
 }
 const LEAVE_ROUND = plannedLeaveRound();
 const LEAVER = N_BOTS - 1; // the bot that leaves with --leave-round
+const LEAVE_OWNER = !!args["leave-owner"]; // --leave-owner: round LEAVE_ROUND's photo owner leaves instead
+if (LEAVE_OWNER && !LEAVE_ROUND) exitUsage("--leave-owner needs --leave-round");
 // Like the app (Client/app/utils/leaveRoom.ts): the leaver closes its socket once leave-room is acked, or after this
 const LEAVE_ACK_TIMEOUT_MS = 1_000;
 // Like the app (Client/app/utils/plantPhotoAck.ts): a planted photo counts as sent only once plant-photo is acked ok
@@ -448,6 +463,7 @@ function payloadLeaks(me, ev, payload, ids, tokens, ctx = { phase: null, baselin
   if (state?.started && inRound(state.phase)) {
     checkHidden(state.players ?? [], `${ev}.players`, state.phase);
     if (ev === "game-state") checkHidden(state.scores ?? [], "game-state.scores", state.phase);
+    if (ev === "game-state") checkHidden(state.roundOptions ?? [], "game-state.roundOptions", state.phase);
   }
   // Nor can the scores' order (EXP-252): a hidden correct guess must not lift anyone past a tied player. It is the
   // order round-scores uses on the shown points: highest first, ties in room order (the players list's order)
@@ -549,7 +565,7 @@ function runRoom(roomIdx, fixedCode) {
       const name = botName(roomIdx, i);
       const isHost = !!args.host && i === 0;
       const socket = io(SERVER, { transports: ["websocket"], reconnection: true });
-      const bot = { name, socket, isHost, players: [], guess: "", round: 0, token: null, plants: i < PLANT, droppedRounds: new Set() };
+      const bot = { name, socket, isHost, players: [], leavers: [], guess: "", round: 0, token: null, plants: i < PLANT, droppedRounds: new Set() };
       bots.push(bot);
       // Second game (--play-again-linger-bot): recorded apart so the first game's checks only see the first game
       const rec = (ev, round, payload) =>
@@ -642,15 +658,23 @@ function runRoom(roomIdx, fixedCode) {
         maybeStart();
       });
       socket.on("player-joined", (p) => { bot.players.push(p.username); maybeStart(); });
-      // Someone left or was removed: no longer an answer option (like the app's game screen), a pick on them is redone
+      // Someone left or was removed (like the app's game screen, DEC-038): out of the room, but during a round still one
+      // of its options, and a pick on them stands, until the next waiting-photo; between rounds simply gone
       const dropPlayer = (username) => {
+        if (!bot.players.includes(username)) return;
         bot.players = bot.players.filter((x) => x !== username);
-        if (bot.guess === username) bot.guess = pickGuess(bot);
+        if (ROUND_PHASES.has(bot.phase)) bot.leavers.push(username);
+        else if (bot.guess === username) bot.guess = pickGuess(bot);
       };
       socket.on("player-left", (n) => {
         rec("player-left", bot.round, { username: n });
         dropPlayer(n);
+        if (votesForDepartedOwner(n)) { bot.guess = n; sendGuess(bot.round); }
       });
+      // --leave-owner: the owner who left during its round stays the answer (DEC-038). The first bot still in the room
+      // switches its pick to them at once, so the round always has a vote sent after the departure
+      const votesForDepartedOwner = (username) => LEAVE_OWNER && bot.round === LEAVE_ROUND && bot.phase === "answering"
+        && bot.leavers.includes(username) && bots.find((b) => !b.gone) === bot;
       // Removed by the host (EXP-139). If it is us, the server closes our connection next: we are out of the room
       socket.on("player-removed", (p) => {
         rec("player-removed", bot.round, { username: p.username });
@@ -751,6 +775,7 @@ function runRoom(roomIdx, fixedCode) {
           uploads.push(up.ms);
           if (!stillInForce("photo")) return;
           socket.emit("photo-sent", { photo: up.url });
+          bot.photoRound = d.round; // --leave-owner: this round's photo is ours
           rec("photo-sent", d.round, { attempt: d.attempt });
         } catch (e) {
           if (e.rateLimited) rateLimited++;
@@ -763,8 +788,10 @@ function runRoom(roomIdx, fixedCode) {
         rec("round-start", d.round, { photo: d.photo, duration: d.duration });
         if (bot.lingering) return; // not playing: no guesses
         bot.round = d.round;
+        bot.leavers = []; // a new round: its options are the players in the room
         if (KICK?.round === d.round && bot.isHost && !kick.sent) sendKick(bot, d.round);
-        if (LEAVE_ROUND === d.round && i === LEAVER && !bot.gone) { leaveRoom(d.round); return; }
+        const leaves = LEAVE_OWNER ? bot.photoRound === d.round : i === LEAVER;
+        if (LEAVE_ROUND === d.round && leaves && !bot.gone) { leaveRoom(d.round); return; }
         bot.guess = pickGuess(bot);
         // Photo access: the first two bots load the photo like the app's <Image> (with credentials), and check that
         // it is refused without them
@@ -793,7 +820,7 @@ function runRoom(roomIdx, fixedCode) {
       const leaveRoom = (round) => {
         bot.gone = true;
         bot.left = true;
-        rec("left-room", round);
+        rec("left-room", round, LEAVE_OWNER ? { owner: true } : undefined);
         socket.timeout(LEAVE_ACK_TIMEOUT_MS).emit("leave-room", () => socket.disconnect());
       };
       // Planned drop: offline for `secs`, then back on a new socket (rejoin + game-state snapshot)
@@ -825,7 +852,11 @@ function runRoom(roomIdx, fixedCode) {
         rec("round-scores", d.round, { scores: d.scores });
         if (HOLD && bot.ownedRound === d.round && !bot.lingering && Math.random() < HOLD) pressHold(d.round);
       });
-      socket.on("waiting-photo", (d) => rec("waiting-photo", d.round, d));
+      socket.on("waiting-photo", (d) => {
+        bot.phase = "waiting-photo";
+        bot.leavers = []; // the round is over: those who left during it are no longer options
+        rec("waiting-photo", d.round, d);
+      });
       socket.on("round-skipped", (d) => rec("round-skipped", d?.round ?? bot.round, d));
       // Rejoin snapshot: catch up like the app does (pick again in answering, im-ready in the ready phase)
       socket.on("game-state", (d) => {
@@ -844,6 +875,8 @@ function runRoom(roomIdx, fixedCode) {
         }
         bot.resyncing = false;
         bot.players = d.players.map((p) => p.username);
+        // The round's options come from the server, those who left during it included (a player-left missed offline)
+        bot.leavers = (d.roundOptions ?? []).map((p) => p.username).filter((n) => !bot.players.includes(n));
         if (d.round !== bot.round) { bot.round = d.round; bot.guess = pickGuess(bot); }
         bot.phase = d.phase;
         if (d.phase === "answering") sendGuess(d.round); // a pick sent while offline was lost; never in reveal

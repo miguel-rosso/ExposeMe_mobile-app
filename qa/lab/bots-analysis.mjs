@@ -188,6 +188,38 @@ function checkScoredLikeEveryone(r, ctx) {
 }
 
 /**
+ * The photo owner who leaves during their own round stays its answer (DEC-038, EXP-301): in that round-scores every
+ * player who voted for them is scored correct, with one point more than at the bot's previous round-scores. A bot
+ * that left as its round's owner (--leave-owner, "left-room" { owner }) is that round's answer, and somebody voted
+ * for it (bots.mjs makes one bot do so), so the rule was really exercised.
+ */
+function checkDepartedOwnerScored(r, ctx) {
+  const out = new Set();
+  for (const exit of r.events.filter((e) => e.ev === "left-room" && e.payload?.owner)) {
+    const answer = ctx.answerOf.get(exit.round);
+    const sc = r.events.find((e) => e.ev === "round-scores" && e.round === exit.round);
+    if (answer !== undefined && answer !== exit.bot) out.add(`round ${exit.round}: ${exit.bot} left as its owner but the answer was ${answer}`);
+    else if (sc && !sc.payload?.scores?.some((row) => row.lastGuess === exit.bot)) out.add(`round ${exit.round}: nobody voted ${exit.bot}, the owner who left`);
+  }
+  for (const [round, answer] of ctx.answerOf) {
+    const left = r.events.some((e) => e.round === round
+      && ((e.ev === "left-room" && e.bot === answer) || (e.ev === "kick-sent" && e.payload?.username === answer)));
+    if (!left) continue;
+    for (const sc of r.events.filter((e) => e.ev === "round-scores" && e.round === round && !ctx.wentOffline.has(e.bot))) {
+      const previous = r.events.filter((e) => e.bot === sc.bot && e.ev === "round-scores" && e.t < sc.t).pop();
+      for (const row of sc.payload?.scores ?? []) {
+        if (row.lastGuess !== answer) continue;
+        const before = previous?.payload?.scores?.find((s) => s.username === row.username)?.points ?? 0;
+        if (!row.lastAnswerCorrect || row.points !== before + 1) {
+          out.add(`round ${round}: ${row.username} voted ${answer}, the owner who left, but was scored ${row.lastAnswerCorrect ? "correct" : "wrong"} with ${row.points - before} point(s)`);
+        }
+      }
+    }
+  }
+  return [...out];
+}
+
+/**
  * Answers freeze when answering ends (EXP-148): each bot's lastGuess in round-scores is its last pick sent while
  * answering ("" if none); a late-submit (the revealed answer, sent at round-reveal) never counts.
  */
@@ -516,7 +548,8 @@ function checkGoneAtNextGame(r, opts) {
 /**
  * Players out of the room (EXP-139): a bot that left (--leave-round, "left-room") or a player the host removed
  * (--kick, "kick-sent"). Every other bot still in the room (not offline meanwhile) is told (player-left /
- * player-removed); from then on the player is in no player list, score table or answer, and nobody guesses it; a
+ * player-removed); from then on the player is in no player list, score table or answer, and nobody guesses it in a
+ * later round (in the round of the exit they are still an option, DEC-038); a
  * mid-game exit doesn't stop the game while 2 players remain. A kicked bot gets player-removed itself, then the server
  * closes its connection ("kicked-out") and it gets no more game events.
  */
@@ -536,7 +569,7 @@ function checkRoomExits(r, ctx) {
       const later = r.events.filter((e) => e.bot === n && e.t > told.t);
       if (later.some((e) => e.ev === "game-started" && e.payload?.players?.includes(x.who))) out.push(`${n}: ${x.who} ${x.how} but is in game-started`);
       if (later.some((e) => e.ev === "round-scores" && e.payload?.scores?.some((s) => s.username === x.who))) out.push(`${n}: ${x.who} ${x.how} but is still in round-scores`);
-      if (later.some((e) => e.ev === "guess-sent" && e.payload?.guess === x.who)) out.push(`${n}: guessed ${x.who} after it ${x.how}`);
+      if (later.some((e) => e.ev === "guess-sent" && e.round > x.round && e.payload?.guess === x.who)) out.push(`${n}: guessed ${x.who} after it ${x.how}`);
       // The game goes on for the others (a round after the exit's) while the room still has 2 players to play
       const playersLeft = r.events.find((e) => e.ev === "round-scores" && e.t > told.t)?.payload?.scores?.length ?? 0;
       if (x.round >= 1 && x.round < gameRounds && playersLeft >= 2 && !later.some((e) => e.ev === "round-start" && e.round > x.round)) {
@@ -668,6 +701,7 @@ export function analyseRoom(r, opts) {
     ...unavailable.errors,
     ...sync.errors,
     ...checkScoredLikeEveryone(r, ctx),
+    ...checkDepartedOwnerScored(r, ctx),
     ...checkFrozenAnswers(r, ctx),
     ...checkRevealedOwnGuess(r),
     ...checkDuplicateRoundStarts(ctx),

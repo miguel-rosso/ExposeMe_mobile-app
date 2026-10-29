@@ -1,9 +1,15 @@
 import {
-  GamePausedData, GameResumedData, GameStateSnapshot, HoldResumeData, ResyncTiming, RoundRevealData, RoundScoresData,
-  RoundStartData, ScoreRound, ServerPhase, WaitingPhotoData,
+  GamePausedData, GameResumedData, GameStateSnapshot, HoldResumeData, Player, ResyncTiming, RoundRevealData,
+  RoundScoresData, RoundStartData, ScoreRound, ServerPhase, WaitingPhotoData,
 } from "../models/interfaces";
 
 // ── Round view: what the game screen shows of the server's current phase (see Server/GAME_FLOW.md) ──
+
+/** A player who left the room during the round in play, and their place among the round's answer options */
+export interface RoundLeaver {
+  player: Player;
+  index: number;
+}
 
 export interface RoundView {
   photo: string | null;
@@ -27,11 +33,16 @@ export interface RoundView {
   gameHeld: boolean;
   /** My finger is on the hold button */
   pressing: boolean;
+  /**
+   * Players who left during the round in play: still its answer options until the next photo wait (DEC-038). One of
+   * them may be the photo's owner, who stays the answer, and the app can't tell which (secret until the reveal)
+   */
+  leavers: readonly RoundLeaver[];
 }
 
 export const initialRoundView: RoundView = {
   photo: null, round: 0, phase: null, phaseDuration: 0, phaseTotal: 0, phaseKey: 0, correctAnswer: "", scores: null,
-  mySelection: "", gameHeld: false, pressing: false,
+  mySelection: "", gameHeld: false, pressing: false, leavers: [],
 };
 
 /**
@@ -48,6 +59,7 @@ export type RoundAction =
   | { type: "round-reveal"; data: RoundRevealData }
   | { type: "round-scores"; data: RoundScoresData }
   | { type: "pick"; guess: string }
+  | { type: "player-left"; leaver: RoundLeaver }
   | { type: "pressing"; pressing: boolean }
   | { type: "hold-start" }
   | { type: "hold-end" }
@@ -75,9 +87,9 @@ const resyncPhase = (state: RoundView, phase: ServerPhase | null, timing: Resync
 export const phaseElapsed = ({ phaseDuration, phaseTotal }: Pick<RoundView, "phaseDuration" | "phaseTotal">): number =>
   phaseTotal > 0 ? Math.max(0, 1 - phaseDuration / phaseTotal) : 0;
 
-/** Leaves the previous round: no answer, scores, pick or hold left over */
+/** Leaves the previous round: no answer, scores, pick, hold or leavers left over */
 const PER_ROUND_RESET = {
-  correctAnswer: "", scores: null, mySelection: "", gameHeld: false, pressing: false,
+  correctAnswer: "", scores: null, mySelection: "", gameHeld: false, pressing: false, leavers: [],
 } as const;
 
 const inRoundPhase = (phase: ServerPhase | null) => phase === "answering" || phase === "reveal" || phase === "scores";
@@ -104,6 +116,15 @@ const snapshotSelection = (state: RoundView, snap: GameStateSnapshot, sameRound:
   return snap.yourGuess ?? "";
 };
 
+/**
+ * The round's options that are no longer in the room, from the snapshot (the server's list: it covers a `player-left`
+ * this screen missed while offline, or one from before the app restarted)
+ */
+const snapshotLeavers = (snap: GameStateSnapshot): RoundLeaver[] =>
+  snap.roundOptions
+    .map((player, index) => ({ player, index }))
+    .filter(({ player }) => !snap.players.some((p) => p.username === player.username));
+
 /** Renders the `game-state` snapshot a rejoining player receives (the pick shown: see snapshotSelection) */
 const applySnapshot = (state: RoundView, snap: GameStateSnapshot, serverUrl: string): RoundView => {
   if (!snap.started) return { ...state, pressing: false, gameHeld: false };
@@ -117,6 +138,7 @@ const applySnapshot = (state: RoundView, snap: GameStateSnapshot, serverUrl: str
       photo, round: snap.round, correctAnswer: snap.correctAnswer ?? "",
       scores: snap.phase === "scores" ? snap.scores : null,
       mySelection: snapshotSelection(state, snap, sameRound),
+      leavers: snapshotLeavers(snap),
     };
   }
 
@@ -150,6 +172,9 @@ export const roundReducer = (state: RoundView, action: RoundAction): RoundView =
       return { ...startPhase(state, "scores", action.data.duration), scores: action.data.scores, round: action.data.round };
     case "pick":
       return { ...state, mySelection: action.guess };
+    // Left during the round in play: kept as an option until the next photo wait (before it, they simply go)
+    case "player-left":
+      return state.photo && inRoundPhase(state.phase) ? { ...state, leavers: [...state.leavers, action.leaver] } : state;
     case "pressing":
       return { ...state, pressing: action.pressing };
     case "hold-start":
@@ -175,6 +200,19 @@ export const roundReducer = (state: RoundView, action: RoundAction): RoundView =
     case "game-state":
       return applySnapshot(state, action.snap, action.serverUrl);
   }
+};
+
+/**
+ * The round's answer options: the players in the room, with those who left during the round back in their places
+ * (each at its index among the options, re-inserted from the first place on, which rebuilds the order they were in)
+ */
+export const roundOptions = (players: Player[], leavers: readonly RoundLeaver[]): Player[] => {
+  if (leavers.length === 0) return players;
+  const options = [...players];
+  for (const { player, index } of [...leavers].sort((a, b) => a.index - b.index)) {
+    if (!options.some((p) => p.username === player.username)) options.splice(Math.min(index, options.length), 0, player);
+  }
+  return options;
 };
 
 // ── What the screen sends after a `game-state` snapshot ──

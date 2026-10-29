@@ -521,14 +521,64 @@ describe("recordAnswer", () => {
     expect(player(guessers[0])).toMatchObject({ points: 1, lastGuess: owner });
   });
 
-  // EXP-148: a player who left (the owner included) is no longer an option
-  it("ignores a guess for a player who is no longer in the room, keeping the previous pick", () => {
+  // EXP-148: only the round's options can be voted for
+  it("ignores a guess for a name that is not an option of the round, keeping the previous pick", () => {
+    roomManager.removePlayer(room.gameCode, guessers[1]); // left before the round: not one of its options
     engine.onPhotoReceived(room, PHOTO, owner);
-    engine.recordAnswer(room, guessers[0], guessers[1]);
-    engine.recordAnswer(room, guessers[0], "nobody");
-    expect(player(guessers[0]).lastGuess).toBe(guessers[1]);
-    roomManager.removePlayer(room.gameCode, owner);
     engine.recordAnswer(room, guessers[0], owner);
+    engine.recordAnswer(room, guessers[0], "nobody");
+    engine.recordAnswer(room, guessers[0], guessers[1]);
+    expect(player(guessers[0])).toMatchObject({ points: 1, lastAnswerCorrect: true, lastGuess: owner });
+  });
+
+  // EXP-301 / DEC-038: the owner who leaves while answering stays the round's answer, and a right guess still scores
+  it("keeps scoring the owner who left during the round, also for guesses sent after they left", () => {
+    engine.onPhotoReceived(room, PHOTO, owner);
+    engine.recordAnswer(room, guessers[0], owner);
+    roomManager.removePlayer(room.gameCode, owner);
+    engine.recordAnswer(room, guessers[1], owner); // tapped after the owner left (or re-sent on a rejoin)
+    vi.advanceTimersByTime(ANSWER_TIME);
+    expect(lastEvent("round-reveal")!.args[0]).toMatchObject({ correctAnswer: owner });
+    expect(player(guessers[0])).toMatchObject({ points: 1, lastAnswerCorrect: true, lastGuess: owner });
+    expect(player(guessers[1])).toMatchObject({ points: 1, lastAnswerCorrect: true, lastGuess: owner });
+  });
+
+  // EXP-301: a client that missed the player-left (offline, app restarted) rebuilds the round's options from game-state
+  it("sends the round's options in the snapshot, leavers included, answers hidden, only during the round", () => {
+    const names = room.players.map((p) => p.username);
+    expect(engine.snapshot(room).roundOptions).toEqual([]); // waiting for the photo
+    engine.onPhotoReceived(room, PHOTO, owner);
+    engine.recordAnswer(room, guessers[0], owner);
+    roomManager.removePlayer(room.gameCode, owner);
+    const options = engine.snapshot(room).roundOptions;
+    expect(options.map((p) => p.username)).toEqual(names);
+    // Public fields only, this round's answers hidden like in `players`
+    for (const option of options) expect(Object.keys(option).sort()).toEqual(["connected", "isHost", "lastAnswerCorrect", "lastGuess", "points", "username"]);
+    expect(options.find((p) => p.username === guessers[0])).toMatchObject({ points: 0, lastGuess: "", lastAnswerCorrect: false });
+    vi.advanceTimersByTime(ANSWER_TIME + REVEAL_TIME);
+    expect(room.phase).toBe("scores");
+    expect(engine.snapshot(room).roundOptions.map((p) => p.username)).toEqual(names);
+    vi.advanceTimersByTime(SCORE_DISPLAY_TIME);
+    expect(room.phase).toBe("waiting-photo");
+    expect(engine.snapshot(room).roundOptions).toEqual([]);
+  });
+
+  // A host who leaves hands the role over: the round options show only the new host as such
+  it("shows only the host in the room as host among the round's options", () => {
+    engine.onPhotoReceived(room, PHOTO, owner);
+    const host = room.players.find((p) => p.isHost)!.username;
+    const { newHost } = roomManager.removePlayer(room.gameCode, host);
+    const hosts = engine.snapshot(room).roundOptions.filter((p) => p.isHost).map((p) => p.username);
+    expect(hosts).toEqual([newHost!.username]);
+    expect(engine.snapshot(room).roundOptions.find((p) => p.username === host)).toMatchObject({ isHost: false });
+  });
+
+  // DEC-038: another player who leaves during the round is still not the answer: a pick on them scores nothing
+  it("records a guess for a non-owner who left during the round as a wrong one", () => {
+    engine.onPhotoReceived(room, PHOTO, owner);
+    engine.recordAnswer(room, guessers[0], owner);
+    roomManager.removePlayer(room.gameCode, guessers[1]);
+    engine.recordAnswer(room, guessers[0], guessers[1]); // moved to the leaver: the right pick is replaced
     expect(player(guessers[0])).toMatchObject({ points: 0, lastAnswerCorrect: false, lastGuess: guessers[1] });
   });
 

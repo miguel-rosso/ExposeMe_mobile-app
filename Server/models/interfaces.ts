@@ -212,6 +212,11 @@ export interface RoomStateSnapshot {
   pause: PauseInfo | null;
   scores: ScoreRound[];
   players: PublicPlayer[];
+  /**
+   * In answering/reveal/scores: the round's answer options, the players in the room at its round-start (room order),
+   * those who left since included (DEC-038); else empty
+   */
+  roundOptions: PublicPlayer[];
 }
 
 /**

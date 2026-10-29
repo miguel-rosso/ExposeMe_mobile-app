@@ -153,12 +153,17 @@ describe("GameScreen answer options (EXP-250)", () => {
     act(() => r.unmount());
   });
 
-  it("re-lays out without crashing when players leave mid-round (3 columns back to 2)", async () => {
+  // A player who leaves mid-round stays an option until the next photo wait (DEC-038): the grid re-lays out then
+  it("re-lays out without crashing when players leave (3 columns back to 2 in the next round)", async () => {
+    const leaver = playerOptionId(`player${THREE_COLUMNS_FROM_PLAYERS}`);
     const r = await renderAnswering(playerNames(THREE_COLUMNS_FROM_PLAYERS));
     expect(styleOf(cellOf(host(r.root, playerOptionId("player2")))).flexBasis).toBe("30%");
     act(() => mockSocket.fire("player-left", `player${THREE_COLUMNS_FROM_PLAYERS}`));
+    expect(styleOf(cellOf(host(r.root, playerOptionId("player2")))).flexBasis).toBe("30%");
+    act(() => mockSocket.fire("waiting-photo", { round: 2, duration: 15_000 }));
+    act(() => mockSocket.fire("round-start", { photo: "/temp/y.jpg", round: 2, duration: 8_000 }));
     expect(styleOf(cellOf(host(r.root, playerOptionId("player2")))).flexBasis).toBe("48%");
-    expect(r.root.findAll((n) => n.props.testID === playerOptionId(`player${THREE_COLUMNS_FROM_PLAYERS}`))).toHaveLength(0);
+    expect(r.root.findAll((n) => n.props.testID === leaver)).toHaveLength(0);
     act(() => r.unmount());
   });
 });

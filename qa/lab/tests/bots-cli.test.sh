@@ -125,6 +125,8 @@ for bad in 0 abc 2,3 -1; do
   run 2 "--leave-round $bad exits 2" --bots 3 --host --leave-round "$bad" --timeout 1
   [[ "$err" == *"--leave-round \"$bad\" is not a round number"* ]] && ok "--leave-round $bad is named" || ko "--leave-round $bad is named" "$err"
 done
+run 2 "--leave-owner without --leave-round exits 2" --bots 3 --host --leave-owner --timeout 1
+[[ "$err" == *"--leave-owner needs --leave-round"* ]] && ok "--leave-owner without --leave-round is named" || ko "--leave-owner without --leave-round is named" "$err"
 run 2 "--kick without --host exits 2" --bots 2 --code K7MQ4X --kick bot2 --timeout 1
 [[ "$err" == *"--kick needs --host"* ]] && ok "--kick without --host is named" || ko "--kick without --host is named" "$err"
 run 2 "--kick of the host itself exits 2" --bots 3 --host --kick bot1 --timeout 1
@@ -147,12 +149,12 @@ done
 # Joining a room (--code): its length is not ours to know
 SERVER_URL="$URL" node "$BOTS" --bots 2 --code K7MQ4X --leave-round 15 --timeout 1 >/dev/null 2>"$TMP/err"; rc=$?
 [[ "$rc" != 2 ]] && ok "--leave-round 15 with --code is accepted" || ko "--leave-round 15 with --code is accepted" "$(cat "$TMP/err")"
-for good in "--leave-round 2" "--kick bot3" "--kick bot3@2" "--kick ios-a" "--kick a@b"; do
+for good in "--leave-round 2" "--leave-round 2 --leave-owner" "--kick bot3" "--kick bot3@2" "--kick ios-a" "--kick a@b"; do
   # shellcheck disable=SC2086
   SERVER_URL="$URL" node "$BOTS" --bots 3 --host $good --timeout 1 >/dev/null 2>"$TMP/err"; rc=$?
   [[ "$rc" != 2 ]] && ok "$good is accepted" || ko "$good is accepted" "$(cat "$TMP/err")"
 done
-[[ "$(node "$BOTS" --help)" == *"--leave-round R"* && "$(node "$BOTS" --help)" == *"--kick NAME[@R]"* ]] && ok "--help lists --leave-round and --kick" || ko "--help lists --leave-round and --kick"
+[[ "$(node "$BOTS" --help)" == *"--leave-round R [--leave-owner]"* && "$(node "$BOTS" --help)" == *"--kick NAME[@R]"* ]] && ok "--help lists --leave-round, --leave-owner and --kick" || ko "--help lists --leave-round, --leave-owner and --kick"
 
 # ── Loopback servers only: QA traffic never leaves the machine (EXP-220) ──
 # Reserved/unresolvable hosts only, so a broken guard can't reach a real server (--timeout 1 as well)

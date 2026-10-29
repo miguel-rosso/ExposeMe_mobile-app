@@ -115,7 +115,7 @@ describe("GameScreen: the answer bar ends at the event's arrival + duration, how
     act(() => mockSocket.fire("game-state", {
       started: true, phase: "answering", round: 1, totalRounds: 10, photo: "/temp/a.jpg", correctAnswer: null,
       yourGuess: null, duration: LEFT_MS, phaseTotal: ANSWERING_MS, held: false, pause: null, scores: [],
-      players: mockPlayers,
+      players: mockPlayers, roundOptions: mockPlayers,
     }));
     expect(Date.now()).toBe(arrivedAt + MOUNT_LAG_MS);
     expectAnswersCloseAt(arrivedAt, LEFT_MS);

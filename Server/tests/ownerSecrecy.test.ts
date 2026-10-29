@@ -33,7 +33,8 @@ function strings(v: unknown, out: string[] = []): string[] {
 
 /**
  * Owner identity leaks in what `p` received (round-start, answering game-state) since emit index `since`: an
- * `owner` or `isOwner` key, or the owner's name outside the player lists.
+ * `owner` or `isOwner` key, or the owner's name outside the player lists (`players`, `scores`, `roundOptions`: everyone
+ * is in them, the owner included).
  */
 function leaksFor(p: Player, ownerName: string, since: number): string[] {
   const out: string[] = [];
@@ -43,7 +44,7 @@ function leaksFor(p: Player, ownerName: string, since: number): string[] {
     if (e.event === "game-state" && data.phase !== "answering") continue;
     if ("owner" in data) out.push(`${p.username} ${e.event}: owner key`);
     if ("isOwner" in data) out.push(`${p.username} ${e.event}: isOwner key`);
-    const { players: _players, scores: _scores, ...rest } = data;
+    const { players: _players, scores: _scores, roundOptions: _roundOptions, ...rest } = data;
     if (strings(rest).includes(ownerName)) out.push(`${p.username} ${e.event}: owner name`);
   }
   return out;

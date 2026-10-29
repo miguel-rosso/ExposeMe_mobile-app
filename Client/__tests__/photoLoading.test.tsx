@@ -164,7 +164,7 @@ describe("GameScreen prefetches the round photo (EXP-119)", () => {
   it("on a game-state snapshot of a round in play", () => {
     act(() => mockSocket.fire("game-state", {
       started: true, phase: "answering", round: 2, photo: "/temp/2.jpg", duration: 5_000, held: false,
-      totalRounds: 10, pause: null, players: mockPlayers, scores: [], correctAnswer: null,
+      totalRounds: 10, pause: null, players: mockPlayers, roundOptions: mockPlayers, scores: [], correctAnswer: null,
     }));
     expect(getSizeWithHeaders).toHaveBeenCalledWith(`${SERVER_URL}/temp/2.jpg`, HEADERS);
   });

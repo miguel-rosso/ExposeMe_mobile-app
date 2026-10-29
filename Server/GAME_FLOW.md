@@ -134,8 +134,8 @@ After last round: game-over
 ## Answers (frozen when answering ends)
 
 - The client sends **`submit-answer { guess }`** as soon as the player taps an option, and again on every change
-  (`""` withdraws the pick, e.g. when the picked player leaves). The server keeps the **last** one: each new guess
-  replaces the previous one and its point.
+  (`""` withdraws the pick). The server keeps the **last** one: each new guess replaces the previous one and its
+  point.
 - Answers are accepted **only in `answering`** (also while paused in it). The server freezes them when the answer
   timer ends, right before emitting `round-reveal`; anything that arrives in `reveal`/`scores` is ignored, since
   `correctAnswer` is public by then. The app sends nothing at the reveal.
@@ -150,8 +150,15 @@ After last round: game-over
   and the server keeps taking answers for ANSWER_GRACE after that, so every tap the app accepted arrives in time.
   The bar ends `duration` after the event **arrived on the device**, however late the phase is painted (a slow phone
   mounts the bar already partly full, EXP-300): only the delivery delay counts against the grace, never the paint.
-- Only players still in `room.players` can be voted for: a guess naming someone who left (the owner included) or an
-  unknown name is ignored and the previous pick stays.
+- **The round's options** are the players in the room at its `round-start`; only they can be voted for (any other
+  name is ignored and the previous pick stays). **A player who leaves during the round (`leave-room`, removed by the
+  host) stays one of its options until the next `waiting-photo`** (DEC-038, EXP-301): if they owned the photo they
+  are still the answer (`correctAnswer` of the reveal and scores), and every guess naming them scores, also one sent
+  after they left (a tap, or a rejoining client's re-sent pick); a pick on any other leaver is a wrong guess, as it
+  would have been before they left. The app can't tell which leaver owned the photo (secret until the reveal), so it
+  keeps them all: it neither withdraws a pick on a leaver nor removes the option, and takes new taps on it, until
+  the next photo wait. A rejoining client gets them in the snapshot's `roundOptions`. A player who leaves between rounds (in `waiting-photo`) is not an option of the next round.
+  A merely disconnected player is still in the room and an option as usual.
 - Rate limit: per socket, a token bucket of **10** `submit-answer`, refilled at **5 per second**; excess events are
   dropped silently. The bucket lives and dies with the socket. The app coalesces rapid taps (at most one send per
   200 ms, with a trailing send of the latest pick), so the limit never drops the pick that counts. When the answer
@@ -416,7 +423,7 @@ fresh snapshot (and `your-turn` for an awaited photo), which the game screen ren
 that reached the lobby screen in between are covered by that snapshot.
 
 - **`game-state`** = `{ started, phase, round, totalRounds, photo, correctAnswer, yourGuess, duration, phaseTotal, held,
-  pause, scores, players }`, the same for every recipient except `yourGuess`: the recipient's own recorded answer,
+  pause, scores, players, roundOptions }`, the same for every recipient except `yourGuess`: the recipient's own recorded answer,
   only in `reveal`/`scores` (as in their `round-reveal`; `""` = no guess), else `null`. `duration` is the remaining
   time of the current phase (frozen while paused/held), `phaseTotal` its full duration (see "Phase totals in resync payloads"). `photo` is only set in `answering`/`reveal`/`scores` (the owner's name is never in it before
   the reveal: `correctAnswer` carries it from `reveal` on);
@@ -428,6 +435,10 @@ that reached the lobby screen in between are covered by that snapshot.
   answers: `lastGuess: ""`, `lastAnswerCorrect: false` and `points` without the point a correct answer earned.
   `scores` is ordered by those shown points, highest first, ties in room order (as `round-scores`), so the order
   can't tell who guessed right (and so whose photo it is) either.
+  `roundOptions` (public players, same rules as `players`) is set only in `answering`/`reveal`/`scores`: the round's
+  answer options in room order, those who left during the round included (with `isHost: false`: only the host in
+  the room shows as host; see "Answers"), else `[]`. The client
+  draws exactly those, so one that missed a `player-left` (offline, app restarted) still shows a departed owner.
   The client renders that phase; in `answering` it re-sends its current pick of that round, if any (never in
   `reveal`: answers are frozen by then); with `phase: null` (ready phase) it sends `im-ready` again.
 - The photo owner who rejoins while their photo is awaited gets `your-turn` again (same `round` and `attempt`);
@@ -539,7 +550,7 @@ All game events are **atomic** — each contains everything the client needs.
 | `im-ready` | - | Player ready to start (session player; payload ignored) |
 | `photo-sent` | `{ photo }` | Photo uploaded; only from the current owner, `photo` must be a path the owner got from `/upload` in this room (`/temp/<32 hex>.jpg\|png\|webp`) for the photo awaited now (uploaded during this `waiting-photo`'s round as their turn photo; not a planted photo, not one from an earlier round) |
 | `photo-unavailable` | `{ round, attempt }` (from its `your-turn`) | The awaited owner has no photo to send (no access, no photos, upload failed): skip the round now |
-| `submit-answer` | `{ guess }` | Player's pick, sent on every tap (the photo owner's too, scored like any other). Only during `answering`, the last one counts (`""` withdraws it); ignored in `reveal`/`scores`, or if `guess` is not a player in the room; at most 10 per socket, refilled 5/s (excess dropped). No guess is stored and sent in scores as `lastGuess: ""` (the app shows its own translated "No guess") |
+| `submit-answer` | `{ guess }` | Player's pick, sent on every tap (the photo owner's too, scored like any other). Only during `answering`, the last one counts (`""` withdraws it); ignored in `reveal`/`scores`, or if `guess` is not one of the round's options (the players in the room at its `round-start`, those who left since included); at most 10 per socket, refilled 5/s (excess dropped). No guess is stored and sent in scores as `lastGuess: ""` (the app shows its own translated "No guess") |
 | `hold-start` | - | Photo owner pressed hold (scores only; per-round limits, see "Hold") |
 | `hold-end` | - | Photo owner released hold |
 | `chat-message` | `{ message }` (≤100 chars) | Broadcast as `{ username, message }` with the session username |

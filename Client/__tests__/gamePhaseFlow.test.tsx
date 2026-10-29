@@ -278,7 +278,7 @@ describe("GameScreen: server phases drawn with the received duration (EXP-063)",
     // A rejoin snapshot in scores draws the same screen
     act(() => mockSocket.fire("game-state", {
       started: true, phase: "scores", round: 1, totalRounds: 10, photo: "/temp/x.jpg",
-      correctAnswer: "carol", duration: 4_000, held: false, pause: null, scores: SCORES, players: mockPlayers,
+      correctAnswer: "carol", duration: 4_000, held: false, pause: null, scores: SCORES, players: mockPlayers, roundOptions: mockPlayers,
     }));
     expect(has(r.root, playerOptionId("alice"))).toBe(false);
 

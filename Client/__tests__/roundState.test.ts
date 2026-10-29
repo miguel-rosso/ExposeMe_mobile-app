@@ -1,6 +1,7 @@
-import { GameStateSnapshot } from "../app/models/interfaces";
+import { GameStateSnapshot, Player } from "../app/models/interfaces";
 import {
-  gameStateFollowUps, initialRoundView, isRevealedOwner, phaseElapsed, RoundAction, roundReducer, RoundView,
+  gameStateFollowUps, initialRoundView, isRevealedOwner, phaseElapsed, RoundAction, roundOptions, roundReducer,
+  RoundView,
 } from "../app/utils/roundState";
 
 // Ported from the applyRoundStart / applyWaitingPhoto / applyGameState setter tests (EXP-215): same expectations,
@@ -24,7 +25,7 @@ describe("round-start (EXP-001)", () => {
     const prev = view({ phaseKey: 4, correctAnswer: "alice", scores: [], mySelection: "bob" });
     expect(start(prev)).toEqual({
       photo: "http://srv/temp/a.jpg", round: 3, phase: "answering", phaseDuration: 10000, phaseTotal: 10000, phaseKey: 5,
-      correctAnswer: "", scores: null, mySelection: "", gameHeld: false, pressing: false,
+      correctAnswer: "", scores: null, mySelection: "", gameHeld: false, pressing: false, leavers: [],
     });
   });
 
@@ -92,6 +93,7 @@ const snapshot = (over: Partial<GameStateSnapshot> = {}): GameStateSnapshot => (
   pause: null,
   scores: [{ username: "alice", points: 2, isHost: true, lastAnswerCorrect: false, lastGuess: "" }],
   players: [],
+  roundOptions: [],
   ...over,
 });
 
@@ -353,5 +355,55 @@ describe("phaseElapsed: where the progress bar of a resumed phase starts", () =>
     const next = applyGameState(snapshot({ phase: "waiting-photo", photo: null, duration: 12_000, phaseTotal: 15_000 }), "", fromReveal);
     expect(next.state).toMatchObject({ phase: "waiting-photo", round: 4, photo: null, correctAnswer: "" });
     expect(phaseElapsed(next.state)).toBeCloseTo(0.2);
+  });
+});
+
+// ── players leaving during a round (EXP-301, DEC-038) ────
+
+describe("players who leave during a round", () => {
+  const player = (username: string): Player => ({
+    username, points: 0, isHost: false, connected: true, lastGuess: "", lastAnswerCorrect: false,
+  });
+  const [alice, bob, carol, dave] = ["alice", "bob", "carol", "dave"].map(player);
+  const left = (state: RoundView, p: Player, index: number) =>
+    roundReducer(state, { type: "player-left", leaver: { player: p, index } });
+  const answering = () =>
+    roundReducer(view(), { type: "round-start", data: { photo: "/temp/a.jpg", round: 2, duration: 7_700 }, serverUrl: "" });
+
+  it("keeps them, and my pick on them, through the reveal and scores, until the next photo wait", () => {
+    let state = roundReducer(answering(), { type: "pick", guess: "carol" });
+    state = left(state, carol, 2);
+    expect(state).toMatchObject({ mySelection: "carol", leavers: [{ player: carol, index: 2 }] });
+    state = roundReducer(state, { type: "round-reveal", data: { correctAnswer: "carol", duration: 3_000, yourGuess: "carol" } });
+    state = left(state, alice, 0);
+    state = roundReducer(state, { type: "round-scores", data: { scores: [], round: 2, totalRounds: 5, duration: 5_000 } });
+    expect(state.leavers.map((l) => l.player.username)).toEqual(["carol", "alice"]);
+    expect(roundReducer(state, { type: "waiting-photo", data: { round: 3, duration: 15_000 } }).leavers).toEqual([]);
+  });
+
+  it("does not keep a player who left between rounds", () => {
+    const waiting = roundReducer(view(), { type: "waiting-photo", data: { round: 1, duration: 15_000 } });
+    expect(left(waiting, carol, 2).leavers).toEqual([]);
+    expect(left(view(), carol, 2).leavers).toEqual([]); // ready phase
+  });
+
+  // The server's roundOptions are the source: they cover a player-left this screen never got (offline, app restarted)
+  it("takes them from a rejoin snapshot's roundOptions, also with no player-left seen", () => {
+    const round = { phase: "answering" as const, round: 2, photo: "/temp/a.jpg", players: [alice, bob, dave] };
+    const snap = snapshot({ ...round, roundOptions: [alice, bob, carol, dave] });
+    expect(applyGameState(snap, "", answering()).state.leavers).toEqual([{ player: carol, index: 2 }]);
+    expect(applyGameState(snap, "", view()).state.leavers).toEqual([{ player: carol, index: 2 }]); // app restarted
+    // Nobody left: none, whatever this screen had seen
+    const none = snapshot({ ...round, players: [alice, bob, carol, dave], roundOptions: [alice, bob, carol, dave] });
+    expect(applyGameState(none, "", left(answering(), carol, 2)).state.leavers).toEqual([]);
+  });
+
+  it("roundOptions puts them back in their places among the round's options", () => {
+    // [alice, bob, carol, dave]: bob (index 1) and dave (index 3) left, in either order
+    const leavers = [{ player: dave, index: 3 }, { player: bob, index: 1 }];
+    expect(roundOptions([alice, carol], leavers)).toEqual([alice, bob, carol, dave]);
+    const players = [alice, bob];
+    expect(roundOptions(players, [])).toBe(players);
+    expect(roundOptions([alice, bob], [{ player: bob, index: 1 }])).toEqual([alice, bob]); // never twice
   });
 });

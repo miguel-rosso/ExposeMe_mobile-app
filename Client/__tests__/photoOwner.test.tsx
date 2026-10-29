@@ -247,7 +247,7 @@ describe("GameScreen: whose photo it is (EXP-128)", () => {
     const snapshot = (phase: string, correctAnswer: string | null) => ({
       started: true, phase, round: 1, totalRounds: 10, photo: "/temp/x.jpg",
       correctAnswer, yourGuess: correctAnswer === null ? null : "", duration: 4_000, held: false, pause: null, scores: [],
-      players: mockPlayers,
+      players: mockPlayers, roundOptions: mockPlayers,
     });
     act(() => mockSocket.fire("game-state", snapshot("answering", null)));
     expect(has(r.root, TEST_IDS.holdButton)).toBe(false);

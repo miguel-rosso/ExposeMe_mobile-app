@@ -239,7 +239,7 @@ describe("Lobby -> game in progress (EXP-289)", () => {
   const snapshot = (over: Partial<GameStateSnapshot> = {}): GameStateSnapshot => ({
     started: true, phase: "answering", round: 3, totalRounds: ROOM_ROUNDS, photo: FIRST_PHOTO, correctAnswer: null,
     yourGuess: null, duration: ANSWERING_MS, phaseTotal: ANSWERING_MS, held: false, pause: null, scores: [],
-    players: LOBBY_PLAYERS, ...over,
+    players: LOBBY_PLAYERS, roundOptions: [], ...over,
   });
   // The lobby's snapshot of the started game opens the game screen, which asks the server again
   async function rejoinGameInProgress() {

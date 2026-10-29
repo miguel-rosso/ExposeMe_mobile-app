@@ -1,6 +1,6 @@
 import { Server } from "socket.io";
 import {
-  GameStateSnapshot, PauseInfo, PhaseResumeData, Player, PlayerConnectionData, Room, RoomStateSnapshot, RoundPhase, RoundRevealData,
+  GameStateSnapshot, PauseInfo, PhaseResumeData, Player, PlayerConnectionData, PublicPlayer, Room, RoomStateSnapshot, RoundPhase, RoundRevealData,
   RoundSkippedData, RoundStartData, ScoreRound, WaitingPhotoData, YourTurnData,
 } from "../models/interfaces";
 import { DISCONNECT_GRACE, RoomManager } from "./RoomManager";
@@ -106,6 +106,13 @@ export class GameEngine {
    * waiting-photo with the same round): an ack can't tell which broadcast it answers.
    */
   private phaseEmits = new WeakMap<Room, Map<number, RoundPhaseEmits>>();
+  /**
+   * The answer options of each room's round in play: everyone in the room at its round-start, in room order. A player
+   * who leaves during the round stays an option until it ends (DEC-038): the app can't tell which leaver owned the
+   * photo (it is secret until the reveal), so it keeps them all, and a departed owner can still be guessed right.
+   * Sent in `game-state` (`roundOptions`), so a client that missed a `player-left` still draws them.
+   */
+  private answerOptions = new WeakMap<Room, readonly Player[]>();
 
   constructor(private io: Server, private roomManager: RoomManager) {}
 
@@ -197,6 +204,7 @@ export class GameEngine {
     this.goneOwners.delete(room);
     this.freeOwnerChanges.delete(room);
     this.phaseEmits.delete(room);
+    this.answerOptions.delete(room);
     this.assignPlantedSlots(room);
     console.log(`[${room.gameCode}] All ready, planted slots: [${[...room.plantedSlots].join(",")}]`);
     this.setTimer(room, GAME_START_DELAY, () => this.startRound(room));
@@ -224,6 +232,7 @@ export class GameEngine {
     room.phase = "answering";
     room.currentPhoto = photo;
     room._consecutiveSkips = 0;
+    this.answerOptions.set(room, [...room.players]);
     console.log(`[${room.gameCode}] Round ${room.round}: ${source} photo from ${owner.username}`);
 
     this.markPhaseEmitted(room, room.round);
@@ -283,8 +292,8 @@ export class GameEngine {
     if (room.phase !== "answering") return;
     const player = room.players.find((p) => p.username === username);
     if (!player) return;
-    // Only players still in the room are options (a player who left, the owner included, can't be voted for)
-    if (guess !== "" && !room.players.some((p) => p.username === guess)) return;
+    // Only the round's options: a player who left during the round still is one, scored like before they left (DEC-038)
+    if (guess !== "" && !this.answerOptions.get(room)?.some((p) => p.username === guess)) return;
     // The app sends its pick on every tap: the last one replaces the previous (and its point)
     if (player.lastAnswerCorrect) player.points--;
     const correct = guess !== "" && room.currentPlayer?.username === guess;
@@ -461,6 +470,7 @@ export class GameEngine {
     // the scores' order (see buildScores)
     const scores = this.buildScores(room, this.roomManager.guessesHidden(room));
     const players = this.roomManager.publicPlayers(room);
+    const roundOptions = inRound ? (this.answerOptions.get(room) ?? []).map((p) => this.publicRoundOption(room, p)) : [];
     return {
       started: room.started,
       phase: room.phase,
@@ -474,7 +484,17 @@ export class GameEngine {
       pause: room.paused ? this.pauseInfo(room) : null,
       scores,
       players,
+      roundOptions,
     };
+  }
+
+  /**
+   * A round option as sent in `game-state`: a public player. One who left is no longer the host (a host who leaves
+   * hands the role over without clearing their own flag), so only the player in the room holding it shows it.
+   */
+  private publicRoundOption(room: Room, option: Player): PublicPlayer {
+    const pub = this.roomManager.publicPlayer(option, room);
+    return room.players.includes(option) ? pub : { ...pub, isHost: false };
   }
 
   private pauseGame(room: Room): void {
@@ -914,6 +934,7 @@ export class GameEngine {
     this.roomManager.clearAllTimers(room);
     this.cancelOwnerReturnWindow(room);
     this.plantedWaits.delete(room);
+    this.answerOptions.delete(room);
     room.started = false;
     room.phase = null;
     room.players.forEach((p) => { p.isReady = false; });

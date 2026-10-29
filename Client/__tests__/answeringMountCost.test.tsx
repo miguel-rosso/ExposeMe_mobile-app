@@ -255,8 +255,9 @@ describe("GameScreen: reveal and scoreboard render cost on Android (EXP-265)", (
     resetCounts();
     showScores();
     expect(has(r.root, TEST_IDS.scoreModal)).toBe(true);
-    // The owner card's entrance (react-native-animatable) sets its first frame as it mounts: nothing else re-renders
-    expect(commits).toEqual(["update", "nested-update"]);
+    // EXP-311: the owner card's entrance starts on the native driver without a second, nested commit before the paint
+    // (react-native-animatable set its first frame as it mounted, re-rendering the card in the same task)
+    expect(commits).toEqual(["update"]);
     expect(mockRenders.scoreboard).toBe(1);
     expect(mockRenders.photo).toBe(0);
     expect(mockRenders.emojiButtons).toBe(0);

@@ -1,4 +1,5 @@
-import React from "react";
+import React, { Profiler } from "react";
+import { NativeModules } from "react-native";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import { ScoreRound } from "../app/models/interfaces";
 import { TEST_IDS, scoreGuessId } from "../app/utils/testIds";
@@ -116,6 +117,31 @@ describe("ScoreModal: whose photo it was (EXP-252)", () => {
     r = modal("ana");
     expect(row(r.root, "dan").label).toBe("Sin respuesta");
     expect(row(r.root, "ana").label).toBe("cid");
+    act(() => r.unmount());
+  });
+});
+
+// EXP-311: the scoreboard is painted from its first commit; the card's entrance must not add a second one before it
+describe("ScoreModal: the owner card's entrance (EXP-311)", () => {
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => { jest.clearAllTimers(); jest.useRealTimers(); });
+
+  it("mounts in one commit and bounces in on the native driver, without re-rendering", () => {
+    const startAnimation = NativeModules.NativeAnimatedModule.startAnimatingNode as jest.Mock;
+    startAnimation.mockClear();
+    const commits: string[] = [];
+    const r = render(
+      <Profiler id="scores" onRender={(_id, phase) => { commits.push(phase); }}>
+        <ScoreModal visible scoreRound={scores} rounds={{ round: 1, roundsOfGame: 10 }} correctAnswer="ana" myUsername="bob" />
+      </Profiler>,
+    );
+    expect(commits).toEqual(["mount"]);
+    expect(startAnimation).toHaveBeenCalledTimes(1);
+    // It starts small and transparent, and the whole bounce runs natively: no frame comes back through React
+    const [card] = byId(r.root, TEST_IDS.scoreAnswerCard);
+    expect(card.props.style).toEqual(expect.objectContaining({ opacity: 0, transform: [{ scale: 0.3 }] }));
+    act(() => jest.advanceTimersByTime(1_000));
+    expect(commits).toEqual(["mount"]);
     act(() => r.unmount());
   });
 });

@@ -416,8 +416,12 @@ export class GameEngine {
    * after it if their photo is awaited. The app drops a turn in flight on game-state (EXP-226), so a resume this
    * rejoin causes leaves the rejoiner's your-turn to this method, which sends it after the snapshot. The awaited owner
    * is reviewed last (a new owner's waiting-photo and your-turn also come after the snapshot).
+   * An owner holding the scores screen is force-released first: the new socket isn't pressing anything and the old
+   * one was evicted with its session cleared, so its disconnect doesn't release, and nobody would end that hold
+   * before its budget ran out.
    */
   onPlayerRejoined(room: Room, player: Player): void {
+    if (room.currentPlayer === player) this.forceRelease(room);
     this.onConnectionChange(room, player);
     this.io.to(player.socketId).emit("game-state", this.gameStateFor(room, player));
     this.sendAwaitedTurn(room, player);

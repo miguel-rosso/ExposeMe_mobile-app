@@ -7,7 +7,8 @@ import { registerTurnUpload } from "./helpers";
 
 // EXP-218: whenever the photo owner goes away while holding the scores screen (kicked by the host, leave-room or a
 // dropped connection), the hold ends at once for everyone (hold-end + hold-resume) and the game goes on, instead of
-// staying frozen until the hold budget runs out.
+// staying frozen until the hold budget runs out. EXP-299: the same when they rejoin on a new socket while the old one
+// is still open (the new socket isn't pressing anything, so nobody would ever send hold-end).
 
 const NAMES = ["alice", "bob", "carol"];
 const RELEASE_WITHIN_MS = 1_000;
@@ -32,7 +33,7 @@ async function newClient(): Promise<ClientSocket> {
 }
 
 async function joinAs(sock: ClientSocket, gameCode: string | null, username: string) {
-  const res = once<{ success: boolean; room?: { gameCode: string } }>(sock, "room-of-game");
+  const res = once<{ success: boolean; room?: { gameCode: string }; rejoinToken?: string }>(sock, "room-of-game");
   sock.emit("join-create-game", { gameCode, username });
   return res;
 }
@@ -40,11 +41,14 @@ async function joinAs(sock: ClientSocket, gameCode: string | null, username: str
 /** A 3-player game in the first round's scores phase, with the photo owner holding it. */
 async function ownerHoldingScores(photoChar: string) {
   const socks: Record<string, ClientSocket> = {};
+  const tokens: Record<string, string> = {};
   socks.alice = await newClient();
-  const gameCode = (await joinAs(socks.alice, null, "alice")).room!.gameCode;
+  const created = await joinAs(socks.alice, null, "alice");
+  const gameCode = created.room!.gameCode;
+  tokens.alice = created.rejoinToken!;
   for (const n of NAMES.slice(1)) {
     socks[n] = await newClient();
-    await joinAs(socks[n], gameCode, n);
+    tokens[n] = (await joinAs(socks[n], gameCode, n)).rejoinToken!;
   }
   const started = NAMES.map((n) => once(socks[n], "game-started"));
   socks.alice.emit("start-game");
@@ -62,7 +66,7 @@ async function ownerHoldingScores(photoChar: string) {
   const holding = NAMES.map((n) => once(socks[n], "hold-start"));
   socks[owner].emit("hold-start");
   await Promise.all(holding);
-  return { socks, gameCode, owner, others: NAMES.filter((n) => n !== owner) };
+  return { socks, tokens, gameCode, owner, others: NAMES.filter((n) => n !== owner) };
 }
 
 /** Every remaining player gets hold-end and hold-resume (scores) quickly, then the next round starts. */
@@ -89,7 +93,7 @@ afterAll(async () => {
 });
 
 // One room each, run side by side: reaching the scores phase takes ~12 s of real game time
-describe.concurrent("the photo owner going away releases their hold (EXP-218)", () => {
+describe.concurrent("the photo owner going away releases their hold (EXP-218, EXP-299)", () => {
   it("when the host kicks them", async () => {
     const { socks, gameCode, owner, others } = await ownerHoldingScores("a");
     // The host can't kick itself: make sure someone else is host (random owner)
@@ -108,5 +112,15 @@ describe.concurrent("the photo owner going away releases their hold (EXP-218)", 
   it("when their connection drops", async () => {
     const { socks, owner, others } = await ownerHoldingScores("d");
     await expectReleasedAndContinues(socks, others, () => socks[owner].disconnect());
+  }, 30_000);
+
+  it("when they rejoin on a new socket while the old one is still open", async () => {
+    const { socks, tokens, gameCode, owner, others } = await ownerHoldingScores("e");
+    const fresh = await newClient();
+    const snapshot = once<{ phase: string; held: boolean }>(fresh, "game-state", RELEASE_WITHIN_MS);
+    await expectReleasedAndContinues(socks, others, () => {
+      fresh.emit("join-create-game", { gameCode, username: owner, rejoinToken: tokens[owner] });
+    });
+    expect(await snapshot).toMatchObject({ phase: "scores", held: false });
   }, 30_000);
 });

@@ -18,10 +18,13 @@ set +e
 # ── Fake environment ──
 RUNS="$TMP/runs"; DEVICES_JSON="$TMP/devices.json"; SIM_DEVICES_DIR="$TMP/sims"
 CMDS="$TMP/cmds.log"
+REAL_SWIFT="$(command -v swift || true)"   # the real generator is checked at the end
 mkdir -p "$TMP/bin"
-# swift stub: make-photos.swift <dir> <label> <count> <prefix> -> empty <prefix><label>-NN.jpg files
+# swift stub: make-photos.swift <dir> <label> <count> <prefix> -> empty <prefix><label>-NN.jpg files;
+# make-photos.swift --edge <dir> <label> <prefix> -> empty <prefix><label>-edge-<kind>.jpg files
 cat >"$TMP/bin/swift" <<'EOF'
 #!/usr/bin/env bash
+if [ "$2" = --edge ]; then for k in big-portrait big-landscape exif-rotated; do : >"$3/$5$4-edge-$k.jpg"; done; exit 0; fi
 for ((i = 1; i <= $4; i++)); do : >"$2/$(printf '%s%s-%02d.jpg' "$5" "$3" "$i")"; done
 EOF
 chmod +x "$TMP/bin/swift"
@@ -47,6 +50,8 @@ parse_photos_args; check "no args -> default count, no reset" "$PHOTOS_N/$PHOTOS
 parse_photos_args 20; check "N -> count" "$PHOTOS_N/$PHOTOS_RESET" "20/0"
 parse_photos_args --reset 5; check "--reset N" "$PHOTOS_N/$PHOTOS_RESET" "5/1"
 parse_photos_args 5 --reset; check "N --reset" "$PHOTOS_N/$PHOTOS_RESET" "5/1"
+check "no --edge -> no edge-case photos" "$PHOTOS_EDGE" "0"
+parse_photos_args --edge 3 --reset; check "--edge N --reset" "$PHOTOS_N/$PHOTOS_RESET/$PHOTOS_EDGE" "3/1/1"
 for bad in abc 0 -3 --wipe; do
   parse_photos_args "$bad" 2>/dev/null && ko "'$bad' is rejected" || ok "'$bad' is rejected"
 done
@@ -59,6 +64,14 @@ check "old leftovers are removed" "$(ls "$dir" | wc -l | tr -d ' ')" "12"
 check "photos from #10" "$(lab_photos_from "$dir" 10 | xargs -n1 basename | tr '\n' ' ')" \
   "exposeme-lab-ios-a-10.jpg exposeme-lab-ios-a-11.jpg exposeme-lab-ios-a-12.jpg "
 check "photos from #08 parse as decimal" "$(lab_photos_from "$dir" 8 | wc -l | tr -d ' ')" "5"
+
+# ── generate_edge_photos / lab_edge_photos (EXP-083) ──
+generate_edge_photos "$dir" ios-a; generate_edge_photos "$dir" ios-a
+check "edge-case photos: added next to the numbered ones, once" "$(ls "$dir" | wc -l | tr -d ' ')" "15"
+check "edge-case photos are listed by name" "$(lab_edge_photos "$dir" | xargs -n1 basename | tr '\n' ' ')" \
+  "exposeme-lab-ios-a-edge-big-landscape.jpg exposeme-lab-ios-a-edge-big-portrait.jpg exposeme-lab-ios-a-edge-exif-rotated.jpg "
+check "numbered photos from #1 leave the edge-case ones out" "$(lab_photos_from "$dir" 1 | grep -c edge)" "0"
+check "numbered photos from #1 are all 12" "$(lab_photos_from "$dir" 1 | wc -l | tr -d ' ')" "12"
 
 # ── ios_photo_plan ──
 check "no marker -> add all" "$(ios_photo_plan "" 0 ios-a 12)" "add 1"
@@ -142,6 +155,27 @@ for step in boot bootstatus; do
 done
 XCRUN_FAIL=""
 
+# ── ios_seed_edge_photos (EXP-083) ──
+esim=0A1B2C3D-0000-4000-8000-00000000000E; new_sim "$esim"; emarker="$SIM_DEVICES_DIR/$esim/data/Media/$IOS_EDGE_MARKER"
+XCRUN_FAIL=addmedia; out="$(ios_seed_edge_photos $esim "$TMP/pe" ios-e)"; rc=$?; XCRUN_FAIL=""
+[ $rc != 0 ] && [ ! -e "$emarker" ] && [[ "$out" == *addmedia* ]] && ok "edge addmedia fails -> non-zero, no marker" || ko "edge addmedia fails -> non-zero, no marker" "rc=$rc out=$out"
+ios_seed_photos $esim "$TMP/pe" ios-e 4 0 >/dev/null
+reset_log; out="$(ios_seed_edge_photos $esim "$TMP/pe" ios-e)"
+check "ios edge 1st run: imports only the 3 edge-case photos" "$(cat "$CMDS")" \
+  "xcrun simctl addmedia $esim exposeme-lab-ios-e-edge-big-landscape.jpg exposeme-lab-ios-e-edge-big-portrait.jpg exposeme-lab-ios-e-edge-exif-rotated.jpg"
+check "ios edge 1st run: says so" "$out" "added 3 edge-case photos"
+check "ios edge: numbered photos kept in the folder" "$(lab_photos_from "$TMP/pe" 1 | wc -l | tr -d ' ')" "4"
+reset_log; out="$(ios_seed_edge_photos $esim "$TMP/pe" ios-e)"
+check "ios edge 2nd run: imports nothing" "$(cmds_matching addmedia)" "0"
+check "ios edge 2nd run: says why" "$out" "edge-case photos already added"
+check "ios edge: numbered marker untouched" "$(cat "$SIM_DEVICES_DIR/$esim/data/Media/$IOS_PHOTO_MARKER")" "ios-e 4"
+ios_reset_photos $esim ios-e 2>/dev/null
+[ ! -e "$emarker" ] && ok "ios --reset forgets the edge-case photos too" || ko "ios --reset forgets the edge-case photos too"
+reset_log; ios_seed_edge_photos $esim "$TMP/pe" ios-e >/dev/null
+check "ios edge after --reset: imports them again" "$(grep -o 'edge-[a-z-]*.jpg' "$CMDS" | wc -l | tr -d ' ')" "3"
+reset_log; out="$(ios_seed_edge_photos ../x "$TMP/pe" ios-e)"; rc=$?
+[ $rc != 0 ] && [ ! -s "$CMDS" ] && ok "ios edge: bad udid refused before any simctl call" || ko "ios edge: bad udid refused" "rc=$rc $out"
+
 # ── cmd_photos twice on both platforms ──
 sim2=0A1B2C3D-0000-4000-8000-00000000000C; new_sim "$sim2"
 echo "[{\"id\":\"$sim2\",\"label\":\"ios-b\",\"platform\":\"ios\"},{\"id\":\"emulator-5556\",\"label\":\"android-a\",\"platform\":\"android\"}]" >"$DEVICES_JSON"
@@ -161,6 +195,59 @@ echo "[{\"id\":\"$sim3\",\"label\":\"ios-c\",\"platform\":\"ios\"}]" >"$DEVICES_
 XCRUN_FAIL=addmedia; err="$( (cmd_photos 4) 2>&1 >/dev/null)"; rc=$?; XCRUN_FAIL=""
 [ $rc != 0 ] && [[ "$err" == *"ios-c: simctl addmedia failed"* ]] && ok "cmd_photos: failed import -> non-zero + reason" || ko "cmd_photos: failed import -> non-zero + reason" "rc=$rc err=$err"
 [ ! -e "$SIM_DEVICES_DIR/$sim3/data/Media/$IOS_PHOTO_MARKER" ] && ok "cmd_photos: failed import leaves no marker" || ko "cmd_photos: failed import leaves no marker"
+
+# ── cmd_photos --edge (EXP-083) ──
+sim4=0A1B2C3D-0000-4000-8000-00000000000F; new_sim "$sim4"
+echo "[{\"id\":\"$sim4\",\"label\":\"ios-d\",\"platform\":\"ios\"},{\"id\":\"emulator-5558\",\"label\":\"android-b\",\"platform\":\"android\"}]" >"$DEVICES_JSON"
+reset_log; (cmd_photos 2 --edge); (cmd_photos 2 --edge)
+check "cmd_photos --edge x2: iOS imports the numbered and the edge-case photos once each" "$(cmds_matching "addmedia $sim4")" "2"
+check "cmd_photos --edge: Android pushes numbered + edge-case photos" "$(ls "$RUNS/photos/android-b" | tr '\n' ' ')" \
+  "exposeme-lab-android-b-01.jpg exposeme-lab-android-b-02.jpg exposeme-lab-android-b-edge-big-landscape.jpg exposeme-lab-android-b-edge-big-portrait.jpg exposeme-lab-android-b-edge-exif-rotated.jpg "
+check "cmd_photos --edge: bots get the edge-case photos too" "$(ls "$RUNS/photos/bots" | grep -c -- '-edge-')" "3"
+(cmd_photos 2)
+check "cmd_photos without --edge: Android folder back to the numbered photos" "$(ls "$RUNS/photos/android-b" | grep -c -- '-edge-')" "0"
+check "cmd_photos without --edge: bots without edge-case photos" "$(ls "$RUNS/photos/bots" | grep -c -- '-edge-')" "0"
+
+# ── make-photos.swift --edge, the real generator (EXP-083): sizes and EXIF orientation ──
+exif_orientation() { # jpeg -> the IFD0 Orientation tag, or "none"
+  python3 -I - "$1" <<'PY'
+import struct, sys
+data = open(sys.argv[1], "rb").read()
+i = 2
+while i + 4 <= len(data) and data[i] == 0xFF:
+    marker, length = data[i + 1], struct.unpack(">H", data[i + 2:i + 4])[0]
+    if marker == 0xE1 and data[i + 4:i + 10] == b"Exif\0\0":
+        tiff = data[i + 10:i + 2 + length]
+        e = "<" if tiff[:2] == b"II" else ">"
+        ifd = struct.unpack(e + "I", tiff[4:8])[0]
+        for k in range(struct.unpack(e + "H", tiff[ifd:ifd + 2])[0]):
+            entry = ifd + 2 + 12 * k
+            if struct.unpack(e + "H", tiff[entry:entry + 2])[0] == 0x0112:
+                print(struct.unpack(e + "H", tiff[entry + 8:entry + 10])[0]); sys.exit()
+    if marker == 0xDA: break
+    i += 2 + length
+print("none")
+PY
+}
+pixel_size() { sips -g pixelWidth -g pixelHeight "$1" | awk '/pixelWidth/{w=$2} /pixelHeight/{h=$2} END{print w "x" h}'; }
+if [ -z "$REAL_SWIFT" ] || ! command -v sips >/dev/null || ! command -v python3 >/dev/null; then
+  echo "skip - make-photos.swift --edge (needs swift, sips and python3: macOS)"
+else
+  gen="$TMP/real-edge"
+  if "$REAL_SWIFT" "$HERE/../make-photos.swift" --edge "$gen" ios-a "$LAB_PHOTO_PREFIX" >/dev/null; then
+    p="$gen/${LAB_PHOTO_PREFIX}ios-a-edge"
+    check "real --edge: 3 photos" "$(ls "$gen" | wc -l | tr -d ' ')" "3"
+    check "real --edge: big portrait is 3024x4032" "$(pixel_size "$p-big-portrait.jpg")" "3024x4032"
+    check "real --edge: big landscape is 4032x3024" "$(pixel_size "$p-big-landscape.jpg")" "4032x3024"
+    check "real --edge: EXIF-rotated photo stores sideways pixels" "$(pixel_size "$p-exif-rotated.jpg")" "4032x3024"
+    check "real --edge: EXIF-rotated photo carries Orientation=6" "$(exif_orientation "$p-exif-rotated.jpg")" "6"
+    check "real --edge: upright photos carry Orientation=1" \
+      "$(exif_orientation "$p-big-portrait.jpg")/$(exif_orientation "$p-big-landscape.jpg")" "1/1"
+    # Bots upload them as they are: they must fit the server's 5 MB upload cap (Server/middlewares/upload.ts)
+    check "real --edge: every photo under 5 MB" "$(find "$gen" -name '*.jpg' -size +5120k | wc -l | tr -d ' ')" "0"
+  else ko "real --edge: generator ran"; fi
+  "$REAL_SWIFT" "$HERE/../make-photos.swift" --edge 2>/dev/null && ko "real --edge without a folder exits non-zero" || ok "real --edge without a folder exits non-zero"
+fi
 
 echo "# $pass passed, $fail failed"
 [ $fail = 0 ]

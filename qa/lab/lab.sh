@@ -14,8 +14,10 @@
 #                               port (its pidfile), never another checkout's: --stop needs an explicit --port
 #                               QA render telemetry on: qa-ack lines in qa/runs/telemetry.jsonl (telemetry-<port>.jsonl)
 #   metro  [--restart]          Start Metro with EXPO_PUBLIC_SERVER_URL=http://localhost:3000 and EXPO_PUBLIC_QA=1
-#   photos [N] [--reset]        Seed N labelled photos per device gallery (default 12); idempotent: replaces the
-#                               lab's own photos, never stacks copies (--reset: wipe lab photos / iOS photo library first)
+#   photos [N] [--reset] [--edge]  Seed N labelled photos per device gallery (default 12); idempotent: replaces the
+#                               lab's own photos, never stacks copies (--reset: wipe lab photos / iOS photo library first;
+#                               --edge: also 3 edge-case photos per gallery and for the bots: 3024x4032, 4032x3024 and
+#                               one stored sideways with EXIF Orientation=6)
 #   build [ios|android|all] [--prebuild]  Build dev-client binaries (slow, only when native deps change);
 #                               --prebuild runs expo prebuild first (needed after app.json/package.json/config-plugin
 #                               changes: build warns when they changed since the lab's last prebuild)
@@ -355,18 +357,24 @@ cmd_metro() {
 #    simulator forgets it too. Photos deleted by hand leave the marker stale: use --reset.
 #  - --reset: Android deletes the whole lab folder; iOS shuts the simulator down, deletes its photo
 #    library (Media/DCIM + Media/PhotoData: ALL photos on that simulator) and boots it again.
+#  - --edge (opt-in, EXP-083): also the edge-case set of `make-photos.swift --edge`, exposeme-lab-<label>-edge-<kind>.jpg
+#    (large portrait and landscape, one stored sideways with EXIF Orientation=6). Android pushes them with the numbered
+#    photos, so a later run without --edge drops them; iOS imports them once (own marker) and keeps them until --reset.
 LAB_PHOTO_PREFIX="exposeme-lab-"
+LAB_EDGE_TAG="-edge-"   # edge-case photos are <prefix><label>-edge-<kind>.jpg: not numbered
 ANDROID_PHOTO_DIR="/sdcard/Pictures/ExposeMeQA"
 IOS_PHOTO_MARKER="${LAB_PHOTO_PREFIX}seeded"
+IOS_EDGE_MARKER="${IOS_PHOTO_MARKER}-edge"
 SIM_DEVICES_DIR="${SIM_DEVICES_DIR:-$HOME/Library/Developer/CoreSimulator/Devices}"
 DEFAULT_PHOTO_COUNT=12
 
-parse_photos_args() { # [N] [--reset] -> sets PHOTOS_N and PHOTOS_RESET (0|1); returns 1 on a bad argument
-  PHOTOS_N=$DEFAULT_PHOTO_COUNT PHOTOS_RESET=0
+parse_photos_args() { # [N] [--reset] [--edge] -> sets PHOTOS_N, PHOTOS_RESET and PHOTOS_EDGE (0|1); returns 1 on a bad argument
+  PHOTOS_N=$DEFAULT_PHOTO_COUNT PHOTOS_RESET=0 PHOTOS_EDGE=0
   while [ $# -gt 0 ]; do
     case $1 in
       --reset) PHOTOS_RESET=1;;
-      *) [[ "$1" =~ ^[1-9][0-9]*$ ]] || { echo "[lab] photos: bad argument '$1' (usage: photos [N] [--reset])" >&2; return 1; }
+      --edge) PHOTOS_EDGE=1;;
+      *) [[ "$1" =~ ^[1-9][0-9]*$ ]] || { echo "[lab] photos: bad argument '$1' (usage: photos [N] [--reset] [--edge])" >&2; return 1; }
          PHOTOS_N=$1;;
     esac
     shift
@@ -376,13 +384,23 @@ generate_lab_photos() { # dir, label, count: fresh labelled photos, no leftovers
   rm -rf "$1"; mkdir -p "$1"
   swift "$QA/lab/make-photos.swift" "$1" "$2" "$3" "$LAB_PHOTO_PREFIX"
 }
+generate_edge_photos() { # dir, label: a fresh edge-case set next to the numbered photos (which it keeps)
+  mkdir -p "$1"; rm -f "$1/$LAB_PHOTO_PREFIX$2$LAB_EDGE_TAG"*.jpg
+  swift "$QA/lab/make-photos.swift" --edge "$1" "$2" "$LAB_PHOTO_PREFIX"
+}
 lab_photos_from() { # dir, first index: the generated photos numbered >= first index, in order
   local f i
   for f in "$1/$LAB_PHOTO_PREFIX"*.jpg; do
     [ -e "$f" ] || continue
     i="${f##*-}"; i="${i%.jpg}"
+    [[ "$i" =~ ^[0-9]+$ ]] || continue   # an edge-case photo: not numbered
     [ $((10#$i)) -ge "$2" ] && echo "$f"
   done
+  return 0
+}
+lab_edge_photos() { # dir: the generated edge-case photos, in order
+  local f
+  for f in "$1/$LAB_PHOTO_PREFIX"*"$LAB_EDGE_TAG"*.jpg; do [ -e "$f" ] && echo "$f"; done
   return 0
 }
 
@@ -427,7 +445,7 @@ ios_reset_photos() { # udid, [label for the log, default the udid]: wipes the si
   media="$(ios_media_dir "$udid")"
   log "$label: --reset: shutting down the simulator to delete its whole photo library" >&2
   xcrun simctl shutdown "$udid" 2>/dev/null || true
-  rm -rf "$media/DCIM" "$media/PhotoData" "$media/$IOS_PHOTO_MARKER" || { echo "could not delete the photo library in $media"; return 1; }
+  rm -rf "$media/DCIM" "$media/PhotoData" "$media/$IOS_PHOTO_MARKER" "$media/$IOS_EDGE_MARKER" || { echo "could not delete the photo library in $media"; return 1; }
   log "$label: --reset: photo library deleted, rebooting the simulator" >&2
   xcrun simctl boot "$udid" || { echo "simctl boot failed after the reset"; return 1; }
   xcrun simctl bootstatus "$udid" -b >/dev/null || { echo "simulator did not finish booting after the reset"; return 1; }
@@ -449,10 +467,22 @@ ios_seed_photos() { # udid, dir, label, count, reset (0|1); prints what it did, 
   mkdir -p "${marker%/*}" && echo "$label $n" >"$marker" || { echo "could not write $marker"; return 1; }
   echo "added photos #$first-#$n"
 }
+ios_seed_edge_photos() { # udid, dir, label; once per photo library (marker). Prints what it did, or why it failed (non-zero)
+  local udid=$1 dir=$2 label=$3 marker f files=()
+  check_sim_dir "$udid" || return 1
+  marker="$(ios_media_dir "$udid")/$IOS_EDGE_MARKER"
+  [ -f "$marker" ] && { echo "edge-case photos already added"; return 0; }
+  generate_edge_photos "$dir" "$label" >/dev/null || { echo "make-photos.swift --edge failed"; return 1; }
+  while read -r f; do files+=("$f"); done < <(lab_edge_photos "$dir")
+  [ ${#files[@]} -gt 0 ] || { echo "no generated edge-case photos in $dir"; return 1; }
+  xcrun simctl addmedia "$udid" "${files[@]}" || { echo "simctl addmedia of the edge-case photos failed (not marked as added)"; return 1; }
+  mkdir -p "${marker%/*}" && echo "$label" >"$marker" || { echo "could not write $marker"; return 1; }
+  echo "added ${#files[@]} edge-case photos"
+}
 
 cmd_photos() {
   parse_photos_args "$@" || exit 1
-  local n=$PHOTOS_N reset=$PHOTOS_RESET
+  local n=$PHOTOS_N reset=$PHOTOS_RESET edge=$PHOTOS_EDGE
   devices | while read -r d; do
     local label id plat dir out
     label="$(jq -r .label <<<"$d")"; id="$(jq -r .id <<<"$d")"; plat="$(jq -r .platform <<<"$d")"
@@ -460,13 +490,20 @@ cmd_photos() {
     if [ "$plat" = ios ]; then
       out="$(ios_seed_photos "$id" "$dir" "$label" "$n" "$reset")" || die "$label: $out"
       log "$label: $out"
+      if [ "$edge" = 1 ]; then
+        out="$(ios_seed_edge_photos "$id" "$dir" "$label")" || die "$label: $out"
+        log "$label: $out"
+      fi
     else
+      local seeded="$n photos"
       generate_lab_photos "$dir" "$label" "$n" >/dev/null
+      if [ "$edge" = 1 ]; then generate_edge_photos "$dir" "$label" >/dev/null; seeded+=" + edge-case photos"; fi
       android_seed_photos "$id" "$dir" "$reset" "$label"
-      log "$label: $n photos (previous lab photos replaced)"
+      log "$label: $seeded (previous lab photos replaced)"
     fi
   done || exit 1   # a device that failed (die in the pipeline's subshell) stops the command
   generate_lab_photos "$RUNS/photos/bots" "bot" "$n"
+  if [ "$edge" = 1 ]; then generate_edge_photos "$RUNS/photos/bots" "bot"; fi
 }
 
 # ── Native prebuild (sourceable: qa/lab/tests/lab-functions.test.sh) ──

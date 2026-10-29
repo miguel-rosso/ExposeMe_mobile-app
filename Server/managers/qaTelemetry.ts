@@ -21,7 +21,8 @@ export interface QaAck {
 
 /**
  * One recorded ack: the payload plus who sent it (from the session), the server clock when it arrived and, if that phase
- * of that round is the room's latest broadcast, the server clock when it was emitted (`serverAt`).
+ * of that round was broadcast once and within the last PHASE_EMIT_ROUNDS_KEPT rounds, the server clock when it was
+ * emitted (`serverAt`).
  */
 export interface QaAckRecord extends QaAck {
   gameCode: string;

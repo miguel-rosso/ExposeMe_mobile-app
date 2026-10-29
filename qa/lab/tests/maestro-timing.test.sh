@@ -2,7 +2,8 @@
 # Step budget of the Maestro flows inside the server's timed phases (EXP-238, EXP-257, EXP-267). On a slow Android
 # emulator every step that reads the screen takes 1-4 s, while the options are up for 8 s (answering) + 3 s (reveal)
 # and the scoreboard for 5 s, so the steps between `# ── timed: <phase> ──` and `# ── end timed ──` must be few and
-# cheap: no settle waits, no conditional reads, no text search. Static: no devices, servers or network.
+# cheap: no settle waits, no conditional reads, no text search (a testID filtered by an env variable, like
+# `text: "${USERNAME}"`, is no UI string and is allowed). Static: no devices, servers or network.
 # Run: qa/lab/tests/maestro-timing.test.sh
 set -uo pipefail
 
@@ -14,8 +15,10 @@ pass=0 fail=0
 ok() { pass=$((pass + 1)); echo "ok   - $1"; }
 ko() { fail=$((fail + 1)); echo "FAIL - $1${2:+ ($2)}"; }
 
-# Steps that touch the device allowed per timed block (evalScript is free: it never reads the screen)
-budget() { case $1 in answering) echo 3;; scores) echo 2;; *) echo "";; esac; }
+# Steps that touch the device allowed per timed block (evalScript is free: it never reads the screen). Scores: the card
+# wait plus two checks of the scoreboard (EXP-141 no options under it, EXP-290 the card never shows my own name); on a
+# slow phone the last one may run once the scoreboard has closed (it then passes without checking anything)
+budget() { case $1 in answering) echo 3;; scores) echo 3;; *) echo "";; esac; }
 # Longest settle wait after a tap or swipe in a timed block: the progress bar never settles, so the default waits it out
 MAX_SETTLE_MS=500
 # Slowest screen read seen on the Android emulator (12 players): the worst case of one budgeted step
@@ -67,7 +70,12 @@ timed_blocks() {
       err("inline text selector inside a timed phase (use a testID)")
     }
     /^[ \t]*optional:[ \t]*true/ { warn("optional step inside a timed phase (a missing element costs up to 7 s)") }
-    /^[ \t]*text:/ { err("text selector inside a timed phase (use a testID)") }
+    /^[ \t]*id:/ { id_line = NR; id_indent = match($0, /[^ \t]/) }
+    /^[ \t]*text:/ {
+      env_filter = $0 ~ /^[ \t]*text:[ \t]*"\$\{[A-Z_]+\}"[ \t]*$/
+      if (!(env_filter && id_line == NR - 1 && id_indent == match($0, /[^ \t]/)))
+        err("text selector inside a timed phase (use a testID, filtered at most by an env variable)")
+    }
     /^[ \t]*when:/ { err("conditional step inside a timed phase (a false condition costs up to 7 s)") }
     /^[ \t]*waitToSettleTimeoutMs:/ { settle = $2 }
     /^[ \t]*timeout:/ { if (steps == 1 && first_timeout == "") first_timeout = $2 }
@@ -158,6 +166,31 @@ timed_blocks "$TMP/settle.yaml" | grep -q "^BLOCK scores [0-9]* 1 swipe -$" && o
 grep -q "unknown timed phase 'reveal'" "$TMP/out" && ok "checker rejects a phase with no budget" || ko "checker rejects a phase with no budget" "$(cat "$TMP/out")"
 printf -- '# ── timed: answering ──\n- tapOn:\n    id: "x"\n    waitToSettleTimeoutMs: 500\n' >"$TMP/open.yaml"
 timed_blocks "$TMP/open.yaml" | grep -q "never closed" && ok "checker flags an unclosed block" || ko "checker flags an unclosed block"
+cat >"$TMP/env-text.yaml" <<'EOF'
+# ── timed: scores ──
+- extendedWaitUntil:
+    notVisible:
+      id: "score-answer-name"
+      text: "${USERNAME}"
+    timeout: 1000
+- extendedWaitUntil:
+    notVisible:
+      text: "${USERNAME}"
+    timeout: 1000
+- extendedWaitUntil:
+    notVisible:
+      id: "score-answer-name"
+      text: "It was your photo!"
+    timeout: 1000
+# ── end timed ──
+EOF
+timed_blocks "$TMP/env-text.yaml" >"$TMP/env-text.out"
+! grep -q "^ERR 5:" "$TMP/env-text.out" && ok "checker allows a testID filtered by an env variable" \
+  || ko "checker allows a testID filtered by an env variable" "$(cat "$TMP/env-text.out")"
+grep -q "^ERR 9: text selector" "$TMP/env-text.out" && ok "checker flags an env variable text without a testID" \
+  || ko "checker flags an env variable text without a testID" "$(cat "$TMP/env-text.out")"
+grep -q "^ERR 14: text selector" "$TMP/env-text.out" && ok "checker flags a UI string filter on a testID" \
+  || ko "checker flags a UI string filter on a testID" "$(cat "$TMP/env-text.out")"
 
 # ── Every flow's timed blocks fit their budget ──
 for flow in "$MAESTRO_DIR"/*.yaml; do check_flow "$flow"; done

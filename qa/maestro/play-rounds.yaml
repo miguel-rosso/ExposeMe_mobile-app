@@ -47,6 +47,14 @@ appId: com.socketNull.ExposeMe
           visible:
             id: "score-answer-card|winner-modal|final-score-modal"
           timeout: 14000
+      # EXP-290: the card never shows this phone's own name: on the owner's phone it says "It was your photo!" /
+      # "¡Era tu foto!" instead (its other branch, PhotoOwnerCard.tsx). Filtered by the player name, not a UI string,
+      # so it works in any language; the short timeout fails while the card shows it, not once the scoreboard closed.
+      - extendedWaitUntil:
+          notVisible:
+            id: "score-answer-name"
+            text: "${USERNAME}"
+          timeout: 1000
       # EXP-141: the scoreboard is drawn alone, with no answer options under it. `below` the scoreboard's title ties
       # both to the same screen read, and the short timeout fails while both are drawn instead of waiting for the
       # scoreboard to close (once it has closed, the next round's options can't match).

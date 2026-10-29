@@ -4,7 +4,7 @@ import path from "path";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import {
   TEST_IDS, playerOptionId, lobbyPlayerId, lobbyPlayerOfflineId, roundsOptionId, winnerNameId, finalWinnerId, finalRankId,
-  settingsStepId,
+  scoreRankId, settingsStepId,
 } from "../app/utils/testIds";
 import AlertModal from "../app/components/modals/AlertModal";
 import CloseButton from "../app/components/CloseButton";
@@ -105,6 +105,8 @@ describe("E2E testIDs (EXP-008)", () => {
       settingsStepId(1),
       // EXP-085 tie flow: the device user and a bot
       ...["${USERNAME}", "bot1"].flatMap((u) => [winnerNameId(u), finalWinnerId(u), finalRankId(u)]),
+      // EXP-290 quit-after-game-over flow: the bot that quit at game over, in none of the next game's lists
+      lobbyPlayerOfflineId("bot3"), playerOptionId("bot3"), scoreRankId("bot3"), finalRankId("bot3"),
       // System photo picker and crop screen used by plant-photo.yaml (not our components)
       "com.google.android.providers.media.module:id/icon_thumbnail",
       "com.socketNull.ExposeMe:id/crop_image_menu_crop",

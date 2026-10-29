@@ -1,0 +1,77 @@
+# EXP-151 / EXP-290: a player whose app is killed on the final screens (no leave-room) must not haunt the next game.
+# The device plays a game with three bots; at game over bot3 (the last bot) closes its socket for good and the others
+# play again at once. The bots' host starts the next game once bot3 has been gone longer than the server's 15 s
+# disconnect grace, and that start drops it. On this device bot3 may only show up dimmed as "disconnected" in the
+# lobby, and is in none of the next game's answer options, scoreboards or final ranking.
+# The bots check the same on their side (player-left before game-started, no second-game list, score or answer).
+#   qa/lab/lab.sh play --flow quit-after-game-over --bots 3 --rounds 3 --devices <label> \
+#     --bot-args "--quit-after-game-over"
+# env: GAME_CODE, USERNAME, METRO_URL (url-encoded)
+# Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
+appId: com.socketNull.ExposeMe
+---
+- runFlow: open-app.yaml
+- runFlow: join-room.yaml
+# Game 1 runs the round loop inline, like play-again-auto-join.yaml: play-rounds.yaml ends by waiting for the winner's
+# "Tap anywhere to continue" and the final ranking, and on a slow Android the bots' next game (~18 s after game over)
+# can take the device off those screens first (EXP-184).
+- runFlow: wait-game-start.yaml
+- extendedWaitUntil:
+    visible:
+      id: "game-waiting-ready|game-waiting-photo|player-option-.*|score-modal"
+    timeout: 180000
+- repeat:
+    while:
+      notVisible:
+        id: "winner-modal|final-score-modal"
+    commands:
+      - tapOn:
+          id: "player-option-bot1"
+          optional: true
+          waitToSettleTimeoutMs: 500
+      - waitForAnimationToEnd:
+          timeout: 4000
+- takeScreenshot: ghost-first-results-${USERNAME}
+# Play again, retried while the final screens are up ("Tap anywhere to continue" only renders once the winner animation
+# is tappable). Every tap is optional: once the next game starts it takes the device in by itself and the loop ends.
+- repeat:
+    times: 5
+    while:
+      visible:
+        id: "winner-modal|final-score-modal"
+    commands:
+      - tapOn:
+          id: "winner-continue"
+          optional: true
+      - tapOn:
+          id: "play-again-button"
+          optional: true
+# In the lobby bot3 is shown as gone once its grace is over; the start of the next game can come first (3 s later)
+- extendedWaitUntil:
+    visible:
+      id: "lobby-player-offline-bot3|game-waiting-ready|game-waiting-photo|player-option-.*"
+    timeout: 60000
+- takeScreenshot: ghost-lobby-${USERNAME}
+# ── The next game: bot3 is not one of its players ──
+# Its first answer options: the live players are there, bot3 is not
+- extendedWaitUntil:
+    visible:
+      id: "player-option-bot1"
+    timeout: 120000
+- assertNotVisible:
+    id: "player-option-bot3"
+- takeScreenshot: ghost-options-${USERNAME}
+# Its first scoreboard has no row for bot3
+- extendedWaitUntil:
+    visible:
+      id: "score-round-title"
+    timeout: 20000
+- assertNotVisible:
+    id: "score-rank-bot3"
+# The rest of the next game, then its final ranking: bot3 is not in it either
+- runFlow: play-rounds.yaml
+- assertVisible:
+    id: "final-rank-bot1"
+- assertNotVisible:
+    id: "final-rank-bot3"
+- takeScreenshot: ghost-results-${USERNAME}

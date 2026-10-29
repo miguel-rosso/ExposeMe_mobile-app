@@ -586,7 +586,8 @@ Bot metrics only show when the server *sent* a phase; this shows when each phone
   event is ignored there). Accepted only from a session player, with a valid payload, at most 10 per socket refilled
   2/s; it appends one JSON line `{ gameCode, username, phase, round, at, handledAt?, receivedAt, serverAt? }`
   (`receivedAt`: server clock on receipt; `serverAt`: server clock when that phase of that round was broadcast,
-  if no later phase has been broadcast since and it was broadcast only once in that round) to `QA_TELEMETRY_FILE` (written synchronously, so lines keep arrival order), or logs
+  if it was broadcast only once in that round; kept for the current and the previous round, so an ack that arrives
+  after the next phase's broadcast still gets it) to `QA_TELEMETRY_FILE` (written synchronously, so lines keep arrival order), or logs
   it when no file is set. Nothing is ever sent back. Each lab server start moves the previous file to `<file>.prev`.
 - After `lab.sh play`, the lab prints the per-phase device render skew (spread of `receivedAt` across devices for the
   same round and phase: p50/p95/max) next to the bots summary, and per device and phase (`latency`) the delivery delay

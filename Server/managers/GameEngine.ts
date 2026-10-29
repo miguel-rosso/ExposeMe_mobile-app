@@ -54,6 +54,11 @@ const PLANTED_RESEND_MAX = 400;
 // A planted photo is only drawn if its upload outlives the round it would be shown in (the longest photo wait, then
 // answering and reveal); one expiring sooner is dropped and the round is played with a normal photo
 const PLANTED_PHOTO_MIN_LIFETIME = PHOTO_WAIT_TIMEOUT + ANSWER_TIME + REVEAL_TIME;
+// QA telemetry keeps the phase broadcast times of this many rounds (the current one and the one before): a slow
+// phone's ack can arrive after the next phase's broadcast, even the next round's (EXP-266)
+const PHASE_EMIT_ROUNDS_KEPT = 2;
+/** Server clock of each phase broadcast in one round; undefined for a phase broadcast more than once in it */
+type RoundPhaseEmits = Map<RoundPhase, number | undefined>;
 
 /**
  * A planted round's photo wait. `shown`/`shownSince` drive the countdown clients see: a normal 15 s photo wait,
@@ -96,11 +101,11 @@ export class GameEngine {
   /** Free owner changes used in each room's game, by username (see MAX_FREE_OWNER_CHANGES) */
   private freeOwnerChanges = new WeakMap<Room, Map<string, number>>();
   /**
-   * Last phase broadcast to each room: phase, round (as clients see it) and server clock (QA telemetry `serverAt`).
-   * `at` is undefined when that phase of that round was broadcast more than once (a skipped photo wait re-sends
+   * Each room's recent phase broadcasts, by round (as clients see it) and phase: server clock (QA telemetry
+   * `serverAt`), undefined when that phase of that round was broadcast more than once (a skipped photo wait re-sends
    * waiting-photo with the same round): an ack can't tell which broadcast it answers.
    */
-  private phaseEmits = new WeakMap<Room, { phase: RoundPhase; round: number; at: number | undefined }>();
+  private phaseEmits = new WeakMap<Room, Map<number, RoundPhaseEmits>>();
 
   constructor(private io: Server, private roomManager: RoomManager) {}
 
@@ -142,13 +147,12 @@ export class GameEngine {
   }
 
   /**
-   * Server clock (ms) when `phase` of `round` was broadcast to `room`, until its next phase broadcast (dev/QA render
-   * telemetry, Server/GAME_FLOW.md "QA render telemetry"); undefined for any other phase or round, and for one broadcast
-   * more than once.
+   * Server clock (ms) when `phase` of `round` was broadcast to `room` (dev/QA render telemetry, Server/GAME_FLOW.md
+   * "QA render telemetry"), kept for the last PHASE_EMIT_ROUNDS_KEPT rounds of the game; undefined for a phase not
+   * broadcast (yet), an older round, and one broadcast more than once.
    */
   phaseEmittedAt(room: Room, phase: RoundPhase, round: number): number | undefined {
-    const last = this.phaseEmits.get(room);
-    return last && last.phase === phase && last.round === round ? last.at : undefined;
+    return this.phaseEmits.get(room)?.get(round)?.get(phase);
   }
 
   /** Game start: drop gone players like a leave (uploads released, host handed over, room notified). */
@@ -245,9 +249,12 @@ export class GameEngine {
   /** Remembers that the room's current phase of `round` is being broadcast now (see phaseEmittedAt). */
   private markPhaseEmitted(room: Room, round: number): void {
     if (!room.phase) return;
-    const last = this.phaseEmits.get(room);
-    const repeated = last?.phase === room.phase && last.round === round;
-    this.phaseEmits.set(room, { phase: room.phase, round, at: repeated ? undefined : Date.now() });
+    const rounds: Map<number, RoundPhaseEmits> = this.phaseEmits.get(room) ?? new Map();
+    this.phaseEmits.set(room, rounds);
+    const phases: RoundPhaseEmits = rounds.get(round) ?? new Map();
+    rounds.set(round, phases);
+    phases.set(room.phase, phases.has(room.phase) ? undefined : Date.now());
+    for (const old of rounds.keys()) if (old <= round - PHASE_EMIT_ROUNDS_KEPT) rounds.delete(old);
   }
 
   /** `your-turn` payload for the current photo request (re-sent unchanged on rejoin/resume). */

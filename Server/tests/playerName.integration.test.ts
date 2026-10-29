@@ -57,6 +57,7 @@ describe("join-create-game player names", () => {
     ["zero-width space", "bob\u200B"],
     ["right-to-left override", "\u202Ebob"],
     ["hangul filler only", "\u3164"],
+    ["a compound vowel typed as two jamo", "\uac00\u1175"],
   ])("refuses a name with %s as \"Invalid username\" (create and join)", async (_label, name) => {
     expect(await joinAs(null, name)).toEqual({ success: false, message: "Invalid username" });
     const { room } = await joinAs(null, "host");

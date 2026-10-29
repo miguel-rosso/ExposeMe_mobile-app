@@ -63,8 +63,9 @@ const withoutAllowedFormatChars = (text: string) => text
 /**
  * A name the server accepts: a string of 1–20 UTF-16 units (at most 60 after NFKC), not blank, with no invisible
  * characters or spaces other than U+0020, no combining mark at the start or on a trailing space, at most four
- * combining marks in a row, no mark on a kana with a voiced form but the voicing mark it takes (marksKanaOddly) and
- * no mix of Latin-lookalike scripts (see mixesLookalikeScripts). Emoji, symbols, punctuation and digits are free: a
+ * combining marks in a row, no mark on a kana with a voiced form but the voicing mark it takes (marksKanaOddly), no
+ * mix of Latin-lookalike scripts (see mixesLookalikeScripts) and no Hangul block of jamo that don't make one syllable
+ * (splitsHangulBlock). Emoji, symbols, punctuation and digits are free: a
  * name may be made only of them.
  */
 export function isValidUsername(value: unknown): value is string {
@@ -75,7 +76,8 @@ export function isValidUsername(value: unknown): value is string {
     && !TRAILING_MARK.test(value)
     && !MARK_PILE.test(value)
     && !marksKanaOddly(value)
-    && !mixesLookalikeScripts(value);
+    && !mixesLookalikeScripts(value)
+    && !splitsHangulBlock(value);
 }
 
 // ── Scripts ─────────────────────────────────────────
@@ -232,6 +234,41 @@ function withoutMarks(decomposed: string, standIns: VoicingStandIns): string {
     WHITESPACE.test(before) || standIns.get(before)?.includes(mark) ? mark : "");
 }
 
+// ── Hangul ──────────────────────────────────────────
+
+// Hangul letters: syllables, conjoining jamo and their compatibility and half-width forms
+const HANGUL_RUN = /\p{Script=Hangul}+/gu;
+
+/**
+ * `text` with conjoining jamo composed into the syllable they draw (EXP-294): ᄋ + ᅵ is 이, 이 + ᆼ is 잉. The lookalike
+ * tables read some jamo on their own (ᄋ as "o", ᅳ as "ー"), so they must not see the pieces of a syllable. Only
+ * Hangul is composed: other scripts keep the marks the tables run before.
+ */
+const composeHangul = (text: string) => text.replace(HANGUL_RUN, (run) => run.normalize("NFC"));
+
+// Conjoining jamo: leading consonants, vowels and trailing consonants, with their extended blocks
+const CONJOINING_JAMO = /[\u1100-\u11FF\uA960-\uA97F\uD7B0-\uD7FF]/u;
+const GRAPHEMES = new Intl.Segmenter("und", { granularity: "grapheme" });
+
+/** Whether a grapheme cluster of `text` holds conjoining jamo that NFC doesn't turn into a single character. */
+const hasUnjoinedJamoCluster = (text: string) =>
+  Array.from(GRAPHEMES.segment(text), ({ segment }) => segment).some((cluster) =>
+    CONJOINING_JAMO.test(cluster) && Array.from(cluster.normalize("NFC")).length > 1);
+
+/**
+ * Whether `name` holds conjoining jamo drawn in one block with letters NFC doesn't join them with (EXP-294): a double
+ * consonant or compound vowel typed as two simple jamo (ᄀ + 가, 가 + ᅵ) looks like the syllable that has it (까, 개)
+ * but would get another key. Checked also without the combining marks, which the keys drop and which would otherwise
+ * split the cluster (가 + acute + ᅵ). Lone jamo ("ᄋ", "(ᅳ_ᅳ)") and every jamo spelling of a syllable (ᄋ + ᅵ, 이 + ᆼ)
+ * are fine; a jamo carrying a mark and archaic jamo clusters are refused.
+ */
+function splitsHangulBlock(name: string): boolean {
+  const withoutAnyMark = name.normalize("NFD").replace(ANY_MARK, "").normalize("NFC");
+  return hasUnjoinedJamoCluster(name) || hasUnjoinedJamoCluster(withoutAnyMark);
+}
+
+// ── Key steps ───────────────────────────────────────
+
 /** Each character drawn like ASCII letters or digits replaced by them (UTS #39 table, see asciiConfusables.ts). */
 const toAscii = (text: string) => replaceChars(text, ASCII_CONFUSABLES);
 
@@ -242,14 +279,14 @@ const foldSymbols = (text: string) => replaceChars(text, SYMBOL_CONFUSABLES);
 const foldCase = (text: string) => text.toUpperCase().toLowerCase();
 
 /**
- * Lookalikes read as ASCII (case kept: Greek small nu reads as "v" but capital nu as "N"), then NFKC (full-width,
- * styled letters), accents and other combining marks on a letter or symbol dropped (but a voicing mark on a kana that
- * takes it, or on a letter that `standIns` reads as one), the table again for what NFKC and the marks uncovered,
- * joiners dropped, whitespace trimmed and collapsed. The table runs before NFKC too because NFKC can lose the look:
- * long s reads as "f" but NFKC turns it into "s".
+ * Hangul jamo composed into syllables, lookalikes read as ASCII (case kept: Greek small nu reads as "v" but capital nu
+ * as "N"), then NFKC (full-width, styled letters), accents and other combining marks on a letter or symbol dropped (but
+ * a voicing mark on a kana that takes it, or on a letter that `standIns` reads as one), the table again for what NFKC
+ * and the marks uncovered, joiners dropped, whitespace trimmed and collapsed. The table runs before NFKC too because
+ * NFKC can lose the look: long s reads as "f" but NFKC turns it into "s".
  */
 function skeleton(name: string, standIns = NO_STAND_INS): string {
-  const decomposed = toAscii(separateVoicing(name, standIns)).normalize("NFKC").normalize("NFD");
+  const decomposed = toAscii(separateVoicing(composeHangul(name), standIns)).normalize("NFKC").normalize("NFD");
   const bare = withoutMarks(decomposed, standIns).normalize("NFC");
   return toAscii(bare).replace(IGNORABLE_IN_KEY, "").replace(WHITESPACE_RUN, " ").trim();
 }
@@ -269,12 +306,13 @@ export function nameKey(name: string): string {
  * their UTS #39 prototype of the same size ("(∙_∙)" as "(•_•)", "ǃǃ" as "!!", "¯" as "ˉ", curly quotes as straight
  * ones), I / l / | / 1 as "l", then "rn" as "m", "vv" as "w", "cl" as "d" and 0 as "o" ("AIice" reads as "Alice",
  * "rnike" as "mike"). The symbol table runs before the skeleton too because NFKC can lose the look: the macron "¯"
- * becomes a space and a combining macron. Kana read as the kanji or kana drawn like them ("カ" as "力", "ヘ" as "へ"),
- * and a voicing mark on a symbol or kanji read as a kana counts as on that kana: "〈" + dakuten reads as ぐ, "力" +
- * dakuten as ガ. Voiced kana that NFKC made (squared "㌎" is ガロン) are split again so the second pass sees the kana.
+ * becomes a space and a combining macron; Hangul jamo are composed before it, as in the skeleton. Kana read as the
+ * kanji or kana drawn like them ("カ" as "力", "ヘ" as "へ"), and a voicing mark on a symbol or kanji read as a kana
+ * counts as on that kana: "〈" + dakuten reads as ぐ, "力" + dakuten as ガ. Voiced kana that NFKC made (squared "㌎" is
+ * ガロン) are split again so the second pass sees the kana.
  */
 export function visualKey(name: string): string {
-  const symbols = foldSymbols(separateVoicing(name, SYMBOL_VOICING_STAND_INS));
+  const symbols = foldSymbols(separateVoicing(composeHangul(name), SYMBOL_VOICING_STAND_INS));
   const skeletal = foldSymbols(separateVoicing(skeleton(symbols, SYMBOL_VOICING_STAND_INS)));
   const folded = toAscii(foldCase(skeletal.replace(LOOKS_LIKE_L, "l")));
   return VISUAL_LOOKALIKES.reduce((key, [pattern, replacement]) => key.replace(pattern, replacement), folded);

@@ -212,10 +212,18 @@ After last round: game-over
   scripts listed in the confusables table below), with their accents dropped, may not come from two of the
   Latin-lookalike scripts (Latin, Greek, Cyrillic, Armenian, Cherokee, Lisu, Coptic), so `Dave` with a Greek nu,
   `Mike` with a Cyrillic small ka, `Dave` with a Greek alpha with tonos or a Greek alpha with a Cyrillic be is
-  refused. Any other mix is free (`Li 李`, `Dave Ж`, `Σ(ﾟДﾟ)`, `(ノಠ益ಠ)ノ`). Otherwise: `"Invalid username"`. The name
+  refused. Any other mix is free (`Li 李`, `Dave Ж`, `Σ(ﾟДﾟ)`, `(ノಠ益ಠ)ノ`). Hangul conjoining jamo
+  (U+1100–11FF, U+A960–A97F, U+D7B0–D7FF) are refused inside a grapheme cluster that NFC doesn't turn into a
+  single character (also a jamo carrying a combining mark, and archaic jamo clusters): fonts draw the cluster as one
+  block, so `ᄀ가`, `가ᅵ`, `오ᅡ` or `각ᆨ` look like `까`, `개`, `와` or `갂`. The check runs on the name as typed and
+  again with every combining mark removed, since a mark between a syllable and a jamo splits the cluster but the keys
+  drop it (`가` + acute + `ᅵ` is refused; `가` + acute + `ᆨ`, which keys as `각`, is fine). Lone jamo (`ᄋ`, `(ᅳ_ᅳ)`)
+  and the jamo spelling of any syllable (`ᄋ` + `ᅵ`, `이` + `ᆼ`) are fine. Otherwise:
+  `"Invalid username"`. The name
   is stored and sent to everyone **exactly as typed** (the app compares its own typed name with the room's names).
-- Names that read the same on screen can't share a room. Two keys are compared. `nameKey`: characters drawn like
-  ASCII letters or digits replaced by them (a table generated from UTS #39 `confusables.txt` covering every script,
+- Names that read the same on screen can't share a room. Two keys are compared. `nameKey`: Hangul conjoining jamo
+  composed into syllables first (NFC on Hangul runs only, so kana keep their voicing marks), then characters drawn
+  like ASCII letters or digits replaced by them (a table generated from UTS #39 `confusables.txt` covering every script,
   symbol and spacing mark, plus the lowercase forms of letters it only lists as capitals, such as Cyrillic small ka;
   `managers/asciiConfusables.ts`, regenerated with `scripts/generateAsciiConfusables.mjs`), then NFKC, combining
   marks and accents dropped unless they sit on a space or are a Japanese voicing mark (dakuten, handakuten) on a kana
@@ -250,6 +258,8 @@ After last round: game-over
     different names (`たいき` and `だいき`, `はな`, `ばな` and `ぱな`, `ハル` and `バル`, also in half-width katakana),
     while `だ` typed precomposed, as `た` + combining dakuten or as `た` + spacing `゛` is the same name (a spacing
     `゛` or `゜` after a kana that takes it voices it, like half-width `ﾞ`; anywhere else it stays a separate mark).
+    A Korean name typed as conjoining jamo (`이민지` as `ᄋ` `ᅵ` `ᄆ` `ᅵ` `ᆫ` `ᄌ` `ᅵ`) is the same name as the
+    precomposed one.
   - Only the same `visualKey` = a **different name that looks too alike**: `AIice` next to `Alice`, `b0b` next to
     `bob`, real names such as `Clara` next to `Dara` or `Arnie` next to `Amie`, and symbol lookalikes such as
     `(∙_∙)` next to `(•_•)`, `ǃǃ` next to `!!`, `ˉ\_(ツ)_/ˉ` next to `¯\_(ツ)_/¯`, `(˚_˚)` or `(º_º)` next to `(°_°)`,

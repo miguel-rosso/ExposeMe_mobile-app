@@ -3,7 +3,8 @@
 # no devices, servers or network. Covers --second-room (2nd bots room -> NEW_CODE), --maestro-env KEY=VALUE and
 # --server/--port (EXP-220: bots and render telemetry on a worktree's own lab server), and the kicked-notice
 # invocation (EXP-139: --bot-args '--kick <device label>'), and the one retry of a device whose dev client got stuck
-# downloading the JS bundle (EXP-256) or whose dev-client-boot.yaml bundle wait ran out (EXP-297).
+# downloading the JS bundle (EXP-256) or whose dev-client-boot.yaml loaded check failed: its bundle wait ran out
+# (EXP-297) or it gave up at once on "There was a problem loading the project" (EXP-304).
 # Run: qa/lab/tests/lab-play.test.sh
 set -uo pipefail
 
@@ -181,7 +182,7 @@ runs_of() { grep -c -- "--test-output-dir $RUNS/$1/maestro/$2" "$TMP/maestro.arg
 STUB_MAESTRO_FAIL=android-a play r16 --bots 2 --devices ios-a,android-a
 rc=$?
 [ $rc = 0 ] && completed r16 && ok "stuck bundle download: the retry saves the run" || ko "stuck bundle download: retry saves the run" "rc=$rc $(cat "$TMP/play.out")"
-grep -q "android-a: dev client stuck loading the JS bundle; force-stopping the app" "$TMP/play.out" \
+grep -qF 'android-a: dev client stuck loading the JS bundle (stuck on its "Downloading N%"); force-stopping the app' "$TMP/play.out" \
   && ok "stuck bundle download: the retry is logged" || ko "stuck bundle download: retry logged" "$(cat "$TMP/play.out")"
 [ "$(cat "$TMP/device-cmds.log" 2>/dev/null)" = "adb -s emulator-5554 shell am force-stop com.socketNull.ExposeMe" ] \
   && ok "stuck bundle download: only that app is force-stopped" || ko "stuck bundle download: force-stop" "$(cat "$TMP/device-cmds.log" 2>/dev/null)"
@@ -228,6 +229,8 @@ rc=$?
 [ $rc = 0 ] && completed r25 && [ "$(runs_of r25 android-a)" = 2 ] && [ "$(runs_of r25 ios-a)" = 1 ] \
   && [ "$(cat "$TMP/device-cmds.log" 2>/dev/null)" = "adb -s emulator-5554 shell am force-stop com.socketNull.ExposeMe" ] \
   && ok "boot wait ran out: force-stop + one retry saves the run" || ko "boot wait ran out: retry" "rc=$rc $(cat "$TMP/play.out" "$TMP/maestro.args")"
+grep -qF "android-a: dev client stuck loading the JS bundle (dev-client-boot.yaml's bundle wait ran out); force-stopping" "$TMP/play.out" \
+  && ok "boot wait ran out: the retry log names it" || ko "boot wait ran out: retry log" "$(cat "$TMP/play.out")"
 STUB_MAESTRO_FAIL="android-a android-a-retry" STUB_LAST_SCREEN="DEVELOPMENT SERVERS" STUB_FAILED_CONDITION="$BOOT_LOADED_CONDITION" \
   play r26 --bots 2 --devices android-a
 rc=$?
@@ -239,6 +242,30 @@ STUB_MAESTRO_FAIL=android-a STUB_LAST_SCREEN="Join Game" STUB_PASSED_CONDITION="
 rc=$?
 [ $rc != 0 ] && [ "$(runs_of r27 android-a)" = 1 ] && [ ! -s "$TMP/device-cmds.log" ] \
   && ok "another assertTrue failed after the app loaded: no retry" || ko "other assertTrue: no retry" "rc=$rc $(cat "$TMP/maestro.args")"
+
+# ── "There was a problem loading the project" (EXP-304): dev-client-boot.yaml leaves its bundle wait at once on that (EXP-298)
+# screen and fails the same loaded check, with no command after it -> the same one retry, logged with that reason ──
+LOAD_ERROR_SCREEN="There was a problem loading the project.\nUnable to load script."
+STUB_MAESTRO_FAIL=android-a STUB_LAST_SCREEN="$LOAD_ERROR_SCREEN" STUB_FAILED_CONDITION="$BOOT_LOADED_CONDITION" \
+  play r28 --bots 2 --devices ios-a,android-a
+rc=$?
+[ $rc = 0 ] && completed r28 && [ "$(runs_of r28 android-a)" = 2 ] && [ "$(runs_of r28 ios-a)" = 1 ] \
+  && [ "$(cat "$TMP/device-cmds.log" 2>/dev/null)" = "adb -s emulator-5554 shell am force-stop com.socketNull.ExposeMe" ] \
+  && ok "load error screen: force-stop + one retry saves the run" || ko "load error screen: retry" "rc=$rc $(cat "$TMP/play.out" "$TMP/maestro.args")"
+grep -qF 'android-a: dev client stuck loading the JS bundle (showed "There was a problem loading the project"); force-stopping' "$TMP/play.out" \
+  && ok "load error screen: the retry log names it" || ko "load error screen: retry log" "$(cat "$TMP/play.out")"
+STUB_MAESTRO_FAIL="ios-a ios-a-retry" STUB_LAST_SCREEN="$LOAD_ERROR_SCREEN" STUB_FAILED_CONDITION="$BOOT_LOADED_CONDITION" \
+  play r29 --bots 2 --devices ios-a
+rc=$?
+[ $rc != 0 ] && [ "$(runs_of r29 ios-a)" = 2 ] && grep -q "RUN r29 had failures" "$TMP/play.out" \
+  && ok "load error screen again on the retry: only one retry, the run fails" || ko "load error twice" "rc=$rc $(cat "$TMP/maestro.args")"
+# The decision stays dev-client-boot.yaml's loaded check: the error screen after the app loaded (e.g. a later reload)
+# shellcheck disable=SC2016 # a Maestro expression
+STUB_MAESTRO_FAIL=android-a STUB_LAST_SCREEN="$LOAD_ERROR_SCREEN" STUB_PASSED_CONDITION="$BOOT_LOADED_CONDITION" \
+  STUB_FAILED_CONDITION='${output.round > 1}' play r30 --bots 2 --devices android-a
+rc=$?
+[ $rc != 0 ] && [ "$(runs_of r30 android-a)" = 1 ] && [ ! -s "$TMP/device-cmds.log" ] \
+  && ok "load error screen after the boot check passed: no retry" || ko "load error after boot: no retry" "rc=$rc $(cat "$TMP/maestro.args")"
 
 # ── Lobby wait covers one retry (EXP-256): the devices that joined keep waiting for the retried one ──
 play r24 --bots 2 --devices ios-a

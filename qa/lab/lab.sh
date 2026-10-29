@@ -27,8 +27,9 @@
 #                               summary and the device render skew per phase (qa/runs/<RUN_ID>/render-skew.json)
 #                               (--bot-args: extra bots.mjs flags, e.g. --flow tie-game --bot-args --no-answer);
 #                               a device whose flow failed while the dev client was still booting (stuck on its
-#                               "Downloading N%", or dev-client-boot.yaml's bundle wait ran out: launcher, ANR dialog)
-#                               is force-stopped and runs the flow once more (maestro/<device>-retry)
+#                               "Downloading N%", or dev-client-boot.yaml's loaded check failed: launcher, ANR dialog,
+#                               "There was a problem loading the project") is force-stopped and runs the flow once
+#                               more (maestro/<device>-retry)
 #        [--second-room "<bots.mjs args>"]  also start a 2nd bots room; its code reaches the flows as NEW_CODE
 #        [--maestro-env KEY=VALUE]          extra Maestro variable for every device (repeatable)
 #        [--server http://localhost:P | --port P]  bots and render telemetry use that lab server (e.g. a worktree's
@@ -660,10 +661,12 @@ reject_bots_server_override() { # play option, its bots.mjs flags: dies if they 
 
 # ── Device flows: one retry when the dev client got stuck booting (EXP-256, EXP-297) ──
 # With 4 devices loading the bundle from Metro at once, a dev client sometimes freezes on "Downloading 55.0%…", stays
-# on its launcher or shows an "isn't responding" dialog, and open-app.yaml times out before the device ever joins.
-# The room is still waiting for it, so force-stopping the app and running the flow again (open-app.yaml relaunches
-# it) saves the run.
+# on its launcher, shows an "isn't responding" dialog or "There was a problem loading the project" (dev-client-boot.yaml
+# fails at once on that one since EXP-298), and open-app.yaml fails before the device ever joins. The room is still waiting
+# for it, so force-stopping the app and running the flow again (open-app.yaml relaunches it) saves the run.
 BUNDLE_DOWNLOAD_TEXT_RE='"text" *: *"Downloading [0-9]+(\.[0-9]+)?%'
+# The dev client's load error screen (Expo dev-client UI, always English): only names the reason in the retry log
+LOAD_ERROR_TEXT='There was a problem loading the project'
 # dev-client-boot.yaml's assertion that the bundle wait saw the app load (lab-play.test.sh checks the flow keeps it)
 # shellcheck disable=SC2016 # a Maestro expression, not a shell one
 BOOT_LOADED_CONDITION='${output.devClientBoot.loaded}'
@@ -689,7 +692,8 @@ stuck_on_bundle_download() { # maestro --test-output-dir: exit 0 when the failed
   [ -n "$h" ] && grep -Eq "$BUNDLE_DOWNLOAD_TEXT_RE" "$h"
 }
 
-boot_wait_ran_out() { # maestro --test-output-dir: exit 0 when the failed step was dev-client-boot.yaml's loaded check
+boot_check_failed() { # maestro --test-output-dir: exit 0 when the failed step was dev-client-boot.yaml's loaded check
+  # (its bundle wait ran out, or it gave up at once on the load error screen)
   # commands.json lists every command run, nested ones included, with its status
   local f
   while read -r f; do
@@ -700,8 +704,17 @@ boot_wait_ran_out() { # maestro --test-output-dir: exit 0 when the failed step w
   return 1
 }
 
-stuck_booting() { # maestro --test-output-dir: exit 0 when the failed run never got past the dev client's boot
-  stuck_on_bundle_download "$1" || boot_wait_ran_out "$1"
+showed_load_error() { # maestro --test-output-dir: exit 0 when the last failed step's screen is the load error
+  local h; h="$(last_failure_hierarchy "$1")"
+  [ -n "$h" ] && grep -qF "$LOAD_ERROR_TEXT" "$h"
+}
+
+stuck_booting_reason() { # maestro --test-output-dir: prints why the failed run never got past the dev client's boot;
+  # exit 1, printing nothing, when it did get past it
+  if stuck_on_bundle_download "$1"; then echo 'stuck on its "Downloading N%"'
+  elif ! boot_check_failed "$1"; then return 1
+  elif showed_load_error "$1"; then echo "showed \"$LOAD_ERROR_TEXT\""
+  else echo "dev-client-boot.yaml's bundle wait ran out"; fi
 }
 
 stop_app() { # platform, device id
@@ -721,8 +734,9 @@ run_device_flow() { # device json, flow file, output dir, maestro args...: the f
   local d=$1 flow=$2 out=$3 id label platform; shift 3
   id="$(jq -r .id <<<"$d")"; label="$(jq -r .label <<<"$d")"; platform="$(jq -r .platform <<<"$d")"
   run_maestro_flow "$id" "$flow" "$out" "$label" "$@" && return 0
-  stuck_booting "$out/$label" || return 1
-  warn "$label: dev client stuck loading the JS bundle; force-stopping the app and running $(basename "$flow") once more" \
+  local reason; reason="$(stuck_booting_reason "$out/$label")" || return 1
+  warn "$label: dev client stuck loading the JS bundle ($reason); force-stopping the app and running" \
+    "$(basename "$flow") once more" \
     "(results in $out/$label-retry)"
   stop_app "$platform" "$id"
   run_maestro_flow "$id" "$flow" "$out" "$label-retry" "$@"

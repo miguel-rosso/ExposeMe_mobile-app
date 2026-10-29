@@ -86,8 +86,9 @@ const inRoundPhase = (phase: ServerPhase | null) => phase === "answering" || pha
 const showsRound = (snap: GameStateSnapshot) => inRoundPhase(snap.phase) && !!snap.photo;
 
 /**
- * `waiting-photo` (and a `game-state` in that phase): leave the previous round's photo and scores and show the
- * waiting screen for round `round`, with the server's `duration` (of the wait's full `total`) for the progress bar.
+ * `waiting-photo` (and a `game-state` in that phase, or a resume into it from scores): leave the previous round
+ * (PER_ROUND_RESET, photo) and show the waiting screen for round `round`, with the server's `duration` (of the wait's
+ * full `total`) for the progress bar.
  */
 const waitForPhoto = (state: RoundView, round: number, duration: number, total = duration): RoundView => ({
   ...startPhase(state, "waiting-photo", duration, total), ...PER_ROUND_RESET, photo: null, round,
@@ -122,10 +123,8 @@ const applySnapshot = (state: RoundView, snap: GameStateSnapshot, serverUrl: str
   // Waiting for the next photo: same screen as `waiting-photo` (snapshot round is the last played one)
   if (snap.phase === "waiting-photo") return waitForPhoto(held, snap.round + 1, snap.duration, snap.phaseTotal);
 
-  // Ready phase: back to the "are you ready" screen until the first round
-  return {
-    ...held, photo: null, phase: null, correctAnswer: "", scores: null, mySelection: "",
-  };
+  // Ready phase: back to the "are you ready" screen until the first round, under the server's hold
+  return { ...state, ...PER_ROUND_RESET, gameHeld: snap.held, photo: null, phase: null };
 };
 
 export const roundReducer = (state: RoundView, action: RoundAction): RoundView => {
@@ -168,10 +167,10 @@ export const roundReducer = (state: RoundView, action: RoundAction): RoundView =
     // The server's phase goes on, also when this screen still showed an earlier one (the game-state that follows a
     // rejoin fills in what that phase shows)
     case "game-resumed": {
-      // Paused between rounds (after scores): the next round's photo is awaited now
+      // Paused between rounds (after scores): the next round's photo is awaited now, as after a waiting-photo
       const nextRoundPhoto = action.data.phase === "waiting-photo" && state.phase !== "waiting-photo";
-      const resumed = nextRoundPhoto ? { ...state, photo: null, scores: null, round: state.round + 1 } : state;
-      return resyncPhase(resumed, action.data.phase, action.data);
+      if (nextRoundPhoto) return waitForPhoto(state, state.round + 1, action.data.duration, action.data.phaseTotal);
+      return resyncPhase(state, action.data.phase, action.data);
     }
     case "game-state":
       return applySnapshot(state, action.snap, action.serverUrl);

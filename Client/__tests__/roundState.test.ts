@@ -178,6 +178,19 @@ describe("game-state", () => {
     expect(ready.state).toMatchObject({ photo: null, phase: null, mySelection: "" });
   });
 
+  // EXP-235: the ready phase leaves everything of a round shown before, its phase bar untouched; the server's hold wins
+  it("a ready-phase snapshot leaves the round shown before and keeps the bar's timing", () => {
+    const prev = shown({
+      phase: "scores", correctAnswer: "alice", scores: [], gameHeld: true, pressing: true,
+      phaseDuration: 5_000, phaseTotal: 5_000, phaseKey: 9,
+    });
+    const ready = applyGameState(snapshot({ phase: null, photo: null }), "", prev).state;
+    expect(ready).toEqual({
+      ...prev, photo: null, phase: null, correctAnswer: "", scores: null, mySelection: "", gameHeld: false, pressing: false,
+    });
+    expect(applyGameState(snapshot({ phase: null, photo: null, held: true }), "", prev).state.gameHeld).toBe(true);
+  });
+
   it("reports game over when the game ended while away", () => {
     const pause = { duration: 1_000, waitingFor: [], pause: 1, maxPauses: 3 };
     const { state, result } = applyGameState(snapshot({ started: false, phase: null, pause }), "", shown({ gameHeld: true }));
@@ -237,10 +250,26 @@ describe("reveal, scores, hold and pause", () => {
     expect(roundReducer(scores, { type: "game-resumed", data: { phase: "waiting-photo", duration: 1_500, phaseTotal: 1_500 } })).toMatchObject({
       photo: null, scores: null, phase: "waiting-photo", round: 3, phaseDuration: 1_500, phaseKey: 8,
     });
+    // Already waiting for that photo: only the remaining time changes, the round stays
+    const waiting = view({ phase: "waiting-photo", round: 3, phaseKey: 4 });
+    expect(roundReducer(waiting, { type: "game-resumed", data: { phase: "waiting-photo", duration: 5_000, phaseTotal: 15_000 } })).toEqual({
+      ...waiting, phaseDuration: 5_000, phaseTotal: 15_000, phaseKey: 5,
+    });
     // Same phase resumed: only the remaining time (of the server's phase total) changes
     expect(roundReducer(answering, { type: "game-resumed", data: { phase: "answering", duration: 4_000, phaseTotal: 7_700 } })).toEqual({
       ...answering, phaseDuration: 4_000, phaseTotal: 7_700, phaseKey: 8,
     });
+  });
+
+  // EXP-235: the resume enters the next round's wait, as the live waiting-photo would: nothing of the round just
+  // scored (its answer, my pick, a press) is carried into the next one
+  it("a resume into the next round's photo wait leaves the scored round, as waiting-photo does", () => {
+    const scores = view({
+      ...answering, phase: "scores", scores: [], correctAnswer: "alice", pressing: true,
+    });
+    const resumed = roundReducer(scores, { type: "game-resumed", data: { phase: "waiting-photo", duration: 1_500, phaseTotal: 1_500 } });
+    expect(resumed).toEqual(roundReducer(scores, { type: "waiting-photo", data: { round: 3, duration: 1_500 } }));
+    expect(resumed).toMatchObject({ correctAnswer: "", mySelection: "", pressing: false });
   });
 });
 

@@ -8,10 +8,11 @@ import { acceptsPlantedPhoto, setUploadRooms } from "../middlewares/uploadAccess
 import { UploadRecord, uploadStore } from "../middlewares/uploadStore";
 import { createSlidingWindow } from "../middlewares/rateLimit";
 import {
-  ALLOWED_EMOJIS, createConnectionCounter, createEventLimiter, createJoinMissGuard, createTokenBucket, EMOJI_BURST, EMOJI_RATE_PER_S,
-  GAME_EVENT_LIMITS, handshakeKey,
+  ALLOWED_EMOJIS, CHAT_MESSAGE_LIMIT, createConnectionCounter, createEventLimiter, createJoinMissGuard, createSocketWindowLimit,
+  createTokenBucket, EMOJI_BURST, EMOJI_RATE_PER_S, GAME_EVENT_LIMITS, handshakeKey,
   HOLD_START_BURST, HOLD_START_RATE_PER_S, JOIN_EXEMPT_MAX, JOIN_MISS_GLOBAL_MAX, JOIN_MISS_HARD_FACTOR, JOIN_MISS_MAX,
-  JOIN_MISS_PREFIX_MAX, JOIN_MISS_PRESSURE_MAX, JOIN_MISS_SOCKET_INTERVAL_MS, JOIN_MISS_WINDOW_MS, MAX_CONNECTIONS_PER_IP,
+  JOIN_ATTEMPT_LIMIT, JOIN_MISS_PREFIX_MAX, JOIN_MISS_PRESSURE_MAX, JOIN_MISS_SOCKET_INTERVAL_MS, JOIN_MISS_WINDOW_MS,
+  MAX_CONNECTIONS_PER_IP,
 } from "../managers/socketGuards";
 import { createQaTelemetry, isQaAck, QA_ACK_BURST, QA_ACK_RATE_PER_S } from "../managers/qaTelemetry";
 import { JoinCreateGameData, PhotoUnavailableData, Player, Room, RoomOfGameResponse } from "../models/interfaces";
@@ -23,15 +24,10 @@ setUploadRooms(roomManager);
 /** Exported for test teardown (roomManager.clear()). */
 export { roomManager };
 
-const CHAT_COOLDOWN = 250;
-// join-create-game rate limit, per socket: at most JOIN_MAX_ATTEMPTS in any JOIN_WINDOW_MS
-const JOIN_MAX_ATTEMPTS = 5;
-const JOIN_WINDOW_MS = 10_000;
-const chatCooldowns = new Map<string, number>();
-// submit-answer rate limit, per socket: token bucket of ANSWER_BURST refilled at ANSWER_RATE_PER_S
-const ANSWER_BURST = 10;
-const ANSWER_RATE_PER_S = 5;
 const MAX_CHAT_LENGTH = 100;
+// Per-socket sliding windows (see managers/socketGuards): join-create-game attempts, chat messages
+const joinAttempts = createSocketWindowLimit(JOIN_ATTEMPT_LIMIT);
+const chatMessages = createSocketWindowLimit(CHAT_MESSAGE_LIMIT);
 // Per-IP limits (see managers/socketGuards): open sockets, and join attempts with a code that matches no room
 const connections = createConnectionCounter(MAX_CONNECTIONS_PER_IP);
 // Per IP key, per IPv6 /48 and global budget (see createJoinMissGuard)
@@ -44,8 +40,8 @@ const joinExemptions = createSlidingWindow({ max: JOIN_EXEMPT_MAX, windowMs: JOI
 const connsWithSocket = new WeakSet<object>();
 // Dev/QA only (QA_TELEMETRY=1): records when each device rendered a phase; null in production (no qa-ack handler)
 const qaTelemetry = createQaTelemetry();
-/** Exported for tests: open connections per IP key, join misses per IP key. */
-export { connections, joinMisses };
+/** Exported for tests: open connections and join misses per IP key, join attempts and chat messages per socket. */
+export { chatMessages, connections, joinAttempts, joinMisses };
 
 /** Some connected player of `room` is on the same IP key as the sender (that network already knows the code). */
 function hasMemberOnIp(room: Room, ip: string): boolean {
@@ -210,7 +206,6 @@ io.use((socket, next) => {
 io.on("connection", (socket: Socket) => {
   console.log(`Connected: ${socket.id}`);
   const ip: string = socket.data.ip;
-  const joinAttempts: number[] = []; // timestamps of recent join-create-game events on this socket
   let lastMissAt = -Infinity;
   /**
    * An unknown code: counts against the IP (and its IPv6 /48, and the global budget), at most once per
@@ -240,10 +235,7 @@ io.on("connection", (socket: Socket) => {
         socket.emit("room-of-game", { success: false, message } satisfies RoomOfGameResponse);
       };
 
-      const now = Date.now();
-      while (joinAttempts.length && now - joinAttempts[0] >= JOIN_WINDOW_MS) joinAttempts.shift();
-      if (joinAttempts.length >= JOIN_MAX_ATTEMPTS) return refuse("Too many attempts");
-      joinAttempts.push(now);
+      if (!joinAttempts.take(socket.id)) return refuse("Too many attempts");
 
       const username = data?.username;
       const rawCode = data?.gameCode;
@@ -330,6 +322,9 @@ io.on("connection", (socket: Socket) => {
 
   socket.on("disconnect", () => {
     try {
+      // Before any early return: the socket's limit state dies with it, in a room or not
+      joinAttempts.forget(socket.id);
+      chatMessages.forget(socket.id);
       const { gameCode, username } = socket.data;
       if (!gameCode || !username) return;
 
@@ -337,8 +332,6 @@ io.on("connection", (socket: Socket) => {
       if (!room) return;
 
       releaseHoldOf(room, socket.id);
-
-      chatCooldowns.delete(socket.id);
 
       const player = roomManager.markDisconnected(gameCode, username, socket.id);
       if (!player) {
@@ -420,15 +413,10 @@ io.on("connection", (socket: Socket) => {
     } catch (e) { console.error("photo-unavailable error:", e); }
   });
 
-  // The app sends a pick on every tap: token bucket per socket (lives and dies with it), excess dropped silently
-  const answerBucket = { tokens: ANSWER_BURST, at: Date.now() };
+  // The app sends a pick on every tap
   socket.on("submit-answer", (data: { guess: string }) => {
     try {
-      const now = Date.now();
-      answerBucket.tokens = Math.min(ANSWER_BURST, answerBucket.tokens + ((now - answerBucket.at) / 1000) * ANSWER_RATE_PER_S);
-      answerBucket.at = now;
-      if (answerBucket.tokens < 1) return;
-      answerBucket.tokens--;
+      if (!gameEvents.take("submit-answer")) return;
       const s = session(socket);
       if (!s) return;
       const guess = typeof data?.guess === "string" && data.guess.length <= MAX_USERNAME_LENGTH ? data.guess : "";
@@ -494,9 +482,7 @@ io.on("connection", (socket: Socket) => {
       const s = session(socket);
       const message = data?.message;
       if (!s || typeof message !== "string" || !message.trim() || message.length > MAX_CHAT_LENGTH) return;
-      const now = Date.now();
-      if (now - (chatCooldowns.get(socket.id) ?? 0) < CHAT_COOLDOWN) return;
-      chatCooldowns.set(socket.id, now);
+      if (!chatMessages.take(socket.id)) return;
       socket.broadcast.to(s.room.gameCode).emit("chat-message", { username: s.player.username, message });
     } catch (e) { console.error("chat error:", e); }
   });

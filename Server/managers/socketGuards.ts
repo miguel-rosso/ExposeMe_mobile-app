@@ -1,6 +1,6 @@
 import type { IncomingMessage } from "http";
 import { ipKey } from "../middlewares/ipKey";
-import { envInt, parseTrustProxy } from "../middlewares/rateLimit";
+import { createSlidingWindow, envInt, parseTrustProxy } from "../middlewares/rateLimit";
 import { MAX_PLAYERS_PER_ROOM } from "./RoomManager";
 
 export { ipKey };
@@ -279,6 +279,27 @@ export function createTokenBucket(burst: number, ratePerS: number, now: () => nu
   };
 }
 
+// ── Sliding window (per socket) ──
+
+/**
+ * At most `max` events per socket in any `windowMs`: one sliding window keyed by socket id. take(socketId) is false
+ * (and counts nothing) when the socket is at the limit. forget(socketId) on disconnect drops the socket's state; idle
+ * sockets are also swept from it, as a safety net.
+ */
+export function createSocketWindowLimit({ max, windowMs }: { max: number; windowMs: number }) {
+  const window = createSlidingWindow({ max, windowMs });
+  return {
+    take(socketId: string): boolean {
+      if (window.retryAfter(socketId)) return false;
+      window.hit(socketId);
+      return true;
+    },
+    forget: window.forget,
+    /** Sockets with events in the window (for tests). */
+    tracked: window.tracked,
+  };
+}
+
 export interface RateLimit {
   burst: number;
   ratePerS: number;
@@ -315,6 +336,7 @@ export function createEventLimiter<E extends string>(limits: Readonly<Record<E, 
  * - start-game: the host taps start a few times (the next game starts on the same socket after "Play again")
  * - remove-player: the host kicking every other player of a full room in a row
  * - im-ready: once on the game screen, and again after each game-state snapshot (rejoin)
+ * - submit-answer: the app sends the pick on every tap
  * - photo-sent / photo-unavailable: once per your-turn, plus a resend of the same photo. photo-sent gets a larger
  *   burst so a valid path still gets through after a handful of rejected ones (cheap to check: session + path)
  * - plant-photo: up to 2 emits per attempt (lobby, game screen, rejoin): the first one, plus a resend of a freshly
@@ -330,11 +352,22 @@ export const GAME_EVENT_LIMITS = {
   "im-ready": { burst: 5, ratePerS: 1 },
   "photo-sent": { burst: 20, ratePerS: 2 },
   "photo-unavailable": { burst: 5, ratePerS: 1 },
+  "submit-answer": { burst: 10, ratePerS: 5 },
   "plant-photo": { burst: 5, ratePerS: 0.5 },
   "hold-end": { burst: 10, ratePerS: 1 },
 } as const satisfies Record<string, RateLimit>;
 
 export type LimitedGameEvent = keyof typeof GAME_EVENT_LIMITS;
+
+// ── Join attempts ──
+
+/** join-create-game per socket: at most 5 in any 10 s; the rest is answered "Too many attempts". */
+export const JOIN_ATTEMPT_LIMIT = { max: 5, windowMs: 10_000 } as const;
+
+// ── Chat ──
+
+/** chat-message per socket: one every 250 ms; the rest is dropped silently. */
+export const CHAT_MESSAGE_LIMIT = { max: 1, windowMs: 250 } as const;
 
 // ── Emoji reactions ──
 

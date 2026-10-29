@@ -7,6 +7,9 @@ import { ipKey } from "./ipKey";
  */
 export const clientIp = (req: Request) => ipKey(req.ip || req.socket.remoteAddress || "unknown");
 
+/** Idle keys are swept at most this often, however short the window (a 250 ms window must not wake us 4 times a second). */
+const MIN_SWEEP_INTERVAL_MS = 5_000;
+
 /** In-memory sliding window: at most `max` hits per key in any `windowMs`. */
 export function createSlidingWindow({ max, windowMs }: { max: number; windowMs: number }) {
   const hits = new Map<string, number[]>();
@@ -17,7 +20,7 @@ export function createSlidingWindow({ max, windowMs }: { max: number; windowMs: 
     for (const [key, times] of hits) {
       if (!times.length || now - times[times.length - 1] >= windowMs) hits.delete(key);
     }
-  }, windowMs);
+  }, Math.max(windowMs, MIN_SWEEP_INTERVAL_MS));
   sweep.unref();
 
   /** Seconds until `key` may hit again, or 0 if it is under the limit now. */
@@ -33,7 +36,11 @@ export function createSlidingWindow({ max, windowMs }: { max: number; windowMs: 
     times.push(Date.now());
     hits.set(key, times);
   };
-  return { retryAfter, hit, tracked: () => hits.size };
+  /** Drops everything recorded for `key` (e.g. its owner is gone). */
+  const forget = (key: string): void => {
+    hits.delete(key);
+  };
+  return { retryAfter, hit, forget, tracked: () => hits.size };
 }
 
 function tooMany(res: Response, retryAfterS: number) {

@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createRateLimiter, createRejectionLimiter, envInt, parseTrustProxy } from "../middlewares/rateLimit";
+import { createRateLimiter, createRejectionLimiter, createSlidingWindow, envInt, parseTrustProxy } from "../middlewares/rateLimit";
 
 function call(limiter: ReturnType<typeof createRateLimiter>, ip: string) {
   const res = { statusCode: 200, headers: {} as Record<string, string>, body: undefined as unknown };
@@ -59,6 +59,31 @@ describe("createRateLimiter", () => {
     expect(limiter.trackedIps()).toBe(1);
     vi.advanceTimersByTime(10_000); // sweep at 20s: 2.2.2.2 idle for 11s
     expect(limiter.trackedIps()).toBe(0);
+  });
+});
+
+describe("createSlidingWindow", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("sweeps a short window every 5 s, not every window (EXP-216)", () => {
+    const window = createSlidingWindow({ max: 1, windowMs: 250 });
+    window.hit("a");
+    vi.advanceTimersByTime(4_999); // idle long past the window, but no sweep yet
+    expect(window.tracked()).toBe(1);
+    expect(window.retryAfter("a")).toBe(0); // expired hits never count meanwhile
+    vi.advanceTimersByTime(1);
+    expect(window.tracked()).toBe(0);
+  });
+
+  it("forget drops a key at once", () => {
+    const window = createSlidingWindow({ max: 1, windowMs: 10_000 });
+    window.hit("a");
+    window.hit("b");
+    expect(window.retryAfter("a")).toBeGreaterThan(0);
+    window.forget("a");
+    expect(window.retryAfter("a")).toBe(0);
+    expect(window.tracked()).toBe(1);
   });
 });
 

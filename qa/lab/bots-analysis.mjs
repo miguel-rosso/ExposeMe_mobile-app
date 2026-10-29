@@ -27,10 +27,13 @@ const OWNER_REPICK_SLACK_MS = 2_000; // that new pick comes this long after the 
 // Answer grace, as in Server/managers/GameEngine.ts (GAME_FLOW.md; bots-cli.test.sh checks the copy): round-start
 // announces ANSWER_GRACE_MS less than the server's answer timer, which keeps taking answers until it fires
 const ANSWER_GRACE_MS = 300;
+// A holder who lets go or goes away (leaves, drops, rejoins on a new socket) releases the hold at once (GAME_FLOW.md
+// "Hold"): every player still in the room gets hold-end and hold-resume within this
+const HOLD_RELEASE_MAX_MS = 1_000;
 
 // Phase events every player receives (keyed by round), and the events that ended a bot's stay in the room
 const SYNCED_EVENTS = ["round-start", "round-reveal", "round-scores", "game-over", "game-started"];
-const OFFLINE_EVENTS = ["chaos-disconnect", "planned-disconnect"];
+const OFFLINE_EVENTS = ["chaos-disconnect", "planned-disconnect", "hold-drop", "hold-rejoin"];
 // Game events a removed player must no longer receive
 const GAME_EVENTS = ["game-started", "waiting-photo", "your-turn", "round-start", "round-reveal", "round-scores", "game-state"];
 
@@ -557,6 +560,73 @@ function checkKickedBot(r, name) {
   return out;
 }
 
+// ── Holds (--hold, EXP-303) ──
+// How a bot's hold ended, as the holder recorded it: the release it sent, going away while holding, or the server
+// ending it first (force-release, pause) -> how the errors name it
+const HOLD_ENDINGS = {
+  "hold-release-sent": (holder) => `${holder} released while holding`,
+  "hold-drop": (holder) => `${holder} dropped while holding`,
+  "hold-rejoin": (holder) => `${holder} rejoined on a new socket while holding`,
+  "left-room": (holder) => `${holder} left while holding`,
+  "hold-ended-by-server": (holder) => `the server ended ${holder}'s hold`,
+};
+// Endings after which the holder is still connected, so it is told too
+const HOLDER_STAYS = ["hold-release-sent", "hold-ended-by-server"];
+
+/**
+ * Each hold the server accepted from a bot ("holding"), in time order: holder, round, start, `until` (the next hold's
+ * start: one hold at a time, so all of this hold's events come before it) and the event that ended it (if any).
+ */
+function botHolds(r) {
+  const starts = r.events.filter((e) => e.ev === "holding").sort((a, b) => a.t - b.t);
+  return starts.map((h, i) => {
+    const until = starts[i + 1]?.t ?? Infinity;
+    const end = r.events.find((e) => e.bot === h.bot && e.t >= h.t && e.t < until && HOLD_ENDINGS[e.ev]);
+    return { holder: h.bot, round: h.round, t: h.t, until, end };
+  });
+}
+
+/** `bot` is away at `t`: it went offline before and has had no rejoin snapshot (game-state) since. */
+function offlineAt(r, bot, t) {
+  const away = r.events.filter((e) => e.bot === bot && OFFLINE_EVENTS.includes(e.ev) && e.t <= t).pop();
+  return !!away && !r.events.some((e) => e.bot === bot && e.ev === "game-state" && e.t > away.t && e.t <= t);
+}
+
+/** The server ended this hold by pausing the game: it sends hold-end, then game-paused, and no hold-resume. */
+const endedByPause = (r, { holder, end }) => end.ev === "hold-ended-by-server"
+  && r.events.some((e) => e.bot === holder && e.ev === "game-paused" && e.t >= end.t && e.t <= end.t + HOLD_RELEASE_MAX_MS);
+
+/**
+ * Holds end for everyone at once (EXP-303): when the holder releases, leaves, drops or rejoins on a new socket, or the
+ * server ends the hold first, every player still in the room and connected gets hold-end and hold-resume within
+ * HOLD_RELEASE_MAX_MS (only hold-end when a pause ended it: game-resumed carries the time then). The holder itself is
+ * only checked when it stays connected (otherwise it is gone, or resynced by its rejoin snapshot). Also returns each
+ * player's lag (ms from the ending to the last of those events).
+ */
+function holdReleases(r, ctx, holds) {
+  const errors = [], lags = [];
+  for (const hold of holds) {
+    const { holder, round, t, until, end } = hold;
+    if (!end) continue; // the run ended while holding
+    const how = HOLD_ENDINGS[end.ev](holder);
+    const due = endedByPause(r, hold) ? ["hold-end"] : ["hold-end", "hold-resume"];
+    const stillThere = (n) => (n === holder ? HOLDER_STAYS.includes(end.ev)
+      : !offlineAt(r, n, end.t) && (ctx.exitedAt.get(n) ?? Infinity) > end.t);
+    for (const n of r.players.filter(stillThere)) {
+      let lag = 0;
+      for (const ev of due) {
+        const got = r.events.find((e) => e.bot === n && e.ev === ev && e.t > t && e.t < until);
+        if (!got) { errors.push(`round ${round}: ${n} never got ${ev} after ${how}`); continue; }
+        const late = Math.round(got.t - end.t);
+        if (late > HOLD_RELEASE_MAX_MS) errors.push(`round ${round}: ${n} got ${ev} ${late} ms after ${how} (max ${HOLD_RELEASE_MAX_MS} ms)`);
+        lag = Math.max(lag, got.t - end.t);
+      }
+      lags.push(lag);
+    }
+  }
+  return { errors, lags };
+}
+
 /** Round numbers run 1, 2, 3… with no gap. */
 const checkRoundNumbering = (ctx) => ctx.roundsSeen.flatMap((n, i) => (n !== i + 1 ? [`round numbering gap: expected ${i + 1}, got ${n}`] : []));
 
@@ -590,6 +660,8 @@ export function analyseRoom(r, opts) {
   const sync = phaseSync(r, ctx);
   const unavailable = photoUnavailableSkips(r);
   const pauses = pauseNumbers(r);
+  const holds = botHolds(r);
+  const holdChecks = holdReleases(r, ctx, holds);
   const consistency = [
     ...checkRequestedRounds(r, opts),
     ...checkWaitingPhotoPayloads(r),
@@ -608,6 +680,7 @@ export function analyseRoom(r, opts) {
     ...checkPlayAgain(r, opts),
     ...checkGoneAtNextGame(r, opts),
     ...checkRoomExits(r, ctx),
+    ...holdChecks.errors,
     ...checkRoundNumbering(ctx),
   ];
   return {
@@ -627,6 +700,9 @@ export function analyseRoom(r, opts) {
     pauses: perBotMax(r, "game-paused"),
     max_pause_number: pauses.maxPauseNumber,
     resumes: perBotMax(r, "game-resumed"),
+    // Holds of the scoreboard by bots (--hold) and, per player, how long after the holder let go / went away it was let go
+    holds: holds.length,
+    hold_release_ms: spread(holdChecks.lags),
     linger_turns_reported: countOf(r, ["g2-linger-photo-unavailable"]),
     // Second game (started while someone lingered on the final screens, EXP-184): rounds played and ready-phase length
     second_game_rounds: new Set(r.events.filter((e) => e.ev === "g2-round-start").map((e) => e.round)).size,

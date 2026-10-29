@@ -5,6 +5,7 @@
 #   analyseRoom fails this test) must give exactly the summary the original analyse() of bots.mjs gave (`expected`),
 #   errors in the same order. lab.sh, bots-cli.test.sh and the dashboard read that JSON.
 # - players out of the room (EXP-139): leave (--leave-round) and kick (--kick) checks on small synthetic games.
+# - holds of the scoreboard (--hold, EXP-303): everyone let go within 1 s of the holder releasing or going away.
 # Run: qa/lab/tests/bots-analysis.test.sh
 # A change meant to alter the summary: UPDATE_FIXTURES=1 qa/lab/tests/bots-analysis.test.sh rewrites every fixture's
 # `expected` with the current output; review the diff (only the intended fields may change) before committing it.
@@ -267,5 +268,121 @@ next_game_case "quit: a stayer guessed the ghost" ghost-guessed "bot1: guessed b
 next_game_case "quit: the ghost still gets game events" ghost-gets-events "bot3: got g2-game-started after quitting"
 next_game_case "quit: the next game never ends" no-second-game-over "bot2: the next game never ended"
 next_game_case "quit: nobody quit" no-quit "nobody quit after game-over"
+
+# ── --hold: everyone is let go within 1 s of the holder releasing or going away (EXP-303) ──
+# A 1-round game of bot1, bot2, bot3: bot1, the round's owner, holds the scoreboard at 10 s and its hold ends at 15 s
+# the way `ending` says (released | dropped | rejoined | left); the others get hold-resume + hold-end LAG ms later (the
+# holder too on a release). Mutations: no-resume (bot3 never gets hold-resume), offline (bot3 dropped at round-start
+# and is still away when the hold ends, so it gets neither). Prints the consistency errors, one per line, then
+# "holds=N lag_max=MS" from the summary.
+hold() { # ending, lag ms, mutation (none|no-resume|offline)
+  node --input-type=module -e '
+    const { analyseRoom } = await import(process.argv[1]);
+    const [ending, lagArg, mutation] = process.argv.slice(2);
+    const lag = Number(lagArg);
+    const players = ["bot1", "bot2", "bot3"];
+    const events = [];
+    const at = (bot, ev, round, t, payload) => events.push({ bot, ev, round, t, ...(payload !== undefined ? { payload } : {}) });
+    const all = (names, ev, round, t, payload) => names.forEach((b) => at(b, ev, round, t, payload));
+    const scores = players.map((u) => ({ username: u, points: 0, lastGuess: "", lastAnswerCorrect: false }));
+    all(players, "game-started", 0, 0, { rounds: 1, players });
+    all(players, "waiting-photo", 1, 500, { round: 1, duration: 15000 });
+    at("bot1", "your-turn", 1, 600, { attempt: 1 });
+    at("bot1", "photo-sent", 1, 900, { attempt: 1 });
+    all(players, "round-start", 1, 1000, { photo: "/temp/p1.jpg", duration: 7700 });
+    if (mutation === "offline") at("bot3", "chaos-disconnect", 1, 1001);
+    const inRoom = mutation === "offline" ? ["bot1", "bot2"] : players;
+    all(inRoom, "round-reveal", 1, 9000, { correctAnswer: "bot1", yourGuess: "" });
+    all(inRoom, "round-scores", 1, 9500, { round: 1, scores });
+    at("bot1", "hold-sent", 1, 9900);
+    all(inRoom, "hold-start", 1, 10000);
+    at("bot1", "holding", 1, 10001);
+    const END = 15000;
+    at("bot1", { released: "hold-release-sent", dropped: "hold-drop", rejoined: "hold-rejoin", left: "left-room" }[ending], 1, END);
+    if (ending === "left") all(["bot2", "bot3"], "player-left", 1, END + 1, { username: "bot1" });
+    const receivers = inRoom.filter((n) => n !== "bot1" || ending === "released");
+    for (const n of receivers) {
+      if (!(mutation === "no-resume" && n === "bot3")) at(n, "hold-resume", 1, END + lag, { phase: "scores", duration: 4000, phaseTotal: 5000 });
+      at(n, "hold-end", 1, END + lag + 1);
+    }
+    if (ending === "dropped" || ending === "rejoined") at("bot1", "game-state", 1, END + 2000, { phase: "scores", paused: false, started: true, yourGuess: "" });
+    all(players.filter((n) => n !== "bot1" || ending !== "left"), "game-over", 1, END + lag + 5000, { finalScore: [] });
+    const r = { code: "QAROOM", reason: "game-over", players, errors: [], uploads: [], rateLimited: 0, events };
+    const summary = analyseRoom(r, { host: true, rounds: 1, playAgainLingerS: 0, lingerBot: 0, startNextGameS: 0 });
+    console.log([...summary.consistency_errors, `holds=${summary.holds} lag_max=${summary.hold_release_ms.max}`].join("\n"));
+  ' "$ANALYSIS" "$@"
+}
+hold_case() { # label, expected text (a clean run: "holds=1 lag_max=..."), hold args...
+  local label="$1" want="$2" got; shift 2
+  got="$(hold "$@")"
+  [[ "$got" == *"$want"* ]] && ok "$label" || ko "$label" "expected [$want] in [$got]"
+}
+[ "$(hold released 20 none)" = "holds=1 lag_max=21.0" ] && ok "hold released: everyone, the holder too, let go on time" || ko "hold released on time: no error" "$(hold released 20 none)"
+hold_case "hold released but hold-end 1.5 s later" "round 1: bot2 got hold-end 1501 ms after bot1 released while holding (max 1000 ms)" released 1500 none
+[ "$(hold dropped 20 none)" = "holds=1 lag_max=21.0" ] && ok "holder drop on time: no consistency error" || ko "holder drop on time: no error" "$(hold dropped 20 none)"
+[ "$(hold left 20 none)" = "holds=1 lag_max=21.0" ] && ok "holder leaves while holding, let go on time: no consistency error" || ko "holder leave on time: no error" "$(hold left 20 none)"
+[ "$(hold rejoined 20 none)" = "holds=1 lag_max=21.0" ] && ok "holder rejoins on a new socket, let go on time: no consistency error" || ko "holder rejoin on time: no error" "$(hold rejoined 20 none)"
+hold_case "holder rejoins on a new socket and the room stays frozen (EXP-299)" "round 1: bot2 got hold-end 25001 ms after bot1 rejoined on a new socket while holding (max 1000 ms)" rejoined 25000 none
+hold_case "a player never gets hold-resume" "round 1: bot3 never got hold-resume after bot1 dropped while holding" dropped 20 no-resume
+[ "$(hold released 20 offline)" = "holds=1 lag_max=21.0" ] && ok "a player away when the hold ends is not expected to get it" || ko "offline player excluded" "$(hold released 20 offline)"
+
+# Holds the server ends first: a 2-round game of bot1 and bot2 whose photos are both bot1's; bot1 holds round 1 at 10 s
+# and the server ends it at 12 s (hold-end, recorded by bot1 as hold-ended-by-server); bot1 holds round 2 from 30 s and
+# releases it at 55 s. Each
+# hold is counted once and judged on its own events (round 1's must not be paired with round 2's release).
+# `round1`: server-ended (hold-end only, no hold-resume nor pause: hold-resume is missing) | paused (bot2 drops, the
+# pause ends the hold: hold-end then game-paused to bot1, no hold-resume due). Prints errors, then holds/lag as above.
+server_ended_hold() { # round1
+  node --input-type=module -e '
+    const { analyseRoom } = await import(process.argv[1]);
+    const round1 = process.argv[2];
+    const players = ["bot1", "bot2"];
+    const events = [];
+    const at = (bot, ev, round, t, payload) => events.push({ bot, ev, round, t, ...(payload !== undefined ? { payload } : {}) });
+    const all = (names, ev, round, t, payload) => names.forEach((b) => at(b, ev, round, t, payload));
+    const scores = players.map((u) => ({ username: u, points: 0, lastGuess: "", lastAnswerCorrect: false }));
+    const playUntilScores = (round, owner, t0) => {
+      all(players, "waiting-photo", round, t0, { round, duration: 15000 });
+      at(owner, "your-turn", round, t0 + 100, { attempt: round });
+      at(owner, "photo-sent", round, t0 + 400, { attempt: round });
+      all(players, "round-start", round, t0 + 500, { photo: `/temp/p${round}.jpg`, duration: 7700 });
+      all(players, "round-reveal", round, t0 + 8500, { correctAnswer: owner, yourGuess: "" });
+      all(players, "round-scores", round, t0 + 9000, { round, scores });
+    };
+    const holdAt = (owner, round, t) => {
+      at(owner, "hold-sent", round, t - 100);
+      all(players, "hold-start", round, t);
+      at(owner, "holding", round, t + 1);
+    };
+    all(players, "game-started", 0, 0, { rounds: 2, players });
+    playUntilScores(1, "bot1", 500);
+    holdAt("bot1", 1, 10000);
+    if (round1 === "paused") {
+      at("bot2", "chaos-disconnect", 1, 11990);
+      at("bot1", "hold-end", 1, 12000);
+      at("bot1", "hold-ended-by-server", 1, 12000);
+      at("bot1", "game-paused", 1, 12005, { waitingFor: ["bot2"], duration: 300000, pause: 1, maxPauses: 3 });
+      at("bot2", "game-state", 1, 14000, { phase: "scores", paused: false, started: true });
+      at("bot1", "game-resumed", 1, 14100, { phase: "scores" });
+    } else {
+      all(players, "hold-end", 1, 12000);
+      at("bot1", "hold-ended-by-server", 1, 12000);
+    }
+    playUntilScores(2, "bot1", 20000);
+    holdAt("bot1", 2, 30000);
+    at("bot1", "hold-release-sent", 2, 55000);
+    all(players, "hold-resume", 2, 55020, { phase: "scores", duration: 4000, phaseTotal: 5000 });
+    all(players, "hold-end", 2, 55021);
+    all(players, "game-over", 2, 60000, { finalScore: [] });
+    const r = { code: "QAROOM", reason: "game-over", players, errors: [], uploads: [], rateLimited: 0, events };
+    const summary = analyseRoom(r, { host: true, rounds: 2, playAgainLingerS: 0, lingerBot: 0, startNextGameS: 0 });
+    console.log([...summary.consistency_errors, `holds=${summary.holds} lag_max=${summary.hold_release_ms.max}`].join("\n"));
+  ' "$ANALYSIS" "$1"
+}
+want=$'round 1: bot1 never got hold-resume after the server ended bot1\'s hold\nround 1: bot2 never got hold-resume after the server ended bot1\'s hold\nholds=2 lag_max=21.0'
+got="$(server_ended_hold server-ended)"
+[ "$got" = "$want" ] && ok "hold ended by the server without hold-resume: reported in its own round, each hold counted once" || ko "server-ended hold" "expected [$want] got [$got]"
+got="$(server_ended_hold paused)"
+[ "$got" = "holds=2 lag_max=21.0" ] && ok "hold ended by a pause: hold-end only, no hold-resume due" || ko "pause-ended hold" "$got"
 echo "# $pass passed, $fail failed"
 [ "$fail" = 0 ]

@@ -103,6 +103,17 @@
 //                           the device alone (qa/maestro/kicked-notice.yaml) nobody is left to play, so the run ends right
 //                           after the kick (reason "lobby-kick") and the device checks its notice.
 //   node qa/lab/bots.mjs --bots 3 --host --rounds 3 --kick bot3@2
+//            --hold P       like the app's hold button (EXP-303): on the scoreboard of a round whose revealed answer is its
+//                           own name, a bot presses hold (hold-start) with probability P and lets go (hold-end) after a
+//                           random time within the server's hold budget. With --chaos C it goes away instead of letting go
+//                           with probability C: half the time it drops (back 1.5-3.5 s later), half the time it rejoins on a
+//                           new socket while holding, like the app reconnecting before the server noticed its old
+//                           connection was lost (EXP-299). Every player still in the room must get hold-end and
+//                           hold-resume within 1 s of the holder letting go, leaving, dropping or rejoining, and of the
+//                           server ending the hold itself (hold-resume is not due when a pause ended it) ("consistency");
+//                           summary: holds, hold_release_ms.
+//   node qa/lab/bots.mjs --bots 3 --host --rounds 3 --hold 1
+//   node qa/lab/bots.mjs --bots 3 --host --rounds 10 --hold 0.5 --chaos 0.3
 //   Checks and metrics of each room: qa/lab/bots-analysis.mjs (tested on recorded events by qa/lab/tests/bots-analysis.test.sh).
 //   Every bot records waiting-photo { round, duration } (room-wide, owner secret): same payload for all, skew measured.
 //   Photos: uploads send the room code + the bot's rejoin token (X-Game-Code / Authorization: Bearer), like the app;
@@ -139,11 +150,13 @@ import { analyseRoom, DISCONNECT_GRACE_MS } from "./bots-analysis.mjs";
 
 // ── Command line ──
 // Parsed and validated before anything touches the network (EXP-197): --help and bad arguments never connect
-const BOOL_FLAGS = new Set(["host", "no-answer", "app-resync", "lobby-host-drop", "drop-on-turn", "quit-after-game-over", "help"]);
+const BOOL_FLAGS = new Set([
+  "host", "no-answer", "app-resync", "lobby-host-drop", "drop-on-turn", "quit-after-game-over", "help",
+]);
 const VALUE_FLAGS = new Set([
   "server", "bots", "rooms", "rounds", "wait-players", "code", "code-file", "photos", "out", "chaos", "upload-fail",
   "timeout", "no-ready", "drop-round", "drop-rounds", "drop-secs", "drop-bot", "photo-unavailable", "plant", "play-again-linger",
-  "play-again-linger-bot", "start-next-game", "name-prefix", "leave-round", "kick",
+  "play-again-linger-bot", "start-next-game", "name-prefix", "leave-round", "kick", "hold",
 ]);
 const USAGE = `usage: node qa/lab/bots.mjs [options]
 
@@ -170,6 +183,9 @@ Headless ExposeMe players (see the header of qa/lab/bots.mjs for every scenario)
   --kick NAME[@R]            the host bot removes NAME (remove-player): in the lobby once NAME is in, or at round R
   --play-again-linger S [--play-again-linger-bot K] [--start-next-game D]
   --quit-after-game-over     the last bot quits at game-over; the next game must drop it (needs --host, 3+ bots)
+  --hold P                   the round's owner bot holds the scoreboard with probability P (0 to 1) and lets go within
+                             the server's hold budget; with --chaos C, instead of letting go it drops or rejoins on a
+                             new socket while holding, with probability C
   --help, -h                 print this help and exit (no network)
 
 Exit codes: 0 pass, 1 fail, 2 bad arguments.`;
@@ -267,6 +283,25 @@ if (args["name-prefix"] !== undefined) {
 const ROUNDS = Number(args.rounds || DEFAULT_ROUNDS);
 const WAIT_PLAYERS = Number(args["wait-players"] || N_BOTS);
 const CHAOS = Number(args.chaos || 0);
+const CHAOS_AWAY_MS = [1_500, 3_500]; // a --chaos drop: back this long later (min, max)
+const randomBetween = ([min, max]) => min + Math.random() * (max - min);
+
+// ── Holding the scoreboard (--hold, EXP-303) ──
+/** --NAME P: a probability (0 to 1), 0 when absent. */
+function probabilityOption(name) {
+  const value = args[name];
+  if (value === undefined) return 0;
+  const p = Number(value);
+  if (value.trim() === "" || !(p >= 0 && p <= 1)) exitUsage(`--${name} "${value}" is not a probability (0 to 1)`);
+  return p;
+}
+const HOLD = probabilityOption("hold");
+// Hold time per round, as in Server/managers/GameEngine.ts (GAME_FLOW.md "Hold"; bots-cli.test.sh checks the copy)
+const HOLD_BUDGET_PER_ROUND = 30_000;
+// A hold lasts this long (min, max): a tap at least, and let go before the budget runs out (not force-released)
+const HOLD_LENGTH_MS = [500, HOLD_BUDGET_PER_ROUND - 2_000];
+// Pressed this long after round-scores (min, max): the scores phase lasts 5 s and a hold needs 1.5 s of it left
+const HOLD_PRESS_DELAY_MS = [200, 1_500];
 const UPLOAD_FAIL = Number(args["upload-fail"] || 0);
 const PHOTO_UNAVAILABLE = Number(args["photo-unavailable"] || 0);
 const NO_READY = Number(args["no-ready"] || 0);
@@ -482,10 +517,11 @@ function runRoom(roomIdx, fixedCode) {
     let turnDropDone = false; // --drop-on-turn: one planned drop per room
     const bots = [];
     const socketIds = new Set(); // every socket id of this room's bots (they change on reconnect)
+    const spareSockets = []; // short-lived second connections of a bot (a holder rejoining on a new socket, --hold)
 
     const done = (reason) => {
       clearTimeout(timer);
-      bots.forEach((b) => b.socket.disconnect());
+      [...bots.map((b) => b.socket), ...spareSockets].forEach((s) => s.disconnect());
       resolve({ code, events, errors, uploads, rateLimited, reason, players: bots.map((b) => b.name) });
     };
     const timer = setTimeout(() => {
@@ -520,7 +556,8 @@ function runRoom(roomIdx, fixedCode) {
         events.push({ bot: name, ev: bot.game2 && ev !== "payload-leak" ? `g2-${ev}` : ev, round, t: now(), payload });
 
       // rejoinToken (from our own room-of-game) is required by the server to reconnect with the same username
-      const join = () => socket.emit("join-create-game", { gameCode: isHost && !code ? null : code, username: name, ...(bot.token ? { rejoinToken: bot.token } : {}) });
+      const joinPayload = () => ({ gameCode: isHost && !code ? null : code, username: name, ...(bot.token ? { rejoinToken: bot.token } : {}) });
+      const join = () => socket.emit("join-create-game", joinPayload());
       bot.join = join;
       socket.on("connect", () => {
         // Out of the room for good (left or kicked): a reconnect planned before that (--chaos) must not come back
@@ -740,7 +777,7 @@ function runRoom(roomIdx, fixedCode) {
         if (CHAOS && Math.random() < CHAOS) {
           rec("chaos-disconnect", d.round);
           socket.disconnect();
-          setTimeout(() => { socket.connect(); }, 1500 + Math.random() * 2000);
+          setTimeout(() => { socket.connect(); }, randomBetween(CHAOS_AWAY_MS));
         }
         // Like a player tapping during the answer time (8 s): sometimes a first pick, then the final one
         const round = d.round;
@@ -775,13 +812,19 @@ function runRoom(roomIdx, fixedCode) {
         bot.phase = "reveal";
         // yourGuess: our own answer as the server froze it (null if missing, so the check reports it)
         rec("round-reveal", bot.round, { correctAnswer: d.correctAnswer, yourGuess: d.yourGuess ?? null });
+        // Our photo: like the app, the scoreboard then shows us the hold button (--hold)
+        bot.ownedRound = d.correctAnswer === name ? bot.round : 0;
         // Fair play: a vote sent once the answer is public must be ignored (checked against round-scores)
         if (i === 0 && d.correctAnswer) {
           socket.emit("submit-answer", { guess: d.correctAnswer });
           rec("late-submit", bot.round, { guess: d.correctAnswer });
         }
       });
-      socket.on("round-scores", (d) => { bot.phase = "scores"; rec("round-scores", d.round, { scores: d.scores }); });
+      socket.on("round-scores", (d) => {
+        bot.phase = "scores";
+        rec("round-scores", d.round, { scores: d.scores });
+        if (HOLD && bot.ownedRound === d.round && !bot.lingering && Math.random() < HOLD) pressHold(d.round);
+      });
       socket.on("waiting-photo", (d) => rec("waiting-photo", d.round, d));
       socket.on("round-skipped", (d) => rec("round-skipped", d?.round ?? bot.round, d));
       // Rejoin snapshot: catch up like the app does (pick again in answering, im-ready in the ready phase)
@@ -814,8 +857,59 @@ function runRoom(roomIdx, fixedCode) {
         console.error(`[room ${roomIdx}] ${name}: game-paused ${d.pause}/${d.maxPauses} (${Math.round(d.duration / 1000)}s), waiting for ${d.waitingFor.join(", ")}`);
       });
       socket.on("game-resumed", (d) => rec("game-resumed", bot.round, { phase: d.phase }));
-      socket.on("hold-start", () => rec("hold-start", bot.round));
+      // ── Holding the scoreboard (--hold, EXP-303) ──
+      // bot.hold: our own press, from hold-start sent until it is over ({ round, accepted })
+      const pressHold = (round) => setTimeout(() => {
+        if (bot.phase !== "scores" || bot.round !== round || !socket.connected) return;
+        bot.hold = { round, accepted: false };
+        rec("hold-sent", round);
+        socket.emit("hold-start");
+      }, randomBetween(HOLD_PRESS_DELAY_MS));
+      socket.on("hold-start", () => {
+        rec("hold-start", bot.round);
+        const hold = bot.hold;
+        // Someone else's hold (a device's), ours already running, or a press of an earlier round the server ignored
+        if (!hold || hold.accepted || hold.round !== bot.round) return;
+        hold.accepted = true; // the hold-start of our own press: we hold until we let go (or go away)
+        rec("holding", hold.round);
+        setTimeout(() => endHold(hold), randomBetween(HOLD_LENGTH_MS));
+      });
+      // Over for everyone: released, force-released (budget, a holder who went away) or ended by a pause
+      socket.on("hold-end", () => {
+        rec("hold-end", bot.round);
+        // Our hold, still running on our side: the server ended it before we let go, which ends it for the checks too
+        if (bot.hold?.accepted) rec("hold-ended-by-server", bot.hold.round);
+        bot.hold = null;
+      });
       socket.on("hold-resume", (d) => rec("hold-resume", bot.round, d));
+      // Let go, or (--chaos) go away while holding: drop, or rejoin on a new socket
+      const endHold = (hold) => {
+        if (bot.hold !== hold) return; // already over
+        bot.hold = null;
+        if (Math.random() >= CHAOS) {
+          rec("hold-release-sent", hold.round);
+          socket.emit("hold-end");
+        } else if (Math.random() < 0.5) rejoinOnNewSocket(hold.round);
+        else {
+          rec("hold-drop", hold.round);
+          socket.disconnect();
+          setTimeout(() => { socket.connect(); }, randomBetween(CHAOS_AWAY_MS));
+        }
+      };
+      // Like the app reconnecting before the server noticed its old connection was lost: the same player joins again
+      // (rejoin token) on a fresh socket, and the server rebinds it there and closes this one. This bot then carries on
+      // with its own socket: it reconnects and joins again, which closes the fresh one the same way
+      const rejoinOnNewSocket = (round) => {
+        const fresh = io(SERVER, { transports: ["websocket"], reconnection: false, forceNew: true });
+        spareSockets.push(fresh);
+        fresh.on("connect", () => {
+          socketIds.add(fresh.id);
+          socket.once("disconnect", () => socket.connect());
+          rec("hold-rejoin", round);
+          fresh.emit("join-create-game", joinPayload());
+        });
+        fresh.on("connect_error", (e) => errors.push(`${name} rejoin on a new socket: connect_error ${e.message}`));
+      };
       socket.on("game-over", (d) => {
         rec("game-over", bot.round, { finalScore: d.finalScore });
         onGameOver();

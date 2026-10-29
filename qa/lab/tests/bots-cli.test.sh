@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Command line of qa/lab/bots.mjs (EXP-197): --help and bad arguments exit before any network activity (also bad
-# --rounds, EXP-203, --drop-round/--drop-rounds, EXP-096, --name-prefix, EXP-207, and --leave-round/--kick, EXP-139),
+# --rounds, EXP-203, --drop-round/--drop-rounds, EXP-096, --name-prefix, EXP-207, --leave-round/--kick, EXP-139, and
+# --hold, EXP-303),
 # and the server constants it (and its checks, bots-analysis.mjs) mirrors match the server.
 # A local TCP listener stands in for the server and counts connections; nothing else is contacted.
 # Run: qa/lab/tests/bots-cli.test.sh
@@ -201,6 +202,19 @@ SERVER_URL="$URL" node "$BOTS" --bots 3 --host --rounds 3 --quit-after-game-over
 SERVER_URL="$URL" node "$BOTS" --bots 2 --host --drop-round 1 --drop-secs 3 --drop-on-turn --timeout 1 >/dev/null 2>"$TMP/err"; rc=$?
 err="$(cat "$TMP/err")"
 [[ "$rc" != 2 && "$err" != *"unknown option"* ]] && ok "--drop-on-turn is accepted" || ko "--drop-on-turn is accepted" "rc=$rc err=$err"
+
+# ── --hold P: the photo owner holds the scoreboard (EXP-303) ──
+for bad in abc 1.5 -0.1 ""; do
+  run 2 "--hold '$bad' exits 2" --bots 3 --host --hold "$bad" --timeout 1
+  [[ "$err" == *"--hold \"$bad\" is not a probability"* ]] && ok "--hold '$bad' is named" || ko "--hold '$bad' is named" "$err"
+done
+for good in "--hold 0" "--hold 1" "--hold 0.3 --chaos 0.2"; do
+  # shellcheck disable=SC2086
+  SERVER_URL="$URL" node "$BOTS" --bots 3 --host $good --timeout 1 >/dev/null 2>"$TMP/err"; rc=$?
+  [[ "$rc" != 2 ]] && ok "$good is accepted" || ko "$good is accepted" "$(cat "$TMP/err")"
+done
+[[ "$(node "$BOTS" --help)" == *"--hold P"* ]] && ok "--help lists --hold" || ko "--help lists --hold"
+mirrors managers/GameEngine.ts "$BOTS" HOLD_BUDGET_PER_ROUND HOLD_BUDGET_PER_ROUND
 
 # ── A valid run says which server it uses before connecting ──
 SERVER_URL="$URL" node "$BOTS" --bots 1 --host --timeout 1 >/dev/null 2>"$TMP/err"

@@ -45,6 +45,10 @@
  "pauses": 6,
  "max_pause_number": 3,
  "resumes": 4,
+ "holds": 0,
+ "hold_release_ms": {
+  "max": null
+ },
  "linger_turns_reported": 0,
  "second_game_rounds": 0,
  "second_game_ready_ms": null,

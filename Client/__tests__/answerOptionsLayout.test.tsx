@@ -9,6 +9,7 @@ import {
   ANSWERS_MAX_HEIGHT_RATIO, COMPACT_FROM_PLAYERS, MIN_TOUCH_TARGET, THREE_COLUMNS_FROM_PLAYERS, answerOptionsLayout,
 } from "../app/utils/answerOptionsLayout";
 import { playerColors } from "../app/utils/playerColors";
+import { resetReduceMotionSettingForTests } from "../app/hooks/useReduceMotion";
 
 // EXP-250: with up to 12 players the answer options grew upwards over the photo and the timer bar, and could not
 // scroll. They now get denser as the room grows and live in an area capped to a share of the window that scrolls.
@@ -171,7 +172,8 @@ describe("GameScreen answer cards (EXP-253)", () => {
   const optionHosts = (node: ReactTestInstance) =>
     node.findAll((n) => typeof n.type === "string" && typeof n.props.testID === "string" && n.props.testID.startsWith("player-option-"));
 
-  beforeEach(() => jest.useFakeTimers());
+  // The reduce-motion setting is cached for the app's lifetime: each test asks the system again
+  beforeEach(() => { jest.useFakeTimers(); resetReduceMotionSettingForTests(); });
   afterEach(() => { jest.clearAllTimers(); jest.useRealTimers(); jest.restoreAllMocks(); });
 
   it("with an odd count the last card keeps the others' width and is centred in its row", async () => {
@@ -215,6 +217,8 @@ describe("GameScreen answer cards (EXP-253)", () => {
     expect(styleOf(cellOf(host(r.root, playerOptionId("player2")))).opacity).toBe(0);
     act(() => r.unmount());
 
+    // A cold app whose system asks to reduce motion (the setting outlives the first screen otherwise)
+    resetReduceMotionSettingForTests();
     jest.spyOn(AccessibilityInfo, "isReduceMotionEnabled").mockResolvedValue(true);
     r = await renderAnswering(playerNames(4));
     for (const o of options(r.root, playerNames(4))) expect(styleOf(cellOf(o)).opacity).toBe(1);

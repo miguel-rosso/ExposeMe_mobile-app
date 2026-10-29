@@ -1,5 +1,5 @@
 import React from "react";
-import { AccessibilityInfo, Animated, StyleSheet } from "react-native";
+import { Animated, StyleSheet } from "react-native";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import * as Haptics from "expo-haptics";
 import AnswerOption, {
@@ -8,7 +8,6 @@ import AnswerOption, {
 import {
   PLAYER_COLOR_INK, PLAYER_PALETTE, PlayerColors, playerColors, playerInitial, withPlayerColors,
 } from "../app/utils/playerColors";
-import { useReduceMotion } from "../app/hooks/useReduceMotion";
 import { usePlayerColors } from "../app/hooks/usePlayerColors";
 import { playerOptionId } from "../app/utils/testIds";
 
@@ -142,29 +141,6 @@ describe("usePlayerColors", () => {
     for (const name of ["alice", "bob", "carol"]) expect(next.get(name)).toBe(first.get(name));
     expect([...first.values()]).not.toContain(next.get("dave"));
     act(() => r.unmount());
-  });
-});
-
-describe("useReduceMotion", () => {
-  afterEach(() => jest.restoreAllMocks());
-
-  it("starts from the system setting and follows its changes", async () => {
-    let onChange: ((enabled: boolean) => void) | undefined;
-    const remove = jest.fn();
-    jest.spyOn(AccessibilityInfo, "isReduceMotionEnabled").mockResolvedValue(true);
-    jest.spyOn(AccessibilityInfo, "addEventListener").mockImplementation(((_: string, fn: (enabled: boolean) => void) => {
-      onChange = fn;
-      return { remove };
-    }) as unknown as typeof AccessibilityInfo.addEventListener);
-    const seen: boolean[] = [];
-    const Probe = () => { seen.push(useReduceMotion()); return null; };
-    let r!: TestRenderer.ReactTestRenderer;
-    await act(async () => { r = TestRenderer.create(<Probe />); });
-    expect(seen.at(-1)).toBe(true);
-    act(() => onChange!(false));
-    expect(seen.at(-1)).toBe(false);
-    act(() => r.unmount());
-    expect(remove).toHaveBeenCalled();
   });
 });
 

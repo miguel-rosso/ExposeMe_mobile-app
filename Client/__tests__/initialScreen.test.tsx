@@ -35,7 +35,7 @@ jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: mockT }) }));
 import InitialScreen from "../app/screens/InitialScreen";
 import PhotoFanHero, { CARD_BLUR_RADIUS, FAN_CARDS, HERO_HEIGHT } from "../app/components/PhotoFanHero";
 import { TEST_IDS } from "../app/utils/testIds";
-import { useReduceMotion, useReduceMotionSetting } from "../app/hooks/useReduceMotion";
+import { resetReduceMotionSettingForTests, useReduceMotion, useReduceMotionSetting } from "../app/hooks/useReduceMotion";
 import { BRAND_GRADIENT, brandTitleShadow } from "../app/theme/brand";
 
 // Rendered trees are unmounted after each test, so no entrance animation outlives it
@@ -66,6 +66,8 @@ beforeEach(() => {
   jest.useFakeTimers();
   mockT = en;
   reduceMotion = false;
+  // The setting is cached for the app's lifetime: every test starts from a cold app that has not asked yet
+  resetReduceMotionSettingForTests();
   mockReplace.mockReset();
   mockHandleContinue.mockReset().mockResolvedValue(undefined);
   jest.spyOn(Haptics, "impactAsync").mockResolvedValue();

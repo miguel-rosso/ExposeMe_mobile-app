@@ -38,6 +38,7 @@ import {
 import { emitWhileConnected } from "../utils/socketEmit";
 import { useGameConnection } from "../hooks/useGameConnection";
 import { useTurnRequest } from "../hooks/useTurnRequest";
+import { usePickSender } from "../hooks/usePickSender";
 import { withHost, withoutPlayer } from "../utils/roomPlayers";
 import PausedModal from "@/app/components/modals/PausedModal";
 import GalleryAccessModal from "@/app/components/modals/GalleryAccessModal";
@@ -55,7 +56,6 @@ import { PROGRESS_BAR_AREA, progressBarAreaBottom, progressBarRow } from "../uti
 import { GameScreenParams, opensOnGameInProgress } from "../utils/gameScreenRoute";
 
 const { SERVER_URL } = getEnvVars();
-const PICK_SEND_INTERVAL = 200; // ms between submit-answer sends (server: 10 per socket, refilled 5/s)
 // Rows over the photo (see safeAreaRows; the progress bar strip is in progressBarRow, the bottom ones in gameRows)
 const RECONNECTING_BANNER = { top: 8, margin: 8 } as const;
 const NO_REACTIONS: EmojiReactionData[] = [];
@@ -116,38 +116,19 @@ const GameScreen = () => {
   // QA builds only: tells the server when this device rendered each phase (lab render-skew metrics); the phase
   // handlers below call markPhaseHandled first, so the ack also says when their event arrived
   const markPhaseHandled = useQaRenderAck(socket, phase, round, phaseKey);
-  // My pick goes to the server as soon as it changes: answers are only taken while answering (EXP-148), the last counts.
-  // Rapid taps are coalesced: at most one send per PICK_SEND_INTERVAL, then a trailing send of the latest pick, so the
-  // server's per-socket rate limit never drops the pick that counts. When the answer bar ends, a pick still waiting
-  // goes at once (within the server's 300 ms grace) and later taps are ignored.
-  // A pick is only emitted while connected: one made offline goes from the rejoin's snapshot.
-  const lastPickSentAt = useRef(0);
-  const pickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const sendPick = () => {
-    if (pickTimer.current) clearTimeout(pickTimer.current);
-    pickTimer.current = null;
-    lastPickSentAt.current = Date.now();
-    const guess = roundRef.current.mySelection;
-    emitWhileConnected(socket, "submit-answer", { guess });
-  };
+  // My pick goes to the server as soon as it changes (throttled, see usePickSender): answers are only taken while
+  // answering (EXP-148), the last counts. When the answer bar ends, a pick still waiting goes at once and later taps
+  // are ignored.
+  const pickSender = usePickSender(socket, roundRef);
   const pickGuess = (val: string) => {
     dispatchRound({ type: "pick", guess: val });
-    if (pickTimer.current) return; // the pending trailing send takes the latest pick
-    const wait = lastPickSentAt.current + PICK_SEND_INTERVAL - Date.now();
-    if (wait <= 0) { sendPick(); return; }
-    const pickRound = roundRef.current.round;
-    pickTimer.current = setTimeout(() => {
-      // Answering is over meanwhile (reveal, or a new round / photo wait): too late, that pick can't count
-      if (roundRef.current.round === pickRound && roundRef.current.phase === "answering") sendPick();
-      else pickTimer.current = null;
-    }, wait);
+    pickSender.pickChanged();
   };
-  useEffect(() => () => { if (pickTimer.current) clearTimeout(pickTimer.current); }, []);
   // The answer bar (server duration) has run out: no more picks this phase (phaseKey changes with every phase/resume)
   const [answersClosedKey, setAnswersClosedKey] = useState(-1);
   const answersClosed = phase === "answering" && answersClosedKey === phaseKey;
   const closeAnswers = () => {
-    if (pickTimer.current) sendPick(); // flush the pick waiting for its throttle slot: it must leave before the close
+    pickSender.flushPending(); // the pick waiting for its throttle slot must leave before the close
     setAnswersClosedKey(phaseKey);
   };
   // Latest players list for the room-membership handlers; updated on write too, so back-to-back events
@@ -403,7 +384,7 @@ const GameScreen = () => {
         setPause(result.pause);
         if (result.gameOver) showGameOver(snap.scores);
         if (result.sendReady) socket.emit("im-ready");
-        if (result.resendGuess && roundRef.current.mySelection) sendPick();
+        if (result.resendGuess) pickSender.resendAfterRejoin();
       },
 
       // Only the picker's emojis (and the screenshot one), only while a photo is shown, at most a few on screen

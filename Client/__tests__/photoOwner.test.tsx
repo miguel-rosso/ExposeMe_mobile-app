@@ -176,6 +176,45 @@ describe("GameScreen: whose photo it is (EXP-128)", () => {
     expect(markOf(r.root, "alice")).toBe(GREEN);
   });
 
+  // EXP-233: the throttle slot counts from the last send, the trailing one included
+  it("after a trailing send, the next tap waits for its own 200 ms slot", () => {
+    act(() => mockSocket.fire("round-start", START));
+    press(r.root, "carol");
+    press(r.root, "alice");
+    act(() => { jest.advanceTimersByTime(200); });
+    expect(answers()).toEqual([{ guess: "carol" }, { guess: "alice" }]);
+    act(() => { jest.advanceTimersByTime(100); });
+    press(r.root, "bob");
+    expect(answers()).toHaveLength(2);
+    act(() => { jest.advanceTimersByTime(100); });
+    expect(answers()).toEqual([{ guess: "carol" }, { guess: "alice" }, { guess: "bob" }]);
+  });
+
+  // EXP-233: a rejoin snapshot of the same round re-sends the current pick at once, taking a pick still waiting
+  it("a rejoin snapshot re-sends a pick still waiting at once, without a trailing duplicate", () => {
+    act(() => mockSocket.fire("round-start", START));
+    press(r.root, "carol");
+    press(r.root, "alice");
+    act(() => mockSocket.fire("game-state", {
+      started: true, phase: "answering", round: 1, totalRounds: 10, photo: START.photo, correctAnswer: null,
+      yourGuess: null, duration: 4_000, held: false, pause: null, scores: [], players: mockPlayers, roundOptions: mockPlayers,
+    }));
+    expect(answers()).toEqual([{ guess: "carol" }, { guess: "alice" }]);
+    act(() => { jest.advanceTimersByTime(1_000); });
+    expect(answers()).toHaveLength(2);
+  });
+
+  // EXP-233: leaving the screen drops a pick still waiting for its throttle slot
+  it("a pick still waiting is not sent after the screen unmounts", () => {
+    act(() => mockSocket.fire("round-start", START));
+    press(r.root, "carol");
+    press(r.root, "alice");
+    act(() => r.unmount());
+    act(() => { jest.advanceTimersByTime(1_000); });
+    expect(answers()).toEqual([{ guess: "carol" }]);
+    act(() => { r = TestRenderer.create(<></>); }); // afterEach unmounts it
+  });
+
   // EXP-227 / EXP-230: the reveal colours the pick the server recorded, not a later local tap
   it("the reveal colours the recorded pick, not one still waiting when answering ended", () => {
     act(() => mockSocket.fire("round-start", START));

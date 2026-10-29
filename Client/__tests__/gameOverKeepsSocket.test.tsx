@@ -18,7 +18,9 @@ const mockSetPlanted = jest.fn();
 const mockSocket = new FakeSocket();
 const mockPickGamePhoto = jest.fn();
 const mockWinnerProps: { visible?: boolean }[] = [];
-jest.mock("expo-router", () => ({ useRouter: () => ({ replace: mockReplace }), useFocusEffect: () => {} }));
+jest.mock("expo-router", () => ({
+  useRouter: () => ({ replace: mockReplace }), useLocalSearchParams: () => ({}), useFocusEffect: () => {},
+}));
 jest.mock("../app/providers/GameContext", () => ({
   useGameContext: () => ({
     username: "bob", gameCode: "123456", socket: mockSocket, endSocket: mockEndSocket,

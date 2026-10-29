@@ -71,6 +71,7 @@ export default {
   ok: "OK",
 
   // GameScreen
+  loadingGame: "Loading game…",
   areYouReady: "ARE YOU READY?",
   holdPhoto: "Hold photo",
   reconnecting: "Reconnecting…",

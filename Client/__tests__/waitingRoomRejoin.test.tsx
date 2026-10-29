@@ -106,7 +106,8 @@ describe("WaitingRoom: joining a game already in progress (EXP-097)", () => {
     expect(mockSetPlayersProvider).toHaveBeenCalledWith(players);
     expect(mockSetRoundsOfGame).toHaveBeenCalledWith(15);
     expect(mockReplace).toHaveBeenCalledTimes(1);
-    expect(mockReplace).toHaveBeenCalledWith("/screens/GameScreen");
+    // Marked as a game in progress: the game screen waits for its own snapshot instead of painting "ready?" (EXP-289)
+    expect(mockReplace).toHaveBeenCalledWith({ pathname: "/screens/GameScreen", params: { resync: "1" } });
 
     // A second snapshot (e.g. another reconnect) does not navigate twice
     act(() => mockSocket.fire("game-state", snapshot({ phase: "reveal" })));
@@ -158,7 +159,7 @@ describe("WaitingRoom: loading screen until the join answer settles (EXP-108)", 
     expect(mockReplace).not.toHaveBeenCalled();
 
     act(() => mockSocket.fire("game-state", snapshot()));
-    expect(mockReplace).toHaveBeenCalledWith("/screens/GameScreen");
+    expect(mockReplace).toHaveBeenCalledWith({ pathname: "/screens/GameScreen", params: { resync: "1" } });
     expect(isLoading(r)).toBe(true);
     act(() => r.unmount());
   });

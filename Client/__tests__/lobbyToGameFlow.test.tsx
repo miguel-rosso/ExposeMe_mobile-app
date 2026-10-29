@@ -3,6 +3,7 @@ import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import { FakeSocket } from "../testUtils/fakeSocket";
 import { TEST_IDS, lobbyPlayerId, playerOptionId } from "../app/utils/testIds";
 import en from "../app/i18n/en";
+import { GameStateSnapshot } from "../app/models/interfaces";
 // Loaded with the file (jest.mock calls below are hoisted above it): a cold transform must not hit the test timeout
 import WaitingRoom from "../app/screens/WaitingRoom";
 import GameScreen from "../app/screens/GameScreen";
@@ -20,12 +21,13 @@ const GAME_ROUTE = "/screens/GameScreen";
 
 interface MockAppState {
   route: string;
+  routeParams: Record<string, string>;
   gameCode: string | null;
   roundsOfGame: number;
   playersProvider: unknown[];
 }
 const mockStore = {
-  state: { route: LOBBY_ROUTE, gameCode: null, roundsOfGame: 10, playersProvider: [] } as MockAppState,
+  state: { route: LOBBY_ROUTE, routeParams: {}, gameCode: null, roundsOfGame: 10, playersProvider: [] } as MockAppState,
   listeners: new Set<() => void>(),
   set(patch: Partial<MockAppState>) {
     mockStore.state = { ...mockStore.state, ...patch };
@@ -37,11 +39,15 @@ const mockStore = {
   },
 };
 const mockUseStore = () => require("react").useSyncExternalStore(mockStore.subscribe, () => mockStore.state) as MockAppState;
-const mockReplace = jest.fn((route: unknown) => { if (typeof route === "string") mockStore.set({ route }); });
+type MockHref = string | { pathname: string; params?: Record<string, string> };
+const mockReplace = jest.fn((href: MockHref) => {
+  if (typeof href === "string") mockStore.set({ route: href, routeParams: {} });
+  else mockStore.set({ route: href.pathname, routeParams: href.params ?? {} });
+});
 
 jest.mock("expo-router", () => ({
   useRouter: () => ({ replace: mockReplace }),
-  useLocalSearchParams: () => ({}),
+  useLocalSearchParams: () => mockStore.state.routeParams,
   useFocusEffect: () => {},
 }));
 jest.mock("../app/providers/GameContext", () => ({
@@ -147,7 +153,7 @@ beforeEach(() => {
   jest.useFakeTimers();
   mockSocket.reset();
   mockReplace.mockClear();
-  mockStore.state = { route: LOBBY_ROUTE, gameCode: ROOM_CODE, roundsOfGame: 10, playersProvider: [] };
+  mockStore.state = { route: LOBBY_ROUTE, routeParams: {}, gameCode: ROOM_CODE, roundsOfGame: 10, playersProvider: [] };
 });
 
 describe("Lobby -> game with the server's events (EXP-187)", () => {
@@ -222,5 +228,56 @@ describe("Lobby -> game with the server's events (EXP-187)", () => {
     expect(has(r.root, playerOptionId("alice"))).toBe(true);
     expect(has(r.root, playerOptionId("bob"))).toBe(true);
     expect(has(r.root, playerOptionId("carol"))).toBe(false);
+  });
+});
+
+// EXP-289: back to a game in progress ("Join" after closing the app, or "Play again" into a started game), the lobby
+// opens the game screen on the snapshot it got, and the game screen asks again for its own. Until that one arrives its
+// phase is unknown: a neutral loader, never the ready phase's "are you ready?".
+describe("Lobby -> game in progress (EXP-289)", () => {
+  const startedRoomOfGame = { ...roomOfGame, room: { ...roomOfGame.room, started: true } };
+  const snapshot = (over: Partial<GameStateSnapshot> = {}): GameStateSnapshot => ({
+    started: true, phase: "answering", round: 3, totalRounds: ROOM_ROUNDS, photo: FIRST_PHOTO, correctAnswer: null,
+    yourGuess: null, duration: ANSWERING_MS, phaseTotal: ANSWERING_MS, held: false, pause: null, scores: [],
+    players: LOBBY_PLAYERS, ...over,
+  });
+  // The lobby's snapshot of the started game opens the game screen, which asks the server again
+  async function rejoinGameInProgress() {
+    const r = await openLobby();
+    act(() => mockSocket.fire("room-of-game", startedRoomOfGame));
+    await act(async () => { mockSocket.fire("game-state", snapshot()); });
+    await flush();
+    expect(has(r.root, TEST_IDS.lobbyGameCode)).toBe(false);
+    expect(mockSocket.emittedPayloads("join-create-game")).toHaveLength(2);
+    return r;
+  }
+
+  it("shows a neutral loader, not 'are you ready?', until the game screen's snapshot draws the phase", async () => {
+    const r = await rejoinGameInProgress();
+    expect(has(r.root, TEST_IDS.gameLoading)).toBe(true);
+    expect(has(r.root, TEST_IDS.gameWaitingReady)).toBe(false);
+    expect(texts(r.root)).not.toContain(en.areYouReady);
+    const [loader] = r.root.findAll((n) => n.props.testID === TEST_IDS.gameLoading && typeof n.type === "string");
+    expect(loader.props.accessibilityLabel).toBe(en.loadingGame);
+
+    act(() => mockSocket.fire("game-state", snapshot()));
+    expect(has(r.root, TEST_IDS.gameLoading)).toBe(false);
+    LOBBY_PLAYERS.forEach(({ username }) => expect(has(r.root, playerOptionId(username))).toBe(true));
+  });
+
+  it("keeps 'are you ready?' for a game really in its ready phase", async () => {
+    const r = await rejoinGameInProgress();
+    act(() => mockSocket.fire("game-state", snapshot({ phase: null, round: 0, photo: null, duration: 0, phaseTotal: 0 })));
+    expect(has(r.root, TEST_IDS.gameLoading)).toBe(false);
+    expect(has(r.root, TEST_IDS.gameWaitingReady)).toBe(true);
+  });
+
+  it("a game opened by game-started is in its ready phase: 'are you ready?' at once, no loader", async () => {
+    const r = await openLobby();
+    act(() => mockSocket.fire("room-of-game", roomOfGame));
+    await act(async () => { mockSocket.fire("game-started", LOBBY_PLAYERS, ROOM_ROUNDS); });
+    await flush();
+    expect(has(r.root, TEST_IDS.gameWaitingReady)).toBe(true);
+    expect(has(r.root, TEST_IDS.gameLoading)).toBe(false);
   });
 });

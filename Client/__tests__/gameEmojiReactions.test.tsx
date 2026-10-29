@@ -31,7 +31,9 @@ jest.mock("expo-screen-capture", () => ({
     return { remove: () => { mockCapture.listeners.delete(fn); mockCapture.removed++; } };
   },
 }));
-jest.mock("expo-router", () => ({ useRouter: () => ({ replace: jest.fn() }), useFocusEffect: () => {} }));
+jest.mock("expo-router", () => ({
+  useRouter: () => ({ replace: jest.fn() }), useLocalSearchParams: () => ({}), useFocusEffect: () => {},
+}));
 jest.mock("../app/providers/GameContext", () => ({
   useGameContext: () => {
     const [playersProvider, setPlayersProvider] = require("react").useState(mockPlayers);

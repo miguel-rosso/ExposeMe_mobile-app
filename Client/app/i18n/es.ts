@@ -71,6 +71,7 @@ export default {
   ok: "Aceptar",
 
   // GameScreen
+  loadingGame: "Cargando partida…",
   areYouReady: "¿ESTÁS LISTO?",
   holdPhoto: "Mantener Foto",
   reconnecting: "Reconectando…",

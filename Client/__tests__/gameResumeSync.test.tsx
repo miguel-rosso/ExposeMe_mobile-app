@@ -20,7 +20,9 @@ const mockPlayers = [
   { username: "alice", points: 0, isHost: true, connected: true, lastAnswerCorrect: false, lastGuess: "" },
   { username: "bob", points: 0, isHost: false, connected: true, lastAnswerCorrect: false, lastGuess: "" },
 ];
-jest.mock("expo-router", () => ({ useRouter: () => ({ replace: jest.fn() }), useFocusEffect: () => {} }));
+jest.mock("expo-router", () => ({
+  useRouter: () => ({ replace: jest.fn() }), useLocalSearchParams: () => ({}), useFocusEffect: () => {},
+}));
 jest.mock("../app/providers/GameContext", () => ({
   useGameContext: () => ({
     username: "bob", gameCode: "123456", socket: mockSocket, endSocket: jest.fn(),

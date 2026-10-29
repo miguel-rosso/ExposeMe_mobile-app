@@ -128,6 +128,7 @@ const mockSocket = new FakeSocket();
 const mockPlayersProvider: { current: { username: string; points: number; isHost: boolean }[] } = { current: [] };
 jest.mock("expo-router", () => ({
   useRouter: () => ({ replace: mockReplace }),
+  useLocalSearchParams: () => ({}),
   useFocusEffect: () => {},
 }));
 jest.mock("../app/providers/GameContext", () => {

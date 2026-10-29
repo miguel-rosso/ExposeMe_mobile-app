@@ -15,7 +15,9 @@ jest.mock("@react-native-async-storage/async-storage", () =>
 const mockSocket = new FakeSocket();
 const mockPickGamePhoto = jest.fn();
 const mockUploadPhoto = jest.fn();
-jest.mock("expo-router", () => ({ useRouter: () => ({ replace: jest.fn() }), useFocusEffect: () => {} }));
+jest.mock("expo-router", () => ({
+  useRouter: () => ({ replace: jest.fn() }), useLocalSearchParams: () => ({}), useFocusEffect: () => {},
+}));
 jest.mock("../app/providers/GameContext", () => ({
   useGameContext: () => ({
     username: "bob", gameCode: "123456", socket: mockSocket, endSocket: jest.fn(),

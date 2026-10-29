@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import {
-  View, Text, TouchableOpacity, StatusBar, BackHandler, LayoutChangeEvent, useWindowDimensions,
+  View, Text, TouchableOpacity, StatusBar, BackHandler, LayoutChangeEvent, useWindowDimensions, ActivityIndicator,
 } from "react-native";
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import tw from "twrnc";
 import { useGameContext } from "../providers/GameContext";
@@ -51,6 +51,7 @@ import { attachHandlers, SocketHandlers } from "../utils/socketHandlers";
 import { safeBottomRow, safeTopRow } from "../utils/safeAreaRows";
 import { ANSWERS_BOTTOM, HOLD_BUTTON_BOTTOM } from "../utils/gameRows";
 import { PROGRESS_BAR_AREA, progressBarAreaBottom, progressBarRow } from "../utils/progressBarRow";
+import { GameScreenParams, opensOnGameInProgress } from "../utils/gameScreenRoute";
 
 const { SERVER_URL } = getEnvVars();
 const PICK_SEND_INTERVAL = 200; // ms between submit-answer sends (server: 10 per socket, refilled 5/s)
@@ -86,6 +87,10 @@ const GameScreen = () => {
   // Room photo credentials for the round-photo prefetch (set with photoHeaders, below)
   const photoHeadersRef = useRef<Record<string, string> | undefined>(undefined);
   const [roundView, setRoundView] = useState<RoundView>(initialRoundView);
+  // Opened on a game in progress (a rejoin from the lobby): its phase is unknown until the server's snapshot, so a
+  // neutral loader is shown instead of the ready phase's "are you ready?" (EXP-289)
+  const routeParams = useLocalSearchParams<GameScreenParams>();
+  const [awaitingSnapshot, setAwaitingSnapshot] = useState(() => opensOnGameInProgress(routeParams));
   const dispatchRound = (action: RoundAction) => {
     const previousPhoto = roundRef.current.photo;
     roundRef.current = roundReducer(roundRef.current, action);
@@ -374,6 +379,7 @@ const GameScreen = () => {
         // suspends my request (its upload goes on, like on game-paused).
         turnRequest.endTurn({ forgetReport: true, suspended: !!snap.pause });
         if (snap.phase !== "waiting-photo") setSkipNotice(null);
+        setAwaitingSnapshot(false);
         dispatchRound({ type: "game-state", snap, serverUrl: SERVER_URL });
         const result = gameStateFollowUps(snap);
         setPause(result.pause);
@@ -611,6 +617,16 @@ const GameScreen = () => {
               <EmojisButton />
             </DeferredMount>
           </>
+        ) : awaitingSnapshot ? (
+          <View
+            testID={TEST_IDS.gameLoading}
+            style={tw`flex-1 justify-center items-center`}
+            accessible
+            accessibilityRole="progressbar"
+            accessibilityLabel={t.loadingGame}
+          >
+            <ActivityIndicator size="large" color="white" />
+          </View>
         ) : (
           <View testID={TEST_IDS.gameWaitingReady} style={tw`flex-1 justify-center items-center`}>
             <Text style={tw`text-xl text-white font-bold mb-4`}>{t.areYouReady}</Text>

@@ -25,7 +25,9 @@ const PLAYER_COUNT = 8;
 const mockPlayers = Array.from({ length: PLAYER_COUNT }, (_, i) => ({
   username: `player${i + 1}`, points: 0, isHost: i === 0, connected: true, lastGuess: "", lastAnswerCorrect: false,
 }));
-jest.mock("expo-router", () => ({ useRouter: () => ({ replace: jest.fn() }), useFocusEffect: () => {} }));
+jest.mock("expo-router", () => ({
+  useRouter: () => ({ replace: jest.fn() }), useLocalSearchParams: () => ({}), useFocusEffect: () => {},
+}));
 jest.mock("../app/providers/GameContext", () => ({
   useGameContext: () => {
     const [playersProvider, setPlayersProvider] = require("react").useState(mockPlayers);

@@ -24,7 +24,9 @@ let mockPlayers: ReturnType<typeof makePlayers> = [];
 const makePlayers = (names: string[]) => names.map((username) => ({
   username, points: 0, isHost: username === ME, connected: true, lastGuess: "", lastAnswerCorrect: false,
 }));
-jest.mock("expo-router", () => ({ useRouter: () => ({ replace: jest.fn() }), useFocusEffect: () => {} }));
+jest.mock("expo-router", () => ({
+  useRouter: () => ({ replace: jest.fn() }), useLocalSearchParams: () => ({}), useFocusEffect: () => {},
+}));
 // Stateful players list, like GameContext's useState
 jest.mock("../app/providers/GameContext", () => ({
   useGameContext: () => {

@@ -44,6 +44,7 @@ import { emitWhileConnected } from "../utils/socketEmit";
 import { parseRoomCodeParam } from "../utils/roomCode";
 import { KICKED_BY_HOST_MESSAGE } from "../utils/serverMessage";
 import { dismissKeyboardOnBackPress } from "../utils/keyboardBackPress";
+import { GAME_SCREEN_PATH, RESYNC_GAME_SCREEN } from "../utils/gameScreenRoute";
 import { useBackHandler } from "@react-native-community/hooks";
 
 /** How much the lobby background photo is blurred */
@@ -356,7 +357,7 @@ const WaitingRoom = ({}) => {
 
       "game-started": (players: Player[]) => {
         setPlayersProvider(players);
-        navigation.replace("/screens/GameScreen");
+        navigation.replace(GAME_SCREEN_PATH);
       },
 
       // Every rejoin is followed by a snapshot; a started game means we came back to a game in progress
@@ -371,7 +372,7 @@ const WaitingRoom = ({}) => {
         resyncOnLeaveRef.current = true;
         setPlayersProvider(snap.players);
         setRoundsOfGame(snap.totalRounds);
-        navigation.replace("/screens/GameScreen");
+        navigation.replace(RESYNC_GAME_SCREEN);
       },
 
       "player-removed": (removed: Player) => {

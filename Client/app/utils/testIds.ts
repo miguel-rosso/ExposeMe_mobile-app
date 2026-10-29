@@ -30,6 +30,7 @@ export const TEST_IDS = {
   chatSendButton: "chat-send-button",
   // ── Game ──
   gameWaitingReady: "game-waiting-ready",
+  gameLoading: "game-loading", // opened on a game in progress: shown until the server's snapshot says its phase
   gameWaitingPhoto: "game-waiting-photo",
   waitingPhotoText: "waiting-photo-text",
   roundSkippedNotice: "round-skipped-notice",

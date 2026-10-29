@@ -91,10 +91,14 @@ const GameScreen = () => {
   // neutral loader is shown instead of the ready phase's "are you ready?" (EXP-289)
   const routeParams = useLocalSearchParams<GameScreenParams>();
   const [awaitingSnapshot, setAwaitingSnapshot] = useState(() => opensOnGameInProgress(routeParams));
+  // Device time the event that started the current phase (a new phaseKey) arrived: its progress bar ends `phaseDuration`
+  // after it, not after the phase's paint, which can come much later on slow phones (EXP-300)
+  const [phaseStartedAt, setPhaseStartedAt] = useState(0);
   const dispatchRound = (action: RoundAction) => {
-    const previousPhoto = roundRef.current.photo;
+    const { photo: previousPhoto, phaseKey: previousPhaseKey } = roundRef.current;
     roundRef.current = roundReducer(roundRef.current, action);
     setRoundView(roundRef.current);
+    if (roundRef.current.phaseKey !== previousPhaseKey) setPhaseStartedAt(Date.now());
     const { photo: currentPhoto } = roundRef.current;
     if (currentPhoto === previousPhoto) return;
     // Reactions belong to the photo they were sent on: dropped in the same render that changes it (waiting-photo,
@@ -523,7 +527,9 @@ const GameScreen = () => {
             </Text>
             {phaseDuration > 0 && pauseEndsAt === null && (
               <View style={tw`w-full max-w-[500px]`}>
-                <ProgressBar key={phaseKey} duration={phaseDuration} elapsed={phaseBarElapsed} />
+                <ProgressBar
+                  key={phaseKey} duration={phaseDuration} elapsed={phaseBarElapsed} startedAt={phaseStartedAt}
+                />
               </View>
             )}
             {skipNotice && (
@@ -564,6 +570,7 @@ const GameScreen = () => {
                         key={phaseKey}
                         duration={phaseDuration}
                         elapsed={phaseBarElapsed}
+                        startedAt={phaseStartedAt}
                         onEnd={phase === "answering" ? closeAnswers : undefined}
                       />
                     </View>

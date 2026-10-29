@@ -76,6 +76,67 @@ describe("ProgressBar", () => {
     act(() => r.unmount());
   });
 
+  // EXP-300: a slow phone paints the phase (and mounts its bar) well after its event arrived; the bar must still end at
+  // the event's arrival + duration, or the app takes taps the server no longer accepts
+  it("mounted late, ends at startedAt + duration, starting as full as the time already gone", () => {
+    const timing = jest.spyOn(Animated, "timing");
+    const onEnd = jest.fn();
+    const startedAt = Date.now();
+    jest.setSystemTime(startedAt + 2_000); // painted 2 s after the event arrived
+    let r!: TestRenderer.ReactTestRenderer;
+    act(() => { r = TestRenderer.create(<ProgressBar duration={8_000} startedAt={startedAt} onEnd={onEnd} />); });
+    expect(StyleSheet.flatten(fill(r).props.style).transform).toEqual([{ scaleX: 0.25 }]);
+    expect(timing).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ toValue: 1, duration: 6_000 }));
+    act(() => jest.advanceTimersByTime(5_900));
+    expect(onEnd).not.toHaveBeenCalled();
+    act(() => jest.advanceTimersByTime(200));
+    expect(onEnd).toHaveBeenCalledTimes(1);
+    act(() => r.unmount());
+  });
+
+  it("mounted late into a resumed phase, fills the rest of what was left from the event's arrival", () => {
+    const onEnd = jest.fn();
+    const startedAt = Date.now();
+    jest.setSystemTime(startedAt + 1_000);
+    let r!: TestRenderer.ReactTestRenderer;
+    act(() => {
+      r = TestRenderer.create(<ProgressBar duration={2_000} elapsed={0.5} startedAt={startedAt} onEnd={onEnd} />);
+    });
+    expect(StyleSheet.flatten(fill(r).props.style).transform).toEqual([{ scaleX: 0.75 }]);
+    act(() => jest.advanceTimersByTime(900));
+    expect(onEnd).not.toHaveBeenCalled();
+    act(() => jest.advanceTimersByTime(200));
+    expect(onEnd).toHaveBeenCalledTimes(1);
+    act(() => r.unmount());
+  });
+
+  // The rest of a slow mount (here a sibling rendered after the bar) runs between the bar's render and its effect: the
+  // animation must start from where the bar is when it starts, not from where it was at render, or it lags and catches up
+  it("starts the animation from the fill at that moment, however long the mount took after its render", () => {
+    const timing = jest.spyOn(Animated, "timing");
+    const startedAt = Date.now();
+    const SlowSibling = () => { jest.setSystemTime(startedAt + 2_000); return null; };
+    let r!: TestRenderer.ReactTestRenderer;
+    act(() => { r = TestRenderer.create(<><ProgressBar duration={8_000} startedAt={startedAt} /><SlowSibling /></>); });
+    // The value the animation starts from (Animated's own reader: not in its public types)
+    const [value, config] = timing.mock.calls[0] as unknown as [{ __getValue: () => number }, Animated.TimingAnimationConfig];
+    expect(value.__getValue()).toBe(0.25);
+    expect(config).toEqual(expect.objectContaining({ toValue: 1, duration: 6_000 }));
+    act(() => r.unmount());
+  });
+
+  it("mounted after its time ran out, is full and ends at once", () => {
+    const onEnd = jest.fn();
+    const startedAt = Date.now();
+    jest.setSystemTime(startedAt + 9_000);
+    let r!: TestRenderer.ReactTestRenderer;
+    act(() => { r = TestRenderer.create(<ProgressBar duration={8_000} startedAt={startedAt} onEnd={onEnd} />); });
+    expect(StyleSheet.flatten(fill(r).props.style).transform).toEqual([{ scaleX: 1 }]);
+    act(() => jest.advanceTimersByTime(20));
+    expect(onEnd).toHaveBeenCalledTimes(1);
+    act(() => r.unmount());
+  });
+
   it("keeps the elapsed fraction inside the bar", () => {
     let r!: TestRenderer.ReactTestRenderer;
     act(() => { r = TestRenderer.create(<ProgressBar duration={1_000} elapsed={-0.5} />); });

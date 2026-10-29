@@ -148,6 +148,8 @@ After last round: game-over
   `answering` (`round-start`, `game-state`, `game-resumed`) is **`ANSWER_GRACE` (300 ms) less** than what is left of
   it. The app stops taking taps when its answer bar (drawn with that `duration`, not a separate game timer) ends,
   and the server keeps taking answers for ANSWER_GRACE after that, so every tap the app accepted arrives in time.
+  The bar ends `duration` after the event **arrived on the device**, however late the phase is painted (a slow phone
+  mounts the bar already partly full, EXP-300): only the delivery delay counts against the grace, never the paint.
 - Only players still in `room.players` can be voted for: a guess naming someone who left (the owner included) or an
   unknown name is ignored and the previous pick stays.
 - Rate limit: per socket, a token bucket of **10** `submit-answer`, refilled at **5 per second**; excess events are
@@ -474,6 +476,8 @@ and it is never less than `duration`. The client draws the progress bar from `1 
 player who reconnects into a phase it never saw start (it was away when the phase changed) sees the bar where it is
 for everyone else, not empty. Before any start event (the ready phase, or a round about to start after a pause at a
 round boundary) the countdown is shown whole: `phaseTotal` = `duration`. A game over snapshot sends 0 for both.
+As with the start events, the bar ends `duration` after the payload arrived on the device, however late it is painted
+(EXP-300).
 
 ## Hold (pause)
 

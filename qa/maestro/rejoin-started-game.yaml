@@ -1,14 +1,15 @@
 # EXP-097: closing the app mid-game and joining the same room again (same name, stored rejoin token) must land
 # on the game screen in the current phase, not on the lobby's "Waiting for host…".
 # Run while the device is in a started game in room ${GAME_CODE} as ${USERNAME} (e.g. after join-room.yaml and
-# a game started with bots: node qa/lab/bots.mjs --bots 2 --code $GAME_CODE). With 2 players the others see the
+# a game started with bots: node qa/lab/bots.mjs --bots 2 --code $GAME_CODE). env: METRO_URL (url-encoded). With 2 players the others see the
 # pause while the app is closed and the game resumes when it comes back.
 # Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
 appId: com.socketNull.ExposeMe
 ---
 - stopApp
-- launchApp:
-    stopApp: false
+# Cold start through the dev client link (env METRO_URL): a bare launchApp can come back with the Expo dev menu open
+# over the home screen on Android, hiding join-game-button
+- runFlow: dev-client-boot.yaml
 # Cold start: the dev client takes a few seconds to load the bundle. Typing before the home screen is up
 # lands in the restored username mid-text (e.g. "andrandroioid-a"), which joins as a new player
 - extendedWaitUntil:

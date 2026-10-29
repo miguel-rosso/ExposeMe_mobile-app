@@ -38,11 +38,13 @@ export interface RoundView {
    * them may be the photo's owner, who stays the answer, and the app can't tell which (secret until the reveal)
    */
   leavers: readonly RoundLeaver[];
+  /** The game's number of rounds as the server sent it (round-scores, snapshot); 0 until then */
+  totalRounds: number;
 }
 
 export const initialRoundView: RoundView = {
   photo: null, round: 0, phase: null, phaseDuration: 0, phaseTotal: 0, phaseKey: 0, correctAnswer: "", scores: null,
-  mySelection: "", gameHeld: false, pressing: false, leavers: [],
+  mySelection: "", gameHeld: false, pressing: false, leavers: [], totalRounds: 0,
 };
 
 /**
@@ -128,7 +130,7 @@ const snapshotLeavers = (snap: GameStateSnapshot): RoundLeaver[] =>
 /** Renders the `game-state` snapshot a rejoining player receives (the pick shown: see snapshotSelection) */
 const applySnapshot = (state: RoundView, snap: GameStateSnapshot, serverUrl: string): RoundView => {
   if (!snap.started) return { ...state, pressing: false, gameHeld: false };
-  const held = { ...state, pressing: false, gameHeld: snap.held };
+  const held = { ...state, pressing: false, gameHeld: snap.held, totalRounds: snap.totalRounds };
 
   if (showsRound(snap)) {
     const photo = `${serverUrl}${snap.photo}`;
@@ -146,7 +148,39 @@ const applySnapshot = (state: RoundView, snap: GameStateSnapshot, serverUrl: str
   if (snap.phase === "waiting-photo") return waitForPhoto(held, snap.round + 1, snap.duration, snap.phaseTotal);
 
   // Ready phase: back to the "are you ready" screen until the first round, under the server's hold
-  return { ...state, ...PER_ROUND_RESET, gameHeld: snap.held, photo: null, phase: null };
+  return { ...held, ...PER_ROUND_RESET, gameHeld: snap.held, photo: null, phase: null };
+};
+
+// ── A snapshot of the next game (EXP-302) ──
+// The game this screen shows ended while I was away (its game-over was lost) and the host already started the next
+// one: the snapshot is of that new game. A game only moves forward (the ready phase, then each round's photo wait,
+// answering, reveal and scores) and keeps its number of rounds, so a snapshot behind what this screen already showed,
+// with another photo for the same round, or with another number of rounds is not this game. (A new game already past
+// the point where this one stopped, with the same number of rounds, can't be told apart without a game id.)
+
+/** The steps of a round, in order: the ready phase (null) comes before every round */
+// Exhaustive on purpose: a new ServerPhase must get its step here, or tsc fails
+const PHASE_STEP: Record<ServerPhase, number> = { "waiting-photo": 1, answering: 2, reveal: 3, scores: 4 };
+
+/** Where a game is: the round its phase belongs to (a photo wait's is the awaited round) and the phase's step in it */
+interface GameProgress { round: number; step: number }
+
+const progressOf = (round: number, phase: ServerPhase | null): GameProgress => ({ round, step: phase === null ? 0 : PHASE_STEP[phase] });
+
+const isBehind = (a: GameProgress, b: GameProgress) => a.round < b.round || (a.round === b.round && a.step < b.step);
+
+/** The snapshot's progress: in `waiting-photo` its `round` is the last played one, the awaited one is the next */
+const snapshotProgress = (snap: GameStateSnapshot): GameProgress =>
+  progressOf(snap.phase === "waiting-photo" ? snap.round + 1 : snap.round, snap.phase);
+
+/** The `game-state` snapshot is of another game than the one this screen shows: the next one, started meanwhile */
+export const isAnotherGame = (state: RoundView, snap: GameStateSnapshot, serverUrl: string): boolean => {
+  if (!snap.started) return false; // the game ended while I was away: its final scores
+  if (state.totalRounds > 0 && snap.totalRounds !== state.totalRounds) return true;
+  if (isBehind(snapshotProgress(snap), progressOf(state.round, state.phase))) return true;
+  const otherPhotoSameRound = showsRound(snap) && inRoundPhase(state.phase) && !!state.photo
+    && snap.round === state.round && `${serverUrl}${snap.photo}` !== state.photo;
+  return otherPhotoSameRound;
 };
 
 export const roundReducer = (state: RoundView, action: RoundAction): RoundView => {
@@ -169,7 +203,10 @@ export const roundReducer = (state: RoundView, action: RoundAction): RoundView =
       };
     // The scoreboard lists the guess the server recorded for each player; the options are not drawn under it
     case "round-scores":
-      return { ...startPhase(state, "scores", action.data.duration), scores: action.data.scores, round: action.data.round };
+      return {
+        ...startPhase(state, "scores", action.data.duration), scores: action.data.scores, round: action.data.round,
+        totalRounds: action.data.totalRounds,
+      };
     case "pick":
       return { ...state, mySelection: action.guess };
     // Left during the round in play: kept as an option until the next photo wait (before it, they simply go)

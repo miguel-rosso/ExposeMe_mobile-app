@@ -1,6 +1,6 @@
 import { GameStateSnapshot, Player } from "../app/models/interfaces";
 import {
-  gameStateFollowUps, initialRoundView, isRevealedOwner, phaseElapsed, RoundAction, roundOptions, roundReducer,
+  gameStateFollowUps, initialRoundView, isAnotherGame, isRevealedOwner, phaseElapsed, RoundAction, roundOptions, roundReducer,
   RoundView,
 } from "../app/utils/roundState";
 
@@ -25,7 +25,7 @@ describe("round-start (EXP-001)", () => {
     const prev = view({ phaseKey: 4, correctAnswer: "alice", scores: [], mySelection: "bob" });
     expect(start(prev)).toEqual({
       photo: "http://srv/temp/a.jpg", round: 3, phase: "answering", phaseDuration: 10000, phaseTotal: 10000, phaseKey: 5,
-      correctAnswer: "", scores: null, mySelection: "", gameHeld: false, pressing: false, leavers: [],
+      correctAnswer: "", scores: null, mySelection: "", gameHeld: false, pressing: false, leavers: [], totalRounds: 0,
     });
   });
 
@@ -189,6 +189,7 @@ describe("game-state", () => {
     const ready = applyGameState(snapshot({ phase: null, photo: null }), "", prev).state;
     expect(ready).toEqual({
       ...prev, photo: null, phase: null, correctAnswer: "", scores: null, mySelection: "", gameHeld: false, pressing: false,
+      totalRounds: 10,
     });
     expect(applyGameState(snapshot({ phase: null, photo: null, held: true }), "", prev).state.gameHeld).toBe(true);
   });
@@ -405,5 +406,62 @@ describe("players who leave during a round", () => {
     const players = [alice, bob];
     expect(roundOptions(players, [])).toBe(players);
     expect(roundOptions([alice, bob], [{ player: bob, index: 1 }])).toEqual([alice, bob]); // never twice
+  });
+});
+
+// ── A snapshot of the next game (EXP-302) ────────────────
+
+describe("the game's number of rounds (EXP-302)", () => {
+  it("is the server's: from round-scores and from a snapshot of a started game", () => {
+    const scores = roundReducer(view(), {
+      type: "round-scores", data: { scores: [], round: 2, totalRounds: 15, duration: 5_000 },
+    });
+    expect(scores.totalRounds).toBe(15);
+    for (const over of [{}, { phase: "waiting-photo" as const, photo: null }, { phase: null, photo: null }]) {
+      expect(applyGameState(snapshot({ ...over, totalRounds: 20 }), "", view()).state.totalRounds).toBe(20);
+    }
+    // A game-over snapshot keeps the count of the game that ended
+    expect(applyGameState(snapshot({ started: false, totalRounds: 20 }), "", scores).state.totalRounds).toBe(15);
+  });
+});
+
+describe("isAnotherGame (EXP-302)", () => {
+  // The old game's last scores: round 10 of 10, photo "/temp/9-z.jpg"
+  const lastScores = view({ round: 10, phase: "scores", photo: "http://srv/temp/9-z.jpg", totalRounds: 10 });
+  const another = (snap: GameStateSnapshot, state = lastScores) => isAnotherGame(state, snap, "http://srv");
+
+  it("the next game's ready phase, photo wait or first rounds, behind where this game stopped", () => {
+    expect(another(snapshot({ phase: null, round: 0, photo: null }))).toBe(true);
+    expect(another(snapshot({ phase: "waiting-photo", round: 0, photo: null }))).toBe(true);
+    expect(another(snapshot({ phase: "answering", round: 1, photo: "/temp/1-a.jpg" }))).toBe(true);
+    expect(another(snapshot({ phase: "reveal", round: 10, photo: "/temp/9-z.jpg" }))).toBe(true); // a step back
+  });
+
+  it("another photo for the round this screen showed", () => {
+    expect(another(snapshot({ phase: "answering", round: 10, photo: "/temp/1-a.jpg" }))).toBe(true);
+    expect(another(snapshot({ phase: "scores", round: 10, photo: "/temp/9-z.jpg" }))).toBe(false);
+  });
+
+  it("another number of rounds than the server gave for this game", () => {
+    const waiting = view({ round: 3, phase: "waiting-photo", totalRounds: 10 });
+    expect(another(snapshot({ phase: "answering", round: 12, totalRounds: 15 }), waiting)).toBe(true);
+    // Not known yet (no round-scores nor snapshot seen): not a sign
+    expect(another(snapshot({ phase: "answering", round: 3, totalRounds: 15 }), view({ round: 3, phase: "waiting-photo" }))).toBe(false);
+  });
+
+  it("is never this game's own progress, nor its end", () => {
+    // The same round's phases, and every later one
+    expect(another(snapshot({ phase: "scores", round: 3 }), shown({ totalRounds: 10 }))).toBe(false);
+    expect(another(snapshot({ phase: "answering", round: 3 }), shown({ totalRounds: 10 }))).toBe(false);
+    expect(another(snapshot({ phase: "waiting-photo", round: 3, photo: null }), shown())).toBe(false);
+    expect(another(snapshot({ phase: "answering", round: 5, photo: "/temp/4-x.jpg" }), shown())).toBe(false);
+    // A photo wait seen live (awaited round 4) and its snapshot (last played round 3)
+    const waiting = roundReducer(shown(), { type: "waiting-photo", data: { round: 4, duration: 15_000 } });
+    expect(another(snapshot({ phase: "waiting-photo", round: 3, photo: null }), waiting)).toBe(false);
+    // A screen that saw nothing yet (opened on a game in progress), or the ready phase
+    expect(another(snapshot({ phase: "scores", round: 7 }), view())).toBe(false);
+    expect(another(snapshot({ phase: null, round: 0, photo: null }), view())).toBe(false);
+    // The game ended while away: its final scores, not another game
+    expect(another(snapshot({ started: false, phase: null, round: 0, photo: null }))).toBe(false);
   });
 });

@@ -32,8 +32,8 @@ import { prefetchImage } from "@/app/utils/image";
 import { photoWaitOf, pickAndUploadTurnPhoto } from "../utils/turnPhoto";
 import { SkipNotice, skipNoticeFor, skipNoticeText } from "../utils/waitingPhoto";
 import {
-  gameStateFollowUps, initialRoundView, isRevealedOwner, phaseElapsed, RoundAction, roundOptions, roundReducer,
-  RoundView,
+  gameStateFollowUps, initialRoundView, isAnotherGame, isRevealedOwner, phaseElapsed, RoundAction, roundOptions,
+  roundReducer, RoundView,
 } from "../utils/roundState";
 import { emitWhileConnected } from "../utils/socketEmit";
 import { useGameConnection } from "../hooks/useGameConnection";
@@ -111,6 +111,8 @@ const GameScreen = () => {
   const {
     photo, round, phase, phaseDuration, phaseKey, correctAnswer, scores, mySelection, gameHeld, pressing, leavers,
   } = roundView;
+  // The server's count once it sent one (a game started while I was away may have another), else the lobby's setting
+  const totalRounds = roundView.totalRounds || roundsOfGame;
   // QA builds only: tells the server when this device rendered each phase (lab render-skew metrics); the phase
   // handlers below call markPhaseHandled first, so the ack also says when their event arrived
   const markPhaseHandled = useQaRenderAck(socket, phase, round, phaseKey);
@@ -238,21 +240,25 @@ const GameScreen = () => {
   const detachGameHandlers = useRef<(() => void) | null>(null);
   const detachFinalScreenHandlers = useRef<(() => void) | null>(null);
 
+  // Join the next game the host started (DEC-018 A) the same way "Play again" does: the lobby rejoins on this socket,
+  // gets the started game's snapshot and opens a fresh game screen (new used-photos list, the server's round count),
+  // which sends im-ready. This screen's game is over: it stops driving it at once.
+  const joiningNextGameRef = useRef(false);
+  const joinNextGame = () => {
+    if (joiningNextGameRef.current) return;
+    joiningNextGameRef.current = true;
+    console.log("[GAME] next game started — joining it");
+    detachGameHandlers.current?.();
+    setPlantedPhotoUri(null); // planted for the game that ended
+    router.replace("/screens/WaitingRoom");
+  };
+
   const showGameOver = (finalScore: ScoreRound[]) => {
     if (gameOverRef.current) return;
     gameOverRef.current = true;
     detachGameHandlers.current?.();
-    // Still in the room on the final screens: when the host starts the next game, join it at once (DEC-018 A), the
-    // same way "Play again" does: the lobby rejoins on this socket, gets the started game's snapshot and opens a fresh
-    // game screen, which sends im-ready. A snapshot of a started game (I reconnected meanwhile) means the same thing.
-    let joiningNext = false;
-    const joinNextGame = () => {
-      if (joiningNext) return;
-      joiningNext = true;
-      console.log("[GAME] next game started from the final screens — joining it");
-      setPlantedPhotoUri(null); // planted for the game that ended
-      router.replace("/screens/WaitingRoom");
-    };
+    // Still in the room on the final screens: when the host starts the next game, join it at once. A snapshot of a
+    // started game (I reconnected meanwhile) means the same thing.
     if (socket) {
       detachFinalScreenHandlers.current = attachHandlers(socket, {
         "game-started": joinNextGame,
@@ -378,6 +384,13 @@ const GameScreen = () => {
       // Snapshot after a rejoin: render whatever phase the server is in
       "game-state": (snap: GameStateSnapshot) => {
         console.log(`[GAME] game-state: ${snap.phase} round ${snap.round}, paused=${!!snap.pause}`);
+        // This game ended while I was away and the next one already started (EXP-302): its game-over and final scores
+        // are lost, so join the new game as the final screens would
+        if (isAnotherGame(roundRef.current, snap, SERVER_URL)) {
+          turnRequest.endTurn();
+          joinNextGame();
+          return;
+        }
         setPlayers(snap.players);
         // An awaited photo of mine is asked again with your-turn right after this snapshot. A report of mine was
         // answered while I was away (that round-skipped is lost): a later skip is not mine. A paused game only
@@ -460,7 +473,7 @@ const GameScreen = () => {
 
   // ── Render helpers ───────────────────────────────────
   // Stable props for the memoised scoreboard: the game screen re-renders during scores (reactions, hold)
-  const scoreRounds = useMemo(() => ({ round, roundsOfGame }), [round, roundsOfGame]);
+  const scoreRounds = useMemo(() => ({ round, roundsOfGame: totalRounds }), [round, totalRounds]);
   // The options are drawn while answering and in the reveal (not in scores: the scoreboard covers the photo)
   const isReveal = phase === "reveal";
 
@@ -523,9 +536,9 @@ const GameScreen = () => {
       <View style={tw`flex-1 bg-black`}>
         {phase === "waiting-photo" ? (
           <View testID={TEST_IDS.gameWaitingPhoto} style={tw`flex-1 justify-center items-center px-6`}>
-            {round > 0 && roundsOfGame > 0 && (
+            {round > 0 && totalRounds > 0 && (
               <Text style={tw`text-gray-400 text-base mb-2`}>
-                {t.roundOf.replace("{round}", String(round)).replace("{total}", String(roundsOfGame))}
+                {t.roundOf.replace("{round}", String(round)).replace("{total}", String(totalRounds))}
               </Text>
             )}
             <Text testID={TEST_IDS.waitingPhotoText} style={tw`text-xl text-white font-bold text-center mb-6`}>

@@ -145,3 +145,63 @@ describe("GameScreen final screens when the next game starts (EXP-184)", () => {
     act(() => r.unmount());
   });
 });
+
+// EXP-302: my socket was down when the game ended (game-over lost) and the host started the next game before I came
+// back. The rejoin's snapshot is of that new game: this screen hands over to it like the final screens do, instead of
+// playing it on with the old game's used photos and round count.
+describe("GameScreen when the rejoin snapshot is of the next game (EXP-302)", () => {
+  const roundScores = (round: number, totalRounds: number) => ({ scores: finalScore, round, totalRounds, duration: 5000 });
+  const newGame = {
+    started: true, phase: null, round: 0, totalRounds: 10, photo: null, correctAnswer: null, yourGuess: null,
+    duration: 0, phaseTotal: 0, held: false, pause: null, scores: [], players: [], roundOptions: [],
+  };
+  const waitingSnapshot = (round: number, totalRounds: number) =>
+    ({ ...newGame, phase: "waiting-photo", round, totalRounds, duration: 9000, phaseTotal: 15000 });
+  const texts = (r: TestRenderer.ReactTestRenderer) =>
+    r.root.findAll((n) => typeof n.type === "string" && n.props.children !== undefined).map((n) => n.props.children).flat();
+
+  async function mountAtLastScores() {
+    let r!: TestRenderer.ReactTestRenderer;
+    await act(async () => { r = TestRenderer.create(<GameScreen />); });
+    await flush();
+    act(() => {
+      mockSocket.fire("round-start", { photo: "/temp/9-z.jpg", round: 10, duration: 7700 });
+      mockSocket.fire("round-scores", roundScores(10, 10));
+    });
+    mockSocket.emitted = [];
+    return r;
+  }
+
+  it("joins the next game through the lobby at once, and stops driving this one", async () => {
+    const r = await mountAtLastScores();
+    act(() => mockSocket.fire("game-state", newGame));
+    expect(mockReplace).toHaveBeenCalledTimes(1);
+    expect(mockReplace).toHaveBeenCalledWith("/screens/WaitingRoom");
+    expect(mockSetPlanted).toHaveBeenCalledWith(null);
+    // Not the new game's im-ready from here: the fresh game screen sends it
+    expect(mockSocket.emitted).toEqual([]);
+    // A your-turn of the new game right after the snapshot is left to the fresh screen (asked again on its rejoin)
+    act(() => mockSocket.fire("your-turn", { round: 1, attempt: 1 }));
+    await flush();
+    expect(mockPickGamePhoto).not.toHaveBeenCalled();
+    expect(mockSocket.emitted).toEqual([]);
+    expect(mockSocket.handlers.get("waiting-photo")?.size ?? 0).toBe(0);
+    act(() => r.unmount());
+  });
+
+  it("a snapshot of this game going on does not leave it", async () => {
+    const r = await mountAtLastScores();
+    act(() => mockSocket.fire("game-state", { ...newGame, phase: "scores", round: 10, photo: "/temp/9-z.jpg", scores: finalScore }));
+    expect(mockReplace).not.toHaveBeenCalled();
+    act(() => r.unmount());
+  });
+
+  it("shows the server's number of rounds, not the lobby's", async () => {
+    let r!: TestRenderer.ReactTestRenderer;
+    await act(async () => { r = TestRenderer.create(<GameScreen />); });
+    await flush();
+    act(() => mockSocket.fire("game-state", waitingSnapshot(3, 15))); // the lobby said 10
+    expect(texts(r)).toContain("Round 4 of 15");
+    act(() => r.unmount());
+  });
+});

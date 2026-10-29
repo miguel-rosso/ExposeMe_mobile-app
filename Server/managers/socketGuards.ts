@@ -317,7 +317,8 @@ export function createEventLimiter<E extends string>(limits: Readonly<Record<E, 
  * - im-ready: once on the game screen, and again after each game-state snapshot (rejoin)
  * - photo-sent / photo-unavailable: once per your-turn, plus a resend of the same photo. photo-sent gets a larger
  *   burst so a valid path still gets through after a handful of rejected ones (cheap to check: session + path)
- * - plant-photo: once from the lobby, plus a retry from the game screen
+ * - plant-photo: up to 2 emits per attempt (lobby, game screen, rejoin): the first one, plus a resend of a freshly
+ *   uploaded copy when it is answered photo-unavailable
  * - hold-end: only a real release (from the socket holding) spends a token, one per accepted hold; holds are
  *   limited more tightly (HOLD_START_BURST, HOLD_START_RATE_PER_S), so a release always gets through
  */

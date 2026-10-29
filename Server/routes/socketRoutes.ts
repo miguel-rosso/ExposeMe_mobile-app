@@ -80,6 +80,40 @@ function isCurrentTurnUpload(value: unknown, room: Room, player: Player): value 
   return record?.kind === "turn" && !record.planted && record.round === room.round;
 }
 
+// ── Planted photo ──
+
+/**
+ * Why plant-photo was refused: the socket is in no room, the payload is no upload path, the game no longer takes
+ * planted photos, or the path is no upload of this player in this room (expired, deleted or never theirs: a single
+ * answer, so it never tells whether another player's photo exists).
+ */
+type PlantRefusal = "not-in-room" | "invalid" | "too-late" | "photo-unavailable";
+/** plant-photo's acknowledgement. */
+type PlantPhotoAck = { ok: true } | { ok: false; reason: PlantRefusal };
+
+/** Plants `photoUrl` as the session player's planted photo (replacing an earlier one), or says why not. */
+function plantPhoto(socket: Socket, photoUrl: unknown): PlantPhotoAck {
+  const s = session(socket);
+  if (!s) return { ok: false, reason: "not-in-room" };
+  if (!isUploadPath(photoUrl)) return { ok: false, reason: "invalid" };
+  const { room, player } = s;
+  // Accept planted photos until the first round actually starts playing (same rule as POST /upload). Not while
+  // this player's planted photo is the one awaited now: a re-send whose ack was lost would show the image twice
+  if (!acceptsPlantedPhoto(room) || gameEngine.isPlanterOfCurrentWait(room, player)) {
+    return { ok: false, reason: "too-late" };
+  }
+  // Any own upload, a turn-kind one too: round 1's owner may plant while their turn is awaited (POST /upload then
+  // stores it as a turn photo); once planted, photo-sent no longer takes it
+  if (!isOwnUpload(photoUrl, room, player)) return { ok: false, reason: "photo-unavailable" };
+  // Replaces an earlier planted photo of this player; the mark only goes back to them (room-of-game)
+  uploadStore.replacePlanted(player.plantedPhoto, photoUrl); // the replaced planted photo is deleted
+  player.plantedPhoto = photoUrl;
+  player.hasPlantedPhoto = true;
+  gameEngine.onLatePlantedPhoto(room); // retry sent after the planted rounds were drawn
+  console.log(`[${room.gameCode}] Planted photo received from ${player.username}`);
+  return { ok: true };
+}
+
 /**
  * Room and player bound to this socket by a successful join-create-game.
  * Identity always comes from here, never from payload fields (gameCode/username in payloads are ignored).
@@ -446,21 +480,12 @@ io.on("connection", (socket: Socket) => {
     } catch (e) { console.error("emoji error:", e); }
   });
 
-  socket.on("plant-photo", (data: { photoUrl: string }) => {
+  // Acked with plantPhoto's answer; not acked when dropped by the rate limit (the app's ack timeout covers that)
+  socket.on("plant-photo", (data: { photoUrl: string }, ack?: unknown) => {
     try {
       if (!gameEvents.take("plant-photo")) return;
-      const s = session(socket);
-      const photoUrl = data?.photoUrl;
-      if (!s || !isOwnUpload(photoUrl, s.room, s.player)) return;
-      const { room, player } = s;
-      // Accept planted photos until the first round actually starts playing (same rule as POST /upload)
-      if (!acceptsPlantedPhoto(room)) return;
-      // Replaces an earlier planted photo of this player; the mark only goes back to them (room-of-game)
-      uploadStore.replacePlanted(player.plantedPhoto, photoUrl); // the replaced planted photo is deleted
-      player.plantedPhoto = photoUrl;
-      player.hasPlantedPhoto = true;
-      gameEngine.onLatePlantedPhoto(room); // retry sent after the planted rounds were drawn
-      console.log(`[${room.gameCode}] Planted photo received from ${player.username}`);
+      const answer = plantPhoto(socket, data?.photoUrl);
+      if (typeof ack === "function") ack(answer);
     } catch (e) { console.error("plant-photo error:", e); }
   });
 

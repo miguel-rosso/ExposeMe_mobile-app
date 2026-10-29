@@ -18,19 +18,34 @@ jest.mock("../app/utils/uploadPhoto", () => ({ uploadPhoto: (...args: unknown[])
 
 import { GameProvider, useGameContext } from "../app/providers/GameContext";
 import { PLANT_UPLOAD_RETRY, UploadHttpError } from "../app/utils/uploadRetry";
+import { PLANT_ACK_TIMEOUT_MS, PlantPhotoAck } from "../app/utils/plantPhotoAck";
 
 let ctx!: ReturnType<typeof useGameContext>;
 const Probe = () => { ctx = useGameContext(); return null; };
+
+// EXP-152: the server acks every plant-photo. Its answer for a photo url (undefined: it never answers)
+const mockPlantAck = jest.fn((_photoUrl: string): PlantPhotoAck | undefined => ({ ok: true }));
+const recordEmit = mockSocket.emit.bind(mockSocket);
+mockSocket.emit = (ev: string, ...args: any[]) => {
+  recordEmit(ev, ...args);
+  const [payload, ack] = args;
+  const answer = ev === "plant-photo" ? mockPlantAck(payload.photoUrl) : undefined;
+  if (answer && typeof ack === "function") ack(answer);
+  return mockSocket;
+};
 
 beforeAll(() => { jest.spyOn(console, "log").mockImplementation(() => {}); });
 afterAll(() => { jest.restoreAllMocks(); });
 beforeEach(() => {
   mockUpload.mockReset(); // also drops a held upload a failed test left queued
   mockUpload.mockImplementation(async () => UPLOADED);
+  mockPlantAck.mockReset();
+  mockPlantAck.mockImplementation(() => ({ ok: true }));
   mockSocket.reset();
 });
 
 const plantPhotoUrls = () => mockSocket.emittedPayloads("plant-photo");
+const refuse = (reason: Extract<PlantPhotoAck, { ok: false }>["reason"]): PlantPhotoAck => ({ ok: false, reason });
 // The server's answer to the screens' join-create-game: binds the socket's current connection to the room
 const joinAnswered = (hasPlantedPhoto = false) => act(() => mockSocket.fire("room-of-game", {
   success: true, room: { gameCode: "ABC123", players: [], rounds: 5, started: false, phase: null, round: 0 }, hasPlantedPhoto,
@@ -156,10 +171,10 @@ describe("GameContext planted photo", () => {
     act(() => r.unmount());
   });
 
-  // EXP-278: the socket reconnects while the planted photo uploads, and the rejoin's room-of-game (without my planted
-  // photo) asks to plant it (e.g. the app was suspended for longer than the server keeps an unclaimed planted upload):
-  // that upload's answer may be a photo the server already deleted, so it is uploaded again and only the new one sent
-  it("reconnected while the photo uploads: uploads it again once done and sends only the new upload", async () => {
+  // EXP-278 / EXP-152: the socket reconnects while the planted photo uploads, and the rejoin's room-of-game (without
+  // my planted photo) asks to plant it (e.g. the app was suspended for longer than the server keeps an unclaimed
+  // planted upload): the server answers that it no longer has that upload, so it is uploaded once more and sent again
+  it("reconnected while the photo uploads, the server lost it: uploads it again once and sends the new upload", async () => {
     const r = mount();
     act(() => ctx.setPlantedPhotoUri("file:///picked.jpg"));
     const stale = holdNextUpload();
@@ -175,14 +190,141 @@ describe("GameContext planted photo", () => {
 
     const FRESH = "/temp/" + "f".repeat(32) + ".jpg";
     mockUpload.mockImplementationOnce(async () => FRESH);
+    mockPlantAck.mockImplementation((url) => (url === UPLOADED ? refuse("photo-unavailable") : { ok: true }));
     await act(async () => { stale.release(UPLOADED); });
     expect(await first).toBe(true);
     expect(await second).toBe(true); // both callers get the outcome
     expect(mockUpload).toHaveBeenCalledTimes(2);
-    expect(plantPhotoUrls()).toEqual([{ photoUrl: FRESH }]);
+    expect(plantPhotoUrls()).toEqual([{ photoUrl: UPLOADED }, { photoUrl: FRESH }]);
     expect(ctx.plantedPhotoSent).toBe(true);
     expect(ctx.plantUpload).toBe("idle");
     act(() => r.unmount());
+  });
+
+  it("reconnected while the photo uploads, the server still has it: no second upload", async () => {
+    const r = mount();
+    act(() => ctx.setPlantedPhotoUri("file:///picked.jpg"));
+    const upload = holdNextUpload();
+    let first!: Promise<boolean>;
+    act(() => { first = ctx.plantPhoto(); });
+    mockSocket.connected = false;
+    reconnect();
+    joinAnswered(false);
+    await act(async () => { upload.release(UPLOADED); });
+    expect(await first).toBe(true);
+    expect(mockUpload).toHaveBeenCalledTimes(1);
+    expect(plantPhotoUrls()).toEqual([{ photoUrl: UPLOADED }]);
+    act(() => r.unmount());
+  });
+
+  // EXP-152: plantedPhotoSent only on the server's ok
+  describe("plant-photo ack", () => {
+    it("lost again after its one re-upload: not sent, reported as failed", async () => {
+      const r = mount();
+      mockPlantAck.mockImplementation(() => refuse("photo-unavailable"));
+      act(() => ctx.setPlantedPhotoUri("file:///picked.jpg"));
+      await act(async () => { expect(await ctx.plantPhoto()).toBe(false); });
+      expect(mockUpload).toHaveBeenCalledTimes(2); // one re-upload, no more
+      expect(plantPhotoUrls()).toHaveLength(2);
+      expect(ctx.plantedPhotoSent).toBe(false);
+      expect(ctx.plantUpload).toBe("failed");
+      act(() => r.unmount());
+    });
+
+    it.each(["too-late", "invalid"] as const)("refused (%s): not sent, not uploaded again, failed", async (reason) => {
+      const r = mount();
+      mockPlantAck.mockImplementation(() => refuse(reason));
+      act(() => ctx.setPlantedPhotoUri("file:///picked.jpg"));
+      await act(async () => { expect(await ctx.plantPhoto()).toBe(false); });
+      expect(mockUpload).toHaveBeenCalledTimes(1);
+      expect(ctx.plantedPhotoSent).toBe(false);
+      expect(ctx.plantUpload).toBe("failed");
+      act(() => r.unmount());
+    });
+
+    it("not in the room (e.g. evicted): not sent, idle (a rejoin plants it again)", async () => {
+      const r = mount();
+      mockPlantAck.mockImplementation(() => refuse("not-in-room"));
+      act(() => ctx.setPlantedPhotoUri("file:///picked.jpg"));
+      await act(async () => { expect(await ctx.plantPhoto()).toBe(false); });
+      expect(mockUpload).toHaveBeenCalledTimes(1);
+      expect(ctx.plantedPhotoSent).toBe(false);
+      expect(ctx.plantUpload).toBe("idle");
+      act(() => r.unmount());
+    });
+
+    describe("without an answer", () => {
+      beforeEach(() => { jest.useFakeTimers(); });
+      afterEach(() => { jest.clearAllTimers(); jest.useRealTimers(); });
+
+      /** Plants the picked photo with the server not answering, until its ack times out; returns the late ack. */
+      const plantUntilAckTimeout = async () => {
+        mockPlantAck.mockImplementation(() => undefined);
+        let ok: boolean | null = null;
+        act(() => { ctx.plantPhoto().then((v) => { ok = v; }); });
+        await act(async () => { jest.advanceTimersByTime(0); });
+        expect(plantPhotoUrls()).toEqual([{ photoUrl: UPLOADED }]);
+        await act(async () => { jest.advanceTimersByTime(PLANT_ACK_TIMEOUT_MS - 1); });
+        expect(ok).toBeNull();
+        expect(ctx.plantUpload).toBe("uploading");
+        await act(async () => { jest.advanceTimersByTime(1); });
+        expect(ok).toBe(false);
+        expect(ctx.plantedPhotoSent).toBe(false);
+        expect(ctx.plantUpload).toBe("idle");
+        return mockSocket.emitted.find(([ev]) => ev === "plant-photo")![2] as (a: PlantPhotoAck) => void;
+      };
+
+      it("no ack within PLANT_ACK_TIMEOUT_MS: not sent; an ok that still comes later marks it planted", async () => {
+        const r = mount();
+        act(() => ctx.setPlantedPhotoUri("file:///picked.jpg"));
+        const lateAck = await plantUntilAckTimeout();
+        await act(async () => { lateAck({ ok: true }); });
+        expect(ctx.plantedPhotoSent).toBe(true);
+        expect(ctx.plantUpload).toBe("idle");
+        act(() => r.unmount());
+      });
+
+      it("a late ok for a photo replaced meanwhile, or a late refusal, changes nothing", async () => {
+        const r = mount();
+        act(() => ctx.setPlantedPhotoUri("file:///a.jpg"));
+        const lateForA = await plantUntilAckTimeout();
+        act(() => ctx.setPlantedPhotoUri("file:///b.jpg"));
+        await act(async () => { lateForA({ ok: true }); });
+        expect(ctx.plantedPhotoSent).toBe(false);
+
+        mockSocket.emitted = [];
+        const lateForB = await plantUntilAckTimeout();
+        await act(async () => { lateForB({ ok: false, reason: "too-late" }); });
+        expect(ctx.plantedPhotoSent).toBe(false);
+        expect(ctx.plantUpload).toBe("idle");
+        act(() => r.unmount());
+      });
+
+      // The issue's case: back from a long suspension the plant-photo is lost with the connection (or flushed on the
+      // new socket before the rejoin, where the server drops it). It must not count as sent, and must not keep the
+      // run busy until the timeout: the rejoin's room-of-game then plants it again on the rejoined socket.
+      it("the connection drops while waiting for the ack: not sent at once, the rejoin plants it again", async () => {
+        const r = mount();
+        mockPlantAck.mockImplementationOnce(() => undefined);
+        act(() => ctx.setPlantedPhotoUri("file:///picked.jpg"));
+        let ok: boolean | null = null;
+        act(() => { ctx.plantPhoto().then((v) => { ok = v; }); });
+        await act(async () => { jest.advanceTimersByTime(0); });
+        expect(plantPhotoUrls()).toHaveLength(1);
+        mockSocket.connected = false;
+        await act(async () => { mockSocket.fire("disconnect", "transport close"); });
+        expect(ok).toBe(false);
+        expect(ctx.plantedPhotoSent).toBe(false);
+
+        reconnect();
+        joinAnswered(false);
+        let replanted: boolean | null = null;
+        await act(async () => { replanted = await ctx.plantPhoto(); }); // the room-of-game handler
+        expect(replanted).toBe(true);
+        expect(ctx.plantedPhotoSent).toBe(true);
+        act(() => r.unmount());
+      });
+    });
   });
 
   // The normal path, no reconnection: the host starts before the lobby upload ends and the game screen asks again

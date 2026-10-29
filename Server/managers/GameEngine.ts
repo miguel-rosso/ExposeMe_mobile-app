@@ -739,6 +739,15 @@ export class GameEngine {
   }
 
   /**
+   * The photo awaited now is `player`'s planted photo (its mark is already cleared, see startRound). Not once that
+   * photo expired (noPhoto): the round will be skipped, so the planter may plant again for a later round.
+   */
+  isPlanterOfCurrentWait(room: Room, player: Player): boolean {
+    const wait = this.plantedWait(room);
+    return !!wait && !wait.noPhoto && wait.planter.username === player.username;
+  }
+
+  /**
    * Countdown sent to clients in a planted round's photo wait: what a normal 15 s wait would have left (frozen while
    * paused), never the hidden delay. Undefined outside a planted wait.
    */

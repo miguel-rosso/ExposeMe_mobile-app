@@ -70,14 +70,23 @@ After last round: game-over
   does the game screen retry it, **after** `im-ready` (accepted until round 1 is played; a photo planted after the
   planted rounds were drawn gets a free later round). `plant-photo` is never emitted offline (socket.io would flush
   it on the new socket before the rejoin, where it is dropped), nor on a reconnected socket until its rejoin's
-  successful `room-of-game` (until then the server drops it too): such a photo counts as not sent. If the socket
-  reconnects while the planted photo is uploading, the app uploads it again before sending it (that upload's answer
-  may come after the server deleted it as unclaimed, `UPLOAD_PLANT_CLAIM_MS`), accepting one extra upload per
-  reconnection. On a rejoin whose `room-of-game.hasPlantedPhoto` is
+  successful `room-of-game` (until then the server drops it too): such a photo counts as not sent.
+  `plant-photo` is **acknowledged**: `{ ok: true }` once it is the player's planted photo, else
+  `{ ok: false, reason }` with `"not-in-room"` (socket bound to no room), `"invalid"` (no `/upload` path),
+  `"too-late"` (round 1 already played, or the photo awaited now is the sender's own planted photo, unless it
+  expired and that round will be skipped; checked before the photo) or `"photo-unavailable"` (no upload of this player in this room: expired, deleted as unclaimed after
+  `UPLOAD_PLANT_CLAIM_MS`, or another player's, all the same answer so it never tells whether someone else's photo
+  exists). No ack when dropped by the rate limit. The app counts the photo as sent only on
+  `ok`; on `"photo-unavailable"` (e.g. the upload's answer came after the server deleted it, the app having been
+  suspended) it uploads it once more and sends that one. No ack within 5 s (`PLANT_ACK_TIMEOUT_MS`), or the
+  connection dropping while it waits, counts as not sent; an `ok` that still comes later on the same connection
+  marks it planted (if that photo is still picked and not being planted again). On a rejoin whose
+  `room-of-game.hasPlantedPhoto` is
   false while the room still accepts planted photos, the lobby and the game screen plant it again (the game screen
   only inside a started game: never after `game-over`, which also leaves no phase but clears the marks; once round 1's
-  wait has started, only a photo the app never sent: a sent one may be the one being played, whose mark is cleared
-  when its wait starts). Picking another photo replaces it. Whether a player planted
+  wait has started, only a photo the app has no `ok` for: an acked one may be the one being played, whose mark is
+  cleared when its wait starts; one accepted whose ack was lost is refused as `"too-late"` if it is the one awaited,
+  so it is never shown twice). Picking another photo replaces it. Whether a player planted
   one goes back only to that player (`room-of-game.hasPlantedPhoto`); there is no way to drop a planted photo.
 - **Planted rounds look like any other round** (nobody can tell one was planted, nor by whom): the server sends
   the same room-wide `waiting-photo { round, duration: 15 s }`, sends **no `your-turn`** (not even to the planter),
@@ -530,7 +539,7 @@ All game events are **atomic** — each contains everything the client needs.
 | `hold-end` | - | Photo owner released hold |
 | `chat-message` | `{ message }` (≤100 chars) | Broadcast as `{ username, message }` with the session username |
 | `emoji-reaction` | `{ emoji }`, exactly one of 😂 😍 ❓ 😳 🔥 😭 🤡 😡 (the app's picker) or 📸 (the app sends it when a screenshot is taken) | Broadcast as `{ username, emoji }` with the session username. Anything else is dropped; at most 5 per socket, refilled 4/s (excess dropped silently) |
-| `plant-photo` | `{ photoUrl }` | Applies to the session player (replaces their earlier one); `photoUrl` must be the player's own `/upload` path in this room; accepted until the first round is played |
+| `plant-photo` | `{ photoUrl }` (with an ack callback) | Applies to the session player (replaces their earlier one); `photoUrl` must be the player's own `/upload` path in this room; accepted until the first round is played. Acked `{ ok: true }` or `{ ok: false, reason: "not-in-room" \| "invalid" \| "too-late" \| "photo-unavailable" }` (see "Planting"); not acked when dropped by the rate limit |
 | `qa-ack` | `{ phase, round, at, handledAt? }` (`phase` one of the four round phases, `round` integer, `at` device clock in ms when the phase was painted, optional `handledAt` device clock in ms when the socket handler of the event that started it ran) | **Dev/QA only**, handled only when the server runs with `QA_TELEMETRY=1` (see "QA render telemetry"); otherwise not even registered |
 
 Payload `gameCode`/`username` fields are ignored for all of the above; identity comes from the session.

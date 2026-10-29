@@ -50,6 +50,7 @@
 //                           every bot gets waiting-photo before round-start, nobody gets your-turn for them
 //                           ("consistency"), and no payload says who planted or who is ready ("payload-leak"; only a
 //                           bot's own room-of-game has its own planted mark, and it must be true after planting).
+//                           plant-photo must be acked { ok: true } within PLANT_ACK_TIMEOUT_MS (EXP-152).
 //   node qa/lab/bots.mjs --bots 3 --host --plant 2
 //            --lobby-host-drop  once everyone joined, the host bot drops in the lobby and never comes back (EXP-157):
 //                           after the 15 s disconnect grace (not before) every other bot gets player-connection
@@ -355,6 +356,8 @@ const LEAVE_ROUND = plannedLeaveRound();
 const LEAVER = N_BOTS - 1; // the bot that leaves with --leave-round
 // Like the app (Client/app/utils/leaveRoom.ts): the leaver closes its socket once leave-room is acked, or after this
 const LEAVE_ACK_TIMEOUT_MS = 1_000;
+// Like the app (Client/app/utils/plantPhotoAck.ts): a planted photo counts as sent only once plant-photo is acked ok
+const PLANT_ACK_TIMEOUT_MS = 5_000;
 // A lobby kick waits this long after NAME joined, like a host reading the list (and so a device's flow sees its lobby)
 const LOBBY_KICK_DELAY_MS = 5_000;
 const KICK_SETTLE_MS = 1_000; // after a lobby kick that ends the run: time for the kicked player to get its notice
@@ -633,7 +636,14 @@ function runRoom(roomIdx, fixedCode) {
         try {
           const up = await uploadPhoto(`${name}-planted`, photoAuth(code, bot.token));
           uploads.push(up.ms);
-          socket.emit("plant-photo", { photoUrl: up.url });
+          const ack = await socket.timeout(PLANT_ACK_TIMEOUT_MS)
+            .emitWithAck("plant-photo", { photoUrl: up.url })
+            .catch(() => null);
+          if (!ack?.ok) {
+            // A connection dropped meanwhile (--chaos, --drop-*) loses the ack: not a server fault
+            if (ack || socket.connected) errors.push(`${name}: plant-photo not accepted (${ack ? ack.reason : "no ack"})`);
+            return;
+          }
           bot.plantedAt = now();
           rec("planted", 0);
           // Same-socket re-join (still in the lobby): its room-of-game must carry our own mark

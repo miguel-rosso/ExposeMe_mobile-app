@@ -1,20 +1,11 @@
-import React, { createContext, useContext, useState, useCallback, useMemo } from "react";
+import React, { useContext, useState, useCallback, useMemo } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import es from "./es";
 import en from "./en";
-
-type Lang = "es" | "en";
-// Every language must provide the same keys; values differ per language
-type Translations = { readonly [K in keyof typeof es]: string };
+import { I18nContext, type Lang, type Translations } from "./context";
 
 // `satisfies` also rejects keys that only one language defines
 const translations = { es, en } satisfies Record<Lang, Translations>;
-
-interface I18nContextType {
-  t: Translations;
-  lang: Lang;
-  setLang: (lang: Lang) => void;
-}
 
 // ── Initial language ──
 const STORAGE_KEY = "app-lang";
@@ -33,8 +24,6 @@ export const resolveInitialLang = (saved: string | null | undefined, deviceLocal
   if (saved === "en" || saved === "es") return saved;
   return deviceLocale?.toLowerCase().split(/[-_]/)[0] === "es" ? "es" : "en";
 };
-
-const I18nContext = createContext<I18nContextType | undefined>(undefined);
 
 export const I18nProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [lang, setLangState] = useState<Lang>("en");

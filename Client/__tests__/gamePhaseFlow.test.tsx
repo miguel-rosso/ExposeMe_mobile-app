@@ -55,6 +55,14 @@ beforeAll(() => {
 });
 afterAll(() => jest.restoreAllMocks());
 
+// The whole file runs on fake timers: the screen must never depend on a timer of its own (only the server moves the
+// phases), and no test leaves a real timer behind
+beforeEach(() => jest.useFakeTimers());
+afterEach(() => {
+  jest.clearAllTimers();
+  jest.useRealTimers();
+});
+
 const byId = (root: ReactTestInstance, id: string) => root.findAll((n) => n.props.testID === id && typeof n.type === "string");
 const has = (root: ReactTestInstance, id: string) => byId(root, id).length > 0;
 const bar = (root: ReactTestInstance) => {
@@ -74,15 +82,10 @@ const SCORES = [
 describe("GameScreen: server phases drawn with the received duration (EXP-063)", () => {
   let r: TestRenderer.ReactTestRenderer;
   beforeEach(async () => {
-    jest.useFakeTimers();
     mockSocket.emitted = [];
     await act(async () => { r = TestRenderer.create(<GameScreen />); });
   });
-  afterEach(() => {
-    act(() => r.unmount());
-    jest.clearAllTimers();
-    jest.useRealTimers();
-  });
+  afterEach(() => act(() => r.unmount()));
 
   it("says im-ready once on mount and waits on the ready screen until the first round", () => {
     expect(emitted("im-ready")).toHaveLength(1);

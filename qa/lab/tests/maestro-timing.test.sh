@@ -1,23 +1,26 @@
 #!/usr/bin/env bash
-# Step budget of the Maestro flows inside the server's timed phases (EXP-238, EXP-257, EXP-267). On a slow Android
-# emulator every step that reads the screen takes 1-4 s, while the options are up for 8 s (answering) + 3 s (reveal)
-# and the scoreboard for 5 s, so the steps between `# ── timed: <phase> ──` and `# ── end timed ──` must be few and
-# cheap: no settle waits, no conditional reads, no text search (a testID filtered by an env variable, like
-# `text: "${USERNAME}"`, is no UI string and is allowed). Static: no devices, servers or network.
+# Step budget of the Maestro flows inside the server's timed phases (EXP-238, EXP-257, EXP-267, EXP-312). On a slow
+# Android emulator every step that reads the screen takes 1-4 s, while the options are up for 8 s (answering) + 3 s
+# (reveal) and the scoreboard for 5 s, so the steps between `# ── timed: <phase> ──` and `# ── end timed ──` must be few
+# and cheap: no settle waits, no conditional reads (a `runFlow` whose `when` is only a `true:` script reads nothing),
+# no text search (a testID filtered by an env variable, like `text: "${USERNAME}"`, is no UI string and is allowed).
+# Then play-rounds.yaml's scoreboard deadline is checked against GameEngine.ts, and the flow is played on a fake game
+# with slow screen reads (maestro-sim.mjs, scenario `rounds`). No devices, servers or network.
 # Run: qa/lab/tests/maestro-timing.test.sh
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MAESTRO_DIR="${MAESTRO_DIR:-$HERE/../../maestro}"
+CLIENT_APP="$HERE/../../../Client/app"
 GAME_ENGINE="$HERE/../../../Server/managers/GameEngine.ts"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 pass=0 fail=0
 ok() { pass=$((pass + 1)); echo "ok   - $1"; }
 ko() { fail=$((fail + 1)); echo "FAIL - $1${2:+ ($2)}"; }
 
-# Steps that touch the device allowed per timed block (evalScript is free: it never reads the screen). Scores: the card
-# wait plus two checks of the scoreboard (EXP-141 no options under it, EXP-290 the card never shows my own name); on a
-# slow phone the last one may run once the scoreboard has closed (it then passes without checking anything)
+# Steps that touch the device allowed per timed block (evalScript, assertTrue and a script-only `when` are free: they
+# never read the screen). Scores: the card wait plus two checks of the scoreboard (EXP-141 no options under it, EXP-290
+# the card never shows my own name), each started only while the scoreboard can still be up (EXP-312)
 budget() { case $1 in answering) echo 3;; scores) echo 3;; *) echo "";; esac; }
 # Longest settle wait after a tap or swipe in a timed block: the progress bar never settles, so the default waits it out
 MAX_SETTLE_MS=500
@@ -25,8 +28,8 @@ MAX_SETTLE_MS=500
 SLOW_STEP_MS=4000
 
 # ── Checker ──
-# timed_blocks FLOW -> one line per timed block: "BLOCK <phase> <line> <steps> <first command> <its timeout or ->",
-# "ERR <line>: <message>" for each rule a step breaks and "WARN <line>: <message>" for optional steps
+# timed_blocks FLOW -> one line per timed block: "BLOCK <phase> <line> <steps> <first command or ->", "ERR <line>:
+# <message>" for each rule a step breaks and "WARN <line>: <message>" for optional steps
 timed_blocks() {
   awk -v max_settle="$MAX_SETTLE_MS" '
     function err_at(line, msg) { print "ERR " line ": " msg }
@@ -41,13 +44,13 @@ timed_blocks() {
     }
     function close_block() {
       close_step()
-      print "BLOCK " phase " " start " " steps " " (first == "" ? "-" : first) " " (first_timeout == "" ? "-" : first_timeout)
+      print "BLOCK " phase " " start " " steps " " (first == "" ? "-" : first)
       phase = ""
     }
     /^[ \t]*# ── timed: / {
       if (phase != "") err("timed block opened inside another (from line " start ")")
       phase = $0; sub(/.*timed: /, "", phase); sub(/ .*/, "", phase)
-      start = NR; steps = 0; first = ""; first_timeout = ""; cmd = ""; settle = ""
+      start = NR; steps = 0; first = ""; cmd = ""; settle = ""; when_indent = 0
       next
     }
     /^[ \t]*# ── end timed ──/ {
@@ -55,13 +58,22 @@ timed_blocks() {
       next
     }
     phase == "" || /^[ \t]*#/ { next }
+    when_indent && match($0, /[^ \t]/) <= when_indent { when_indent = 0 }
+    when_indent && /^[ \t]*(visible|notVisible|platform):/ {
+      err_at(when_line, "conditional step reading the screen inside a timed phase (a false condition costs up to 7 s; only `true:` scripts)")
+    }
     /^[ \t]*- [A-Za-z]+(:|$)/ {
       close_step()
       cmd = $0; sub(/^[ \t]*- /, "", cmd); sub(/:.*/, "", cmd); step_line = NR
-      if (cmd == "evalScript") { cmd = ""; next }
+      if (cmd == "evalScript" || cmd == "assertTrue") { cmd = ""; next } # JS only: no screen read
+      # A runFlow reads nothing itself (its `when` may only be a script) and its own steps are counted, unless it runs a file
+      if (cmd == "runFlow") {
+        if ($0 ~ /runFlow:[ \t]*[^ \t#]/) err("runFlow of a subflow file inside a timed phase (it hides its steps)")
+        cmd = ""; next
+      }
       steps++
       if (first == "") first = cmd
-      if (cmd ~ /^(waitForAnimationToEnd|scrollUntilVisible|repeat|runFlow|retry)$/)
+      if (cmd ~ /^(waitForAnimationToEnd|scrollUntilVisible|repeat|retry)$/)
         err(cmd " inside a timed phase (it waits for the screen to settle, polls or hides more steps)")
       if (cmd == "assertNotVisible")
         err("assertNotVisible inside a timed phase (it polls until the element goes away: use extendedWaitUntil notVisible with a short timeout)")
@@ -76,9 +88,8 @@ timed_blocks() {
       if (!(env_filter && id_line == NR - 1 && id_indent == match($0, /[^ \t]/)))
         err("text selector inside a timed phase (use a testID, filtered at most by an env variable)")
     }
-    /^[ \t]*when:/ { err("conditional step inside a timed phase (a false condition costs up to 7 s)") }
+    /^[ \t]*when:/ { when_line = NR; when_indent = match($0, /[^ \t]/) }
     /^[ \t]*waitToSettleTimeoutMs:/ { settle = $2 }
-    /^[ \t]*timeout:/ { if (steps == 1 && first_timeout == "") first_timeout = $2 }
     END { if (phase != "") { err("timed block from line " start " never closed"); close_block() } }
   ' "$1"
 }
@@ -138,14 +149,42 @@ cat >"$TMP/slow.yaml" <<'EOF'
       # ── end timed ──
 EOF
 timed_blocks "$TMP/slow.yaml" >"$TMP/slow.out"
-for rule in "ERR 4: tapOn without waitToSettleTimeoutMs" "ERR 6: tapOn without waitToSettleTimeoutMs" "ERR 6: inline text selector" "ERR 7: runFlow inside a timed phase" \
-  "ERR 8: conditional step" "ERR 14: text selector" "ERR 15: waitForAnimationToEnd inside" "ERR 17: assertNotVisible inside" \
-  "ERR 20: inline text selector" "ERR 23: inline text selector" "WARN 28: optional step"; do
+for rule in "ERR 4: tapOn without waitToSettleTimeoutMs" "ERR 6: tapOn without waitToSettleTimeoutMs" "ERR 6: inline text selector" \
+  "ERR 8: conditional step reading the screen" "ERR 14: text selector" "ERR 15: waitForAnimationToEnd inside" \
+  "ERR 17: assertNotVisible inside" "ERR 20: inline text selector" "ERR 23: inline text selector" "WARN 28: optional step"; do
   grep -q "^$rule" "$TMP/slow.out" && ok "checker flags: $rule" || ko "checker flags: $rule" "$(cat "$TMP/slow.out")"
 done
-[ "$(grep -c '^ERR' "$TMP/slow.out")" = 10 ] && ok "checker reports every broken rule once (10)" || ko "checker reports every broken rule once" "$(cat "$TMP/slow.out")"
-grep -q "^BLOCK answering [0-9]* 9 tapOn -$" "$TMP/slow.out" \
-  && ok "checker counts nested steps (9)" || ko "checker counts nested steps" "$(cat "$TMP/slow.out")"
+[ "$(grep -c '^ERR' "$TMP/slow.out")" = 9 ] && ok "checker reports every broken rule once (9)" || ko "checker reports every broken rule once" "$(cat "$TMP/slow.out")"
+grep -q "^BLOCK answering [0-9]* 8 tapOn$" "$TMP/slow.out" \
+  && ok "checker counts nested steps, not the runFlow around them (8)" || ko "checker counts nested steps" "$(cat "$TMP/slow.out")"
+# A runFlow whose only condition is a script reads nothing (EXP-312); a subflow file or a screen condition does
+cat >"$TMP/script-when.yaml" <<'EOF'
+# ── timed: scores ──
+- runFlow:
+    when:
+      true: ${Date.now() < output.deadline}
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: "score-answer-card"
+          timeout: 1000
+- runFlow: other.yaml
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - extendedWaitUntil:
+          notVisible:
+            id: "player-option-.*"
+          timeout: 1000
+# ── end timed ──
+EOF
+timed_blocks "$TMP/script-when.yaml" >"$TMP/script-when.out"
+! grep -qE "^ERR [2-9]:" "$TMP/script-when.out" && grep -q "^BLOCK scores 1 2 extendedWaitUntil$" "$TMP/script-when.out" \
+  && ok "checker allows a runFlow conditioned on a script only, counting its steps" \
+  || ko "checker allows a script-only runFlow" "$(cat "$TMP/script-when.out")"
+grep -q "^ERR 10: runFlow of a subflow file" "$TMP/script-when.out" && grep -q "^ERR 12: conditional step reading the screen" "$TMP/script-when.out" \
+  && ok "checker flags a subflow file and a platform condition" || ko "checker flags a subflow file and a platform condition" "$(cat "$TMP/script-when.out")"
 ( check_flow "$TMP/slow.yaml" ) >"$TMP/out" 2>&1 # subshell: its expected failures must not count
 grep -q "^warn - slow.yaml: 28: optional step" "$TMP/out" && ok "optional steps are a warning" || ko "optional steps are a warning" "$(cat "$TMP/out")"
 cat >"$TMP/settle.yaml" <<'EOF'
@@ -156,12 +195,13 @@ cat >"$TMP/settle.yaml" <<'EOF'
     direction: UP
     waitToSettleTimeoutMs: 3000
 - evalScript: ${output.n = 1}
+- assertTrue: ${output.n}
 # ── end timed ──
 # ── timed: reveal ──
 # ── end timed ──
 EOF
 timed_blocks "$TMP/settle.yaml" | grep -q "swipe settles for 3000 ms" && ok "checker flags a long settle wait" || ko "checker flags a long settle wait"
-timed_blocks "$TMP/settle.yaml" | grep -q "^BLOCK scores [0-9]* 1 swipe -$" && ok "evalScript is not counted" || ko "evalScript is not counted"
+timed_blocks "$TMP/settle.yaml" | grep -q "^BLOCK scores [0-9]* 1 swipe$" && ok "evalScript and assertTrue are not counted" || ko "evalScript and assertTrue are not counted"
 ( check_flow "$TMP/settle.yaml" ) >"$TMP/out" 2>&1 # subshell: its expected failures must not count
 grep -q "unknown timed phase 'reveal'" "$TMP/out" && ok "checker rejects a phase with no budget" || ko "checker rejects a phase with no budget" "$(cat "$TMP/out")"
 printf -- '# ── timed: answering ──\n- tapOn:\n    id: "x"\n    waitToSettleTimeoutMs: 500\n' >"$TMP/open.yaml"
@@ -202,21 +242,54 @@ blocks_of() { timed_blocks "$MAESTRO_DIR/$1" | grep -c "^BLOCK $2 "; } # FLOW, p
 [ "$(blocks_of many-players.yaml answering)" = 2 ] \
   && ok "many-players.yaml splits its checks over two answering phases" || ko "many-players.yaml has 2 answering blocks"
 
-# ── The score card wait fits the server's phases (EXP-267) ──
+# ── play-rounds.yaml's scoreboard bounds fit the server's phases (EXP-267, EXP-312) ──
+ROUNDS="$MAESTRO_DIR/play-rounds.yaml"
 answer="$(engine_ms ANSWER_TIME)" reveal="$(engine_ms REVEAL_TIME)" scores="$(engine_ms SCORE_DISPLAY_TIME)"
+# The flow's own copy: `- evalScript: "${output.timing = { answeringMs: 8000, ... }}"`
+flow_timing="$(sed -nE 's/^- evalScript: "\$\{output\.timing = \{ (.*) \}\}"$/\1/p' "$ROUNDS")"
+flow_ms() { tr ',' '\n' <<<"$flow_timing" | sed -nE "s/^ *$1: ([0-9]+) *$/\1/p"; } # KEY -> its value in the flow
+# flow_has LINE: exit 0 if the flow has that exact line (leading spaces aside)
+flow_has() { sed -E 's/^[[:space:]]*//' "$ROUNDS" | grep -qxF -- "$1"; }
 if [ -z "$answer" ] || [ -z "$reveal" ] || [ -z "$scores" ]; then
   ko "phase durations read from GameEngine.ts" "answer=$answer reveal=$reveal scores=$scores"
 else
-  read -r _ _ _ _ first card_wait < <(timed_blocks "$MAESTRO_DIR/play-rounds.yaml" | grep "^BLOCK scores ")
-  next_scoreboard=$((answer + reveal + scores + answer + reveal))
-  answering_steps_ms=$(($(budget answering) * SLOW_STEP_MS))
-  # Starts after the answering steps: long enough to reach this round's scoreboard even if they were instant, short
-  # enough to time out before the next round's one even if they were slow, so a scoreboard without the card fails
-  # instead of passing on a later round
-  [ "${first:-}" = extendedWaitUntil ] && [ "${card_wait:-0}" -gt $((answer + reveal)) ] \
-    && [ $((card_wait + answering_steps_ms)) -lt "$next_scoreboard" ] \
-    && ok "card wait ($card_wait ms) reaches this scoreboard ($((answer + reveal)) ms), not the next ($next_scoreboard ms - $answering_steps_ms ms of answering steps)" \
-    || ko "card wait between $((answer + reveal)) and $((next_scoreboard - answering_steps_ms)) ms" "first=${first:-} timeout=${card_wait:-}"
+  [ "$(flow_ms answeringMs)" = "$answer" ] && [ "$(flow_ms revealMs)" = "$reveal" ] && [ "$(flow_ms scoresMs)" = "$scores" ] \
+    && ok "play-rounds.yaml's phase lengths match GameEngine.ts ($answer/$reveal/$scores ms)" \
+    || ko "play-rounds.yaml's phase lengths match GameEngine.ts" "flow: $flow_timing"
+  # The scoreboard closes the three phases after the options showed: after the last look that found none
+  # (closesAfter), before the options were seen (closesBy). The card wait ends at closesBy: with the options seen at the
+  # latest one slow read after they showed, that comes before the next round's scoreboard, so a missing card fails on
+  # its own round instead of passing on a later one. readMs: how long the look that saw them took
+  # shellcheck disable=SC2016 # Maestro expressions, not shell ones
+  flow_has '- evalScript: ${output.timing.roundMs = output.timing.answeringMs + output.timing.revealMs + output.timing.scoresMs}' \
+    && flow_has '- evalScript: "${output.round = { closesAfter: output.options.hiddenFrom && output.options.hiddenFrom + output.timing.roundMs, closesBy: output.options.seenAt + output.timing.roundMs, readMs: output.options.seenAt - output.options.lookFrom }}"' \
+    && flow_has 'timeout: ${output.round.closesBy - Date.now()}' \
+    && [ $((answer + reveal + scores + SLOW_STEP_MS)) -lt $((answer + reveal + scores + answer + reveal)) ] \
+    && ok "the card wait ends when the scoreboard has surely closed, before the next one opens" \
+    || ko "closesAfter/closesBy from the options wait, card wait until closesBy"
+  # Every scoreboard step starts only before closesAfter, the card wait half a read before it (it fails if its first
+  # read sees the next round); lab.sh counts the passes of that guard (lab-play.test.sh keeps them in sync)
+  card_guard="true: $(sed -nE "s/^SCOREBOARD_GUARD='(.*)'$/\1/p" "$HERE/../lab.sh")"
+  # shellcheck disable=SC2016
+  check_guard='true: ${Date.now() < output.round.closesAfter}'
+  guards="$(awk -v card="$card_guard" -v check="$check_guard" '/# ── timed: scores ──/ { on = 1 } /# ── end timed ──/ { on = 0 }
+    { line = $0; sub(/^[ \t]*/, "", line) } on && (line == card || line == check) { n++ } END { print n + 0 }' "$ROUNDS")"
+  read -r _ _ _ score_steps _ < <(timed_blocks "$ROUNDS" | grep "^BLOCK scores ")
+  flow_has "$card_guard" && [ "$guards" = "${score_steps:-x}" ] \
+    && ok "each of the $score_steps scoreboard steps starts only before the scoreboard may close" \
+    || ko "every scoreboard step guarded by closesAfter" "guards=$guards steps=${score_steps:-}"
+fi
+
+# ── play-rounds.yaml on a fake game with slow screen reads (EXP-312) ──
+# Every guess lands while answering, no scoreboard check passes after its scoreboard closed, slower phones (fixed and
+# seeded random reads) never fail by mistake and lose few guesses, a missing card or the device's own name on it still
+# fails (maestro-sim.mjs: Maestro 2.11 semantics, phase lengths from GameEngine.ts)
+if out="$(node "$HERE/maestro-sim.mjs" rounds "$ROUNDS" "$CLIENT_APP" 2>&1)"; then
+  while IFS=$'\t' read -r name verdict detail; do
+    [ "$verdict" = ok ] && ok "play-rounds.yaml: $name" || ko "play-rounds.yaml: $name" "$detail"
+  done <<<"$out"
+else
+  ko "play-rounds.yaml: the simulator runs the flow" "$(tr '\n' ' ' <<<"$out")"
 fi
 
 echo "# $pass passed, $fail failed"

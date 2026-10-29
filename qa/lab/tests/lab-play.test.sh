@@ -4,7 +4,8 @@
 # --server/--port (EXP-220: bots and render telemetry on a worktree's own lab server), and the kicked-notice
 # invocation (EXP-139: --bot-args '--kick <device label>'), and the one retry of a device whose dev client got stuck
 # downloading the JS bundle (EXP-256) or whose dev-client-boot.yaml loaded check failed: its bundle wait ran out
-# (EXP-297) or it gave up at once on "There was a problem loading the project" (EXP-304).
+# (EXP-297) or it gave up at once on "There was a problem loading the project" (EXP-304); the scoreboards each device
+# checked in play-rounds.yaml and the Maestro version warning (EXP-312).
 # Run: qa/lab/tests/lab-play.test.sh
 set -uo pipefail
 
@@ -43,12 +44,23 @@ EOF
 # screen hierarchy of their failed steps like Maestro does: an optional step showing STUB_EARLIER_SCREEN, then the
 # last step (STUB_LAST_STEP, default 011) showing STUB_LAST_SCREEN (default: the dev client stuck on the bundle download).
 # With STUB_FAILED_CONDITION it also writes Maestro's commands.json: an assertTrue that passed (STUB_PASSED_CONDITION,
-# optional), then the failed one with that condition inside its failed parent runFlow
+# optional), then the failed one with that condition inside its failed parent runFlow. `--version` prints
+# STUB_MAESTRO_VERSION (default 2.11.0). A passing run with STUB_SCOREBOARD_PASSES ("SKIPPED COMPLETED ...") writes
+# the commands.json of play-rounds.yaml's round loop: one card-wait guard (STUB_SCOREBOARD_GUARD) per pass
 cat >"$TMP/bin/maestro" <<'EOF'
 #!/usr/bin/env bash
+[ "$1" = --version ] && { echo "${STUB_MAESTRO_VERSION:-2.11.0}"; exit 0; }
 echo "$*" >>"$STUB_LOG/maestro.args"
 out=""; while [ $# -gt 0 ]; do [ "$1" = --test-output-dir ] && out=$2; shift; done
-case " ${STUB_MAESTRO_FAIL:-} " in *" ${out##*/} "*) ;; *) exit 0;; esac
+pass_commands() { # the round loop's guards, one per pass
+  for status in $STUB_SCOREBOARD_PASSES; do
+    jq -n --arg c "$STUB_SCOREBOARD_GUARD" --arg s "$status" \
+      '{command: {runFlowCommand: {condition: {scriptCondition: $c}}}, metadata: {status: $s}}'
+  done | jq -s .
+}
+case " ${STUB_MAESTRO_FAIL:-} " in *" ${out##*/} "*) ;; *)
+  if [ -n "${STUB_SCOREBOARD_PASSES:-}" ]; then mkdir -p "$out/2026-10-29_164852/play-game"; pass_commands >"$out/2026-10-29_164852/play-game/commands.json"; fi
+  exit 0;; esac
 h="$out/2026-10-26_162536/play-game/screen-hierarchy"; mkdir -p "$h"
 printf '{"attributes" : {"text" : "%s"}}\n' "${STUB_EARLIER_SCREEN:-Join Game}" >"$h/step-009-tapOnElement-optional.json"
 printf '{"attributes" : {"text" : "%s"}}\n' "${STUB_LAST_SCREEN:-Downloading 55.0%…}" >"$h/step-${STUB_LAST_STEP:-011}-assertCondition.json"
@@ -292,6 +304,27 @@ first_open_wait_ms="$(grep -oE 'timeout: [0-9]+' "$MAESTRO_DIR/dev-client-boot.y
 for f in play-rounds many-players tie-game waiting-photo; do
   grep -q -- "- runFlow: wait-game-start.yaml" "$MAESTRO_DIR/$f.yaml" && ok "$f.yaml waits in the lobby with the budget" || ko "$f.yaml uses wait-game-start.yaml"
 done
+
+# ── play-rounds.yaml's checked scoreboards and the Maestro it was verified on (EXP-312) ──
+sed 's/^[[:space:]]*//' "$MAESTRO_DIR/play-rounds.yaml" | grep -qxF "true: $SCOREBOARD_GUARD" \
+  && ok "play-rounds.yaml's card wait has lab.sh's SCOREBOARD_GUARD" || ko "play-rounds.yaml card-wait guard in sync with lab.sh"
+export STUB_SCOREBOARD_GUARD="$SCOREBOARD_GUARD" STUB_SCOREBOARD_PASSES="SKIPPED COMPLETED SKIPPED COMPLETED COMPLETED"
+play r30 --bots 2 --devices android-a
+rc=$?
+[ $rc = 0 ] && grep -q "android-a: 3/4 scoreboards checked (play-rounds.yaml)" "$TMP/play.out" \
+  && ok "play prints each device's checked scoreboards (the loop's first pass has none)" \
+  || ko "play prints checked scoreboards" "rc=$rc $(cat "$TMP/play.out")"
+unset STUB_SCOREBOARD_PASSES
+play r31 --bots 2 --devices android-a
+! grep -q "scoreboards checked" "$TMP/play.out" && ok "a flow without the round loop prints no scoreboard count" \
+  || ko "no scoreboard count without play-rounds.yaml" "$(cat "$TMP/play.out")"
+! grep -q "is not 2.11.x" "$TMP/play.out" && ok "Maestro 2.11.0: no version warning" || ko "Maestro 2.11.0: no version warning" "$(cat "$TMP/play.out")"
+STUB_MAESTRO_VERSION=2.12.1 play r32 --bots 2 --devices android-a
+rc=$?
+[ $rc = 0 ] && grep -q "Maestro 2.12.1 is not 2.11.x" "$TMP/play.out" \
+  && ok "another Maestro version: play warns and goes on" || ko "Maestro version warning" "rc=$rc $(cat "$TMP/play.out")"
+STUB_MAESTRO_VERSION=2.12.1 play r33 --bots 2 --devices none
+! grep -q "is not 2.11.x" "$TMP/play.out" && ok "no devices: no Maestro version check" || ko "no devices: no version check" "$(cat "$TMP/play.out")"
 
 echo "# $pass passed, $fail failed"
 [ $fail = 0 ]

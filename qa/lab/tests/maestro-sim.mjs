@@ -1,8 +1,10 @@
-// Flow simulator for maestro-selectors.test.sh: runs a flow's own YAML and JS against a fake device with the Maestro
-// 2.11 semantics the boot flows rely on (`when` conditions, `repeat` times/while, `retry` maxRetries <= 3, lookups that
-// wait for the element, selector regex options). The YAML is read by structure, so reordering keys or steps doesn't
-// break it; anything it doesn't model (YAML, commands, selector keys, subflow files) fails with the flow's line.
-// Usage: node maestro-sim.mjs <boot|toggle> FLOW CLIENT_APP_DIR -> one "<name>\t<ok|FAIL>\t<detail>" line per scenario
+// Flow simulator for maestro-selectors.test.sh and maestro-timing.test.sh: runs a flow's own YAML and JS against a fake
+// device with the Maestro 2.11 semantics the boot and round flows rely on (`when` conditions, `repeat` times/while,
+// `retry` maxRetries <= 3, lookups that wait for the element, conditions that wait less after a command acted on the
+// device, selector regex options, `below`, env variables, screen reads that take time). The YAML is read by structure, so reordering keys or steps doesn't break it; anything it
+// doesn't model (YAML, commands, selector keys, subflow files) fails with the flow's line.
+// Usage: node maestro-sim.mjs <boot|toggle|rounds> FLOW CLIENT_APP_DIR -> one "<name>\t<ok|FAIL>\t<detail>" line per
+// scenario
 import fs from "node:fs";
 
 const [scenario, flowFile, clientApp] = process.argv.slice(2);
@@ -21,6 +23,7 @@ function readFlow(file) {
   const scalar = (line, v) => {
     if (v.startsWith('"')) return JSON.parse(v);
     if (v.startsWith("'")) return v.slice(1, -1).replace(/''/g, "'");
+    if (v === "[]") return []; // an empty list, e.g. `commands: []`
     // Maestro's parser rejects these in an unquoted value (`maestro check-syntax`: "Parsing Failed")
     return /: | #/.test(v) ? fail(line, `quote this value (": " or " #" in a plain scalar): ${v}`) : v;
   };
@@ -56,11 +59,14 @@ function readFlow(file) {
 }
 
 // ── Mini Maestro ──
-const OPTIONAL_LOOKUP_MS = 7000; // a `when: visible` that finds nothing gives up after this
+// A condition (`when`, `while`) waits for its element at most this long, minus the time since the last command that
+// may have acted on the device, an evalScript included (Maestro 2.11: Orchestra.adjustedToLatestInteraction, and
+// evalScriptCommand always reports a change): 7 s or more after it, a single read
+const OPTIONAL_LOOKUP_MS = 7000;
 const LOOKUP_MS = 17000; // tapOn / assertVisible wait this long for the element
 const STEP_MS = 1000; // any other device step
 const POLL_MS = 500;
-const SELECTOR_KEYS = ["id", "text"];
+const SELECTOR_KEYS = ["id", "text", "below"];
 class FlowFailure extends Error {} // the device didn't do what the flow expects: what `retry` retries
 
 // Maestro 2.11 compiles text and id selectors with IGNORE_CASE, DOT_MATCHES_ALL and MULTILINE and matches the whole
@@ -79,11 +85,14 @@ const checkKeys = (node, allowed, what) => {
   if (unknown.length) throw flowError(node, `${what}: ${unknown.join(", ")} not simulated (only ${allowed.join(", ")})`);
 };
 
-// skippableSubflows: `runFlow: <file>` steps another check covers; any other subflow file fails the run
-function runFlow(commands, device, { skippableSubflows = [] } = {}) {
+// skippableSubflows: `runFlow: <file>` steps another check covers; any other subflow file fails the run.
+// env: the flow's variables (`maestro test -e KEY=VALUE`)
+function runFlow(commands, device, { skippableSubflows = [], env = {} } = {}) {
   const output = {};
   const clock = { now: () => device.now };
-  const js = (expr) => new Function("output", "Date", `"use strict"; return (${expr});`)(output, clock);
+  let lastInteraction = -Infinity; // device.now when a command last acted on the device
+  const js = (expr) =>
+    new Function("output", "Date", ...Object.keys(env), `"use strict"; return (${expr});`)(output, clock, ...Object.values(env));
   const value = (v) => {
     if (typeof v !== "string") return v;
     const whole = v.match(/^\$\{([^$]*)\}$/);
@@ -92,12 +101,17 @@ function runFlow(commands, device, { skippableSubflows = [] } = {}) {
   const selector = (s, extraKeys = []) => {
     if (typeof s === "string") return { text: s };
     checkKeys(s, [...SELECTOR_KEYS, ...extraKeys], "selector");
-    return { id: value(s.id), text: value(s.text) };
+    return { id: value(s.id), text: value(s.text), below: s.below && selector(s.below) };
   };
-  const describe = (s) => JSON.stringify(selector(s, ["optional"]));
+  const TAP_KEYS = ["optional", "waitToSettleTimeoutMs"];
+  const describe = (s) => JSON.stringify(selector(s, TAP_KEYS));
+  // `below`: some element matching it is higher on screen (smaller y)
+  const found = (sel, shown) => shown.filter((e) => (!sel.id || matches(sel.id, e.id)) && (!sel.text || matches(sel.text, e.text))
+    && (!sel.below || found(sel.below, shown).some((anchor) => (anchor.y ?? 0) < (e.y ?? 0))));
+  // One screen read: what shows when it starts (it may take a while, see device.read)
   const isVisible = (s, extraKeys) => {
-    const { id, text } = selector(s, extraKeys);
-    return device.elements().some((e) => (!id || matches(id, e.id)) && (!text || matches(text, e.text)));
+    const sel = selector(s, extraKeys);
+    return found(sel, device.read(sel)).length > 0;
   };
   const waitFor = (check, timeoutMs) => {
     for (const end = device.now + timeoutMs; !check(); device.tick(POLL_MS)) if (device.now >= end) return false;
@@ -106,19 +120,23 @@ function runFlow(commands, device, { skippableSubflows = [] } = {}) {
   // Maestro's order: platform, script (`true`), visible, notVisible
   const condition = (c) => {
     checkKeys(c, ["platform", "true", "visible", "notVisible"], "condition");
+    const lookupMs = () => Math.max(0, OPTIONAL_LOOKUP_MS - (device.now - lastInteraction));
     return (!c.platform || c.platform.toLowerCase() === device.platform)
       && (!("true" in c) || Boolean(value(c.true)))
-      && (!c.visible || waitFor(() => isVisible(c.visible), OPTIONAL_LOOKUP_MS))
-      && (!c.notVisible || waitFor(() => !isVisible(c.notVisible), OPTIONAL_LOOKUP_MS));
+      && (!c.visible || waitFor(() => isVisible(c.visible), lookupMs()))
+      && (!c.notVisible || waitFor(() => !isVisible(c.notVisible), lookupMs()));
   };
   const step = () => device.tick(STEP_MS);
+  // A command that acts on the device: a step, then conditions wait the full optional lookup again
+  const interaction = (act = () => {}) => (arg) => { act(arg); step(); lastInteraction = device.now; };
   const commandsByName = {
-    launchApp: step, waitForAnimationToEnd: step, swipe: step,
+    waitForAnimationToEnd: step, takeScreenshot: step,
+    launchApp: interaction(), swipe: interaction(),
     // the device reacts to these only if it models them (see the fake devices)
-    openLink: (link) => { device.openLink?.(link); step(); },
-    stopApp: () => { device.stopApp?.(); step(); },
-    pressKey: (key) => { device.pressKey?.(key); step(); },
-    evalScript: (arg) => { value(arg); },
+    openLink: interaction((link) => device.openLink?.(link)),
+    stopApp: interaction(() => device.stopApp?.()),
+    pressKey: interaction((key) => device.pressKey?.(key)),
+    evalScript: (arg) => { value(arg); lastInteraction = device.now; },
     runFlow: (arg, command) => {
       if (typeof arg === "string") {
         if (skippableSubflows.includes(arg)) return;
@@ -129,17 +147,19 @@ function runFlow(commands, device, { skippableSubflows = [] } = {}) {
     },
     tapOn: (arg) => {
       const optional = arg.optional === "true";
-      if (!waitFor(() => isVisible(arg, ["optional"]), optional ? OPTIONAL_LOOKUP_MS : LOOKUP_MS)) {
+      if (!waitFor(() => isVisible(arg, TAP_KEYS), optional ? OPTIONAL_LOOKUP_MS : LOOKUP_MS)) {
         if (optional) return;
         throw new FlowFailure(`tapOn ${describe(arg)}: not found`);
       }
-      device.tap(selector(arg, ["optional"]));
-      step();
+      interaction(() => device.tap(selector(arg, TAP_KEYS)))();
     },
     assertVisible: (arg) => {
       if (!waitFor(() => isVisible(arg), LOOKUP_MS)) throw new FlowFailure(`assertVisible ${describe(arg)}`);
     },
-    assertTrue: (arg) => { if (!value(arg)) throw new FlowFailure(`assertTrue ${arg}`); },
+    assertTrue: (arg) => { // `assertTrue: ${...}` or { condition, label }
+      const { condition: cond, label } = typeof arg === "string" ? { condition: arg } : arg;
+      if (!value(cond)) throw new FlowFailure(`assertTrue ${label || cond}`);
+    },
     extendedWaitUntil: (arg) => {
       checkKeys(arg, ["visible", "notVisible", "timeout"], "extendedWaitUntil");
       const met = () => (!arg.visible || isVisible(arg.visible)) && (!arg.notVisible || !isVisible(arg.notVisible));
@@ -174,8 +194,11 @@ function runFlow(commands, device, { skippableSubflows = [] } = {}) {
 }
 
 // ── Fake devices ──
-const device = (platform, elements, tap) => {
+// readMs(device, selector): how long one screen read takes (a fast phone by default); it sees the screen as it starts
+const DEFAULT_READ_MS = 500;
+const device = (platform, elements, tap, readMs = () => DEFAULT_READ_MS) => {
   const d = { platform, now: 0, due: [], elements: () => elements(d), tap: (sel) => tap(d, sel) };
+  d.read = (sel) => { const shown = d.elements(); d.tick(readMs(d, sel)); return shown; };
   d.later = (ms, effect) => d.due.push({ at: d.now + ms, effect });
   d.tick = (ms) => {
     d.now += ms;
@@ -273,6 +296,69 @@ function onboarding(startLang, fate) {
   return { d, state };
 }
 
+// A game of `rounds` rounds as the server plays it (phase lengths from GameEngine.ts) on a device whose screen reads take
+// readMs(time) each. Records the phase each tap on an option lands in, and by round the screen reads of the scoreboard
+// checks: the card wait's that saw the scoreboard, and the card name's and options-under-it's, whose reads that saw no
+// scoreboard (`blindChecks`) pass without checking anything.
+// ownerRound: the device's photo (its card says so); ownNameRound: its card wrongly shows its own name (EXP-290).
+const PHOTO_WAIT_MS = 500; // the owner's upload (a bot's: well under a second)
+const PHOTO_LOADING_MS = 1000; // the round photo's loading spinner
+const engineMs = (name) => {
+  const engine = fs.readFileSync(`${clientApp}/../../Server/managers/GameEngine.ts`, "utf8");
+  const m = engine.match(new RegExp(`^const ${name} = ([0-9_]+);`, "m"));
+  if (!m) throw new Error(`GameEngine.ts: no ${name}`);
+  return Number(m[1].replace(/_/g, ""));
+};
+function game({ rounds, readMs, username, ownerRound = 0, ownNameRound = 0, cardlessRound = 0 }) {
+  const phases = [["photo", PHOTO_WAIT_MS], ["answering", engineMs("ANSWER_TIME")], ["reveal", engineMs("REVEAL_TIME")],
+    ["scores", engineMs("SCORE_DISPLAY_TIME")]];
+  const roundMs = phases.reduce((sum, [, ms]) => sum + ms, 0);
+  const state = { roundMs, phases: Object.fromEntries(phases), taps: [], checks: [], blindChecks: [], final: false };
+  const phaseAt = (t) => { // { round (from 1), phase, ms into it }
+    const round = Math.floor(t / roundMs) + 1;
+    if (round > rounds) return { round: rounds, phase: "over" };
+    let into = t % roundMs;
+    for (const [phase, ms] of phases) { if (into < ms) return { round, phase, into }; into -= ms; }
+  };
+  const options = [{ id: "answer-options", y: 2 }, { id: "player-option-bot1", y: 3 }, { id: "player-option-bot2", y: 3 }];
+  const cardName = (round) => {
+    if (round === ownNameRound) return username;
+    return round === ownerRound ? "It was your photo!" : "bot2";
+  };
+  const card = (round) => (round === cardlessRound ? [] : [
+    { id: "score-answer-card" }, { id: "score-answer-name", text: cardName(round) },
+  ]);
+  const screen = ({ round, phase, into }) => ({
+    photo: () => [{ id: "game-waiting-photo" }],
+    answering: () => [{ id: "round-progress", y: 1 }, { id: "photo-view" },
+      ...(into < PHOTO_LOADING_MS ? [{ id: "photo-loading" }] : []), ...options],
+    reveal: () => [{ id: "photo-view" }, ...options],
+    scores: () => [{ id: "score-modal" }, { id: "score-round-title", y: 1 }, ...card(round)],
+    over: () => (state.final ? [{ id: "final-score-modal" }] : [{ id: "winner-modal" }, { id: "winner-continue" }]),
+  })[phase]();
+  const scoreboardCheck = (sel) => {
+    if (/^score-answer-card\|/.test(sel.id || "")) return "card";
+    if (sel.id === "score-answer-name") return "card name";
+    return sel.below?.id === "score-round-title" ? "options under it" : null;
+  };
+  const d = device(
+    "android",
+    (dev) => screen(phaseAt(dev.now)),
+    (dev, sel) => {
+      if (matches(sel.id || "", "winner-continue")) state.final = true;
+      else if (/^player-option-/.test(sel.id || "")) state.taps.push(phaseAt(dev.now));
+    },
+    (dev, sel) => {
+      const at = phaseAt(dev.now);
+      const check = scoreboardCheck(sel);
+      if (check && at.phase === "scores") state.checks.push({ round: at.round, check });
+      else if (check && check !== "card") state.blindChecks.push({ round: at.round, check }); // the card wait polls
+      return readMs(dev.now, state);
+    },
+  );
+  return { d, state, env: { USERNAME: username } };
+}
+
 // ── Scenarios ──
 const report = (name, pass, detail) => console.log(`${name}\t${pass ? "ok" : "FAIL"}\t${detail}`);
 
@@ -325,9 +411,120 @@ function toggleScenarios(flow) {
   report(`a toggle that never responds fails the flow after ${state.taps} taps`, Boolean(failure) && state.taps <= 4, failure || "flow passed");
 }
 
+// Seeded uniform random numbers in [0, 1) (an LCG: the same games on every run)
+const seededRandom = (seed) => {
+  let x = seed >>> 0;
+  return () => { x = (Math.imul(x, 1664525) + 1013904223) >>> 0; return x / 2 ** 32; };
+};
+
+function roundsScenarios(flow) {
+  const ROUNDS = 6;
+  const USERNAME = "android-a";
+  const options = { skippableSubflows: ["wait-game-start.yaml"] };
+  const play = (readMs, gameOptions = {}) => {
+    const { d, state, env } = game({ rounds: ROUNDS, readMs, username: USERNAME, ownerRound: 2, ...gameOptions });
+    const result = runFlow(flow, d, { ...options, env });
+    return { state, now: d.now, ...result };
+  };
+  // Rounds 2 on: the first one starts from the lobby, where the device may well be late for the options
+  const LATER_ROUNDS = Array.from({ length: ROUNDS - 1 }, (_, i) => i + 2);
+  const missedGuesses = (state) => [1, ...LATER_ROUNDS]
+    .filter((round) => !state.taps.some((tap) => tap.round === round && tap.phase === "answering"));
+  // Screen reads on the Android emulator (it136, 12-player room): 0.6-3.5 s, ~1.5 s most of the time, and now and then
+  // a burst of slow ones (EXP-312, round 6 there: 3.3-3.6 s after its guess) that pushed the scoreboard checks into
+  // the next answering phase
+  const STEADY_READ_MS = 1500;
+  const SLOW_READ_MS = 4000;
+  const slowAfterGuess = (round) => (t, { roundMs, phases }) => { // from the round's reveal to its scoreboard's end
+    const revealStart = (round - 1) * roundMs + phases.photo + phases.answering;
+    return t >= revealStart && t < revealStart + phases.reveal + phases.scores ? SLOW_READ_MS : STEADY_READ_MS;
+  };
+  const RANDOM_GAMES = 40;
+  // Read ranges: it136's usual one, and every read it measured (0.6-3.5 s). The share of games in which a scoreboard
+  // without its card fails the flow: on a slower phone more scoreboards go by while it is still busy with the round
+  const RANDOM_PROFILES = [
+    { range: [600, 2000], minCardlessCaught: 0.9 },
+    { range: [600, 3500], minCardlessCaught: 0.6 },
+  ];
+  const CARDLESS_ROUND = 3;
+  // Most guesses must land: a slower phone loses some (the flow can't make a read faster), never by a false failure
+  const MAX_MISSED_RANDOM = 0.05;
+
+  // ── Every guess in time, the scoreboard checked while it is up ──
+  const cases = [
+    [`steady emulator (${STEADY_READ_MS / 1000} s per screen read)`, () => STEADY_READ_MS],
+    [`slow reads (${SLOW_READ_MS / 1000} s) through round 3's reveal and scoreboard (it136)`, slowAfterGuess(3)],
+  ];
+  for (const [name, readMs] of cases) {
+    const { state, failure } = play(readMs);
+    const missed = missedGuesses(state);
+    report(`${name}: the game ends on the results`, !failure && state.final, failure || "no final ranking");
+    report(`${name}: every round's guess lands while answering`, missed.length === 0,
+      `rounds without a guess in time: ${missed.join(", ")}; taps: ${JSON.stringify(state.taps)}`);
+    report(`${name}: no scoreboard check reads after its scoreboard closed`, state.blindChecks.length === 0,
+      `checks that saw no scoreboard: ${JSON.stringify(state.blindChecks)}`);
+  }
+  const steady = play(() => STEADY_READ_MS);
+  const uncheckedCards = LATER_ROUNDS.filter((round) => !steady.state.checks.some((c) => c.round === round && c.check === "card"));
+  report(`steady emulator: the card is checked on every scoreboard after the first`, uncheckedCards.length === 0,
+    `rounds whose card went unchecked: ${uncheckedCards.join(", ")}`);
+
+  // ── Slower phones: no false failure, few lost guesses, enough scoreboards checked ──
+  // The flow itself fails when fewer than half the scoreboards (the last aside) were checked, so a game that ends on the
+  // results met that floor
+  const cardsChecked = (state) => new Set(state.checks.filter((c) => c.check === "card").map((c) => c.round)).size;
+  for (const readMs of [2000, 2500]) {
+    const { state, failure } = play(() => readMs);
+    const missed = missedGuesses(state);
+    report(`${readMs / 1000} s per screen read: the game ends on the results (${cardsChecked(state)}/${ROUNDS} scoreboards `
+      + "checked), at most one guess lost", !failure && state.final && missed.length <= 1 && state.blindChecks.length === 0,
+    `${failure || ""} rounds without a guess in time: ${missed.join(", ")}; blind checks: ${state.blindChecks.length}`);
+  }
+  // Seeded random reads: the same games on every run. Each game is played again with a scoreboard missing its card,
+  // which must fail the flow in most games (a late scoreboard goes unchecked, but never most of them: the floor)
+  const randomReads = (seed, [fastest, slowest]) => {
+    const random = seededRandom(seed);
+    return () => Math.round(fastest + random() * (slowest - fastest));
+  };
+  for (const { range, minCardlessCaught } of RANDOM_PROFILES) {
+    let failures = 0, missed = 0, blind = 0, checked = 0, caught = 0;
+    for (let seed = 1; seed <= RANDOM_GAMES; seed++) {
+      const { state, failure } = play(randomReads(seed, range));
+      if (failure || !state.final) failures++;
+      missed += missedGuesses(state).filter((round) => round > 1).length;
+      blind += state.blindChecks.length;
+      checked += cardsChecked(state);
+      const cardless = play(randomReads(seed, range), { cardlessRound: CARDLESS_ROUND });
+      if (/score-answer-card/.test(cardless.failure || "")) caught++;
+    }
+    const laterRounds = RANDOM_GAMES * LATER_ROUNDS.length;
+    const name = `${RANDOM_GAMES} games with random ${range[0] / 1000}-${range[1] / 1000} s screen reads`;
+    report(`${name}: no failed flow, no blind check, at most ${MAX_MISSED_RANDOM * 100}% of the guesses after round 1 lost`,
+      failures === 0 && blind === 0 && missed <= MAX_MISSED_RANDOM * laterRounds,
+      `failed flows: ${failures}, blind checks: ${blind}, lost guesses: ${missed}/${laterRounds}`);
+    report(`${name}: a round without the card fails at least ${minCardlessCaught * 100}% of them `
+      + `(${caught}/${RANDOM_GAMES}; ${checked}/${RANDOM_GAMES * ROUNDS} scoreboards checked)`,
+    caught >= minCardlessCaught * RANDOM_GAMES, `caught ${caught}/${RANDOM_GAMES}`);
+  }
+
+  // ── A wrong scoreboard still fails ──
+  // EXP-290: the owner's card showing the device's own name fails the flow
+  const OWN_NAME_ROUND = 4;
+  const ownName = play(() => STEADY_READ_MS, { ownNameRound: OWN_NAME_ROUND });
+  report("a card showing the device's own name fails the flow", /score-answer-name/.test(ownName.failure || ""),
+    ownName.failure || "flow passed");
+  // EXP-267: a scoreboard without the card fails on that round, not passing on a later round's card
+  const cardless = play(() => STEADY_READ_MS, { cardlessRound: CARDLESS_ROUND });
+  const nextScoreboard = cardless.state.roundMs * CARDLESS_ROUND + cardless.state.phases.photo
+    + cardless.state.phases.answering + cardless.state.phases.reveal;
+  report(`a round without the card fails the flow before the next scoreboard`,
+    /score-answer-card/.test(cardless.failure || "") && cardless.now < nextScoreboard,
+    `${cardless.failure || "flow passed"} at ${cardless.now} ms (next scoreboard at ${nextScoreboard} ms)`);
+}
+
 try {
-  const scenarios = { boot: bootScenarios, toggle: toggleScenarios };
-  if (!scenarios[scenario]) throw new Error(`unknown scenario: ${scenario} (boot or toggle)`);
+  const scenarios = { boot: bootScenarios, toggle: toggleScenarios, rounds: roundsScenarios };
+  if (!scenarios[scenario]) throw new Error(`unknown scenario: ${scenario} (boot, toggle or rounds)`);
   scenarios[scenario](readFlow(flowFile));
 } catch (e) {
   console.error(e.message);

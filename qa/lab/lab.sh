@@ -22,12 +22,13 @@
 #                               --prebuild runs expo prebuild first (needed after app.json/package.json/config-plugin
 #                               changes: build warns when they changed since the lab's last prebuild)
 #   install                     Install the last built binaries on every lab device (non-zero if any install failed)
-#   open                        Open the app on every device, pointed at local Metro
+#   open                        Open the app on every device, pointed at local Metro (Android: cold start, like play)
 #   shot <label>                Screenshot every device into qa/runs/<RUN_ID>/shots/<label>-<device>.png
 #   play [--bots N] [--rounds R] [--devices all|pair|ios|android|none|<label,label>] [--flow play-game] [--bot-args "..."]
 #                               Full multiplayer session: bots host a room, devices join and play; prints the bots
-#                               summary and the device render skew per phase (qa/runs/<RUN_ID>/render-skew.json), and
-#                               keeps the game's raw telemetry rows (qa/runs/<RUN_ID>/telemetry.jsonl)
+#                               summary, the device render skew per phase (qa/runs/<RUN_ID>/render-skew.json) and how
+#                               many scoreboards each device checked (play-rounds.yaml), and keeps the game's raw
+#                               telemetry rows (qa/runs/<RUN_ID>/telemetry.jsonl); warns unless Maestro is 2.11.x
 #                               (--bot-args: extra bots.mjs flags, e.g. --flow tie-game --bot-args --no-answer);
 #                               a device whose flow failed while the dev client was still booting (stuck on its
 #                               "Downloading N%", or dev-client-boot.yaml's loaded check failed: launcher, ANR dialog,
@@ -53,7 +54,9 @@ MAESTRO="${MAESTRO:-$HOME/.maestro/bin/maestro}"
 APP_ID="com.socketNull.ExposeMe"
 METRO_PORT=8081
 SERVER_PORT=3000
-DEV_CLIENT_URL="exp+expose-me://expo-development-client/?url=http%3A%2F%2Flocalhost%3A${METRO_PORT}"
+# `open`'s link to local Metro, with the flags of dev-client-boot.yaml's openLink (keep in sync: lab-functions.test.sh):
+# no dev-menu onboarding sheet and no dev menu opening over the app at launch (EXP-282, EXP-313)
+DEV_CLIENT_URL="exp+expose-me://expo-development-client/?url=http%3A%2F%2Flocalhost%3A${METRO_PORT}&disableOnboarding=1&disableAutoLaunch=1&__expo_disable_auto_launch=1"
 IOS_MODELS=("iPhone 17" "iPhone 16e" "iPhone 17 Pro Max" "iPad mini (A17 Pro)")
 AVD_IMAGE="system-images;android-35;google_apis_playstore;arm64-v8a"
 AVD_NAMES=("exposeme_a" "exposeme_b" "exposeme_c")
@@ -143,7 +146,7 @@ cmd_doctor() {
   client_path >/dev/null || ok=0
   [ -x "$ADB" ] || { echo "MISSING adb ($ADB)"; ok=0; }
   [ -x "$EMULATOR" ] || { echo "MISSING emulator ($EMULATOR)"; ok=0; }
-  [ -x "$MAESTRO" ] || { echo "MISSING maestro (run: qa/lab/lab.sh setup)"; ok=0; }
+  if [ -x "$MAESTRO" ]; then maestro_version_check || true; else echo "MISSING maestro (run: qa/lab/lab.sh setup)"; ok=0; fi
   [ -d "$QA/node_modules/socket.io-client" ] || { echo "MISSING qa deps (run: qa/lab/lab.sh setup)"; ok=0; }
   "$EMULATOR" -list-avds | grep -q exposeme_a || { echo "MISSING AVDs (run: qa/lab/lab.sh setup)"; ok=0; }
   java -version >/dev/null 2>&1 || { echo "MISSING java 17 (maestro + gradle)"; ok=0; }
@@ -618,11 +621,16 @@ cmd_install() { # tries every device, then exits non-zero naming those whose ins
   [ ${#failed[@]} = 0 ] || die "install failed on: ${failed[*]}"
 }
 
+# Boots like dev-client-boot.yaml: on Android the link cold-starts the app (a running dev client can drop it, EXP-296,
+# and only a loaded link applies disableAutoLaunch), iOS handles it on a running app
 cmd_open() {
   devices | while read -r d; do
-    local id; id="$(jq -r .id <<<"$d")"
-    if [ "$(jq -r .platform <<<"$d")" = ios ]; then xcrun simctl openurl "$id" "$DEV_CLIENT_URL"
-    else adbs "$id" shell am start -a android.intent.action.VIEW -d "'$DEV_CLIENT_URL'" >/dev/null; fi
+    local id platform; id="$(jq -r .id <<<"$d")"; platform="$(jq -r .platform <<<"$d")"
+    if [ "$platform" = ios ]; then xcrun simctl openurl "$id" "$DEV_CLIENT_URL"
+    else
+      stop_app "$platform" "$id"
+      adbs "$id" shell am start -a android.intent.action.VIEW -d "'$DEV_CLIENT_URL'" >/dev/null
+    fi
   done
   log "app opened on all devices"
 }
@@ -794,6 +802,41 @@ run_device_flow() { # device json, flow file, output dir, maestro args...: the f
   run_maestro_flow "$id" "$flow" "$out" "$label-retry" "$@"
 }
 
+# ── play-rounds.yaml: the Maestro it was verified on, and how many scoreboards each device checked (EXP-312) ──
+# The flow times its looks by Maestro 2.11's rules (a condition waits less after a command acted on the device, and an
+# evalScript counts as one), read from its bytecode and modelled by qa/lab/tests/maestro-sim.mjs
+MAESTRO_VERIFIED_VERSION=2.11
+# The guard of play-rounds.yaml's card wait (keep in sync: lab-play.test.sh checks the flow has it): Maestro's
+# commands.json lists it once per pass of the round loop, SKIPPED when that pass checked no scoreboard, and the first
+# pass has none to check
+# shellcheck disable=SC2016 # a Maestro expression, not a shell one
+SCOREBOARD_GUARD='${Date.now() + output.round.readMs / 2 < output.round.closesAfter}'
+
+maestro_version_check() { # warns (exit 1) unless the Maestro CLI is the version play-rounds.yaml was verified on
+  local version; version="$("$MAESTRO" --version 2>/dev/null | tail -1)"
+  [[ $version == "$MAESTRO_VERIFIED_VERSION".* ]] && return 0
+  warn "Maestro ${version:-(unknown version)} is not $MAESTRO_VERIFIED_VERSION.x, the one play-rounds.yaml's timing was" \
+    "verified on (EXP-312): check its condition timeouts against qa/lab/tests/maestro-sim.mjs"
+  return 1
+}
+
+scoreboards_checked() { # maestro --test-output-dir: "<checked>/<shown>" scoreboards of its play-rounds.yaml run, or nothing
+  local f; f="$(find "$1" -name commands.json 2>/dev/null | head -1)"
+  [ -n "$f" ] || return 0
+  jq -r --arg guard "$SCOREBOARD_GUARD" '
+    [.[] | select(.command.runFlowCommand.condition.scriptCondition == $guard)] as $passes
+    | select($passes | length > 0)
+    | "\([$passes[] | select(.metadata.status == "COMPLETED")] | length)/\($passes | length - 1)"' "$f" 2>/dev/null
+}
+
+print_scoreboards_checked() { # maestro output dir: one line per device run that played rounds
+  local run checked
+  for run in "$1"/*/; do
+    checked="$(scoreboards_checked "$run")"
+    [ -z "$checked" ] || log "$(basename "$run"): $checked scoreboards checked (play-rounds.yaml)"
+  done
+}
+
 wait_room_code() { # dir, label: prints the room code the bots wrote to dir/code, or dies
   local dir=$1 label=$2 i
   for ((i = 0; i < ${LAB_ROOM_CODE_TIMEOUT:-$ROOM_CODE_TIMEOUT_S}; i++)); do [ -s "$dir/code" ] && break; sleep 1; done
@@ -846,6 +889,7 @@ cmd_play() {
   local bots_pid=$BOTS_PID
   local code; code="$(wait_room_code "$dir" "bots")" || exit 1
   log "room $code"
+  [ "$n_dev" = 0 ] || maestro_version_check || true
   local pids=()
   while read -r d; do
     [ -n "$d" ] || continue
@@ -862,6 +906,7 @@ cmd_play() {
   stop_play_bots
   node -e 'const r=require(process.argv[1]);console.log(JSON.stringify(r.summary,null,2))' "$dir/bots.json" 2>/dev/null || true
   print_render_skew "$dir" "$code" "$server_port"
+  print_scoreboards_checked "$dir/maestro"
   save_game_telemetry "$dir" "$code" "$server_port"
   [ $fail = 0 ] && log "RUN $RUN_ID PASS ($dir)" || { log "RUN $RUN_ID had failures ($dir)"; exit 1; }
 }

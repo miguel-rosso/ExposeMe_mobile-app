@@ -156,6 +156,21 @@ FAIL_ON=""; rm "$STATE/android-apk-path"; run_install
 [ $rc = 0 ] && grep -q "android-a: skipped, no Android build" <<<"$out" && ! grep -q "installed on android" <<<"$out" \
   && [ "$(grep -c "adb -s .* install " "$CMDS")" = 0 ] && ok "install: no Android build -> skipped, not reported installed" || ko "install: no Android build -> skipped" "rc=$rc $out"
 
+# ── cmd_open: boots the dev client like dev-client-boot.yaml (EXP-313) ──
+# Its link carries the same flags as the flow's openLink (no dev-menu onboarding sheet, no dev menu at launch), with
+# local Metro as the url, and Android cold-starts the app with it: a running dev client can drop the link (EXP-296)
+boot_link="$(sed -nE 's/^- openLink: "(.*)"$/\1/p' "$HERE/../../maestro/dev-client-boot.yaml")"
+[ -n "$boot_link" ] && [ "$DEV_CLIENT_URL" = "${boot_link//'${METRO_URL}'/http%3A%2F%2Flocalhost%3A$METRO_PORT}" ] \
+  && ok "open: same dev-client link as dev-client-boot.yaml, pointed at local Metro" \
+  || ko "open: same dev-client link as dev-client-boot.yaml" "lab.sh=$DEV_CLIENT_URL flow=$boot_link"
+: >"$CMDS"; out="$( (set -euo pipefail; cmd_open) 2>&1)"; rc=$?
+android_open_cmds="$(grep '^adb -s emulator-5556 ' "$CMDS")"
+[ $rc = 0 ] && [ "$android_open_cmds" = "$(printf '%s\n' "adb -s emulator-5556 shell am force-stop $APP_ID" \
+  "adb -s emulator-5556 shell am start -a android.intent.action.VIEW -d '$DEV_CLIENT_URL'")" ] \
+  && ok "open: Android stops the app, then the link cold-starts it" || ko "open: Android cold start via the link" "rc=$rc $(tr '\n' ';' <"$CMDS")"
+grep -qxF "xcrun simctl openurl SIM-A $DEV_CLIENT_URL" "$CMDS" && ! grep -q "terminate" "$CMDS" \
+  && ok "open: iOS opens the link (it handles it on a running app)" || ko "open: iOS opens the link" "$(tr '\n' ';' <"$CMDS")"
+
 # ── prebuild_stale / build --prebuild (EXP-255, EXP-086): app.json & co. only reach the binaries via expo prebuild ──
 ROOT="$TMP/prebuild-repo"; RUNS="$TMP/prebuild-runs"; STATE="$RUNS/.lab"; mkdir -p "$ROOT/Client" "$STATE"
 echo '{"expo":{"name":"ExposeMe"}}' >"$ROOT/Client/app.json"; echo '{"name":"client"}' >"$ROOT/Client/package.json"

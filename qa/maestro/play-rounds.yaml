@@ -1,28 +1,129 @@
 # Play until GAME OVER: each round tap a guess, screenshot it and check the scoreboard.
 # Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
 #
-# Timing (EXP-238, EXP-267): on a slow Android emulator every step that reads the screen takes 1-4 s, while the server
-# shows the options for 8 s (answering) + 3 s (reveal) and the scoreboard for 5 s. So each phase gets a few cheap
+# Timing (EXP-238, EXP-267, EXP-312): on a slow Android emulator every step that reads the screen takes 1-4 s, while the
+# server shows the options for 8 s (answering) + 3 s (reveal) and the scoreboard for 5 s. So each phase gets a few cheap
 # steps, the one that matters first: the guess as soon as the options show, the score card as soon as the
 # scoreboard opens. No settle waits (the progress bar never settles) and no `when: visible` before a timed check (a
-# false condition costs up to 7 s). The steps between `timed:` markers are budgeted by qa/lab/tests/maestro-timing.test.sh.
+# false condition costs up to 7 s). The steps between `timed:` markers are budgeted by qa/lab/tests/maestro-timing.test.sh,
+# and qa/lab/tests/maestro-sim.mjs (scenario `rounds`) plays the flow on a fake game with slow screen reads.
+# EXP-312: each pass of the loop checks the last round's scoreboard, then plays the next round up to its reveal, so the
+# loop's own screen read (is the game over?) falls between the guess and the scoreboard, not between the scoreboard and
+# the next guess. The wait for the options notes when a look last found none (`hiddenFrom`), so the round's scoreboard
+# is known to close after `closesAfter` (that look + the three phases) and before `closesBy` (the options seen + the
+# same). The scoreboard steps only start before `closesAfter`: a late one could see no scoreboard
+# (passing without checking anything, or failing the card wait on the next round) and would push the next guess past
+# its answering phase (it136). When the options were already up at the first look, the round has no `closesAfter` and
+# its scoreboard isn't checked: Maestro's commands.json shows those steps as SKIPPED.
+# The looks are conditions (`runFlow` with `when: visible/notVisible`): Maestro waits up to 7 s for one to come true,
+# minus the time since the last command that may have acted on the device (the tap, and any evalScript): 7 s after it,
+# a look is a single screen read (Orchestra.adjustedToLatestInteraction; evalScriptCommand always reports a change,
+# assertTrue doesn't). So their bookkeeping is in the loops' scripts and in assertTrue steps whose value is always
+# true. Verified in Maestro 2.11.0's bytecode: lab.sh play and doctor warn on any other Maestro version.
+# Skipping is never silent: lab.sh play prints how many scoreboards each device checked, and the flow fails if fewer
+# than half of them (the last aside: the winner modal follows it) were (`minCheckedShare`).
 appId: com.socketNull.ExposeMe
 ---
 - runFlow: wait-game-start.yaml
+# The server's phase lengths (Server/managers/GameEngine.ts: ANSWER_TIME, REVEAL_TIME, SCORE_DISPLAY_TIME, checked by
+# maestro-timing.test.sh); how long to wait for the next round's options (up to 3 photo waits of 15 s in a row, skips,
+# end the game); the share of scoreboards that must be checked
+- evalScript: "${output.timing = { answeringMs: 8000, revealMs: 3000, scoresMs: 5000, optionsWaitMs: 90000, minCheckedShare: 0.5 }}"
+- evalScript: ${output.timing.roundMs = output.timing.answeringMs + output.timing.revealMs + output.timing.scoresMs}
+# No round played yet: no scoreboard to check, no options of its own on screen. Scoreboards counted: those shown
+# (every pass after the first) and those whose card was checked
+- evalScript: "${output.round = { closesAfter: 0, closesBy: 0, optionsGoneBy: 0, readMs: 0 }}"
+- evalScript: "${output.scoreboards = { shown: 0, checked: 0 }}"
 - extendedWaitUntil:
     visible:
       id: "game-waiting-ready|game-waiting-photo|player-option-.*|score-modal"
     timeout: 180000
+- evalScript: "${output.options = { shown: false, seenAt: 0, hiddenFrom: 0, lookFrom: 0, goneLookFrom: 0, giveUpAt: Date.now() + output.timing.optionsWaitMs }}"
 - repeat:
     while:
       notVisible:
         id: "winner-modal|final-score-modal"
     commands:
-      # Next round's options, or the end of the game. Up to 3 photo waits of 15 s in a row (skips) end the game.
-      - extendedWaitUntil:
-          visible:
-            id: "player-option-.*|winner-modal|final-score-modal"
-          timeout: 90000
+      # EXP-252: the scoreboard opens with the card saying whose photo it was ("It was your photo!" on the owner's
+      # phone). Waited for directly, so it is checked in the same screen read that sees the scoreboard, until the
+      # scoreboard has surely closed, so a scoreboard without the card fails here instead of passing on a later one.
+      # It only starts while its first read would still see this scoreboard: before `closesAfter` by half the length of
+      # the look that saw the options (`readMs`; a read sees the screen somewhere along it, and the whole length makes
+      # slow phones skip most cards, see maestro-sim.mjs `rounds`). Only the last round's card goes unchecked if it is
+      # missing: the winner modal follows its scoreboard. Each card wait passed is counted (an assertTrue: always true,
+      # and no action on the device).
+      # ── timed: scores ──
+      - runFlow:
+          when:
+            true: ${Date.now() + output.round.readMs / 2 < output.round.closesAfter}
+          commands:
+            - extendedWaitUntil:
+                visible:
+                  id: "score-answer-card|winner-modal|final-score-modal"
+                timeout: ${output.round.closesBy - Date.now()}
+            - assertTrue: ${++output.scoreboards.checked}
+            # EXP-290: the card never shows this phone's own name: on the owner's phone it says "It was your photo!" /
+            # "¡Era tu foto!" instead (its other branch, PhotoOwnerCard.tsx). Filtered by the player name, not a UI
+            # string, so it works in any language; the short timeout fails while the card shows it.
+            - runFlow:
+                when:
+                  true: ${Date.now() < output.round.closesAfter}
+                commands:
+                  - extendedWaitUntil:
+                      notVisible:
+                        id: "score-answer-name"
+                        text: "${USERNAME}"
+                      timeout: 1000
+            # EXP-141: the scoreboard is drawn alone, with no answer options under it. `below` the scoreboard's title
+            # ties both to the same screen read, and the short timeout fails while both are drawn.
+            - runFlow:
+                when:
+                  true: ${Date.now() < output.round.closesAfter}
+                commands:
+                  - extendedWaitUntil:
+                      notVisible:
+                        id: "player-option-.*"
+                        below:
+                          id: "score-round-title"
+                      timeout: 1000
+      # ── end timed ──
+      # This round's options stay up through its reveal, so until a look finds them gone (or they surely are), options
+      # on screen are not the next round's. That look is the first known to come before the next round's options. It
+      # is noted by an assertTrue (always true: a timestamp), which unlike an evalScript doesn't count as acting on the
+      # device, so the looks for the next round's options stay single reads.
+      - repeat:
+          while:
+            true: ${!output.options.hiddenFrom && (output.options.goneLookFrom = Date.now()) < output.round.optionsGoneBy}
+          commands:
+            - runFlow:
+                when:
+                  notVisible:
+                    id: "player-option-.*"
+                commands:
+                  - assertTrue: ${output.options.hiddenFrom = output.options.goneLookFrom}
+      # Next round's options, or the end of the game. Before each look the script notes the previous one as the last
+      # that found none (the loop goes on only after those) and when this one starts.
+      - repeat:
+          while:
+            true: ${!output.options.shown && (output.options.hiddenFrom = Math.max(output.options.hiddenFrom, output.options.lookFrom), output.options.lookFrom = Date.now()) < output.options.giveUpAt}
+          commands:
+            - runFlow:
+                when:
+                  visible:
+                    id: "player-option-.*|winner-modal|final-score-modal"
+                commands:
+                  - evalScript: ${output.options.seenAt = Date.now()}
+                  - evalScript: ${output.options.shown = true}
+      - assertTrue:
+          condition: ${output.options.shown}
+          label: "Next round's options or the game over showed within 90 s"
+      # The last round's scoreboard has shown by now (if there was a round)
+      - evalScript: "${output.scoreboards.shown += output.round.closesBy ? 1 : 0}"
+      - evalScript: "${output.round = { closesAfter: output.options.hiddenFrom && output.options.hiddenFrom + output.timing.roundMs, closesBy: output.options.seenAt + output.timing.roundMs, readMs: output.options.seenAt - output.options.lookFrom }}"
+      # Options seen after this are the next round's
+      - evalScript: ${output.round.optionsGoneBy = output.round.closesBy - output.timing.scoresMs}
+      # The next wait for the options starts after this round's scoreboard, which closes by closesBy
+      - evalScript: "${output.options = { shown: false, seenAt: 0, hiddenFrom: 0, lookFrom: 0, goneLookFrom: 0, giveUpAt: output.round.closesBy + output.timing.optionsWaitMs }}"
       # ── timed: answering ──
       - tapOn:
           id: "player-option-bot1"
@@ -36,35 +137,11 @@ appId: com.socketNull.ExposeMe
             id: "photo-loading"
           timeout: 5000
       # ── end timed ──
-      # EXP-252: the scoreboard opens with the card saying whose photo it was ("It was your photo!" on the owner's
-      # phone). Waited for directly, so it is checked in the same screen read that sees the scoreboard. The timeout
-      # covers what is left of answering + reveal (8 + 3 s), and even after slow answering steps it ends before the
-      # next round's scoreboard could show up (answering + reveal + scores + answering + reveal = 27 s after this
-      # round's options at the earliest), so a scoreboard without the card fails here instead of passing on a later
-      # one. Only the last round's card goes unchecked if it is missing: the winner modal follows its scoreboard.
-      # ── timed: scores ──
-      - extendedWaitUntil:
-          visible:
-            id: "score-answer-card|winner-modal|final-score-modal"
-          timeout: 14000
-      # EXP-290: the card never shows this phone's own name: on the owner's phone it says "It was your photo!" /
-      # "¡Era tu foto!" instead (its other branch, PhotoOwnerCard.tsx). Filtered by the player name, not a UI string,
-      # so it works in any language; the short timeout fails while the card shows it, not once the scoreboard closed.
-      - extendedWaitUntil:
-          notVisible:
-            id: "score-answer-name"
-            text: "${USERNAME}"
-          timeout: 1000
-      # EXP-141: the scoreboard is drawn alone, with no answer options under it. `below` the scoreboard's title ties
-      # both to the same screen read, and the short timeout fails while both are drawn instead of waiting for the
-      # scoreboard to close (once it has closed, the next round's options can't match).
-      - extendedWaitUntil:
-          notVisible:
-            id: "player-option-.*"
-            below:
-              id: "score-round-title"
-          timeout: 1000
-      # ── end timed ──
+# Too few scoreboards checked (the device was late for most of them) fails rather than passing unchecked. lab.sh play
+# prints the count per device
+- assertTrue:
+    condition: ${output.scoreboards.checked >= Math.floor(output.timing.minCheckedShare * (output.scoreboards.shown - 1))}
+    label: "At least half the scoreboards (the last aside) had their card checked"
 - takeScreenshot: final-${USERNAME}
 # "Tap anywhere to continue" only renders once the winner animation is tappable
 - runFlow:

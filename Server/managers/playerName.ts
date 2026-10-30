@@ -13,7 +13,9 @@ import { displayOrder } from "./displayOrder";
  *   `visualKey` (too similar), and a room never holds two such players (nameKeys, nameClash).
  */
 
-export const MAX_USERNAME_LENGTH = 20;
+// Longest name in UTF-16 units: exactly what the app's name input takes (MAX_USERNAME_INPUT_LENGTH in
+// Client/app/utils/protocolLimits.ts; qa/lab/tests/protocol-constants.test.sh checks they are equal)
+export const MAX_USERNAME_LENGTH = 15;
 // NFKC can expand one character a lot (the Arabic ligature U+FDFA is 18 letters): bounds the work of the name keys
 const MAX_NORMALIZED_LENGTH = 60;
 
@@ -61,7 +63,7 @@ const withoutAllowedFormatChars = (text: string) => text
   .replace(SCRIPT_JOINER, "");
 
 /**
- * A name the server accepts: a string of 1–20 UTF-16 units (at most 60 after NFKC), not blank, with no invisible
+ * A name the server accepts: a string of 1–15 UTF-16 units (at most 60 after NFKC), not blank, with no invisible
  * characters or spaces other than U+0020, no combining mark at the start or on a trailing space, at most four
  * combining marks in a row, no mark on a kana with a voiced form but the voicing mark it takes (marksKanaOddly), no
  * mix of Latin-lookalike scripts (see mixesLookalikeScripts) and no Hangul block of jamo that don't make one syllable
@@ -248,6 +250,40 @@ const composeHangul = (text: string) => text.replace(HANGUL_RUN, (run) => run.no
 
 // Conjoining jamo: leading consonants, vowels and trailing consonants, with their extended blocks
 const CONJOINING_JAMO = /[\u1100-\u11FF\uA960-\uA97F\uD7B0-\uD7FF]/u;
+
+// Compatibility jamo (ㄱ, ㅏ) and their half-width forms (ﾡ, ￂ) are letters drawn on their own, one per cell, never
+// joined into a syllable block: "ㄱㅏ" shows two letters, "가" one (EXP-324). NFKC turns them into conjoining jamo and
+// composes those into syllables, so the keys keep them out of NFKC (keepingCompatibilityJamo) and read the conjoining
+// jamo still on their own after composing as compatibility letters (compatibilityLetters). So "ㄱㅏ" stays apart from
+// "가", as "ㅇㅣ" from "이", while half-width "ﾡￂ", lone conjoining "ᄀ ᅡ" (drawn as separate letters too) and "ㄱㅏ"
+// share their keys like before. NFKC sends each compatibility jamo to a different leading consonant, vowel or (when it
+// has no leading form, as ㄳ) trailing consonant, which gives the map back.
+const FIRST_COMPATIBILITY_JAMO = 0x3131;
+const LAST_COMPATIBILITY_JAMO = 0x318e;
+const COMPATIBILITY_JAMO = Array.from(
+  { length: LAST_COMPATIBILITY_JAMO - FIRST_COMPATIBILITY_JAMO + 1 },
+  (_, i) => String.fromCodePoint(FIRST_COMPATIBILITY_JAMO + i),
+);
+/** Each conjoining jamo that NFKC makes of a compatibility letter, with that letter (ᄀ: ㄱ, ᅡ: ㅏ, ᆪ: ㄳ). */
+const COMPATIBILITY_LETTER_OF: ReadonlyMap<string, string> = new Map(
+  COMPATIBILITY_JAMO.map((letter) => [letter.normalize("NFKC"), letter]),
+);
+// A compatibility or half-width jamo, captured so that splitting a text on it keeps it
+const LETTER_JAMO = /([\u3131-\u318E\uFFA0-\uFFDC])/u;
+const CONJOINING_JAMO_ALL = new RegExp(CONJOINING_JAMO.source, "gu");
+
+/** `jamo` as its compatibility letter (half-width ﾡ and conjoining ᄀ as ㄱ), if it has one; else as itself. */
+const compatibilityLetter = (jamo: string) => COMPATIBILITY_LETTER_OF.get(jamo.normalize("NFKC")) ?? jamo;
+
+/** NFKC of `text`, but with its compatibility and half-width jamo as compatibility letters, never composed. */
+const keepingCompatibilityJamo = (text: string) => text
+  .split(LETTER_JAMO)
+  .map((part, i) => (i % 2 === 1 ? compatibilityLetter(part) : part.normalize("NFKC")))
+  .join("");
+
+/** `text` with each conjoining jamo (that NFC left on its own) as its compatibility letter, if it has one. */
+const compatibilityLetters = (text: string) => text.replace(CONJOINING_JAMO_ALL, compatibilityLetter);
+
 const GRAPHEMES = new Intl.Segmenter("und", { granularity: "grapheme" });
 
 /** Whether a grapheme cluster of `text` holds conjoining jamo that NFC doesn't turn into a single character. */
@@ -279,15 +315,17 @@ const foldSymbols = (text: string) => replaceChars(text, SYMBOL_CONFUSABLES);
 const foldCase = (text: string) => text.toUpperCase().toLowerCase();
 
 /**
- * Hangul jamo composed into syllables, lookalikes read as ASCII (case kept: Greek small nu reads as "v" but capital nu
- * as "N"), then NFKC (full-width, styled letters), accents and other combining marks on a letter or symbol dropped (but
- * a voicing mark on a kana that takes it, or on a letter that `standIns` reads as one), the table again for what NFKC
- * and the marks uncovered, joiners dropped, whitespace trimmed and collapsed. The table runs before NFKC too because
- * NFKC can lose the look: long s reads as "f" but NFKC turns it into "s".
+ * Hangul conjoining jamo composed into syllables, lookalikes read as ASCII (case kept: Greek small nu reads as "v" but
+ * capital nu as "N"), then NFKC (full-width, styled letters) but for compatibility jamo, accents and other combining
+ * marks on a letter or symbol dropped (but a voicing mark on a kana that takes it, or on a letter that `standIns` reads
+ * as one), conjoining jamo still on their own read as compatibility letters, the table again for what NFKC and the
+ * marks uncovered, joiners dropped, whitespace trimmed and collapsed. The table runs before NFKC too because NFKC can
+ * lose the look: long s reads as "f" but NFKC turns it into "s".
  */
 function skeleton(name: string, standIns = NO_STAND_INS): string {
-  const decomposed = toAscii(separateVoicing(composeHangul(name), standIns)).normalize("NFKC").normalize("NFD");
-  const bare = withoutMarks(decomposed, standIns).normalize("NFC");
+  const lookalikesRead = toAscii(separateVoicing(composeHangul(name), standIns));
+  const decomposed = keepingCompatibilityJamo(lookalikesRead).normalize("NFD");
+  const bare = compatibilityLetters(withoutMarks(decomposed, standIns).normalize("NFC"));
   return toAscii(bare).replace(IGNORABLE_IN_KEY, "").replace(WHITESPACE_RUN, " ").trim();
 }
 

@@ -23,7 +23,7 @@ mirrors() { # client file, client const, server file, server const: same initial
   [[ -n "$theirs" && "$ours" == "$theirs" ]] && ok "$2 matches the server's $4" || ko "$2 matches the server's $4" "app=[$ours] server=[$theirs]"
 }
 
-# within LABEL APP_VALUE OP SERVER_VALUE: the app's own limit stays on the server's side of it (OP: -le or -ge)
+# within LABEL APP_VALUE OP SERVER_VALUE: the app's own limit stays on the server's side of it (OP: -le, -ge or -eq)
 within() {
   [[ "$2" =~ ^[0-9]+$ && "$4" =~ ^[0-9]+$ ]] && [ "$2" "$3" "$4" ] && ok "$1" || ko "$1" "app=[$2] server=[$4]"
 }
@@ -42,8 +42,9 @@ server_emojis="$(initializer "$SERVER_SRC/managers/socketGuards.ts" ALLOWED_EMOJ
   || ko "REACTION_EMOJIS + SCREENSHOT_EMOJI match the server's ALLOWED_EMOJIS" "app=[$app_emojis] server=[$server_emojis]"
 
 # ── The app's own limits, inside the server's ──
-within "MAX_USERNAME_INPUT_LENGTH is at most the server's MAX_USERNAME_LENGTH" \
-  "$(initializer "$CLIENT_SRC/$LIMITS" MAX_USERNAME_INPUT_LENGTH)" -le "$(initializer "$SERVER_SRC/managers/playerName.ts" MAX_USERNAME_LENGTH)"
+# The name input takes exactly the names the server accepts: no name the server refuses, none it accepts cut (DEC-043)
+within "MAX_USERNAME_INPUT_LENGTH equals the server's MAX_USERNAME_LENGTH" \
+  "$(initializer "$CLIENT_SRC/$LIMITS" MAX_USERNAME_INPUT_LENGTH)" -eq "$(initializer "$SERVER_SRC/managers/playerName.ts" MAX_USERNAME_LENGTH)"
 chat_limit="$(initializer "$SERVER_SRC/managers/socketGuards.ts" CHAT_MESSAGE_LIMIT)"   # { max: N, windowMs: W } as const
 chat_max="$(sed -n 's/.*max: *\([0-9]*\).*/\1/p' <<<"$chat_limit")"
 chat_window="$(sed -n 's/.*windowMs: *\([0-9]*\).*/\1/p' <<<"$chat_limit")"

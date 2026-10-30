@@ -23,7 +23,7 @@ describe("isValidUsername", () => {
     ["rainbow flag (VS + ZWJ)", "ana \u{1F3F3}\uFE0F\u200D\u{1F308}"],
     ["emoji presentation selector (red heart)", "\u2764\uFE0F ana"],
     ["keycap one", "1\uFE0F\u20E3 uno"],
-    ["subdivision flag (England)", "ana \u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}"],
+    ["subdivision flag (England), 15 UTF-16 units", "a\u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}"],
     ["two combining marks", "a\u0301\u0323na"],
     ["Tibetan with three stacked marks (Drolma)", "\u0F66\u0F92\u0FB2\u0F7C\u0F63\u0F0B\u0F58"],
     ["pointed Hebrew with three marks", "\u05E9\u05B8\u05BC\u05C1"],
@@ -33,7 +33,8 @@ describe("isValidUsername", () => {
     ["Devanagari half form with a zero-width joiner", "\u0915\u094D\u200D\u0937"],
     ["mark on a space between symbols", "( \u0361\u00B0)"],
     ["Arabic with tatweel", "\u0639\u0640\u0644\u064A"],
-    ["20 characters", "a".repeat(20)],
+    // The app's name input takes 15 characters, and the server as many (DEC-043)
+    ["15 characters", "a".repeat(15)],
     // Emoji, symbols, punctuation and ASCII art, with no letter at all or with letters of one script (DEC-033)
     ["emoji only", "\u{1F600}"],
     ["repeated emoji", "\u{1F525}\u{1F525}"],
@@ -126,7 +127,7 @@ describe("isValidUsername", () => {
     ["blank braille between symbols", "<3\u2800<3"],
     ["empty", ""],
     ["blank", "   "],
-    ["too long", "a".repeat(21)],
+    ["too long (16 characters)", "a".repeat(16)],
   ])("refuses %s", (_label, name) => {
     expect(isValidUsername(name)).toBe(false);
   });

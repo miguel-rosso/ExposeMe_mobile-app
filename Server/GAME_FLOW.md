@@ -195,7 +195,7 @@ After last round: game-over
   bounds the sessions a browser can open without ever joining (e.g. with `<img>` tags, which send no `Origin`).
 - `join-create-game { gameCode, username, rejoinToken? }`: `gameCode: null` creates a room (sender is host).
   `username` (`managers/playerName.ts`) is free-form: any script, emoji, symbols, punctuation or ASCII art, also with
-  no letter at all (`¯\_(ツ)_/¯`, `(•_•)`, `<3 <3`, `🔥🔥`). It must be a string of 1–20 chars (UTF-16 units) and at
+  no letter at all (`¯\_(ツ)_/¯`, `(•_•)`, `<3 <3`, `🔥🔥`). It must be a string of 1–15 chars (UTF-16 units, as many as the app's name input takes) and at
   most 60 after NFKC (one Arabic ligature such as U+FDFA expands to 18 letters), not blank, with no combining mark at
   the start (after any leading spaces) or on a trailing space, at most four combining marks in a row (Tibetan and
   pointed Hebrew stack three; more is "Zalgo" text), no mark on a kana with a voiced form (`た`, `は`, `ウ`; or on a
@@ -259,7 +259,9 @@ After last round: game-over
     while `だ` typed precomposed, as `た` + combining dakuten or as `た` + spacing `゛` is the same name (a spacing
     `゛` or `゜` after a kana that takes it voices it, like half-width `ﾞ`; anywhere else it stays a separate mark).
     A Korean name typed as conjoining jamo (`이민지` as `ᄋ` `ᅵ` `ᄆ` `ᅵ` `ᆫ` `ᄌ` `ᅵ`) is the same name as the
-    precomposed one.
+    precomposed one. Compatibility jamo (U+3131–318E) and their half-width forms, which fonts draw as separate letters,
+    are kept out of NFKC (which would compose `ㄱㅏ` into `가`), and conjoining jamo left on their own after composing
+    read as their compatibility letter: `ㄱㅏ`, half-width `ﾡￂ` and lone `ᄀ ᅡ` are one name, different from `가`.
   - Only the same `visualKey` = a **different name that looks too alike**: `AIice` next to `Alice`, `b0b` next to
     `bob`, real names such as `Clara` next to `Dara` or `Arnie` next to `Amie`, and symbol lookalikes such as
     `(∙_∙)` next to `(•_•)`, `ǃǃ` next to `!!`, `ˉ\_(ツ)_/ˉ` next to `¯\_(ツ)_/¯`, `(˚_˚)` or `(º_º)` next to `(°_°)`,

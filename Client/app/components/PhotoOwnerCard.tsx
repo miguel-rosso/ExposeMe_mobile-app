@@ -11,7 +11,7 @@ const ENTRANCE_DURATION_MS = 700;
 const ENTRANCE_EASING = Easing.bezier(0.25, 0.1, 0.25, 1);
 const ENTRANCE_OPACITY = { inputRange: [0, 0.6, 1], outputRange: [0, 1, 1] };
 const ENTRANCE_SCALE = { inputRange: [0, 0.2, 0.4, 0.6, 0.8, 1], outputRange: [0.3, 1.1, 0.9, 1.03, 0.97, 1] };
-// A long name (up to 20 characters) shrinks down to this scale to stay on one line on small phones
+// A long name (up to 15 characters) shrinks down to this scale to stay on one line on small phones
 const MIN_NAME_SCALE = 0.5;
 
 /**

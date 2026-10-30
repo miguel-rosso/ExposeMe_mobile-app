@@ -8,8 +8,9 @@ export const ROUND_OPTIONS = [10, 15, 20];
 export const MAX_CHAT_LENGTH = 100;
 
 /**
- * Longest name the home screen's input takes. The app's own limit: at most the server's MAX_USERNAME_LENGTH
- * (Server/managers/playerName.ts), which refuses longer names.
+ * Longest name the home screen's input takes: equal to the server's MAX_USERNAME_LENGTH
+ * (Server/managers/playerName.ts), which refuses longer names, so the input never cuts a name the server accepts
+ * (DEC-043).
  */
 export const MAX_USERNAME_INPUT_LENGTH = 15;
 

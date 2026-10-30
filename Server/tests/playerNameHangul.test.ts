@@ -88,3 +88,60 @@ describe("Hangul conjoining jamo", () => {
     expect(looksLike(`(${JAMO_EU}_${JAMO_EU})`, "(ー_ー)")).toBe(true);
   });
 });
+
+// EXP-324: compatibility jamo (ㄱ, ㅏ) and their half-width forms (ﾡ, ￂ) are drawn as separate letters, one per cell,
+// never in one block, so they don't spell the syllable NFKC would compose them into ("ㄱㅏ" is not "가"). Among
+// themselves they compare as the same letters, and a lone conjoining jamo, also drawn on its own, reads as its
+// compatibility letter, as before.
+
+const FIRST_COMPATIBILITY_JAMO = 0x3131;
+const LAST_COMPATIBILITY_JAMO = 0x318e;
+/** Each conjoining jamo with the compatibility letter NFKC turns into it (ᄀ: ㄱ). */
+const COMPATIBILITY_LETTER_OF = new Map(
+  Array.from({ length: LAST_COMPATIBILITY_JAMO - FIRST_COMPATIBILITY_JAMO + 1 }, (_, i) => {
+    const letter = String.fromCodePoint(FIRST_COMPATIBILITY_JAMO + i);
+    return [letter.normalize("NFKC"), letter];
+  }),
+);
+/**
+ * `text` with each Hangul syllable written as compatibility letters (가 as ㄱㅏ; a final consonant with no compatibility
+ * letter of its own stays a conjoining jamo).
+ */
+const asCompatibilityLetters = (text: string) =>
+  Array.from(text.normalize("NFD"), (jamo) => COMPATIBILITY_LETTER_OF.get(jamo) ?? jamo).join("");
+
+describe("Hangul compatibility jamo", () => {
+  it.each([
+    ["\u3131\u314F", "가"],
+    ["\u3134\u314F", "나"],
+    ["\u3147\u3163", "이"],
+    ["\uFFA1\uFFC2", "가"],
+    ["\uFFB7\uFFDC", "이"],
+    ["가\u3131", "각"],
+    ["\u3131가", "까"],
+    ["\u3131\u314F민지", "가민지"],
+  ])("%s is a different name from %s", (letters, syllables) => {
+    expect(isValidUsername(letters)).toBe(true);
+    expect(looksLike(letters, syllables)).toBe(false);
+  });
+
+  it("no syllable reads like its compatibility letters", () => {
+    expect(SYLLABLES.filter((syllable) => looksLike(syllable, asCompatibilityLetters(syllable)))).toEqual([]);
+  });
+
+  it.each([
+    ["half-width", "\uFFA1\uFFC2", "\u3131\u314F"],
+    ["half-width and compatibility mixed", "\uFFA1\u314F", "\u3131\u314F"],
+    ["compatibility consonant and lone conjoining vowel", "\u3131\u1161", "\u3131\u314F"],
+    ["lone conjoining jamo", "\u1100 \u1161", "\u3131 \u314F"],
+    ["lone conjoining consonant", "Kim \u1100", "Kim \u3131"],
+  ])("the %s spelling %s is the same name as %s", (_label, spelling, letters) => {
+    expect(isValidUsername(spelling)).toBe(true);
+    expect(sameName(spelling, letters)).toBe(true);
+  });
+
+  it("conjoining jamo that spell a syllable are still that syllable, not its letters", () => {
+    expect(sameName(asJamo("가"), "가")).toBe(true);
+    expect(looksLike(asJamo("가"), "\u3131\u314F")).toBe(false);
+  });
+});

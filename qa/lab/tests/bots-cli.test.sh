@@ -134,7 +134,7 @@ run 2 "--kick without --host exits 2" --bots 2 --code K7MQ4X --kick bot2 --timeo
 run 2 "--kick of the host itself exits 2" --bots 3 --host --kick bot1 --timeout 1
 [[ "$err" == *"the host can't remove itself"* ]] && ok "--kick of the host is named" || ko "--kick of the host is named" "$err"
 run 2 "--kick with several rooms exits 2" --bots 3 --host --rooms 2 --kick bot2 --timeout 1
-run 2 "--kick of a name longer than the server's 20 exits 2" --bots 3 --host --kick abcdefghijklmnopqrstu --timeout 1
+run 2 "--kick of a name longer than the server's 15 exits 2" --bots 3 --host --kick abcdefghijklmnop --timeout 1
 run 2 "--kick of an empty name exits 2" --bots 3 --host --kick "" --timeout 1
 # Lobby only (EXP-316): the server ignores remove-player once a game started, so the old NAME@R form is refused
 run 2 "--kick NAME@R (mid-game) exits 2" --bots 3 --host --rounds 3 --kick bot3@2 --timeout 1
@@ -179,15 +179,15 @@ for bad in "a b" "bot!" "é-" ""; do
   run 2 "--name-prefix '$bad' exits 2" --bots 2 --code K7MQ4X --name-prefix "$bad" --timeout 1
 done
 [[ "$err" == *"--name-prefix"* ]] && ok "bad --name-prefix is named" || ko "bad --name-prefix is named" "$err"
-run 2 "--name-prefix that makes a name longer than the server's 20 exits 2" --bots 12 --code K7MQ4X --name-prefix abcdefghijklmnop --timeout 1
-[[ "$err" == *'"abcdefghijklmnopbot12" exceeds the server'* ]] && ok "too long --name-prefix names the longest bot" || ko "too long --name-prefix named" "$err"
-# 13 + "r10-" + "bot2" = 21 characters
-run 2 "--name-prefix length counts the room prefix of --rooms" --bots 2 --host --rooms 11 --name-prefix abcdefghijklm --timeout 1
-# The longest accepted: 15 + "bot12" and 12 + "r10-" + "bot2" = 20 characters
-for good in "--bots 12 --code K7MQ4X --name-prefix abcdefghijklmno" "--bots 2 --host --rooms 11 --name-prefix abcdefghijkl"; do
+run 2 "--name-prefix that makes a name longer than the server's 15 exits 2" --bots 12 --code K7MQ4X --name-prefix abcdefghijk --timeout 1
+[[ "$err" == *'"abcdefghijkbot12" exceeds the server'* ]] && ok "too long --name-prefix names the longest bot" || ko "too long --name-prefix named" "$err"
+# 8 + "r10-" + "bot2" = 16 characters
+run 2 "--name-prefix length counts the room prefix of --rooms" --bots 2 --host --rooms 11 --name-prefix abcdefgh --timeout 1
+# The longest accepted: 10 + "bot12" and 7 + "r10-" + "bot2" = 15 characters
+for good in "--bots 12 --code K7MQ4X --name-prefix abcdefghij" "--bots 2 --host --rooms 11 --name-prefix abcdefg"; do
   # shellcheck disable=SC2086
   SERVER_URL="$URL" node "$BOTS" $good --timeout 1 >/dev/null 2>"$TMP/err"; rc=$?
-  [[ "$rc" != 2 ]] && ok "20-character names are accepted ($good)" || ko "20-character names accepted ($good)" "$(cat "$TMP/err")"
+  [[ "$rc" != 2 ]] && ok "15-character names are accepted ($good)" || ko "15-character names accepted ($good)" "$(cat "$TMP/err")"
 done
 SERVER_URL="$URL" node "$BOTS" --bots 2 --code K7MQ4X --name-prefix b_2- --timeout 1 >/dev/null 2>"$TMP/err"; rc=$?
 [[ "$rc" != 2 ]] && ok "--name-prefix b_2- is accepted" || ko "--name-prefix b_2- is accepted" "$(cat "$TMP/err")"

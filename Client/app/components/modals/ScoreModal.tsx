@@ -125,7 +125,7 @@ const ScoreModal: React.FC<ScoreModalProps> = ({
                   <Text testID={scoreRankId(player.username)} style={tw`text-lg text-white font-bold`}>{player.rank}</Text>
                 </View>
                 <View style={tw`flex-row px-2 pr-4 items-center flex-1 justify-between`}>
-                  {/* Shrinks before the points do: long names (up to 20 characters) stay on one line in the fixed-height row */}
+                  {/* Shrinks before the points do: long names (up to 15 characters) stay on one line in the fixed-height row */}
                   <View style={tw`flex-shrink mr-2`}>
                     <Text style={tw`text-lg font-bold`} numberOfLines={1} ellipsizeMode="tail">{player.username}</Text>
                     <View style={tw`flex-row items-center`}>

@@ -2,6 +2,7 @@ import { AddressInfo } from "net";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { io as connect, Socket as ClientSocket } from "socket.io-client";
 import { io, server } from "../app";
+import { MAX_USERNAME_LENGTH } from "../managers/playerName";
 import { roomManager } from "../routes/socketRoutes";
 import { registerTurnUpload, registerUpload } from "./helpers";
 
@@ -134,7 +135,7 @@ describe("join and rejoin", () => {
 
   it("rejects invalid usernames", async () => {
     const c = await newClient();
-    for (const username of ["", "   ", "x".repeat(21), 42, null]) {
+    for (const username of ["", "   ", "x".repeat(MAX_USERNAME_LENGTH + 1), 42, null]) {
       const res = once<RoomOfGame>(c, "room-of-game");
       c.emit("join-create-game", { gameCode: null, username });
       expect((await res).success).toBe(false);

@@ -235,7 +235,7 @@ describe("Home join field: alphanumeric room codes (EXP-198)", () => {
   });
 });
 
-// EXP-217: the app's own name limit (protocol-constants.test.sh keeps it within the server's MAX_USERNAME_LENGTH)
+// EXP-217: the app's own name limit (protocol-constants.test.sh keeps it equal to the server's MAX_USERNAME_LENGTH)
 describe("Home name field: length limit (EXP-217)", () => {
   it("takes at most MAX_USERNAME_INPUT_LENGTH characters", async () => {
     const r = await mount();

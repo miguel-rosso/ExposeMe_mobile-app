@@ -1,9 +1,7 @@
-import { AddressInfo } from "net";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { io as connect, Socket as ClientSocket } from "socket.io-client";
-import { io, server } from "../app";
-import { roomManager } from "../routes/socketRoutes";
+import { describe, expect, it } from "vitest";
+import type { Socket as ClientSocket } from "socket.io-client";
 import { registerTurnUpload } from "./helpers";
+import { useTestServer } from "./socketHarness";
 
 // EXP-301 / DEC-038: the photo owner who leaves while answering stays the round's answer until its scores, so the
 // players who guess them right score (also with a pick sent after they left); a non-owner who leaves during the round
@@ -12,28 +10,7 @@ import { registerTurnUpload } from "./helpers";
 const PHOTO = "/temp/" + "d".repeat(32) + ".jpg";
 const NAMES = ["alice", "bob", "carol", "dave", "erin"];
 
-let url: string;
-const clients: ClientSocket[] = [];
-
-function once<T = unknown>(socket: ClientSocket, event: string, timeoutMs = 4_000): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`timeout waiting for "${event}"`)), timeoutMs);
-    socket.once(event, (data: T) => { clearTimeout(t); resolve(data); });
-  });
-}
-
-async function newClient(): Promise<ClientSocket> {
-  const c = connect(url, { transports: ["websocket"], forceNew: true, reconnection: false });
-  clients.push(c);
-  await once(c, "connect");
-  return c;
-}
-
-async function joinAs(sock: ClientSocket, gameCode: string | null, username: string) {
-  const res = once<{ success: boolean; room?: { gameCode: string } }>(sock, "room-of-game");
-  sock.emit("join-create-game", { gameCode, username });
-  return res;
-}
+const { once, newClient, joinAs } = useTestServer();
 
 /** `sock` saw `username` leave the room (so the server handled the leave before anything `sock` sends next) */
 function leftSeenBy(sock: ClientSocket, username: string): Promise<void> {
@@ -42,19 +19,6 @@ function leftSeenBy(sock: ClientSocket, username: string): Promise<void> {
     sock.on("player-left", onLeft);
   });
 }
-
-beforeAll(async () => {
-  vi.spyOn(console, "log").mockImplementation(() => {});
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-});
-
-afterAll(async () => {
-  clients.forEach((c) => c.disconnect());
-  await new Promise<void>((resolve) => io.close(() => resolve()));
-  roomManager.clear();
-  vi.restoreAllMocks();
-});
 
 describe("players leaving while answering (EXP-301, DEC-038)", () => {
   it("scores right guesses of the owner who left, and no point for a non-owner who left", async () => {

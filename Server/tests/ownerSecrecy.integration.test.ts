@@ -1,9 +1,7 @@
-import { AddressInfo } from "net";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { io as connect, Socket as ClientSocket } from "socket.io-client";
-import { io, server } from "../app";
-import { roomManager } from "../routes/socketRoutes";
+import { describe, expect, it } from "vitest";
+import type { Socket as ClientSocket } from "socket.io-client";
 import { registerTurnUpload } from "./helpers";
+import { useTestServer } from "./socketHarness";
 import { ANSWER_GRACE, ANSWER_TIME } from "../managers/GameEngine";
 
 // EXP-128 / EXP-252: real server + real clients, every event each socket receives is recorded. Until round-reveal,
@@ -15,31 +13,17 @@ const PHOTO = "/temp/" + "a".repeat(32) + ".jpg";
 const NAMES = ["alice", "bob", "carol"];
 
 interface Received { who: string; sock: string; ev: string; args: unknown[]; t: number }
-interface RoomOfGame { success: boolean; rejoinToken?: string; room?: { gameCode: string } }
 
-let url: string;
-const clients: ClientSocket[] = [];
+const harness = useTestServer();
+const { once, joinAs } = harness;
+// Own record (not the harness's recordPayloads): each event is tagged with its receiver and arrival time
 const received: Received[] = [];
 
-function once<T = unknown>(socket: ClientSocket, event: string, timeoutMs = 4_000): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`timeout waiting for "${event}"`)), timeoutMs);
-    socket.once(event, (data: T) => { clearTimeout(t); resolve(data); });
-  });
-}
-
 async function newClient(who: string): Promise<ClientSocket> {
-  const c = connect(url, { transports: ["websocket"], forceNew: true, reconnection: false });
-  clients.push(c);
+  const c = harness.connectClient();
   c.onAny((ev: string, ...args: unknown[]) => received.push({ who, sock: c.id ?? "", ev, args, t: Date.now() }));
   await once(c, "connect");
   return c;
-}
-
-async function joinAs(sock: ClientSocket, gameCode: string | null, username: string, rejoinToken?: string): Promise<RoomOfGame> {
-  const res = once<RoomOfGame>(sock, "room-of-game");
-  sock.emit("join-create-game", { gameCode, username, ...(rejoinToken ? { rejoinToken } : {}) });
-  return res;
 }
 
 /** Owner identity in one received payload: `owner` / `isOwner` keys, or the name outside player entries. */
@@ -58,19 +42,6 @@ function ownerLeaks(r: Received, ownerName: string): string[] {
   r.args.forEach((x, i) => walk(x, String(i)));
   return out;
 }
-
-beforeAll(async () => {
-  vi.spyOn(console, "log").mockImplementation(() => {});
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-});
-
-afterAll(async () => {
-  clients.forEach((c) => c.disconnect());
-  await new Promise<void>((resolve) => io.close(() => resolve()));
-  roomManager.clear();
-  vi.restoreAllMocks();
-});
 
 describe("photo owner secrecy over the socket (EXP-128, EXP-252)", () => {
   it("nobody, the owner included, learns the owner before round-reveal, rejoin snapshots included; the owner's vote counts", async () => {

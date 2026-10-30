@@ -1,33 +1,17 @@
-import { AddressInfo } from "net";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { io as connect, Socket as ClientSocket } from "socket.io-client";
-import { io, server } from "../app";
+import { describe, expect, it } from "vitest";
+import type { Socket as ClientSocket } from "socket.io-client";
 import { roomManager } from "../routes/socketRoutes";
 import { registerTurnUpload, registerUpload } from "./helpers";
+import { useTestServer } from "./socketHarness";
 
 // EXP-126 / EXP-035: the app plants its photo from the lobby (upload + plant-photo). Whether a player planted one is
 // told only to that player (room-of-game `hasPlantedPhoto`), never in anyone's player data, and no message can drop
 // a planted photo once the game started.
 
-interface RoomOfGame {
-  success: boolean;
-  room: { gameCode: string; started: boolean; players: Record<string, unknown>[] };
-  rejoinToken: string;
-  hasPlantedPhoto?: boolean;
-}
-
 const PLANTED = "/temp/" + "e".repeat(32) + ".jpg";
 const LATE = "/temp/" + "f".repeat(32) + ".jpg";
 
-let url: string;
-const clients: ClientSocket[] = [];
-
-function once<T = unknown>(socket: ClientSocket, event: string, timeoutMs = 4_000): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`timeout waiting for "${event}"`)), timeoutMs);
-    socket.once(event, (data: T) => { clearTimeout(t); resolve(data); });
-  });
-}
+const { once, newClient, joinAs } = useTestServer();
 
 async function until(cond: () => boolean, ms = 2_000) {
   const end = Date.now() + ms;
@@ -37,33 +21,12 @@ async function until(cond: () => boolean, ms = 2_000) {
   }
 }
 
-async function newClient(): Promise<ClientSocket> {
-  const c = connect(url, { transports: ["websocket"], forceNew: true, reconnection: false });
-  clients.push(c);
-  await once(c, "connect");
-  return c;
-}
-
-async function join(c: ClientSocket, gameCode: string | null, username: string): Promise<RoomOfGame> {
-  const res = once<RoomOfGame>(c, "room-of-game");
-  c.emit("join-create-game", { gameCode, username });
-  const data = await res;
+/** A join that must succeed: its room-of-game, with the room. */
+async function join(c: ClientSocket, gameCode: string | null, username: string) {
+  const data = await joinAs(c, gameCode, username);
   expect(data.success).toBe(true);
-  return data;
+  return { ...data, room: data.room! };
 }
-
-beforeAll(async () => {
-  vi.spyOn(console, "log").mockImplementation(() => {});
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-});
-
-afterAll(async () => {
-  clients.forEach((c) => c.disconnect());
-  await new Promise<void>((resolve) => io.close(() => resolve()));
-  roomManager.clear();
-  vi.restoreAllMocks();
-});
 
 describe("planted photo from the lobby", () => {
   it("own mark only in the planter's room-of-game; nothing drops it after the start; none accepted after round 1", async () => {

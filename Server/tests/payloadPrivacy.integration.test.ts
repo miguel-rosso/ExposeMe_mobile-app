@@ -1,9 +1,8 @@
-import { AddressInfo } from "net";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { io as connect, Socket as ClientSocket } from "socket.io-client";
-import { io, server } from "../app";
+import { describe, expect, it, vi } from "vitest";
+import type { Socket as ClientSocket } from "socket.io-client";
 import { roomManager } from "../routes/socketRoutes";
 import { registerTurnUpload, registerUpload } from "./helpers";
+import { useTestServer } from "./socketHarness";
 
 // EXP-017 / EXP-027: real server + real clients. Records every event each client receives and checks that no
 // payload carries a socket id, a rejoin token (other than the receiver's own, in room-of-game) or a planted photo
@@ -19,18 +18,12 @@ const RANDOM_BOB_OWNS_ROUND_1 = 0.4;
 
 interface Received { who: string; ev: string; args: unknown[] }
 
-let url: string;
-const clients: ClientSocket[] = [];
+const harness = useTestServer();
+const { once, joinAs } = harness;
+// Own record (not the harness's recordPayloads): each event is tagged with the player who received it
 const received: Received[] = [];
 const socketIds = new Set<string>();
 const tokens = new Map<string, string>(); // username -> rejoinToken
-
-function once<T = unknown>(socket: ClientSocket, event: string, timeoutMs = 4_000): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`timeout waiting for "${event}"`)), timeoutMs);
-    socket.once(event, (data: T) => { clearTimeout(t); resolve(data); });
-  });
-}
 
 async function until(cond: () => boolean, ms = 2_000) {
   const end = Date.now() + ms;
@@ -41,8 +34,7 @@ async function until(cond: () => boolean, ms = 2_000) {
 }
 
 async function newClient(who: string): Promise<ClientSocket> {
-  const c = connect(url, { transports: ["websocket"], forceNew: true, reconnection: false });
-  clients.push(c);
+  const c = harness.connectClient();
   c.onAny((ev: string, ...args: unknown[]) => received.push({ who, ev, args }));
   await once(c, "connect");
   socketIds.add(c.id!);
@@ -50,12 +42,10 @@ async function newClient(who: string): Promise<ClientSocket> {
 }
 
 async function join(c: ClientSocket, gameCode: string | null, username: string, rejoinToken?: string) {
-  const res = once<{ success: boolean; room: { gameCode: string; players: Record<string, unknown>[] }; rejoinToken: string }>(c, "room-of-game");
-  c.emit("join-create-game", { gameCode, username, ...(rejoinToken ? { rejoinToken } : {}) });
-  const data = await res;
+  const data = await joinAs(c, gameCode, username, rejoinToken);
   expect(data.success).toBe(true);
-  tokens.set(username, data.rejoinToken);
-  return data;
+  tokens.set(username, data.rejoinToken!);
+  return { ...data, room: data.room! };
 }
 
 /** Problems found in one received payload (path-qualified). */
@@ -79,19 +69,6 @@ function leaks(r: Received): string[] {
   walk(r.args, []);
   return out;
 }
-
-beforeAll(async () => {
-  vi.spyOn(console, "log").mockImplementation(() => {});
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-});
-
-afterAll(async () => {
-  clients.forEach((c) => c.disconnect());
-  await new Promise<void>((resolve) => io.close(() => resolve()));
-  roomManager.clear();
-  vi.restoreAllMocks();
-});
 
 describe("player data in socket payloads", () => {
   it("never leaks socket ids, tokens or planted photos, and hides the round's answers until round-scores", async () => {

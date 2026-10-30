@@ -1,9 +1,8 @@
-import { AddressInfo } from "net";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { io as connect, Socket as ClientSocket } from "socket.io-client";
-import { io, server } from "../app";
+import { describe, expect, it } from "vitest";
+import type { Socket as ClientSocket } from "socket.io-client";
 import { roomManager } from "../routes/socketRoutes";
 import { registerTurnUpload } from "./helpers";
+import { useTestServer } from "./socketHarness";
 import { ANSWER_GRACE, ANSWER_TIME } from "../managers/GameEngine";
 
 // Real server on an ephemeral port + 3 real socket.io clients.
@@ -11,35 +10,7 @@ import { ANSWER_GRACE, ANSWER_TIME } from "../managers/GameEngine";
 
 const PHOTO = "/temp/0123456789abcdef0123456789abcdef.jpg"; // shape of a POST /upload result
 
-let url: string;
-const clients: ClientSocket[] = [];
-
-function once<T = unknown>(socket: ClientSocket, event: string, timeoutMs = 4_000): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`timeout waiting for "${event}"`)), timeoutMs);
-    socket.once(event, (data: T) => { clearTimeout(t); resolve(data); });
-  });
-}
-
-async function newClient(): Promise<ClientSocket> {
-  const c = connect(url, { transports: ["websocket"], forceNew: true, reconnection: false });
-  clients.push(c);
-  await once(c, "connect");
-  return c;
-}
-
-beforeAll(async () => {
-  vi.spyOn(console, "log").mockImplementation(() => {});
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-});
-
-afterAll(async () => {
-  clients.forEach((c) => c.disconnect());
-  await new Promise<void>((resolve) => io.close(() => resolve()));
-  roomManager.clear(); // pending room deletions / game timers must not outlive the server
-  vi.restoreAllMocks();
-});
+const { once, newClient } = useTestServer();
 
 describe("socket flow", () => {
   it("join → start → im-ready → your-turn → photo-sent → round-start reaches all clients", async () => {

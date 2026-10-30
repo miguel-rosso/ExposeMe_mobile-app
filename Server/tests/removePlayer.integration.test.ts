@@ -1,8 +1,7 @@
-import { AddressInfo } from "net";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { io as connect, Socket as ClientSocket } from "socket.io-client";
-import { io, server } from "../app";
+import { describe, expect, it, vi } from "vitest";
+import type { Socket as ClientSocket } from "socket.io-client";
 import { roomManager } from "../routes/socketRoutes";
+import { useTestServer } from "./socketHarness";
 
 // EXP-213: leaving (leave-room) and a host kick (remove-player) both take a player out of the room through
 // GameEngine.removePlayer. These pin what each path tells the room, in which order, and what it leaves behind
@@ -12,17 +11,11 @@ const ACK_TIMEOUT_MS = 2_000;
 /** Long enough for any broadcast caused by a handled event to reach every client on localhost. */
 const QUIET_MS = 300;
 
-let url: string;
-const clients: ClientSocket[] = [];
+// Every test plays in a lobby of its own, so each one's rooms and games (a paused one included) are dropped after it
+const harness = useTestServer({ resetBetweenTests: true });
+const { once, newClient, joinAs } = harness;
 
 type Received = [event: string, ...args: unknown[]];
-
-function once<T = unknown>(socket: ClientSocket, event: string, timeoutMs = 4_000): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`timeout waiting for "${event}"`)), timeoutMs);
-    socket.once(event, (data: T) => { clearTimeout(t); resolve(data); });
-  });
-}
 
 const quiet = () => new Promise((resolve) => setTimeout(resolve, QUIET_MS));
 
@@ -35,26 +28,15 @@ function record(socket: ClientSocket): Received[] {
 
 const eventNames = (received: Received[]) => received.map(([event]) => event);
 
-async function newClient(): Promise<ClientSocket> {
-  const c = connect(url, { transports: ["websocket"], forceNew: true, reconnection: false });
-  clients.push(c);
-  await once(c, "connect");
-  return c;
-}
-
 /** A lobby with `names` joined in order (the first one creates the room and is the host). */
 async function lobby(names: string[]): Promise<{ gameCode: string; sockets: ClientSocket[] }> {
   const host = await newClient();
-  const created = once<{ room: { gameCode: string } }>(host, "room-of-game");
-  host.emit("join-create-game", { gameCode: null, username: names[0] });
-  const gameCode = (await created).room.gameCode;
+  const gameCode = (await joinAs(host, null, names[0])).room!.gameCode;
   const sockets = [host];
   for (const name of names.slice(1)) {
     const guest = await newClient();
-    const joined = once<{ success: boolean }>(guest, "room-of-game");
     const announced = sockets.map((c) => once(c, "player-joined"));
-    guest.emit("join-create-game", { gameCode, username: name });
-    expect((await joined).success).toBe(true);
+    expect((await joinAs(guest, gameCode, name)).success).toBe(true);
     await Promise.all(announced);
     sockets.push(guest);
   }
@@ -62,29 +44,12 @@ async function lobby(names: string[]): Promise<{ gameCode: string; sockets: Clie
 }
 
 /** The lobby's host starts the game; every socket has received game-started when this resolves. */
-async function startGame(sockets: ClientSocket[]): Promise<void> {
-  const started = sockets.map((c) => once(c, "game-started"));
-  sockets[0].emit("start-game");
-  await Promise.all(started);
-}
+const startGame = (sockets: ClientSocket[]) => harness.startGame(sockets[0], sockets);
 
 const room = (gameCode: string) => roomManager.getRoom(gameCode)!;
 const playerNames = (gameCode: string) => room(gameCode).players.map((p) => p.username);
 const player = (gameCode: string, username: string) => room(gameCode).players.find((p) => p.username === username)!;
 const hostName = (gameCode: string) => room(gameCode).players.find((p) => p.isHost)?.username;
-
-beforeAll(async () => {
-  vi.spyOn(console, "log").mockImplementation(() => {});
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-});
-
-afterAll(async () => {
-  clients.forEach((c) => c.disconnect());
-  await new Promise<void>((resolve) => io.close(() => resolve()));
-  roomManager.clear();
-  vi.restoreAllMocks();
-});
 
 describe("leave-room removes the player (EXP-213)", () => {
   it("lobby: a guest's leave tells everyone player-left, the leaver included, and nothing else", async () => {

@@ -1,9 +1,7 @@
-import { AddressInfo } from "net";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { io as connect, Socket as ClientSocket } from "socket.io-client";
-import { io, server } from "../app";
-import { roomManager } from "../routes/socketRoutes";
+import { describe, expect, it } from "vitest";
+import type { Socket as ClientSocket } from "socket.io-client";
 import { registerTurnUpload } from "./helpers";
+import { useTestServer } from "./socketHarness";
 
 // EXP-218: whenever the photo owner goes away while holding the scores screen (leave-room or a dropped connection;
 // the host can't kick players mid-game, EXP-316), the hold ends at once for everyone (hold-end + hold-resume) and the game goes on, instead of
@@ -15,28 +13,8 @@ const RELEASE_WITHIN_MS = 1_000;
 const SCORES_TIMEOUT_MS = 15_000; // waiting-photo → answering (8.5 s) → reveal (3 s) → scores
 const NEXT_ROUND_TIMEOUT_MS = 8_000; // the resumed scores phase (≤ 5 s) then the next round's waiting-photo
 
-let url: string;
-const clients: ClientSocket[] = [];
-
-function once<T = unknown>(socket: ClientSocket, event: string, timeoutMs = 4_000): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`timeout waiting for "${event}"`)), timeoutMs);
-    socket.once(event, (data: T) => { clearTimeout(t); resolve(data); });
-  });
-}
-
-async function newClient(): Promise<ClientSocket> {
-  const c = connect(url, { transports: ["websocket"], forceNew: true, reconnection: false });
-  clients.push(c);
-  await once(c, "connect");
-  return c;
-}
-
-async function joinAs(sock: ClientSocket, gameCode: string | null, username: string) {
-  const res = once<{ success: boolean; room?: { gameCode: string }; rejoinToken?: string }>(sock, "room-of-game");
-  sock.emit("join-create-game", { gameCode, username });
-  return res;
-}
+// No resetBetweenTests: the tests run concurrently, so a reset after one would cut the others' games short
+const { once, newClient, joinAs } = useTestServer();
 
 /** A 3-player game in the first round's scores phase, with the photo owner holding it. */
 async function ownerHoldingScores(photoChar: string) {
@@ -78,19 +56,6 @@ async function expectReleasedAndContinues(socks: Record<string, ClientSocket>, o
   for (const resume of await Promise.all(resumes)) expect(resume.phase).toBe("scores");
   await Promise.all(others.map((n) => once(socks[n], "waiting-photo", NEXT_ROUND_TIMEOUT_MS)));
 }
-
-beforeAll(async () => {
-  vi.spyOn(console, "log").mockImplementation(() => {});
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-});
-
-afterAll(async () => {
-  clients.forEach((c) => c.disconnect());
-  await new Promise<void>((resolve) => io.close(() => resolve()));
-  roomManager.clear();
-  vi.restoreAllMocks();
-});
 
 // One room each, run side by side: reaching the scores phase takes ~12 s of real game time
 describe.concurrent("the photo owner going away releases their hold (EXP-218, EXP-299)", () => {

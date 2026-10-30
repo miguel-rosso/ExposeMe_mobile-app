@@ -1,12 +1,11 @@
-import { AddressInfo } from "net";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { io as connect, Socket as ClientSocket } from "socket.io-client";
-import { io, server } from "../app";
+import { describe, expect, it, vi } from "vitest";
+import type { Socket as ClientSocket } from "socket.io-client";
 import { roomManager } from "../routes/socketRoutes";
 import { GAME_EVENT_LIMITS } from "../managers/socketGuards";
 import { GameEngine } from "../managers/GameEngine";
 import { uploadStore } from "../middlewares/uploadStore";
 import { registerUpload } from "./helpers";
+import { useTestServer } from "./socketHarness";
 
 // EXP-152: plant-photo is acknowledged, so the app counts its planted photo as sent only once the server has it and
 // knows whether uploading it again helps. The reasons say nothing about other players (someone else's upload gets
@@ -19,26 +18,12 @@ const ACK_WAIT_MS = 2_000;
 // Hidden delay of a planted round in the expiry test: long enough to remove the photo before round-start is checked
 const EXPIRY_CHECK_DELAY_MS = 300;
 
-let url: string;
-const clients: ClientSocket[] = [];
-
-function once<T = unknown>(socket: ClientSocket, event: string): Promise<T> {
-  return new Promise((resolve) => socket.once(event, (data: T) => resolve(data)));
-}
-
-async function newClient(): Promise<ClientSocket> {
-  const c = connect(url, { transports: ["websocket"], forceNew: true, reconnection: false });
-  clients.push(c);
-  await once(c, "connect");
-  return c;
-}
+const { once, newClient, joinAs } = useTestServer();
 
 async function join(c: ClientSocket, gameCode: string | null, username: string): Promise<string> {
-  const res = once<{ success: boolean; room: { gameCode: string } }>(c, "room-of-game");
-  c.emit("join-create-game", { gameCode, username });
-  const data = await res;
+  const data = await joinAs(c, gameCode, username);
   expect(data.success).toBe(true);
-  return data.room.gameCode;
+  return data.room!.gameCode;
 }
 
 /** plant-photo with an ack callback: the server's answer, or null if none came in time. */
@@ -76,19 +61,6 @@ async function startPlantedRound1(alice: ClientSocket, bob: ClientSocket, gameCo
   expect(turns).toEqual([]);
   expect(roomManager.getPlayer(gameCode, "bob")?.plantedPhoto).toBeUndefined(); // used by this wait
 }
-
-beforeAll(async () => {
-  vi.spyOn(console, "log").mockImplementation(() => {});
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-});
-
-afterAll(async () => {
-  clients.forEach((c) => c.disconnect());
-  await new Promise<void>((resolve) => io.close(() => resolve()));
-  roomManager.clear();
-  vi.restoreAllMocks();
-});
 
 describe("plant-photo acknowledgement", () => {
   it("ok once the photo is the player's planted photo", async () => {

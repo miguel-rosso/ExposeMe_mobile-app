@@ -1,50 +1,20 @@
-import { AddressInfo } from "net";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { io as connect, Socket as ClientSocket } from "socket.io-client";
-import { io, server } from "../app";
-import { roomManager } from "../routes/socketRoutes";
+import { describe, expect, it } from "vitest";
+import type { Socket as ClientSocket } from "socket.io-client";
+import { useTestServer } from "./socketHarness";
 
 // EXP-039 / EXP-040 over real sockets: every player gets waiting-photo (same payload, owner secret), and the
 // owner's photo-unavailable skips the round at once; anyone else's is ignored. Production timings.
 
-let url: string;
-const clients: ClientSocket[] = [];
-
-function once<T = unknown>(socket: ClientSocket, event: string, timeoutMs = 4_000): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`timeout waiting for "${event}"`)), timeoutMs);
-    socket.once(event, (data: T) => { clearTimeout(t); resolve(data); });
-  });
-}
-
-/** Resolves true if `event` is NOT received within `ms`. */
-function silent(socket: ClientSocket, event: string, ms = 1_000): Promise<boolean> {
-  return new Promise((resolve) => {
-    const handler = () => { clearTimeout(t); resolve(false); };
-    const t = setTimeout(() => { socket.off(event, handler); resolve(true); }, ms);
-    socket.once(event, handler);
-  });
-}
-
-async function newClient(): Promise<ClientSocket> {
-  const c = connect(url, { transports: ["websocket"], forceNew: true, reconnection: false });
-  clients.push(c);
-  await once(c, "connect");
-  return c;
-}
+const { once, silent, newClient, joinAs } = useTestServer();
 
 /** Started game; resolves once the first waiting-photo reached everyone and the owner got your-turn. */
 async function gameWaitingForPhoto(names: string[]) {
   const socks: Record<string, ClientSocket> = {};
   socks[names[0]] = await newClient();
-  const created = once<{ room: { gameCode: string } }>(socks[names[0]], "room-of-game");
-  socks[names[0]].emit("join-create-game", { gameCode: null, username: names[0] });
-  const gameCode = (await created).room.gameCode;
+  const gameCode = (await joinAs(socks[names[0]], null, names[0])).room!.gameCode;
   for (const n of names.slice(1)) {
     socks[n] = await newClient();
-    const joined = once(socks[n], "room-of-game");
-    socks[n].emit("join-create-game", { gameCode, username: n });
-    await joined;
+    await joinAs(socks[n], gameCode, n);
   }
   const turns = names.map((n) => once<Turn>(socks[n], "your-turn").then((turn) => ({ n, turn })).catch(() => null));
   const waiting = names.map((n) => once<{ round: number; duration: number }>(socks[n], "waiting-photo"));
@@ -58,19 +28,6 @@ async function gameWaitingForPhoto(names: string[]) {
 }
 
 interface Turn { round: number; attempt: number }
-
-beforeAll(async () => {
-  vi.spyOn(console, "log").mockImplementation(() => {});
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-});
-
-afterAll(async () => {
-  clients.forEach((c) => c.disconnect());
-  await new Promise<void>((resolve) => io.close(() => resolve()));
-  roomManager.clear();
-  vi.restoreAllMocks();
-});
 
 describe("waiting for the chosen player's photo", () => {
   it("every player gets the same waiting-photo; the owner's photo-unavailable skips at once, others' are ignored", async () => {

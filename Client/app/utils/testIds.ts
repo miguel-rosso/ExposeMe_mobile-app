@@ -35,6 +35,7 @@ export const TEST_IDS = {
   waitingPhotoText: "waiting-photo-text",
   roundSkippedNotice: "round-skipped-notice",
   holdButton: "hold-button",
+  gameHeld: "game-held", // invisible marker while the photo owner holds the scoreboard (game layer hidden)
   photoView: "photo-view", // PhotoComponent: the game photo (also the own-photos viewer)
   photoLoading: "photo-loading", // PhotoComponent: shown until the photo has loaded
   roundProgress: "round-progress",

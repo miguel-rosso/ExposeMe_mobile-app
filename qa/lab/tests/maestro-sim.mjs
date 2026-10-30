@@ -127,6 +127,10 @@ function runFlow(commands, device, { skippableSubflows = [], env = {} } = {}) {
       && (!c.notVisible || waitFor(() => !isVisible(c.notVisible), lookupMs()));
   };
   const step = () => device.tick(STEP_MS);
+  // With --test-output-dir (lab.sh play), Maestro 2.11 dumps the view hierarchy (one more screen read) and takes a
+  // screenshot for every step that ends FAILED or WARNED (ArtifactsGenerator.onCommandFinished): a failure caught by a
+  // `retry`, an optional tap that found nothing, and each step a failure goes through
+  const failedStepArtifacts = () => { device.read({ id: "view-hierarchy-dump" }); step(); };
   // A command that acts on the device: a step, then conditions wait the full optional lookup again
   const interaction = (act = () => {}) => (arg) => { act(arg); step(); lastInteraction = device.now; };
   const commandsByName = {
@@ -148,7 +152,7 @@ function runFlow(commands, device, { skippableSubflows = [], env = {} } = {}) {
     tapOn: (arg) => {
       const optional = arg.optional === "true";
       if (!waitFor(() => isVisible(arg, TAP_KEYS), optional ? OPTIONAL_LOOKUP_MS : LOOKUP_MS)) {
-        if (optional) return;
+        if (optional) return failedStepArtifacts(); // a warning
         throw new FlowFailure(`tapOn ${describe(arg)}: not found`);
       }
       interaction(() => device.tap(selector(arg, TAP_KEYS)))();
@@ -161,10 +165,12 @@ function runFlow(commands, device, { skippableSubflows = [], env = {} } = {}) {
       if (!value(cond)) throw new FlowFailure(`assertTrue ${label || cond}`);
     },
     extendedWaitUntil: (arg) => {
-      checkKeys(arg, ["visible", "notVisible", "timeout"], "extendedWaitUntil");
+      checkKeys(arg, ["visible", "notVisible", "timeout", "label"], "extendedWaitUntil");
       const met = () => (!arg.visible || isVisible(arg.visible)) && (!arg.notVisible || !isVisible(arg.notVisible));
-      if (!waitFor(met, Number(value(arg.timeout))))
-        throw new FlowFailure(`extendedWaitUntil ${describe(arg.visible || arg.notVisible)}: timed out`);
+      if (!waitFor(met, Number(value(arg.timeout)))) {
+        const label = arg.label ? ` (${arg.label})` : "";
+        throw new FlowFailure(`extendedWaitUntil ${describe(arg.visible || arg.notVisible)}${label}: timed out`);
+      }
     },
     repeat: (arg) => {
       checkKeys(arg, ["times", "while", "commands"], "repeat");
@@ -185,7 +191,12 @@ function runFlow(commands, device, { skippableSubflows = [], env = {} } = {}) {
   const run = (list) => list.forEach((command) => {
     const [name, arg] = Object.entries(command)[0];
     if (!commandsByName[name]) throw flowError(command, `unsupported command: ${name}`);
-    commandsByName[name](arg, command);
+    try {
+      commandsByName[name](arg, command);
+    } catch (e) {
+      if (e instanceof FlowFailure) failedStepArtifacts();
+      throw e;
+    }
   });
   try { run(commands); return { output, failure: null }; } catch (e) {
     if (e instanceof FlowFailure) return { output, failure: e.message };
@@ -299,8 +310,11 @@ function onboarding(startLang, fate) {
 // A game of `rounds` rounds as the server plays it (phase lengths from GameEngine.ts) on a device whose screen reads take
 // readMs(time) each. Records the phase each tap on an option lands in, and by round the screen reads of the scoreboard
 // checks: the card wait's that saw the scoreboard, and the card name's and options-under-it's, whose reads that saw no
-// scoreboard (`blindChecks`) pass without checking anything.
+// scoreboard (`blindChecks`) pass without checking anything; those that saw it held go to `heldReads`.
 // ownerRound: the device's photo (its card says so); ownNameRound: its card wrongly shows its own name (EXP-290).
+// holds: { <round>: { at, ms } }, the round's owner (a bot) holds its scoreboard `at` ms after it opens, for `ms`: the
+// server freezes the scoreboard's timer meanwhile and the app shows only the photo and the held marker (EXP-325).
+// Rounds whose card wait ended on the held marker (`markerPasses`) and whose held marker a look for it saw (`heldSeen`).
 const PHOTO_WAIT_MS = 500; // the owner's upload (a bot's: well under a second)
 const PHOTO_LOADING_MS = 1000; // the round photo's loading spinner
 const engineMs = (name) => {
@@ -309,16 +323,26 @@ const engineMs = (name) => {
   if (!m) throw new Error(`GameEngine.ts: no ${name}`);
   return Number(m[1].replace(/_/g, ""));
 };
-function game({ rounds, readMs, username, ownerRound = 0, ownNameRound = 0, cardlessRound = 0 }) {
+function game({ rounds, readMs, username, ownerRound = 0, ownNameRound = 0, cardlessRound = 0, holds = {} }) {
   const phases = [["photo", PHOTO_WAIT_MS], ["answering", engineMs("ANSWER_TIME")], ["reveal", engineMs("REVEAL_TIME")],
     ["scores", engineMs("SCORE_DISPLAY_TIME")]];
   const roundMs = phases.reduce((sum, [, ms]) => sum + ms, 0);
-  const state = { roundMs, phases: Object.fromEntries(phases), taps: [], checks: [], blindChecks: [], final: false };
+  const state = {
+    roundMs, phases: Object.fromEntries(phases), taps: [], checks: [], blindChecks: [], heldReads: [], final: false,
+    markerPasses: new Set(), heldSeen: new Set(),
+  };
+  // The game's timeline: one segment per phase, a held scoreboard split around its hold ([scores, held, scores])
+  const timeline = [];
+  for (let round = 1, t = 0; round <= rounds; round++) {
+    for (const [phase, ms] of phases) {
+      const hold = phase === "scores" && holds[round];
+      const parts = hold ? [["scores", hold.at], ["held", hold.ms], ["scores", ms - hold.at]] : [[phase, ms]];
+      for (const [name, length] of parts) { timeline.push({ round, phase: name, start: t, end: t + length }); t += length; }
+    }
+  }
   const phaseAt = (t) => { // { round (from 1), phase, ms into it }
-    const round = Math.floor(t / roundMs) + 1;
-    if (round > rounds) return { round: rounds, phase: "over" };
-    let into = t % roundMs;
-    for (const [phase, ms] of phases) { if (into < ms) return { round, phase, into }; into -= ms; }
+    const segment = timeline.find((s) => t < s.end);
+    return segment ? { round: segment.round, phase: segment.phase, into: t - segment.start } : { round: rounds, phase: "over" };
   };
   const options = [{ id: "answer-options", y: 2 }, { id: "player-option-bot1", y: 3 }, { id: "player-option-bot2", y: 3 }];
   const cardName = (round) => {
@@ -334,8 +358,11 @@ function game({ rounds, readMs, username, ownerRound = 0, ownNameRound = 0, card
       ...(into < PHOTO_LOADING_MS ? [{ id: "photo-loading" }] : []), ...options],
     reveal: () => [{ id: "photo-view" }, ...options],
     scores: () => [{ id: "score-modal" }, { id: "score-round-title", y: 1 }, ...card(round)],
+    held: () => [{ id: "photo-view" }, { id: "game-held" }],
     over: () => (state.final ? [{ id: "final-score-modal" }] : [{ id: "winner-modal" }, { id: "winner-continue" }]),
   })[phase]();
+  // The scoreboard checks, by selector (the card wait also ends on the held marker; the looks for the marker check
+  // nothing)
   const scoreboardCheck = (sel) => {
     if (/^score-answer-card\|/.test(sel.id || "")) return "card";
     if (sel.id === "score-answer-name") return "card name";
@@ -351,8 +378,13 @@ function game({ rounds, readMs, username, ownerRound = 0, ownNameRound = 0, card
     (dev, sel) => {
       const at = phaseAt(dev.now);
       const check = scoreboardCheck(sel);
+      if (at.phase === "held" && matches(sel.id || "", "game-held")) {
+        (check === "card" ? state.markerPasses : state.heldSeen).add(at.round);
+      }
       if (check && at.phase === "scores") state.checks.push({ round: at.round, check });
-      else if (check && check !== "card") state.blindChecks.push({ round: at.round, check }); // the card wait polls
+      else if (check && check !== "card") { // the card wait polls
+        (at.phase === "held" ? state.heldReads : state.blindChecks).push({ round: at.round, check });
+      }
       return readMs(dev.now, state);
     },
   );
@@ -420,9 +452,10 @@ const seededRandom = (seed) => {
 function roundsScenarios(flow) {
   const ROUNDS = 6;
   const USERNAME = "android-a";
+  const OWNER_ROUND = 2; // the device's photo: the bots own (and may hold) the others
   const options = { skippableSubflows: ["wait-game-start.yaml"] };
   const play = (readMs, gameOptions = {}) => {
-    const { d, state, env } = game({ rounds: ROUNDS, readMs, username: USERNAME, ownerRound: 2, ...gameOptions });
+    const { d, state, env } = game({ rounds: ROUNDS, readMs, username: USERNAME, ownerRound: OWNER_ROUND, ...gameOptions });
     const result = runFlow(flow, d, { ...options, env });
     return { state, now: d.now, ...result };
   };
@@ -522,6 +555,104 @@ function roundsScenarios(flow) {
   report(`a round without the card fails the flow before the next scoreboard`,
     /score-answer-card/.test(cardless.failure || "") && cardless.now < nextScoreboard,
     `${cardless.failure || "flow passed"} at ${cardless.now} ms (next scoreboard at ${nextScoreboard} ms)`);
+
+  // ── Held scoreboards (EXP-325) ──
+  // A bot owner holding its scoreboard (bots.mjs --hold) hides the card for up to the round's hold budget: the flow
+  // never fails on it, counts it as held when its look for the marker sees it, and the guesses after it still land.
+  // The holds of it166 (23 s in a round, 21 s in the last one), a short one and one that ends about when the scoreboard
+  // would have closed without it.
+  // What the flow can't tell apart (Maestro reads the screen once per step), reported with the counts:
+  // - a card wait that ended on the marker of a hold over before the look for it (`shortHoldPasses`): its scoreboard
+  //   counts as checked;
+  // - a hold that starts after the card wait saw the card: the name and options checks that follow may read the held
+  //   screen (`heldReads`), which they pass without checking anything.
+  const HOLDS = {
+    3: { at: 1000, ms: 23000 }, 4: { at: 200, ms: 500 }, 5: { at: 1500, ms: 3500 }, 6: { at: 800, ms: 21000 },
+  };
+  const LONG_HOLD_ROUND = 3;
+  // Rounds whose card a screen read saw on its scoreboard
+  const cardsSeen = (state) => new Set(state.checks.filter((c) => c.check === "card").map((c) => c.round));
+  const shortHoldPasses = (state) => [...state.markerPasses].filter((round) => !state.heldSeen.has(round));
+  // Every scoreboard counted as checked had its card seen, but for the short holds; every one counted as held was seen
+  // held
+  const heldProblems = (state, output) => {
+    const { checked, held } = output.scoreboards ?? {};
+    const seen = cardsSeen(state).size;
+    const short = shortHoldPasses(state).length;
+    return [
+      checked > seen + short && `${checked} counted checked, ${seen} cards seen, ${short} short holds`,
+      held !== state.heldSeen.size && `${held} counted held, ${state.heldSeen.size} seen held`,
+      state.blindChecks.length && `checks that saw no scoreboard: ${JSON.stringify(state.blindChecks)}`,
+    ].filter(Boolean);
+  };
+  for (const [name, readMs] of cases) {
+    const { state, output, failure } = play(readMs, { holds: HOLDS });
+    const missed = missedGuesses(state);
+    const problems = heldProblems(state, output);
+    report(`${name}, rounds 3-6 held: the game ends on the results, every guess in time`,
+      !failure && state.final && missed.length === 0,
+      `${failure || ""} rounds without a guess in time: ${missed.join(", ")}`);
+    report(`${name}, rounds 3-6 held: only seen cards counted as checked, no blind check (${output.scoreboards?.held} `
+      + `held, ${shortHoldPasses(state).length} short holds, ${state.heldReads.length} reads of a held screen)`,
+    problems.length === 0, problems.join("; "));
+  }
+  const steadyHeld = play(() => STEADY_READ_MS, { holds: HOLDS });
+  report(`steady emulator: the ${HOLDS[LONG_HOLD_ROUND].ms / 1000} s hold of round ${LONG_HOLD_ROUND} is counted held`,
+    steadyHeld.output.scoreboards?.held >= 1 && !cardsSeen(steadyHeld.state).has(LONG_HOLD_ROUND),
+    `held ${steadyHeld.output.scoreboards?.held}; cards seen in rounds ${[...cardsSeen(steadyHeld.state)].join(", ")}`);
+  // A missing card on another round still fails on that round
+  const cardlessHeld = play(() => STEADY_READ_MS, { holds: { 4: HOLDS[4], 5: HOLDS[5] }, cardlessRound: CARDLESS_ROUND });
+  report("rounds 4-5 held: a round without the card still fails the flow",
+    /score-answer-card/.test(cardlessHeld.failure || ""), cardlessHeld.failure || "flow passed");
+
+  // Seeded random reads and holds like the bots' (bots.mjs --hold 0.5): each bot's round held with probability 0.5,
+  // pressed and let go after bots.mjs's own random delays
+  const HOLD_PROBABILITY = 0.5;
+  const { HOLD_PRESS_DELAY_MS, HOLD_LENGTH_MS } = botsConstants("HOLD_PRESS_DELAY_MS", "HOLD_LENGTH_MS");
+  const randomHolds = (seed) => {
+    const random = seededRandom(seed * 7919);
+    const between = ([low, high]) => Math.round(low + random() * (high - low));
+    return Object.fromEntries([1, ...LATER_ROUNDS].filter((round) => round !== OWNER_ROUND && random() < HOLD_PROBABILITY)
+      .map((round) => [round, { at: between(HOLD_PRESS_DELAY_MS), ms: between(HOLD_LENGTH_MS) }]));
+  };
+  for (const { range } of RANDOM_PROFILES) {
+    let failures = 0, missed = 0, holds = 0, counted = 0, short = 0, heldReads = 0;
+    const problems = [];
+    for (let seed = 1; seed <= RANDOM_GAMES; seed++) {
+      const gameHolds = randomHolds(seed);
+      const { state, output, failure } = play(randomReads(seed, range), { holds: gameHolds });
+      if (failure || !state.final) {
+        failures++;
+        problems.push(`seed ${seed} (holds ${JSON.stringify(gameHolds)}): ${failure || "no final ranking"}`);
+      }
+      missed += missedGuesses(state).filter((round) => round > 1).length;
+      holds += Object.keys(gameHolds).length;
+      counted += output.scoreboards?.held ?? 0;
+      short += shortHoldPasses(state).length;
+      heldReads += state.heldReads.length;
+      problems.push(...heldProblems(state, output).map((p) => `seed ${seed}: ${p}`));
+    }
+    const laterRounds = RANDOM_GAMES * LATER_ROUNDS.length;
+    report(`${RANDOM_GAMES} games with random ${range[0] / 1000}-${range[1] / 1000} s screen reads and bot holds `
+      + `(${holds} holds: ${counted} counted held, ${short} short ones counted checked; ${heldReads} reads of a held `
+      + `screen): no failed flow, only seen cards counted as checked, no blind check, at most `
+      + `${MAX_MISSED_RANDOM * 100}% of the guesses after round 1 lost`,
+    failures === 0 && problems.length === 0 && missed <= MAX_MISSED_RANDOM * laterRounds,
+    `failed flows: ${failures}, lost guesses: ${missed}/${laterRounds}; ${problems.slice(0, 3).join("; ")}`);
+  }
+}
+
+// bots.mjs's own constants (`const NAME = <expression>;`, evaluated in order, HOLD_BUDGET_PER_ROUND first), so the
+// simulated holds follow the bots'
+function botsConstants(...names) {
+  const source = fs.readFileSync(new URL("../bots.mjs", import.meta.url), "utf8");
+  const values = {};
+  for (const name of ["HOLD_BUDGET_PER_ROUND", ...names]) {
+    const m = source.match(new RegExp(`^const ${name} = (.+);`, "m"));
+    if (!m) throw new Error(`bots.mjs: no ${name}`);
+    values[name] = new Function(...Object.keys(values), `"use strict"; return (${m[1]});`)(...Object.values(values));
+  }
+  return values;
 }
 
 try {

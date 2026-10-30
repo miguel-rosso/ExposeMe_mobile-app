@@ -46,17 +46,22 @@ EOF
 # With STUB_FAILED_CONDITION it also writes Maestro's commands.json: an assertTrue that passed (STUB_PASSED_CONDITION,
 # optional), then the failed one with that condition inside its failed parent runFlow. `--version` prints
 # STUB_MAESTRO_VERSION (default 2.11.0). A passing run with STUB_SCOREBOARD_PASSES ("SKIPPED COMPLETED ...") writes
-# the commands.json of play-rounds.yaml's round loop: one card-wait guard (STUB_SCOREBOARD_GUARD) per pass
+# the commands.json of play-rounds.yaml's round loop: one card-wait guard (STUB_SCOREBOARD_GUARD) per pass, and one
+# held-check guard (STUB_HELD_GUARD) per entry of STUB_HELD_PASSES
 cat >"$TMP/bin/maestro" <<'EOF'
 #!/usr/bin/env bash
 [ "$1" = --version ] && { echo "${STUB_MAESTRO_VERSION:-2.11.0}"; exit 0; }
 echo "$*" >>"$STUB_LOG/maestro.args"
 out=""; while [ $# -gt 0 ]; do [ "$1" = --test-output-dir ] && out=$2; shift; done
-pass_commands() { # the round loop's guards, one per pass
-  for status in $STUB_SCOREBOARD_PASSES; do
-    jq -n --arg c "$STUB_SCOREBOARD_GUARD" --arg s "$status" \
-      '{command: {runFlowCommand: {condition: {scriptCondition: $c}}}, metadata: {status: $s}}'
-  done | jq -s .
+guards() { # CONDITION, statuses... -> one runFlow per status
+  local condition=$1 status; shift
+  for status in "$@"; do
+    jq -n --arg c "$condition" --arg s "$status" '{command: {runFlowCommand: {condition: {scriptCondition: $c}}}, metadata: {status: $s}}'
+  done
+}
+pass_commands() { # the round loop's guards
+  # shellcheck disable=SC2086 # status lists
+  { guards "$STUB_SCOREBOARD_GUARD" $STUB_SCOREBOARD_PASSES; guards "${STUB_HELD_GUARD:-}" ${STUB_HELD_PASSES:-}; } | jq -s .
 }
 case " ${STUB_MAESTRO_FAIL:-} " in *" ${out##*/} "*) ;; *)
   if [ -n "${STUB_SCOREBOARD_PASSES:-}" ]; then mkdir -p "$out/2026-10-29_164852/play-game"; pass_commands >"$out/2026-10-29_164852/play-game/commands.json"; fi
@@ -308,13 +313,22 @@ done
 # ── play-rounds.yaml's checked scoreboards and the Maestro it was verified on (EXP-312) ──
 sed 's/^[[:space:]]*//' "$MAESTRO_DIR/play-rounds.yaml" | grep -qxF "true: $SCOREBOARD_GUARD" \
   && ok "play-rounds.yaml's card wait has lab.sh's SCOREBOARD_GUARD" || ko "play-rounds.yaml card-wait guard in sync with lab.sh"
+sed 's/^[[:space:]]*//' "$MAESTRO_DIR/play-rounds.yaml" | grep -qxF "true: $HELD_GUARD" \
+  && ok "play-rounds.yaml's held check has lab.sh's HELD_GUARD" || ko "play-rounds.yaml held-check guard in sync with lab.sh"
 export STUB_SCOREBOARD_GUARD="$SCOREBOARD_GUARD" STUB_SCOREBOARD_PASSES="SKIPPED COMPLETED SKIPPED COMPLETED COMPLETED"
+export STUB_HELD_GUARD="$HELD_GUARD" STUB_HELD_PASSES="SKIPPED SKIPPED SKIPPED SKIPPED SKIPPED"
 play r30 --bots 2 --devices android-a
 rc=$?
-[ $rc = 0 ] && grep -q "android-a: 3/4 scoreboards checked (play-rounds.yaml)" "$TMP/play.out" \
+[ $rc = 0 ] && grep -q "android-a: 3/4 scoreboards checked, 0 held (play-rounds.yaml)" "$TMP/play.out" \
   && ok "play prints each device's checked scoreboards (the loop's first pass has none)" \
   || ko "play prints checked scoreboards" "rc=$rc $(cat "$TMP/play.out")"
-unset STUB_SCOREBOARD_PASSES
+# EXP-325: a pass whose card wait found the scoreboard held completes its guard too: it counts as held, not checked
+STUB_HELD_PASSES="SKIPPED SKIPPED SKIPPED COMPLETED SKIPPED" play r34 --bots 2 --devices android-a
+rc=$?
+[ $rc = 0 ] && grep -q "android-a: 2/4 scoreboards checked, 1 held (play-rounds.yaml)" "$TMP/play.out" \
+  && ok "play prints each device's held scoreboards apart from the checked ones" \
+  || ko "play prints held scoreboards" "rc=$rc $(cat "$TMP/play.out")"
+unset STUB_SCOREBOARD_PASSES STUB_HELD_PASSES
 play r31 --bots 2 --devices android-a
 ! grep -q "scoreboards checked" "$TMP/play.out" && ok "a flow without the round loop prints no scoreboard count" \
   || ko "no scoreboard count without play-rounds.yaml" "$(cat "$TMP/play.out")"

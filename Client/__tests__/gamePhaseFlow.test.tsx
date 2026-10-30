@@ -134,14 +134,29 @@ describe("GameScreen: server phases drawn with the received duration (EXP-063)",
     act(() => mockSocket.fire("round-reveal", { correctAnswer: "carol", duration: 3_000, yourGuess: "" }));
     act(() => mockSocket.fire("round-scores", { scores: SCORES, round: 1, totalRounds: 10, duration: 5_000 }));
 
+    expect(has(r.root, TEST_IDS.gameHeld)).toBe(false); // EXP-325: the held marker only while held
     act(() => mockSocket.fire("hold-start"));
     expect(bar(r.root)).toBeNull();
     expect(has(r.root, "score-modal-probe")).toBe(false);
     expect(has(r.root, playerOptionId("alice"))).toBe(false);
+    expect(has(r.root, TEST_IDS.gameHeld)).toBe(true);
 
     act(() => mockSocket.fire("hold-resume", { phase: "scores", duration: 2_400 }));
     expect(bar(r.root)!.duration).toBe(2_400);
     expect(scoreModal(r.root).visible).toBe(true);
+    expect(has(r.root, TEST_IDS.gameHeld)).toBe(false);
+  });
+
+  // EXP-325: the held marker lets the device flows tell a held scoreboard (game layer hidden) from a missing one. It
+  // never takes a touch from the photo owner's hold button or the emojis
+  it("marks the held state with an untouchable marker, gone when the server ends the hold", () => {
+    act(() => mockSocket.fire("round-start", START));
+    act(() => mockSocket.fire("round-scores", { scores: SCORES, round: 1, totalRounds: 10, duration: 5_000 }));
+    act(() => mockSocket.fire("hold-start"));
+    const [marker] = byId(r.root, TEST_IDS.gameHeld);
+    expect(marker.props.pointerEvents).toBe("none");
+    act(() => mockSocket.fire("hold-end"));
+    expect(has(r.root, TEST_IDS.gameHeld)).toBe(false);
   });
 
   it("hold-end from the server (force release) shows the overlay again", () => {

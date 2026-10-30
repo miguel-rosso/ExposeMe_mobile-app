@@ -552,6 +552,12 @@ const GameScreen = () => {
               onReactionEnd={removeEmoji}
             />
 
+            {/* Held marker for the device flows (qa/maestro/play-rounds.yaml): invisible and untouchable; kept out of
+                view flattening so it reaches the native view tree */}
+            {gameHeld && (
+              <View testID={TEST_IDS.gameHeld} style={tw`absolute inset-0`} pointerEvents="none" collapsable={false} />
+            )}
+
             {/* Game overlay — hidden during hold so photo is visible */}
             {!gameHeld && (
               <View style={tw`z-8 absolute w-full h-full`}>

@@ -256,6 +256,14 @@ else
   [ "$(flow_ms answeringMs)" = "$answer" ] && [ "$(flow_ms revealMs)" = "$reveal" ] && [ "$(flow_ms scoresMs)" = "$scores" ] \
     && ok "play-rounds.yaml's phase lengths match GameEngine.ts ($answer/$reveal/$scores ms)" \
     || ko "play-rounds.yaml's phase lengths match GameEngine.ts" "flow: $flow_timing"
+  # EXP-325: a held scoreboard is waited out for the round's hold budget, and the next options a hold budget longer
+  hold_budget="$(engine_ms HOLD_BUDGET_PER_ROUND)"
+  # shellcheck disable=SC2016 # Maestro expressions, not shell ones
+  [ -n "$hold_budget" ] && [ "$(flow_ms holdBudgetMs)" = "$hold_budget" ] \
+    && flow_has 'timeout: ${output.timing.holdBudgetMs + output.timing.holdEndSlackMs}' \
+    && grep -qF 'giveUpAt: output.round.closesBy + output.timing.holdBudgetMs + output.timing.optionsWaitMs' "$ROUNDS" \
+    && ok "play-rounds.yaml waits out a hold for GameEngine.ts's hold budget ($hold_budget ms)" \
+    || ko "play-rounds.yaml's hold budget matches GameEngine.ts" "engine: ${hold_budget:-none}, flow: $flow_timing"
   # The scoreboard closes the three phases after the options showed: after the last look that found none
   # (closesAfter), before the options were seen (closesBy). The card wait ends at closesBy: with the options seen at the
   # latest one slow read after they showed, that comes before the next round's scoreboard, so a missing card fails on

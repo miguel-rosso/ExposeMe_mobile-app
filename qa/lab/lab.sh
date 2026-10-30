@@ -811,6 +811,10 @@ MAESTRO_VERIFIED_VERSION=2.11
 # pass has none to check
 # shellcheck disable=SC2016 # a Maestro expression, not a shell one
 SCOREBOARD_GUARD='${Date.now() + output.round.readMs / 2 < output.round.closesAfter}'
+# The script guard of its look for the held marker (EXP-325): COMPLETED when that look found a checked scoreboard held,
+# which then counts as held, not checked (lab-play.test.sh checks the flow has it)
+# shellcheck disable=SC2016
+HELD_GUARD='${!output.options.shown && output.round.cardWaited && !output.round.heldLooked && Date.now() > output.round.closesBy + output.timing.heldLookDelayMs && (output.round.heldLooked = true)}'
 
 maestro_version_check() { # warns (exit 1) unless the Maestro CLI is the version play-rounds.yaml was verified on
   local version; version="$("$MAESTRO" --version 2>/dev/null | tail -1)"
@@ -820,20 +824,24 @@ maestro_version_check() { # warns (exit 1) unless the Maestro CLI is the version
   return 1
 }
 
-scoreboards_checked() { # maestro --test-output-dir: "<checked>/<shown>" scoreboards of its play-rounds.yaml run, or nothing
+scoreboards_checked() { # maestro --test-output-dir: "<checked>/<shown> scoreboards checked, <held> held" of its
+  # play-rounds.yaml run, or nothing
   local f; f="$(find "$1" -name commands.json 2>/dev/null | head -1)"
   [ -n "$f" ] || return 0
-  jq -r --arg guard "$SCOREBOARD_GUARD" '
+  jq -r --arg guard "$SCOREBOARD_GUARD" --arg held "$HELD_GUARD" '
+    def completed($condition): [.[] | select(.command.runFlowCommand.condition.scriptCondition == $condition
+      and .metadata.status == "COMPLETED")] | length;
     [.[] | select(.command.runFlowCommand.condition.scriptCondition == $guard)] as $passes
     | select($passes | length > 0)
-    | "\([$passes[] | select(.metadata.status == "COMPLETED")] | length)/\($passes | length - 1)"' "$f" 2>/dev/null
+    | completed($held) as $held
+    | "\(completed($guard) - $held)/\($passes | length - 1) scoreboards checked, \($held) held"' "$f" 2>/dev/null
 }
 
 print_scoreboards_checked() { # maestro output dir: one line per device run that played rounds
   local run checked
   for run in "$1"/*/; do
     checked="$(scoreboards_checked "$run")"
-    [ -z "$checked" ] || log "$(basename "$run"): $checked scoreboards checked (play-rounds.yaml)"
+    [ -z "$checked" ] || log "$(basename "$run"): $checked (play-rounds.yaml)"
   done
 }
 

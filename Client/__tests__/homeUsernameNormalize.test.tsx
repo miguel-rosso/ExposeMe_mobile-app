@@ -1,0 +1,165 @@
+import React from "react";
+import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { TEST_IDS } from "../app/utils/testIds";
+import { normalizeUsername } from "../app/utils/username";
+
+// EXP-263: the home screen saves and sends the name without stray spaces (iOS autocorrect adds a trailing one), so
+// others never see «Ana  María ». Typing stays free: the name is normalized on Create / Join, not on every keystroke.
+
+let mockStoredName: string | null = null;
+jest.mock("@react-native-async-storage/async-storage", () => {
+  const mock = require("@react-native-async-storage/async-storage/jest/async-storage-mock");
+  mock.getItem = jest.fn(async (k: string) => (k === "hasSeenInitialScreen" ? "true" : k === "username" ? mockStoredName : null));
+  return mock;
+});
+
+// The game context's name on its last render, and its value when the app navigates to the waiting room (which
+// mounts with it and sends it to the server)
+let mockCurrentName: string | null = null;
+let nameAtPush: string | null | undefined;
+const mockPush = jest.fn();
+jest.mock("expo-router", () => ({
+  useRouter: () => ({ push: mockPush, replace: jest.fn() }),
+  useLocalSearchParams: () => ({}),
+  useFocusEffect: () => {},
+}));
+jest.mock("expo-splash-screen", () => ({ preventAutoHideAsync: jest.fn(), hideAsync: jest.fn() }));
+jest.mock("@expo/vector-icons", () => ({ Ionicons: () => null }));
+jest.mock("@react-native-community/hooks", () => ({ useBackHandler: () => {} }));
+jest.mock("@/app/screens/InitialScreen", () => () => null);
+jest.mock("../app/components/LanguageToggle", () => () => null);
+jest.mock("../app/components/LimitedAccessBanner", () => () => null);
+jest.mock("../app/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: 1 }) }));
+jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/en").default }) }));
+const mockGalleryCheck = jest.fn(async () => ({ status: "ok" }));
+jest.mock("@/app/hooks/useGalleryAccessGuard", () => ({
+  useGalleryAccessGuard: () => ({ check: () => mockGalleryCheck() }),
+}));
+jest.mock("@/app/components/modals/GalleryAccessModal", () => () => null);
+// A stateful game context, like the real provider's username / gameCode state
+jest.mock("../app/providers/GameContext", () => {
+  const { useState } = require("react");
+  return {
+    useGameContext: () => {
+      const [username, setUsername] = useState(null);
+      const [gameCode, setGameCode] = useState("K7MQ4X");
+      mockCurrentName = username;
+      return { username, setUsername, gameCode, setGameCode, socket: null, endSocket: () => {} };
+    },
+  };
+});
+
+import Index from "../app/index";
+
+beforeAll(() => jest.spyOn(console, "log").mockImplementation(() => {}));
+afterAll(() => jest.restoreAllMocks());
+beforeEach(() => {
+  mockStoredName = null;
+  nameAtPush = undefined;
+  mockPush.mockReset();
+  mockPush.mockImplementation(() => { nameAtPush = mockCurrentName; });
+  (AsyncStorage.setItem as jest.Mock).mockClear();
+});
+
+const flush = () => act(async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); });
+const byTestId = (root: ReactTestInstance, id: string) => root.findAll((n) => n.props.testID === id, { deep: true });
+const press = async (root: ReactTestInstance, id: string) => {
+  await act(async () => { await byTestId(root, id).find((n) => typeof n.props.onPress === "function")!.props.onPress(); });
+  await flush();
+};
+/**
+ * Presses `id` while the gallery check is still pending, then lets it answer. On a phone that check is a native call,
+ * so React renders what the press changed before it answers; one act() around both would hold that render until the
+ * handler had already navigated.
+ */
+const pressBeforeGalleryAnswers = async (root: ReactTestInstance, id: string) => {
+  let answerGalleryCheck!: () => void;
+  mockGalleryCheck.mockImplementationOnce(() => new Promise((resolve) => {
+    answerGalleryCheck = () => resolve({ status: "ok" });
+  }));
+  let pressed!: Promise<void>;
+  act(() => { pressed = byTestId(root, id).find((n) => typeof n.props.onPress === "function")!.props.onPress(); });
+  await act(async () => { answerGalleryCheck(); await pressed; });
+  await flush();
+};
+const typeName = async (root: ReactTestInstance, text: string) => {
+  const input = byTestId(root, TEST_IDS.usernameInput).find((n) => typeof n.props.onChange === "function")!;
+  await act(async () => { await input.props.onChange({ nativeEvent: { text } }); });
+  await flush();
+};
+const inputValue = (root: ReactTestInstance) =>
+  byTestId(root, TEST_IDS.usernameInput).find((n) => typeof n.props.onChange === "function")!.props.value;
+const storedNames = () =>
+  (AsyncStorage.setItem as jest.Mock).mock.calls.filter(([key]) => key === "username").map(([, value]) => value);
+
+async function mount() {
+  let r!: TestRenderer.ReactTestRenderer;
+  await act(async () => { r = TestRenderer.create(<Index />); });
+  await flush();
+  return r;
+}
+
+describe("normalizeUsername", () => {
+  it.each([
+    ["Ana María ", "Ana María"],
+    ["  Ana  María  ", "Ana María"],
+    ["Ana\u00A0\u00A0María", "Ana María"],
+    ["Ana\tMaría\n", "Ana María"],
+    ["¯\\_(ツ)_/¯", "¯\\_(ツ)_/¯"],
+    ["   ", ""],
+    ["", ""],
+    [null, ""],
+  ])("%j → %j", (typed, expected) => {
+    expect(normalizeUsername(typed)).toBe(expected);
+  });
+});
+
+describe("Home screen name (EXP-263)", () => {
+  it("keeps the space being typed between two words", async () => {
+    const r = await mount();
+    await typeName(r.root, "Ana ");
+    expect(inputValue(r.root)).toBe("Ana ");
+    await typeName(r.root, "Ana  M");
+    expect(inputValue(r.root)).toBe("Ana  M");
+    act(() => r.unmount());
+  });
+
+  it("Create game saves and sends the name without stray spaces", async () => {
+    const r = await mount();
+    await typeName(r.root, " Ana  María ");
+    await pressBeforeGalleryAnswers(r.root, TEST_IDS.createGameButton);
+    expect(mockPush).toHaveBeenCalledWith("/screens/WaitingRoom");
+    expect(nameAtPush).toBe("Ana María");
+    expect(storedNames().at(-1)).toBe("Ana María");
+    act(() => r.unmount());
+  });
+
+  it("Join game saves the name without stray spaces before searching the room", async () => {
+    const r = await mount();
+    await typeName(r.root, "Ana María ");
+    await press(r.root, TEST_IDS.joinGameButton);
+    expect(storedNames().at(-1)).toBe("Ana María");
+    await press(r.root, TEST_IDS.searchRoomButton);
+    expect(mockPush).toHaveBeenCalledWith("/screens/WaitingRoom");
+    expect(nameAtPush).toBe("Ana María");
+    act(() => r.unmount());
+  });
+
+  it("a name made only of spaces counts as empty: no game is created or joined", async () => {
+    const r = await mount();
+    await typeName(r.root, "   ");
+    await press(r.root, TEST_IDS.createGameButton);
+    expect(mockPush).not.toHaveBeenCalled();
+    await press(r.root, TEST_IDS.joinGameButton);
+    expect(byTestId(r.root, TEST_IDS.searchRoomButton)).toHaveLength(0);
+    act(() => r.unmount());
+  });
+
+  it("a name saved with stray spaces by an older version loads normalized", async () => {
+    mockStoredName = "Ana  María ";
+    const r = await mount();
+    expect(inputValue(r.root)).toBe("Ana María");
+    act(() => r.unmount());
+  });
+});

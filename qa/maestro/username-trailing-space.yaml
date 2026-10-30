@@ -1,0 +1,32 @@
+# EXP-263: a name typed with stray spaces (iOS autocorrect adds a trailing one; double spaces between words) reaches
+# the room without them: the device creates a room as "Ana  Maria " and its own lobby row is "Ana Maria".
+# The name is ASCII on purpose: Maestro's inputText can't type non-ASCII characters on Android.
+# No bots needed (the device hosts the room itself), so run it directly rather than through `lab.sh play`:
+#   ~/.maestro/bin/maestro --device <id> test qa/maestro/username-trailing-space.yaml -e METRO_URL=<url-encoded>
+# env: METRO_URL (url-encoded)
+# Selectors are testIDs (Client/app/utils/testIds.ts, lobbyPlayerId = "lobby-player-<name>"), so the flow works in any
+# UI language. Ids are regexes (single-quoted so YAML keeps the backslashes).
+appId: com.socketNull.ExposeMe
+---
+- runFlow: open-app.yaml
+# Clear a previously saved name before typing
+- tapOn:
+    id: "username-clear-button"
+    optional: true
+- tapOn:
+    id: "username-input"
+- inputText: "Ana  Maria "
+- hideKeyboard
+- tapOn:
+    id: "create-game-button"
+- extendedWaitUntil:
+    visible:
+      id: "lobby-game-code"
+    timeout: 30000
+# iOS may turn the typed double space into ". " (its "." shortcut): either way the row has single spaces only
+- assertVisible:
+    id: 'lobby-player-Ana\.? Maria'
+# No lobby row whose name starts or ends with whitespace or has two whitespace characters in a row
+- assertNotVisible:
+    id: 'lobby-player-(\s.*|.*\s|.*\s{2}.*)'
+- takeScreenshot: username-trailing-space

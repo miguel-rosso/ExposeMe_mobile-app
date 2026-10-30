@@ -39,6 +39,7 @@ import { handleHomeBackPress } from "./utils/homeBackPress";
 import { isRoomCode, sanitizeRoomCodeInput } from "./utils/roomCode";
 import { translateServerMessage } from "./utils/serverMessage";
 import { MAX_USERNAME_INPUT_LENGTH } from "./utils/protocolLimits";
+import { normalizeUsername } from "./utils/username";
 import {
   HOME_TOP_ROW_HEIGHT,
   HOME_TOP_ROW_TOP,
@@ -234,7 +235,7 @@ const Index = () => {
     };
 
     const loadUsername = async () => {
-      const storedUsername = await AsyncStorage.getItem("username");
+      const storedUsername = normalizeUsername(await AsyncStorage.getItem("username"));
       if (storedUsername) {
         setUsername(storedUsername);
       }
@@ -284,22 +285,30 @@ const Index = () => {
     await AsyncStorage.setItem("username", text);
   };
 
+  /**
+   * Saves the typed name without stray spaces before Create / Join (normalized here, not while typing, so the space
+   * between two words can still be typed). False, with the input shaken, when the name is blank.
+   */
+  const submitUsername = (): boolean => {
+    const name = normalizeUsername(username);
+    if (!name) {
+      (usernameInputRef.current as any)?.shake?.(500);
+      return false;
+    }
+    if (name !== username) handleUsernameChange(name);
+    return true;
+  };
+
   // Manejar la acción de unirse a un juego
   const handleJoinGame = () => {
-    if (!username) {
-      (usernameInputRef.current as any)?.shake?.(500);
-      return;
-    }
+    if (!submitUsername()) return;
 
     setIsJoiningGame(true);
   };
 
   // Manejar la acción de crear un juego
   const handleCreateGame = async () => {
-    if (!username) {
-      (usernameInputRef.current as any)?.shake?.(500);
-      return;
-    }
+    if (!submitUsername()) return;
 
     if (!(await ensureGalleryAccess())) return;
 

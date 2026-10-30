@@ -228,15 +228,8 @@ describe("WaitingRoom: invite link after a previous game (EXP-206)", () => {
     expect(joins(socket)).toEqual([{ gameCode: OLD_ROOM, username: "bob", rejoinToken: "tok-old" }]);
   });
 
-  it("on a cold start joins the linked room and keeps a stored token for it", async () => {
-    mockStore.set({ token: { gameCode: LINKED_ROOM, token: "tok-linked" } });
-    mockDeepLinkCode = LINKED_ROOM;
-    await mount();
-
-    expect(mockLog).toEqual(["startSocket"]);
-    const socket = await connectNewSocket();
-    expect(joins(socket)).toEqual([{ gameCode: LINKED_ROOM, username: "bob", rejoinToken: "tok-linked" }]);
-  });
+  // A real cold start (nothing in memory, the name only in storage) runs the real GameProvider:
+  // waitingRoomColdInvite.test.tsx (EXP-334)
 
   it("keeps a stored token for the linked room when the known code binds no socket (typed on Home)", async () => {
     mockStore.set({ gameCode: OLD_ROOM, token: { gameCode: LINKED_ROOM, token: "tok-linked" } });

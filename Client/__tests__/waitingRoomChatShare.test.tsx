@@ -25,6 +25,7 @@ jest.mock("../app/providers/GameContext", () => ({
     setPlayersProvider: jest.fn(), socket: mockSocket, username: "alice", setRoundsOfGame: jest.fn(), roundsOfGame: 10,
     plantedPhotoUri: null, setPlantedPhotoUri: jest.fn(), plantPhoto: jest.fn(), saveRejoinToken: jest.fn(),
     getRejoinToken: async () => "tok-123", clearRejoinToken: jest.fn(),
+    takeNewRoomRequest: () => true, // a lobby without a code is the one home's Create game opened
   }),
 }));
 jest.mock("../app/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: null }) }));

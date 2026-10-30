@@ -39,7 +39,7 @@ import { handleHomeBackPress } from "./utils/homeBackPress";
 import { isRoomCode, sanitizeRoomCodeInput } from "./utils/roomCode";
 import { translateServerMessage } from "./utils/serverMessage";
 import { MAX_USERNAME_INPUT_LENGTH } from "./utils/protocolLimits";
-import { normalizeUsername } from "./utils/username";
+import { normalizeUsername, USERNAME_STORAGE_KEY } from "./utils/username";
 import {
   HOME_TOP_ROW_HEIGHT,
   HOME_TOP_ROW_TOP,
@@ -182,9 +182,21 @@ const Index = () => {
   const message = params?.message;
   const [isLoading, setIsLoading] = useState(true);
   const [hasSeenInitialScreen, setHasSeenInitialScreen] = useState(false);
-  const { setUsername, username, setGameCode, gameCode, socket, endSocket } = useGameContext();
+  const {
+    setUsername,
+    username,
+    setGameCode,
+    gameCode,
+    socket,
+    endSocket,
+    pendingInviteCode,
+    setPendingInviteCode,
+    requestNewRoom,
+  } = useGameContext();
   const { backgroundImage } = useBackgroundContext();
   const [isJoiningGame, setIsJoiningGame] = useState(false);
+  // The join panel also asks for the name (opened for an invite link that came without one)
+  const [askNameToJoin, setAskNameToJoin] = useState(false);
   const [shouldAnimateCreateGameButton, setShouldAnimateCreateGameButton] = useState(false);
   const [isFirstMount, setIsFirstMount] = useState(true);
   const gameCodeInputRef = useRef<TextInput>(null);
@@ -234,15 +246,8 @@ const Index = () => {
       setIsLoading(false);
     };
 
-    const loadUsername = async () => {
-      const storedUsername = normalizeUsername(await AsyncStorage.getItem("username"));
-      if (storedUsername) {
-        setUsername(storedUsername);
-      }
-    };
-
+    // The saved name is loaded by GameProvider at app start
     checkInitialScreen();
-    loadUsername();
 
     // The server's reason for sending us home (room-of-game refusal, connection refused, kicked), in our language
     const serverMessage = Array.isArray(message) ? message[0] : message;
@@ -259,6 +264,20 @@ const Index = () => {
         endSocket();
       }
     }, [socket, endSocket])
+  );
+
+  // An invite link opened without a name (the waiting room sent us here): once the home form shows (after the
+  // first-run screen, if any), open the join panel with the link's code, asking for the name there too. On focus
+  // only: on a cold start the stack keeps a hidden home under the waiting room.
+  const showsHomeForm = !isLoading && hasSeenInitialScreen;
+  useFocusEffect(
+    useCallback(() => {
+      if (!showsHomeForm || !pendingInviteCode) return;
+      setPendingInviteCode(null);
+      setGameCode(pendingInviteCode);
+      setAskNameToJoin(true);
+      setIsJoiningGame(true);
+    }, [showsHomeForm, pendingInviteCode])
   );
 
   // useEffect para manejar las animaciones cuando cambia el estado isJoiningGame
@@ -282,7 +301,7 @@ const Index = () => {
   // Manejar el cambio de nombre de usuario
   const handleUsernameChange = async (text: string) => {
     setUsername(text);
-    await AsyncStorage.setItem("username", text);
+    await AsyncStorage.setItem(USERNAME_STORAGE_KEY, text);
   };
 
   /**
@@ -312,13 +331,16 @@ const Index = () => {
 
     if (!(await ensureGalleryAccess())) return;
 
-    setGameCode(null); // Limpiar el gameCode antes de navegar
+    requestNewRoom(); // No room code: the waiting room asks the server for a new room
     console.log("Navigating to WaitingRoom");
     router.push("/screens/WaitingRoom");
   };
 
   // Manejar la acción de buscar una sala
   const handleSearchRoom = async () => {
+    // Already checked by Join game, unless the panel asks for the name itself
+    if (!submitUsername()) return;
+
     if (!isRoomCode(gameCode)) {
       (gameCodeAnimRef.current as any)?.shake?.(500);
       return;
@@ -345,10 +367,48 @@ const Index = () => {
   const handleCancelJoinGame = () => {
     console.log("CANCEL JOIN GAME");
     setIsJoiningGame(false);
+    setAskNameToJoin(false);
     setShouldAnimateCreateGameButton(true);
     (usernameInputRef.current as any)?.slideInDownBounce?.(600);
     (JoingameButtonRef.current as any)?.slideInUpBounce?.(600);
   };
+
+  /** The name field with its clear button: on the home form, and in the join panel when it asks for the name */
+  const renderUsernameInput = (animation: string | undefined) => (
+    <Animatable.View
+      ref={usernameInputRef}
+      animation={animation}
+      duration={600}
+      style={tw`w-full flex items-center justify-center mb-4 relative`}
+    >
+      <TextInput
+        testID={TEST_IDS.usernameInput}
+        accessibilityLabel={t.enterUsername}
+        style={tw`h-15 rounded-2xl  w-full bg-white font-bold text-center text-lg`}
+        placeholder={t.enterUsername}
+        placeholderTextColor="#3333"
+        value={username || ""}
+        onChange={(e) => handleUsernameChange(e.nativeEvent.text)}
+        maxLength={MAX_USERNAME_INPUT_LENGTH}
+      />
+      {username && username.length > 0 && (
+        <View style={tw`absolute flex items-center justify-center h-full absolute right-4`}>
+          <TouchableOpacity
+            testID={TEST_IDS.usernameClearButton}
+            accessibilityRole="button"
+            accessibilityLabel={t.clearUsername}
+            style={tw` justify-center  bg-gray-200 h-8 w-8 rounded-full flex items-center justify-center`}
+            onPress={() => {
+              handleUsernameChange("");
+              Keyboard.dismiss();
+            }}
+          >
+            <Ionicons name="close-outline" size={24} color="black" />
+          </TouchableOpacity>
+        </View>
+      )}
+    </Animatable.View>
+  );
 
   // Mostrar un indicador de carga si los datos iniciales aún se están cargando
   if (isLoading) {
@@ -428,40 +488,7 @@ const Index = () => {
           {/* Mostrar el formulario de ingreso de usuario y botones si no se está uniendo a un juego */}
           {!isJoiningGame && (
             <>
-              {/* Input para ingresar el nombre de usuario */}
-              <Animatable.View
-                ref={usernameInputRef}
-                animation={shouldAnimateCreateGameButton ? "fadeIn" : undefined}
-                duration={600}
-                style={tw`w-full flex items-center justify-center mb-4 relative`}
-              >
-                <TextInput
-                  testID={TEST_IDS.usernameInput}
-                  accessibilityLabel={t.enterUsername}
-                  style={tw`h-15 rounded-2xl  w-full bg-white font-bold text-center text-lg`}
-                  placeholder={t.enterUsername}
-                  placeholderTextColor="#3333"
-                  value={username || ""}
-                  onChange={(e) => handleUsernameChange(e.nativeEvent.text)}
-                  maxLength={MAX_USERNAME_INPUT_LENGTH}
-                />
-                {username && username.length > 0 && (
-                  <View style={tw`absolute flex items-center justify-center h-full absolute right-4`}>
-                    <TouchableOpacity
-                      testID={TEST_IDS.usernameClearButton}
-                      accessibilityRole="button"
-                      accessibilityLabel={t.clearUsername}
-                      style={tw` justify-center  bg-gray-200 h-8 w-8 rounded-full flex items-center justify-center`}
-                      onPress={() => {
-                        handleUsernameChange("");
-                        Keyboard.dismiss();
-                      }}
-                    >
-                      <Ionicons name="close-outline" size={24} color="black" />
-                    </TouchableOpacity>
-                  </View>
-                )}
-              </Animatable.View>
+              {renderUsernameInput(shouldAnimateCreateGameButton ? "fadeIn" : undefined)}
 
               {/* Botón para crear un juego */}
               <Animatable.View
@@ -507,6 +534,7 @@ const Index = () => {
           {isJoiningGame && (
             <TouchableWithoutFeedback accessible={false} onPress={handleCancelJoinGame}>
               <View style={tw`flex-1 w-full justify-center items-center`}>
+                {askNameToJoin && renderUsernameInput("slideInDownBounce")}
                 {/* Input para ingresar el código del juego */}
                 <Animatable.View
                   ref={gameCodeAnimRef}

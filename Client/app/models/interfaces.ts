@@ -177,6 +177,15 @@ export interface GameContextProps {
   socket: Socket | null;
   gameCode: string | null;
   username: string | null;
+  /** The name saved on this device has been read at app start: `username` is now that name, or null if none */
+  usernameLoaded: boolean;
+  /** Room of an invite link opened without a name: home opens its join panel with this code to ask for one */
+  pendingInviteCode: string | null;
+  setPendingInviteCode: (code: string | null) => void;
+  /** Home's Create game: forget the room code and let the next waiting room ask the server for a new room */
+  requestNewRoom: () => void;
+  /** Whether a new room was asked for since the last call (the waiting room takes it once, on opening) */
+  takeNewRoomRequest: () => boolean;
   playersProvider: Player[];
   roundsOfGame: number;
   setGameCode: (code: string | null) => void;

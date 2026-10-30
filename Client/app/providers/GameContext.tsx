@@ -9,6 +9,7 @@ import { PLANT_UPLOAD_RETRY, uploadWithRetry } from "@/app/utils/uploadRetry";
 import { leaveAndClose } from "@/app/utils/leaveRoom";
 import { isFinalRefusal, isPhotoUnavailable, PlantPhotoAck, sendPlantPhoto } from "@/app/utils/plantPhotoAck";
 import type { PhotoAuth } from "@/app/utils/photoAuth";
+import { normalizeUsername, USERNAME_STORAGE_KEY } from "@/app/utils/username";
 import { GameContext } from "./GameContextInstance";
 
 const { SERVER_URL } = getEnvVars();
@@ -20,6 +21,15 @@ interface StoredRejoinToken {
   token: string;
 }
 
+/** The name saved on this device (normalized: older versions saved it with stray spaces), or null if none. */
+const loadStoredUsername = async (): Promise<string | null> => {
+  try {
+    return normalizeUsername(await AsyncStorage.getItem(USERNAME_STORAGE_KEY)) || null;
+  } catch {
+    return null;
+  }
+};
+
 /** Upload of the picked planted photo in progress (one per picked photo at a time). */
 interface PlantRun {
   uri: string;
@@ -30,6 +40,8 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [gameCode, setGameCode] = useState<string | null>(null);
   const [username, setUsername] = useState<string | null>(null);
+  const [usernameLoaded, setUsernameLoaded] = useState(false);
+  const [pendingInviteCode, setPendingInviteCode] = useState<string | null>(null);
   const [playersProvider, setPlayersProvider] = useState<Player[]>([]);
   const [roundsOfGame, setRoundsOfGame] = useState<number>(5);
   // Photo picked in the lobby to plant in this game (dropped when the game/room ends), and whether the server has it
@@ -142,6 +154,34 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     if (leaving) leaveAndClose(leaving);
   };
 
+  // ── Stored name ──
+
+  // Read once at app start, for every screen: an invite link that cold-starts the app opens the waiting room, which
+  // needs the name to join, with home never shown. A name typed meanwhile wins.
+  useEffect(() => {
+    loadStoredUsername().then((stored) => {
+      if (stored) setUsername((current) => current ?? stored);
+      setUsernameLoaded(true);
+    });
+  }, []);
+
+  // ── New room ──
+
+  // In memory only (a link can't forge it): a waiting room opened without a room code asks the server for a new room
+  // only when home's Create game opened it
+  const newRoomRequestedRef = useRef(false);
+
+  const requestNewRoom = () => {
+    newRoomRequestedRef.current = true;
+    setGameCode(null);
+  };
+
+  const takeNewRoomRequest = (): boolean => {
+    const requested = newRoomRequestedRef.current;
+    newRoomRequestedRef.current = false;
+    return requested;
+  };
+
   // Handle app going to background/foreground
   useEffect(() => {
     const sub = AppState.addEventListener("change", (state) => {
@@ -241,6 +281,11 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
         socket,
         gameCode,
         username,
+        usernameLoaded,
+        pendingInviteCode,
+        setPendingInviteCode,
+        requestNewRoom,
+        takeNewRoomRequest,
         playersProvider,
         roundsOfGame,
         startSocket,

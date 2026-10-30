@@ -10,3 +10,6 @@ const WHITESPACE_RUN_RE = /\s+/g;
  */
 export const normalizeUsername = (name: string | null | undefined): string =>
   (name ?? "").replace(WHITESPACE_RUN_RE, " ").trim();
+
+/** AsyncStorage key of the name typed on the home screen, kept for the next launch */
+export const USERNAME_STORAGE_KEY = "username";

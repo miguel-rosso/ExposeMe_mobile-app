@@ -1,0 +1,50 @@
+# EXP-334: an invite link opened by a player with no saved name (fresh install). Before the fix the waiting room
+# waited forever for a name to join with ("Loading room…"); now it sends the player home with the join panel open,
+# the link's code filled in and the name field in it, so they only type a name and tap Search.
+# The app starts with clearState (no saved name) and gets past the first-run screen, then opens the link from home.
+# A link that cold-starts the app can't be driven here: the dev client always starts on its own launch link (see
+# dev-client-boot.yaml) and drops the app's. The no-name path is the same either way (the stored-name cold start is
+# covered by Client/__tests__/waitingRoomColdInvite.test.tsx).
+# Run with ONE bot (the host, so the room exists and starts once the device joins) and ONE device:
+#   qa/lab/lab.sh play --flow invite-link-no-name --bots 1 --devices <label>
+# env: GAME_CODE, USERNAME, METRO_URL (url-encoded)
+# Selectors are testIDs (Client/app/utils/testIds.ts), except the iOS link alert, matched in both UI languages.
+appId: com.socketNull.ExposeMe
+---
+- runFlow: open-app.yaml
+# The invite link the server's /join/<code> page redirects to (Server/routes/uploadRoutes.ts)
+- openLink: "exposeme://screens/WaitingRoom?code=${GAME_CODE}"
+# iOS 26+/Xcode 27 simulators confirm custom-scheme links with a system alert
+- runFlow:
+    when:
+      platform: iOS
+      visible: "Open in Expose Me\\?|¿Abrir en Expose Me\\?"
+    commands:
+      - tapOn: "Open|Abrir"
+# Home's join panel with the link's code, asking for the name (not the endless lobby spinner)
+- extendedWaitUntil:
+    visible:
+      id: "game-code-input"
+      text: "${GAME_CODE}"
+    timeout: 30000
+- assertNotVisible:
+    id: "lobby-loading"
+- assertVisible:
+    id: "search-room-button"
+- takeScreenshot: invite-no-name-panel-${USERNAME}
+- tapOn:
+    id: "username-input"
+- inputText: ${USERNAME}
+# Submit instead of hideKeyboard (see join-room.yaml); a tap outside the fields would close the join panel
+- pressKey: Enter
+- assertVisible:
+    id: "username-input"
+    text: "${USERNAME}"
+- tapOn:
+    id: "search-room-button"
+# In the linked room's lobby (or its game, if the host bot already started it)
+- extendedWaitUntil:
+    visible:
+      id: "lobby-waiting|start-game-button|game-waiting-ready|game-waiting-photo|player-option-.*"
+    timeout: 30000
+- takeScreenshot: invite-no-name-lobby-${USERNAME}

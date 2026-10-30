@@ -15,6 +15,10 @@ import { hideDevToolsButton } from "./utils/devToolsButton";
 SplashScreen.preventAutoHideAsync();
 hideDevToolsButton();
 
+// Home always sits at the bottom of the stack: a link that cold-starts the app (an invite to screens/WaitingRoom)
+// opens on top of it, so Back and dismissTo("/") reach home instead of closing the app
+export const unstable_settings = { anchor: "index" };
+
 export default function RootLayout() {
   const [loaded] = useFonts({
     IconFont: require("@/assets/fonts/b.otf"),

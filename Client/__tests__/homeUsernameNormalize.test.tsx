@@ -7,10 +7,9 @@ import { normalizeUsername } from "../app/utils/username";
 // EXP-263: the home screen saves and sends the name without stray spaces (iOS autocorrect adds a trailing one), so
 // others never see «Ana  María ». Typing stays free: the name is normalized on Create / Join, not on every keystroke.
 
-let mockStoredName: string | null = null;
 jest.mock("@react-native-async-storage/async-storage", () => {
   const mock = require("@react-native-async-storage/async-storage/jest/async-storage-mock");
-  mock.getItem = jest.fn(async (k: string) => (k === "hasSeenInitialScreen" ? "true" : k === "username" ? mockStoredName : null));
+  mock.getItem = jest.fn(async (k: string) => (k === "hasSeenInitialScreen" ? "true" : null));
   return mock;
 });
 
@@ -45,7 +44,8 @@ jest.mock("../app/providers/GameContext", () => {
       const [username, setUsername] = useState(null);
       const [gameCode, setGameCode] = useState("K7MQ4X");
       mockCurrentName = username;
-      return { username, setUsername, gameCode, setGameCode, socket: null, endSocket: () => {} };
+      const requestNewRoom = () => setGameCode(null);
+      return { username, setUsername, gameCode, setGameCode, requestNewRoom, socket: null, endSocket: () => {} };
     },
   };
 });
@@ -55,7 +55,6 @@ import Index from "../app/index";
 beforeAll(() => jest.spyOn(console, "log").mockImplementation(() => {}));
 afterAll(() => jest.restoreAllMocks());
 beforeEach(() => {
-  mockStoredName = null;
   nameAtPush = undefined;
   mockPush.mockReset();
   mockPush.mockImplementation(() => { nameAtPush = mockCurrentName; });
@@ -156,10 +155,6 @@ describe("Home screen name (EXP-263)", () => {
     act(() => r.unmount());
   });
 
-  it("a name saved with stray spaces by an older version loads normalized", async () => {
-    mockStoredName = "Ana  María ";
-    const r = await mount();
-    expect(inputValue(r.root)).toBe("Ana María");
-    act(() => r.unmount());
-  });
+  // A name saved with stray spaces by an older version loads normalized: GameProvider loads it at app start
+  // (waitingRoomColdInvite.test.tsx, EXP-334)
 });

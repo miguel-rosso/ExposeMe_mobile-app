@@ -41,7 +41,8 @@ import { TEST_IDS, lobbyPlayerId, lobbyPlayerOfflineId, roundsOptionId } from ".
 import { isHostIn, withConnection, withHost, withoutPlayer } from "../utils/roomPlayers";
 import { attachHandlers, SocketHandlers } from "../utils/socketHandlers";
 import { emitWhileConnected } from "../utils/socketEmit";
-import { parseRoomCodeParam } from "../utils/roomCode";
+import { isRoomCode, parseRoomCodeParam } from "../utils/roomCode";
+import { normalizeUsername } from "../utils/username";
 import { KICKED_BY_HOST_MESSAGE } from "../utils/serverMessage";
 import { CHAT_COOLDOWN_MS, MAX_CHAT_LENGTH, ROUND_OPTIONS } from "../utils/protocolLimits";
 import { dismissKeyboardOnBackPress } from "../utils/keyboardBackPress";
@@ -72,6 +73,9 @@ const WaitingRoom = ({}) => {
     setPlayersProvider,
     socket,
     username,
+    usernameLoaded,
+    setPendingInviteCode,
+    takeNewRoomRequest,
     setRoundsOfGame,
     roundsOfGame,
     plantedPhotoUri,
@@ -262,10 +266,24 @@ const WaitingRoom = ({}) => {
     bindingRef.current = null;
   };
 
+  // Set once this screen leaves for home without joining: nothing may join from it any more
+  const sentHomeRef = useRef(false);
+
+  /** Leave for home without joining; `inviteCode` makes home open its join panel with that code, asking for a name. */
+  const sendHome = (inviteCode: string | null) => {
+    if (sentHomeRef.current) return;
+    sentHomeRef.current = true;
+    setPendingInviteCode(inviteCode);
+    endSocket();
+    navigation.dismissTo("/");
+  };
+
   // On mount, and whenever an invite deep link (re)opens this screen: a linked room always wins over the code left
   // from a previous game. If the socket is still bound to that room, leave it first; a code without a socket (e.g.
   // typed on Home) binds nothing, and its stored rejoin token may well belong to the linked room, so it is kept.
-  // A malformed code is ignored. Then start (or reuse) the socket.
+  // A malformed code is ignored. With no room code at all, the join would ask the server for a new room (it creates
+  // one for a null/empty code): only home's Create game may do that, anything else (e.g. a link without a valid
+  // code) goes home. Then start (or reuse) the socket.
   useEffect(() => {
     const linkedCode = parseRoomCodeParam(deepLinkCode);
     if (linkedCode && linkedCode !== gameCodeRef.current) {
@@ -278,13 +296,16 @@ const WaitingRoom = ({}) => {
       // Set synchronously: the join below may run in this same commit, before the state update lands
       gameCodeRef.current = linkedCode;
       setGameCode(linkedCode);
+    } else if (!linkedCode && !gameCodeRef.current && !takeNewRoomRequest()) {
+      sendHome(null);
+      return;
     }
     startSocket();
   }, [deepLinkCode]);
 
   // Single effect: setup listeners, join room, handle reconnect
   useEffect(() => {
-    if (!socket || !username || socket === leftSocketRef.current) return;
+    if (!socket || !username || socket === leftSocketRef.current || sentHomeRef.current) return;
 
     const doJoin = async () => {
       const code = gameCodeRef.current;
@@ -403,6 +424,14 @@ const WaitingRoom = ({}) => {
       }
     };
   }, [socket, username]);
+
+  // Opened without a name (an invite link on a fresh install): nothing can join, so home asks for one with this
+  // room's join panel open and its code filled in. Until the saved name is read, the loading overlay stays.
+  useEffect(() => {
+    if (!usernameLoaded || normalizeUsername(username)) return;
+    const code = gameCodeRef.current;
+    sendHome(isRoomCode(code) ? code : null);
+  }, [usernameLoaded, username]);
 
   const handleLeaveGame = () => {
     leaveRoom();

@@ -28,10 +28,12 @@ jest.mock("../app/components/LanguageToggle", () => () => null);
 jest.mock("../app/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: 1 }) }));
 jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/en").default }) }));
 const mockSetGameCode = jest.fn();
+const mockRequestNewRoom = jest.fn();
 let mockGameCode: string | null = null;
 jest.mock("../app/providers/GameContext", () => ({
   useGameContext: () => ({
     username: "ana", setUsername: jest.fn(), gameCode: mockGameCode, setGameCode: mockSetGameCode, socket: null, endSocket: jest.fn(),
+    requestNewRoom: mockRequestNewRoom,
   }),
 }));
 
@@ -79,6 +81,7 @@ beforeEach(() => {
     return { remove: () => { appStateHandlers = appStateHandlers.filter((x) => x !== h); } };
   }) as typeof AppState.addEventListener);
   mockPush.mockClear();
+  mockRequestNewRoom.mockClear();
   mockReplace.mockClear();
   mockRequest.mockClear();
   mockPicker.mockClear();
@@ -113,6 +116,9 @@ describe("Home Create/Join gallery gate (EXP-118)", () => {
     const r = await mount();
     await press(r.root, TEST_IDS.createGameButton);
     expect(mockPush).toHaveBeenCalledWith("/screens/WaitingRoom");
+    // EXP-334: the waiting room only asks the server for a new room when Create opened it
+    expect(mockRequestNewRoom).toHaveBeenCalledTimes(1);
+    expect(mockRequestNewRoom.mock.invocationCallOrder[0]).toBeLessThan(mockPush.mock.invocationCallOrder[0]);
     expect(navigatedTo("SettingsInstructions")).toBe(false);
     expect(has(r.root, TEST_IDS.galleryAccessModal)).toBe(false);
     act(() => r.unmount());
@@ -161,6 +167,7 @@ describe("Home Create/Join gallery gate (EXP-118)", () => {
     mockPerm = { status: "granted", canAskAgain: true, accessPrivileges: "limited" };
     const r = await mount();
     await press(r.root, TEST_IDS.createGameButton);
+    expect(mockRequestNewRoom).not.toHaveBeenCalled(); // blocked: no room asked for
     await press(r.root, TEST_IDS.gallerySelectPhotosButton);
     expect(has(r.root, TEST_IDS.galleryAccessModal)).toBe(true);
     mockPhotos.push({ id: "p1", mediaType: "image" });

@@ -13,17 +13,19 @@ import { Keyboard } from "react-native";
 
 const mockSocket = new FakeSocket();
 const mockReplace = jest.fn();
+const mockDismissTo = jest.fn();
 const mockCtx = {
   startSocket: jest.fn(), endSocket: jest.fn(), leaveRoom: jest.fn(), setGameCode: jest.fn(), setPlayersProvider: jest.fn(),
   setRoundsOfGame: jest.fn(), setPlantedPhotoUri: jest.fn(), plantPhoto: jest.fn(), saveRejoinToken: jest.fn(),
   getRejoinToken: jest.fn(async (..._a: unknown[]) => "tok-123" as string | null), clearRejoinToken: jest.fn(),
+  setPendingInviteCode: jest.fn(), takeNewRoomRequest: jest.fn(() => false),
 };
 const mockClose: { onPress?: () => void } = {};
 /** Context game code and route params (invite deep link), per test */
 const mockRoute: { gameCode: string | null; params: { code?: string | string[] } } = { gameCode: "K7MQ4X", params: {} };
 
 jest.mock("expo-router", () => ({
-  useRouter: () => ({ replace: mockReplace }),
+  useRouter: () => ({ replace: mockReplace, dismissTo: mockDismissTo }),
   useLocalSearchParams: () => mockRoute.params,
 }));
 jest.mock("../app/providers/GameContext", () => ({
@@ -74,6 +76,7 @@ beforeEach(() => {
   mockSocket.emitted = [];
   mockSocket.connected = true;
   mockReplace.mockClear();
+  mockDismissTo.mockClear();
   Object.values(mockCtx).forEach((f) => f.mockClear());
   mockRoute.gameCode = "K7MQ4X";
   mockRoute.params = {};
@@ -301,11 +304,15 @@ describe("WaitingRoom: room code (EXP-198)", () => {
     act(() => r.unmount());
   });
 
-  it("ignores a malformed deep link code", async () => {
+  it("ignores a malformed deep link code: with no room known it goes home, never creating a room (EXP-334)", async () => {
     mockRoute.gameCode = null;
     mockRoute.params = { code: "12345O" };
     const r = await mount();
     expect(mockCtx.setGameCode).not.toHaveBeenCalled();
+    expect(mockCtx.takeNewRoomRequest).toHaveBeenCalled();
+    expect(mockDismissTo).toHaveBeenCalledWith("/");
+    expect(mockCtx.startSocket).not.toHaveBeenCalled();
+    expect(emitted("join-create-game")).toEqual([]);
     act(() => r.unmount());
   });
 });

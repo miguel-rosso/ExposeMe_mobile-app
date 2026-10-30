@@ -56,7 +56,7 @@ export default function RootLayout() {
             <Stack.Screen name="screens/WaitingRoom" options={{ headerShown: false }} />
             <Stack.Screen name="screens/InitialScreen" options={{ headerShown: false }} />
             <Stack.Screen name="screens/SettingsInstructionsScreen" options={{ headerShown: false }} />
-            <Stack.Screen name="screens/GameScreen" options={{ headerShown: false }} />
+            <Stack.Screen name="screens/GameScreen" options={{ headerShown: false, gestureEnabled: false }} />
           </Stack>
         </BackgroundProvider>
       </GameProvider>

@@ -1,0 +1,69 @@
+# EXP-335: the back swipe never takes the player out of a game. On iOS the edge swipe (and, on iOS 26+, a swipe from
+# anywhere, e.g. over the photo) used to pop GameScreen back home, closing the socket: the server paused the game.
+# On Android the back gesture and the back key go to GameScreen's hardwareBackPress handler, which swallows them.
+# The guarantee comes from Client/__tests__/gameScreenSwipeBack.test.tsx (GameScreen's route has gestureEnabled:
+# false) and react-native-screens' gesture delegate (RNSScreenStack.mm: a top screen with gestureEnabled=NO rejects
+# the edge, iOS 26 content and full-screen pop recognizers). This flow is a device smoke test on top of that.
+# Run with ONE bot and ONE device:
+#   qa/lab/lab.sh play --flow game-swipe-back --bots 1 --devices <label>
+# env: GAME_CODE, USERNAME, METRO_URL (url-encoded)
+# Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
+appId: com.socketNull.ExposeMe
+---
+- runFlow: open-app.yaml
+# Positive control (iOS): the same edge swipe pops the photo explorer, which keeps the gesture, back home. Without it
+# the game checks below would also pass if the synthetic drag never triggered a pop. iOS only: on Android a synthetic
+# edge drag is the system back gesture only with gesture navigation, so Android checks the back key in the game instead
+# (its explorer back is covered by own-photos-back.yaml).
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - tapOn:
+          id: "own-photos-button"
+      - extendedWaitUntil:
+          visible:
+            id: "close-button"
+          timeout: 10000
+      - swipe:
+          start: 1%, 50%
+          end: 90%, 50%
+          duration: 400
+      - extendedWaitUntil:
+          visible:
+            id: "create-game-button"
+          timeout: 10000
+      - assertNotVisible:
+          id: "close-button"
+- runFlow: join-room.yaml
+- runFlow: wait-game-start.yaml
+# Answering phase: the photo and the options are on screen
+- extendedWaitUntil:
+    visible:
+      id: "player-option-.*"
+    timeout: 180000
+# Edge swipe (every iOS version, Android back gesture with gesture navigation), then a swipe over the photo (iOS 26+
+# full-screen pop)
+- swipe:
+    start: 1%, 50%
+    end: 90%, 50%
+    duration: 400
+- swipe:
+    start: 30%, 40%
+    end: 95%, 40%
+    duration: 400
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - pressKey: Back
+- takeScreenshot: swipe-back-${USERNAME}
+# Still in the game (whatever phase it reached), not home, and the server did not see a drop
+- assertNotVisible:
+    id: "create-game-button|join-game-button"
+- extendedWaitUntil:
+    visible:
+      id: "player-option-.*|score-modal|game-waiting-ready|game-waiting-photo|round-progress"
+    timeout: 5000
+- assertNotVisible:
+    id: "paused-modal"

@@ -144,6 +144,42 @@ describe("game start removes disconnected players (EXP-129)", () => {
     expect(events("player-left")).toHaveLength(0);
     expect(events("new-host")).toHaveLength(0);
   });
+
+  // EXP-213: the start cleanup shares GameEngine.removePlayer with leave and kick, but tells the room only who is
+  // removed: no lobby review (player-connection, new-host for a gone host) and no ready/pause logic
+  it("tells the room each removal (new-host before player-left), then game-started, and nothing else", () => {
+    const room = lobby(["alice", "bob", "carol", "dave"]);
+    rm.markDisconnected(room.gameCode, "alice", "sock-alice");
+    rm.markDisconnected(room.gameCode, "carol", "sock-carol");
+    vi.advanceTimersByTime(DISCONNECT_GRACE);
+
+    expect(engine.startGame(room)).toBe(true);
+
+    expect(names(room)).toEqual(["bob", "dave"]);
+    expect(emits.map((e) => [e.event, e.target])).toEqual([
+      ["new-host", room.gameCode],
+      ["player-left", room.gameCode],
+      ["player-left", room.gameCode],
+      ["game-started", room.gameCode],
+    ]);
+    expect(emits[0].args[0]).toMatchObject({ username: "bob", isHost: true });
+    expect(emits.slice(1, 3).map((e) => e.args[0])).toEqual(["alice", "carol"]);
+  });
+
+  it("cancels a pending lobby review: a player still within the grace is never announced as gone", () => {
+    const room = lobby(["alice", "bob", "carol"]);
+    rm.markDisconnected(room.gameCode, "carol", "sock-carol");
+    engine.onConnectionChange(room); // lobby review: wakes up when carol's grace runs out
+    const startAfter = DISCONNECT_GRACE / 2;
+    vi.advanceTimersByTime(startAfter);
+
+    expect(engine.startGame(room)).toBe(true);
+    vi.advanceTimersByTime(DISCONNECT_GRACE - startAfter); // past carol's grace, before the ready timeout
+
+    expect(names(room)).toEqual(["alice", "bob", "carol"]);
+    expect(events("player-connection")).toHaveLength(0);
+    expect(emits.map((e) => e.event)).toEqual(["game-started"]);
+  });
 });
 
 describe("no guess is stored as an empty string (EXP-132)", () => {

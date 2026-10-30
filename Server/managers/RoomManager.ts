@@ -27,6 +27,11 @@ export function isAllowedRounds(rounds: unknown, env: NodeJS.ProcessEnv = proces
   return rounds === QA_ROUNDS && env.ALLOW_QA_ROUNDS === "1";
 }
 
+/** RoomManager.removePlayer: the removed player, who got the host role from them, and whether the room is now empty. */
+export type RemovePlayerResult =
+  | { removed: false; player?: undefined; newHost?: undefined; isEmpty: false }
+  | { removed: true; player: Player; newHost?: Player; isEmpty: boolean };
+
 export class RoomManager {
   private rooms = new Map<string, Room>();
   private roomTimeouts = new Map<string, NodeJS.Timeout>();
@@ -134,7 +139,12 @@ export class RoomManager {
     return this.rooms.get(gameCode);
   }
 
-  removePlayer(gameCode: string, username: string): { removed: boolean; player?: Player; newHost?: Player; isEmpty: boolean } {
+  /**
+   * Takes `username` out of the room: their uploads are released, a removed host hands the role to the first connected
+   * player (`newHost`), and the room is deleted later if nobody connected is left (reset right away when empty).
+   * Telling the room is up to the caller (GameEngine.removePlayer).
+   */
+  removePlayer(gameCode: string, username: string): RemovePlayerResult {
     const room = this.rooms.get(gameCode);
     if (!room) return { removed: false, isEmpty: false };
     const idx = room.players.findIndex((p) => p.username === username);
@@ -179,17 +189,6 @@ export class RoomManager {
     if (host) host.isHost = false;
     next.isHost = true;
     return next;
-  }
-
-  /** Host kick (remove-player): drops the player without host handover (the host is the one kicking). */
-  removePlayerByUsername(gameCode: string, username: string): Player | undefined {
-    const room = this.rooms.get(gameCode);
-    if (!room) return undefined;
-    const idx = room.players.findIndex((p) => p.username === username);
-    if (idx === -1) return undefined;
-    const player = room.players.splice(idx, 1)[0];
-    this.releasePlayerUploads(room, player);
-    return player;
   }
 
   /** A player left / was removed: their photos go, except the one on screen this round (see clearShownPhoto). */

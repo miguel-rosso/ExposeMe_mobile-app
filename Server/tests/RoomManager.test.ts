@@ -213,17 +213,6 @@ describe("removePlayer", () => {
   });
 });
 
-describe("removePlayerByUsername", () => {
-  it("removes the matching player and returns it", () => {
-    const room = rm.createRoom("alice", "sock-alice");
-    rm.joinRoom(room.gameCode, "bob", "sock-bob");
-    expect(rm.removePlayerByUsername(room.gameCode, "bob")!.username).toBe("bob");
-    expect(room.players.map((p) => p.username)).toEqual(["alice"]);
-    expect(rm.removePlayerByUsername(room.gameCode, "bob")).toBeUndefined();
-    expect(rm.removePlayerByUsername("000000", "alice")).toBeUndefined();
-  });
-});
-
 describe("misc", () => {
   it("setRounds updates an existing room only", () => {
     const room = rm.createRoom("alice", "sock-alice");

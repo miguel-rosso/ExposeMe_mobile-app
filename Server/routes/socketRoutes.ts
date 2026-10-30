@@ -146,17 +146,9 @@ function leaveBinding(socket: Socket, gameCode: string, username: string, owned:
   const room = roomManager.getRoom(gameCode);
   if (owned && room) {
     releaseHoldOf(room, socket.id);
-
-    console.log(`[${gameCode}] ${username} left voluntarily`);
-    const result = roomManager.removePlayer(gameCode, username);
-    if (result.removed) {
-      if (result.newHost) io.to(gameCode).emit("new-host", roomManager.publicPlayer(result.newHost, room));
-      if (!result.isEmpty) io.to(gameCode).emit("player-left", username);
-      gameEngine.checkReady(room); // ready phase: the others may all be ready now
-      gameEngine.onConnectionChange(room); // mid-game: pause (or end) if fewer than 2 remain connected
-    }
+    gameEngine.removePlayer(room, username, "left");
   }
-  socket.leave(gameCode);
+  socket.leave(gameCode); // after the removal: the leaver hears it too
 }
 
 /**
@@ -496,15 +488,12 @@ io.on("connection", (socket: Socket) => {
       if (!s || !s.player.isHost || s.room.started) return;
       if (typeof data?.username !== "string" || data.username === s.player.username) return;
       const { room } = s;
-      const removed = roomManager.removePlayerByUsername(room.gameCode, data.username);
-      if (removed) {
-        io.to(room.gameCode).emit("player-removed", roomManager.publicPlayer(removed, room));
-        // The kicked player's current socket and any other socket still bound to them in this room
-        const target = io.sockets.sockets.get(removed.socketId);
+      // Cut off the kicked player's current socket and any other socket still bound to them in this room
+      gameEngine.removePlayer(room, data.username, "kicked", (kicked) => {
+        const target = io.sockets.sockets.get(kicked.socketId);
         if (target) evictSocket(target, room.gameCode);
-        socketsOf(room.gameCode, removed.username).forEach((old) => evictSocket(old, room.gameCode));
-        gameEngine.onConnectionChange(room); // lobby review; the kicked player's waits are forgotten
-      }
+        socketsOf(room.gameCode, kicked.username).forEach((old) => evictSocket(old, room.gameCode));
+      });
     } catch (e) { console.error("remove-player error:", e); }
   });
 

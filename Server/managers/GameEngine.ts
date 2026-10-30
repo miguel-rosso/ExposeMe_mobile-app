@@ -61,6 +61,14 @@ const PHASE_EMIT_ROUNDS_KEPT = 2;
 /** Server clock of each phase broadcast in one round; undefined for a phase broadcast more than once in it */
 type RoundPhaseEmits = Map<RoundPhase, number | undefined>;
 
+/** Why a player is taken out of their room (see GameEngine.removePlayer). */
+export type RemovalReason = "left" | "kicked" | "gone";
+const REMOVAL_LOG: Record<RemovalReason, string> = {
+  left: "left voluntarily",
+  kicked: "removed by the host",
+  gone: "removed at game start (disconnected)",
+};
+
 /**
  * A planted round's photo wait. `shown`/`shownSince` drive the countdown clients see: a normal 15 s photo wait,
  * frozen while paused (`shownSince` null), independent of the hidden real delay before round-start.
@@ -167,13 +175,42 @@ export class GameEngine {
   private removeDisconnected(room: Room): void {
     if (room._lobbyTimer) { clearTimeout(room._lobbyTimer); room._lobbyTimer = null; }
     for (const ghost of room.players.filter((p) => this.roomManager.isGone(p))) {
-      const result = this.roomManager.removePlayer(room.gameCode, ghost.username);
-      if (!result.removed) continue;
-      console.log(`[${room.gameCode}] ${ghost.username} removed at game start (disconnected)`);
-      if (result.newHost) this.io.to(room.gameCode).emit("new-host", this.roomManager.publicPlayer(result.newHost, room));
-      if (!result.isEmpty) this.io.to(room.gameCode).emit("player-left", ghost.username);
+      this.removePlayer(room, ghost.username, "gone");
     }
     this.forgetLeaversWaits(room);
+  }
+
+  // ── Removing players ─────────────────────────────────
+
+  /**
+   * Takes `username` out of the room (uploads released, a removed host's role handed over, the room deleted later if
+   * nobody connected is left) and tells the room, by `reason`:
+   * - "left" (leave-room, or a socket joining another room): `new-host` if the host left, then `player-left`; then the
+   *   game reviews who is left (ready phase: start if all are ready; mid-game: pause or end; lobby: reviewLobby).
+   * - "kicked" (the host's remove-player, lobby only): `player-removed`; `detach` cuts the kicked player's sockets off
+   *   before that review, so the removal is the last thing they hear. The host is never kicked (refused), so a kick
+   *   never hands the host role over.
+   * - "gone" (start-game cleanup): `new-host` / `player-left` like a leave, but no review: the game is starting.
+   * Returns the removed player, or undefined if `username` was not in the room (or is the host, for a kick).
+   */
+  removePlayer(room: Room, username: string, reason: RemovalReason, detach?: (removed: Player) => void): Player | undefined {
+    if (reason === "kicked" && this.roomManager.getPlayer(room.gameCode, username)?.isHost) return undefined;
+    const result = this.roomManager.removePlayer(room.gameCode, username);
+    if (!result.removed) return undefined;
+    const { player, newHost, isEmpty } = result;
+    console.log(`[${room.gameCode}] ${username} ${REMOVAL_LOG[reason]}`);
+    if (reason === "kicked") {
+      this.io.to(room.gameCode).emit("player-removed", this.roomManager.publicPlayer(player, room));
+    } else {
+      if (newHost) this.io.to(room.gameCode).emit("new-host", this.roomManager.publicPlayer(newHost, room));
+      if (!isEmpty) this.io.to(room.gameCode).emit("player-left", username);
+    }
+    detach?.(player);
+    if (reason !== "gone") {
+      this.checkReady(room); // ready phase: the others may all be ready now
+      this.onConnectionChange(room); // mid-game: pause (or end) if fewer than 2 remain connected; lobby: review
+    }
+    return player;
   }
 
   /** im-ready: only counts between game-started and the first round (phase is null until then). */

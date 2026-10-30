@@ -201,10 +201,25 @@ describe("answers of the round in play stay hidden until round-scores", () => {
 });
 
 describe("remove-player by username", () => {
-  it("removePlayerByUsername removes the player and returns it", () => {
-    const removed = rm.removePlayerByUsername(room.gameCode, "carol");
-    expect(removed?.username).toBe("carol");
+  it("a kick removes the player, returns it and sends player-removed as a public player", () => {
+    const kicked = room.players.find((p) => p.username === "carol")!;
+    const detach = vi.fn();
+    expect(engine.removePlayer(room, "carol", "kicked", detach)).toBe(kicked);
     expect(room.players.map((p) => p.username)).toEqual(["alice", "bob"]);
-    expect(rm.removePlayerByUsername(room.gameCode, "carol")).toBeUndefined();
+    expect(detach).toHaveBeenCalledWith(kicked);
+    const sent = emits.filter((e) => e.event === "player-removed");
+    expect(sent).toHaveLength(1);
+    expect(Object.keys(sent[0].args[0] as object).sort()).toEqual(PUBLIC_KEYS);
+    expectNoSecrets(sent[0].args[0]);
+    expect(engine.removePlayer(room, "carol", "kicked", detach)).toBeUndefined();
+    expect(detach).toHaveBeenCalledTimes(1);
+  });
+
+  it("the host is never kicked: refused, nothing removed and nothing sent (a kick never hands the host over)", () => {
+    const detach = vi.fn();
+    expect(engine.removePlayer(room, "alice", "kicked", detach)).toBeUndefined();
+    expect(room.players.map((p) => [p.username, p.isHost])).toEqual([["alice", true], ["bob", false], ["carol", false]]);
+    expect(detach).not.toHaveBeenCalled();
+    expect(emits).toEqual([]);
   });
 });

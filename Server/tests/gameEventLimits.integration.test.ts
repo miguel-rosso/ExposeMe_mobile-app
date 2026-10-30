@@ -129,7 +129,7 @@ describe("per-socket game event limits (EXP-062)", () => {
 
   it("remove-player", async () => {
     const { host, barrier } = await lobby();
-    const removePlayer = vi.spyOn(roomManager, "removePlayerByUsername").mockReturnValue(undefined);
+    const removePlayer = vi.spyOn(GameEngine.prototype, "removePlayer").mockReturnValue(undefined);
     await expectFloodCapped(host, "remove-player", { username: "ghost" }, removePlayer, barrier);
   });
 

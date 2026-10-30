@@ -19,6 +19,19 @@ export const DISCONNECT_GRACE = 15_000;
 export const ROUND_OPTIONS = [10, 15, 20];
 /** QA-only short game (EXP-100): accepted only when the server runs with ALLOW_QA_ROUNDS=1; never offered in the app. */
 export const QA_ROUNDS = 3;
+/**
+ * Rejoin tokens of kicked players remembered per room (a full room twice over); past it the oldest is forgotten, and a
+ * join carrying that one enters as a new player again.
+ */
+export const MAX_REVOKED_TOKENS_PER_ROOM = 2 * MAX_PLAYERS_PER_ROOM;
+/** Random bytes in a rejoin token, sent as base64url (no padding): REJOIN_TOKEN_SHAPE's 24 characters. */
+const REJOIN_TOKEN_BYTES = 18;
+const REJOIN_TOKEN_SHAPE = /^[A-Za-z0-9_-]{24}$/;
+
+/** `value` if it can be a rejoin token, else undefined: anything else is no token, never copied nor compared. */
+function asRejoinToken(value: unknown): string | undefined {
+  return typeof value === "string" && REJOIN_TOKEN_SHAPE.test(value) ? value : undefined;
+}
 
 /** Whether `rounds` is a valid set-rounds value. The env is read per call, so the QA flag is off unless set. */
 export function isAllowedRounds(rounds: unknown, env: NodeJS.ProcessEnv = process.env): rounds is number {
@@ -37,6 +50,8 @@ export class RoomManager {
   private roomTimeouts = new Map<string, NodeJS.Timeout>();
   // Name keys per player, computed once: a join only computes the new name's keys (EXP-032)
   private playerNameKeys = new WeakMap<Player, NameKeys>();
+  // Rejoin tokens of the players the host removed, oldest first (EXP-337); they go with the room
+  private revokedTokens = new WeakMap<Room, string[]>();
 
   createRoom(username: string, socketId: string): Room {
     const gameCode = this.generateRoomCode();
@@ -85,11 +100,12 @@ export class RoomManager {
   /**
    * Join or rejoin. `replacing`: username of a player in this room that the caller is about to remove
    * (same socket switching username), so its slot does not count against MAX_PLAYERS_PER_ROOM.
-   * Only successful joins cancel a pending room deletion.
+   * Only successful joins cancel a pending room deletion. A `givenToken` that can't be a rejoin token is no token.
    */
-  joinRoom(gameCode: string, username: string, socketId: string, rejoinToken?: string, replacing?: string): { success: boolean; room?: Room; message?: string; rejoin?: boolean } {
+  joinRoom(gameCode: string, username: string, socketId: string, givenToken?: unknown, replacing?: string): { success: boolean; room?: Room; message?: string; rejoin?: boolean } {
     const room = this.rooms.get(gameCode);
     if (!room) return { success: false, message: "Game not found" };
+    const rejoinToken = asRejoinToken(givenToken);
 
     // Re-join: same username reconnecting (e.g. after app background) — only with that player's token and the exact
     // stored name
@@ -103,6 +119,9 @@ export class RoomManager {
       return { success: true, room, rejoin: true };
     }
 
+    // An app that missed its own player-removed (offline at the kick) comes back with its old token: tell it so rather
+    // than letting it in as someone new. A join without that token (typed by hand) is a new player (DEC-016)
+    if (this.isRevoked(room, rejoinToken)) return { success: false, message: "Removed by host" };
     if (room.started) return { success: false, message: "Game already started" };
     // Before comparing names, so a full room tells nothing about who is in it
     if (others.length >= MAX_PLAYERS_PER_ROOM) return { success: false, message: "Room is full" };
@@ -134,6 +153,18 @@ export class RoomManager {
   canRejoin(gameCode: string, username: string, rejoinToken: unknown): boolean {
     const player = this.getPlayer(gameCode, username);
     return !!player && this.tokenMatches(player.rejoinToken, rejoinToken);
+  }
+
+  /** The host removed the player holding `token`: a join that still carries it is refused with "Removed by host". */
+  revokeRejoinToken(room: Room, token: string): void {
+    const revoked = this.revokedTokens.get(room) ?? [];
+    revoked.push(token);
+    if (revoked.length > MAX_REVOKED_TOKENS_PER_ROOM) revoked.shift();
+    this.revokedTokens.set(room, revoked);
+  }
+
+  private isRevoked(room: Room, token: unknown): boolean {
+    return (this.revokedTokens.get(room) ?? []).some((revoked) => this.tokenMatches(revoked, token));
   }
 
   getRoom(gameCode: string): Room | undefined {
@@ -301,11 +332,12 @@ export class RoomManager {
   }
 
   private createPlayer(username: string, socketId: string, isHost: boolean): Player {
-    return { username, socketId, isHost, isReady: false, connected: true, points: 0, lastAnswerCorrect: false, lastGuess: "", rejoinToken: randomBytes(18).toString("base64url") };
+    return { username, socketId, isHost, isReady: false, connected: true, points: 0, lastAnswerCorrect: false, lastGuess: "", rejoinToken: randomBytes(REJOIN_TOKEN_BYTES).toString("base64url") };
   }
 
+  /** Constant-time compare; a `given` of another length (e.g. a huge string) is refused before being copied. */
   private tokenMatches(expected: string, given: unknown): boolean {
-    if (typeof given !== "string") return false;
+    if (typeof given !== "string" || given.length !== expected.length) return false;
     const a = Buffer.from(expected);
     const b = Buffer.from(given);
     return a.length === b.length && timingSafeEqual(a, b);

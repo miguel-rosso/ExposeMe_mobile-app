@@ -54,6 +54,7 @@ import { safeBottomRow, safeTopRow } from "../utils/safeAreaRows";
 import { ANSWERS_BOTTOM, HOLD_BUTTON_BOTTOM } from "../utils/gameRows";
 import { PROGRESS_BAR_AREA, progressBarAreaBottom, progressBarRow } from "../utils/progressBarRow";
 import { GameScreenParams, opensOnGameInProgress } from "../utils/gameScreenRoute";
+import { isKickedByHost, KICKED_BY_HOST_MESSAGE } from "../utils/serverMessage";
 
 const { SERVER_URL } = getEnvVars();
 // Rows over the photo (see safeAreaRows; the progress bar strip is in progressBarRow, the bottom ones in gameRows)
@@ -65,7 +66,7 @@ const GameScreen = () => {
   const { t } = useI18n();
   const {
     username, gameCode, socket, playersProvider, setPlayersProvider, roundsOfGame, plantedPhotoUri,
-    plantedPhotoSent, plantPhoto, getRejoinToken, saveRejoinToken, setPlantedPhotoUri,
+    plantedPhotoSent, plantPhoto, getRejoinToken, saveRejoinToken, clearRejoinToken, setPlantedPhotoUri,
   } = useGameContext();
   const safeUsername = username ?? "";
   const safeGameCode = gameCode ?? "";
@@ -208,13 +209,23 @@ const GameScreen = () => {
     emitWhileConnected(socket, "hold-end");
   };
 
+  // ── Leaving for home ─────────────────────────────────
+  // Out of the game for good (kicked, room gone, rejoin or connection refused): home, which shows the reason in my
+  // language. Only once: the server closes the socket right after my own player-removed. Kicked (player-removed, or a
+  // rejoin refused for it after missing that offline): my rejoin token is dead, so it is forgotten
+  const leftGameRef = useRef(false);
+  const leaveGame = (message?: string) => {
+    if (leftGameRef.current) return;
+    leftGameRef.current = true;
+    if (isKickedByHost(message)) clearRejoinToken();
+    console.log("[GAME] Out of the game — returning to menu");
+    router.replace(message ? { pathname: "/", params: { message } } : "/");
+  };
+
   // ── Connection: stay in the game, rejoin on reconnect ─
   const { connected } = useGameConnection({
     socket, gameCode, username, getRejoinToken, saveRejoinToken,
-    onLeave: (message) => {
-      console.log("[GAME] Can't rejoin the game — returning to menu");
-      router.replace(message ? { pathname: "/", params: { message } } : "/");
-    },
+    onLeave: leaveGame,
     planted: { uri: plantedPhotoUri, sent: plantedPhotoSent, plant: plantPhoto },
   });
 
@@ -414,7 +425,12 @@ const GameScreen = () => {
         showGameOver(data.finalScore);
       },
       "player-left": (name: string) => { console.log(`[GAME] player-left: ${name}`); dropPlayer(name); },
-      "player-removed": (removed: Player) => { console.log(`[GAME] player-removed: ${removed.username}`); dropPlayer(removed.username); },
+      // The host can only remove players between games, so mine reaches me on the final screens: home, telling why
+      "player-removed": (removed: Player) => {
+        console.log(`[GAME] player-removed: ${removed.username}`);
+        if (removed.username === safeUsername) leaveGame(KICKED_BY_HOST_MESSAGE);
+        else dropPlayer(removed.username);
+      },
       "new-host": (host: Player) => setPlayers(withHost(playersRef.current, host.username)),
     };
 

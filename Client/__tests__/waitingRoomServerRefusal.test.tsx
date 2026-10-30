@@ -3,12 +3,14 @@ import TestRenderer, { act } from "react-test-renderer";
 import { FakeSocket } from "../testUtils/fakeSocket";
 // Loaded with the file (jest.mock calls below are hoisted above it), not inside a test
 import WaitingRoom from "../app/screens/WaitingRoom";
+import { KICKED_BY_HOST_MESSAGE } from "../app/utils/serverMessage";
 
 // EXP-180 / EXP-036: when the server refuses the join (room-of-game) or the connection itself (connect_error),
 // the lobby sends the player home with the server's reason; the home screen shows it translated.
 
 const mockSocket = new FakeSocket();
 const mockReplace = jest.fn();
+const mockClearRejoinToken = jest.fn();
 
 jest.mock("expo-router", () => ({
   useRouter: () => ({ replace: mockReplace }),
@@ -19,7 +21,7 @@ jest.mock("../app/providers/GameContext", () => ({
     startSocket: jest.fn(), endSocket: jest.fn(), gameCode: "ABC123", setGameCode: jest.fn(),
     setPlayersProvider: jest.fn(), socket: mockSocket, username: "bob",
     setRoundsOfGame: jest.fn(), roundsOfGame: 10, setPlantedPhotoUri: jest.fn(),
-    saveRejoinToken: jest.fn(), getRejoinToken: async () => "tok-123", clearRejoinToken: jest.fn(),
+    saveRejoinToken: jest.fn(), getRejoinToken: async () => "tok-123", clearRejoinToken: mockClearRejoinToken,
   }),
 }));
 jest.mock("../app/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: null }) }));
@@ -65,6 +67,7 @@ beforeEach(() => {
   mockSocket.emitted = [];
   mockSocket.active = true;
   mockReplace.mockClear();
+  mockClearRejoinToken.mockClear();
 });
 
 describe("WaitingRoom: the server refuses us (EXP-180)", () => {
@@ -72,6 +75,17 @@ describe("WaitingRoom: the server refuses us (EXP-180)", () => {
     const r = await mount();
     act(() => mockSocket.fire("room-of-game", { success: false, message: "Too many attempts" }));
     expect(mockReplace).toHaveBeenCalledWith({ pathname: "/", params: { message: "Too many attempts" } });
+    expect(mockClearRejoinToken).not.toHaveBeenCalled(); // e.g. rate-limited: the token may still rejoin later
+    act(() => r.unmount());
+  });
+
+  // EXP-337: kicked while offline, the app comes back with its stored token; the server refuses it. The token is
+  // forgotten, so joining again by hand (code + name) enters as a new player instead of being refused again (DEC-016)
+  it("kicked while offline: the refused rejoin forgets the token and goes home telling why", async () => {
+    const r = await mount();
+    act(() => mockSocket.fire("room-of-game", { success: false, message: KICKED_BY_HOST_MESSAGE }));
+    expect(mockClearRejoinToken).toHaveBeenCalledTimes(1);
+    expect(mockReplace).toHaveBeenCalledWith({ pathname: "/", params: { message: KICKED_BY_HOST_MESSAGE } });
     act(() => r.unmount());
   });
 

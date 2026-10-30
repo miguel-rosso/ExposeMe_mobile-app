@@ -43,7 +43,7 @@ import { attachHandlers, SocketHandlers } from "../utils/socketHandlers";
 import { emitWhileConnected } from "../utils/socketEmit";
 import { isRoomCode, parseRoomCodeParam } from "../utils/roomCode";
 import { normalizeUsername } from "../utils/username";
-import { KICKED_BY_HOST_MESSAGE } from "../utils/serverMessage";
+import { isKickedByHost, KICKED_BY_HOST_MESSAGE } from "../utils/serverMessage";
 import { CHAT_COOLDOWN_MS, MAX_CHAT_LENGTH, ROUND_OPTIONS } from "../utils/protocolLimits";
 import { dismissKeyboardOnBackPress } from "../utils/keyboardBackPress";
 import { GAME_SCREEN_PATH, RESYNC_GAME_SCREEN } from "../utils/gameScreenRoute";
@@ -312,8 +312,10 @@ const WaitingRoom = ({}) => {
       socket.emit("join-create-game", { gameCode: code, username, ...(rejoinToken ? { rejoinToken } : {}) });
     };
 
-    // Back to the home screen, which shows the reason (a server refusal, or kicked) in the user's language
+    // Back to the home screen, which shows the reason (a server refusal, or kicked) in the user's language. Kicked
+    // (player-removed, or a rejoin refused for it after missing that offline): the rejoin token is forgotten
     const leaveWithMessage = (message?: string) => {
+      if (isKickedByHost(message)) clearRejoinToken();
       endSocket();
       navigation.replace({ pathname: "/", params: { message } });
     };
@@ -393,7 +395,6 @@ const WaitingRoom = ({}) => {
 
       "player-removed": (removed: Player) => {
         if (removed.username === username) {
-          clearRejoinToken();
           leaveWithMessage(KICKED_BY_HOST_MESSAGE);
         } else {
           setPlayers((prev) => withoutPlayer(prev, removed.username));

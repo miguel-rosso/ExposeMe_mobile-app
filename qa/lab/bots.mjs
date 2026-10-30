@@ -110,7 +110,10 @@
 //                           no mid-game form (NAME@R is refused). Every bot gets player-removed { NAME }; NAME is in no
 //                           game-started, round-scores or answer, and nobody guesses it. A kicked bot gets player-removed
 //                           itself, then the server closes its connection ("kicked-out") and it gets no more game events
-//                           ("consistency"). NAME may be a device's: with one bot host and the device alone
+//                           ("consistency"). Then, like an app that was offline at the kick and comes back with its
+//                           stored token (EXP-337), it joins again with that token on a new socket: the server must
+//                           refuse it with "Removed by host" ("kick-rejoin-refused"); being let in, another refusal or
+//                           no answer at all is an error. NAME may be a device's: with one bot host and the device alone
 //                           (qa/maestro/kicked-notice.yaml) nobody is left to play, so the run ends right after the kick
 //                           (reason "lobby-kick") and the device checks its notice.
 //   node qa/lab/bots.mjs --bots 4 --host --rounds 3 --kick bot4
@@ -423,6 +426,8 @@ const PLANT_ACK_TIMEOUT_MS = 5_000;
 const LOBBY_KICK_DELAY_MS = 5_000;
 const KICK_SETTLE_MS = 1_000; // after a lobby kick that ends the run: time for the kicked player to get its notice
 const KICK = plannedKick(); // --kick: the username the host bot removes in the lobby, or null
+// The server's answer to a join carrying the token of a player the host removed (Server/managers/RoomManager.ts)
+const KICKED_REFUSAL = "Removed by host";
 // What the room checks need to know about this run (qa/lab/bots-analysis.mjs)
 const ANALYSIS_OPTS = {
   host: !!args.host, rounds: ROUNDS, playAgainLingerS: PLAY_AGAIN_LINGER_S, lingerBot: LINGER_BOT, startNextGameS: START_NEXT_GAME_S,
@@ -700,9 +705,26 @@ function runRoom(roomIdx, fixedCode) {
         if (bot.isHost && p.username === KICK) onKickConfirmed();
       });
       socket.on("disconnect", (reason) => {
-        if (bot.kicked && reason === "io server disconnect") rec("kicked-out", bot.round, { reason });
+        if (bot.kicked && reason === "io server disconnect") {
+          rec("kicked-out", bot.round, { reason });
+          comeBackAfterKick();
+        }
         if (bot.left || bot.kicked) endIfAllOut();
       });
+      // Like an app that was offline at the kick, missed player-removed and comes back with its stored token (EXP-337):
+      // the server must refuse that join with its own reason, not let the kicked player in again as a new one
+      const comeBackAfterKick = () => {
+        const fresh = io(SERVER, { transports: ["websocket"], reconnection: false, forceNew: true });
+        spareSockets.push(fresh);
+        fresh.on("connect", () => fresh.emit("join-create-game", joinPayload()));
+        fresh.on("connect_error", (e) => errors.push(`${name} rejoin after being kicked: connect_error ${e.message}`));
+        fresh.on("room-of-game", (d) => {
+          fresh.disconnect();
+          if (d.success) errors.push(`${name}: let in again with its token after being kicked`);
+          else if (d.message !== KICKED_REFUSAL) errors.push(`${name}: rejoin after being kicked refused with "${d.message}", not "${KICKED_REFUSAL}"`);
+          else rec("kick-rejoin-refused", bot.round, { message: d.message });
+        });
+      };
       socket.on("player-connection", (d) => rec("player-connection", 0, d));
       socket.on("new-host", (p) => {
         rec("new-host", 0, { username: p.username });

@@ -68,7 +68,11 @@ exits() { # scenario (left|owner-left|lobby-kick|lobby-kick-device), mutation (n
     if (lobbyKick) {
       at("bot1", "kick-sent", 0, { username: out });
       if (mutation !== "no-notice") all(players, "player-removed", 0, { username: out });
-      if (out === "bot3" && mutation !== "still-connected") at("bot3", "kicked-out", 0, { reason: "io server disconnect" });
+      if (out === "bot3" && mutation !== "still-connected") {
+        at("bot3", "kicked-out", 0, { reason: "io server disconnect" });
+        // EXP-337: back with its old token, refused with "Removed by host"
+        if (mutation !== "no-kick-rejoin-refusal") at("bot3", "kick-rejoin-refused", 0, { message: "Removed by host" });
+      }
       if (mutation === "events-after-kick") at("bot3", "game-started", 0, { rounds: 3, players: ["bot1", "bot2", "bot3"] });
     }
     all(bots(inGame), "game-started", 0, { rounds: 3, players: mutation === "in-game-started" ? [...inGame, out] : inGame });
@@ -127,6 +131,8 @@ expect_error "kick: someone guessed the removed player" lobby-kick guess-after-e
 expect_error "leave: the answer of a later round is the leaver" left answer-after-exit "round 3: the answer is bot3, who left in round 2"
 expect_error "leave: no round after the leave" left game-stopped "bot1: no round after round 2, when bot3 left"
 expect_error "kick: the kicked bot stays connected" lobby-kick still-connected "bot3: still connected after being kicked"
+expect_error "kick: the kicked bot's rejoin with its old token is never refused (EXP-337)" lobby-kick no-kick-rejoin-refusal \
+  "bot3: no \"Removed by host\" refusal for its rejoin with the old token after being kicked"
 expect_error "lobby kick: the kicked bot is in game-started" lobby-kick in-game-started "bot1: bot3 was removed but is in game-started"
 expect_error "lobby kick: the kicked bot gets game-started" lobby-kick events-after-kick "bot3: got game-started after being kicked"
 expect_error "leave: an event missed before the exit is still a missed event" left missed-before-exit "missed events: bot3"

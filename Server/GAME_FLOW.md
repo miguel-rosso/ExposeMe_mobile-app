@@ -280,14 +280,16 @@ After last round: game-over
     name (`二郎` and `次郎`, `口田` and `山田` stay apart). Letters drawn like a capital I (Cyrillic
     І, Arabic alef) have the prototype `l` in UTS #39, so next to a name with I they also get `"Username too
     similar"` rather than `"Username already taken"`: both refuse the name.
-  - Checked in this order: a valid rejoin (exact stored name and its token) first; then `"Game already started"`
+  - Checked in this order: a valid rejoin (exact stored name and its token) first; then `"Removed by host"` for a
+    join carrying the token of a player the host removed (see "Kicked" below); then `"Game already started"`
     mid-game and `"Room is full"` at 12 players, **before** comparing names, so neither tells anything about the
     names in the room; then the two answers above.
 - On success the server answers **only to that socket** with
   `room-of-game { success, room, rejoinToken, hasPlantedPhoto }`. `hasPlantedPhoto` is the joining
   player's own planted-photo mark (never sent about anyone else). `rejoinToken` is a random secret per player
   (base64url, 18 bytes) that is never included in any other payload; clients keep it (the app stores it in
-  AsyncStorage with the game code and username) to reconnect.
+  AsyncStorage with the game code and username) to reconnect. A join's `rejoinToken` of any other shape (not a
+  string of 24 base64url characters) is treated as no token, and is never copied nor compared.
 - Joining with a username that already exists in the room is a **rejoin** and requires the matching
   `rejoinToken` (compared in constant time). Without it the join is rejected with
   `"Username already taken"` (lobby; `"Room is full"` if the room has 12 players) or `"Game already started"` (game
@@ -307,6 +309,18 @@ After last round: game-over
   and drops it if the socket disconnected meanwhile, and the player would then be treated as a lost connection
   (lobby: shown as gone for 15 s with the name taken; mid-game: the game pauses for them instead of ending).
   In the lobby, Android's system back (key or gesture) is that same Exit, and the iOS back swipe is disabled (EXP-336).
+- **Kicked** (`remove-player`, lobby only, also between games while others linger on the final screens): every
+  socket of the room, the kicked player's included, gets `player-removed`, then the kicked player's sockets are
+  evicted, and their `rejoinToken` is **revoked** in that room (EXP-337). The app, in the lobby or on the final
+  screens, forgets its token on its own `player-removed` and goes home with the notice "the host removed you". An app
+  that missed it (offline at the kick: phone locked, no signal) comes back with its stored token: that join is refused
+  with **`"Removed by host"`** (checked before `"Game already started"`, so it is told even if a game started
+  meanwhile), nobody is told, and the app shows the same notice and forgets the token. Only a join carrying that token
+  is refused: joining again by hand, with no token, is a normal new player, right away and with the same name if it is
+  free (DEC-016). Revoked tokens live as long as the room (also through an emptied room's reset), at most 24 per room
+  (`MAX_REVOKED_TOKENS_PER_ROOM`, twice a full room; past it the oldest is forgotten and a join with it enters as a new
+  player, as before EXP-337). A player who left or was removed as gone at game start keeps no such mark: a join with
+  their old token is a new player.
 - **One socket = one player in one room.** The same live socket re-sending `join-create-game` for the room
   and username it is already bound to (e.g. the WaitingRoom effect re-running, a duplicate join) is a no-op:
   same `room-of-game` answer with the same token, no token needed, no broadcast. If the game has started it
@@ -382,7 +396,7 @@ After last round: game-over
   by default, so production rejects it, and the app never offers it), `start-game` (not while a game is running), `remove-player { username }`
   (lobby only, also between games: ignored while a game is running; by username, socket ids are never sent to
   clients; the host can't remove itself; evicts every socket bound to the removed player in that room, like a
-  rejoin evicts the replaced one).
+  rejoin evicts the replaced one, and revokes their token: see "Kicked" above).
 - `im-ready` only counts between `game-started` and the first round (`started && phase === null`).
   The first round is scheduled (after `GAME_START_DELAY`, 1 s) as soon as **at least 2 players are connected
   and all connected players are ready** (checked on `im-ready` and when a player disconnects or leaves during
@@ -567,10 +581,10 @@ All game events are **atomic** — each contains everything the client needs.
 
 | Event | Phase | Data | Description |
 |-------|-------|------|-------------|
-| `room-of-game` | - | `{ success, room?, message?, rejoinToken?, hasPlantedPhoto? }` | Join result (token and own planted mark only to the joiner) |
+| `room-of-game` | - | `{ success, room?, message?, rejoinToken?, hasPlantedPhoto? }` | Join result (token and own planted mark only to the joiner). `message` on a refusal, e.g. `"Removed by host"` for a kicked player's token |
 | `player-joined` | lobby | public player | A new player joined (not sent for rejoins; not to the joiner) |
 | `player-left` | any | `username` (string) | A player left (`leave-room`, a join to another room, or removed as gone at game start) |
-| `player-removed` | any | public player | The host removed this player (`remove-player`) |
+| `player-removed` | any | public player | The host removed this player (`remove-player`); to the kicked player too, whose token is then revoked (see "Kicked") |
 | `rounds-updated` | lobby | `rounds` (number) | The host changed the number of rounds |
 | `game-started` | - | `players, rounds` | Navigate to game screen (public player data only, see "Public player data") |
 | `waiting-photo` | waiting-photo | `{ round, duration }` | Whole room: a photo is awaited (owner not revealed), show wait bar |
@@ -598,7 +612,7 @@ All game events are **atomic** — each contains everything the client needs.
 | `join-create-game` | `{ gameCode \| null, username, rejoinToken? }` | Create/join; rejoin needs `rejoinToken` (also after every reconnect in game) |
 | `set-rounds` | `{ rounds }` (10/15/20; 3 only with `ALLOW_QA_ROUNDS=1`, QA-only) | Host only, lobby only |
 | `start-game` | - | Host only |
-| `remove-player` | `{ username }` | Host only, lobby only (ignored while a game is running): removes that player (not the host) and evicts their sockets |
+| `remove-player` | `{ username }` | Host only, lobby only (ignored while a game is running): removes that player (not the host), evicts their sockets and revokes their rejoin token (a join with it gets `"Removed by host"`) |
 | `leave-room` | - (with an ack callback) | Explicit leave (Exit button): player removed, host handed over, `player-left` to the room; from a socket replaced by a rejoin it only detaches that socket. Acked (no data) once handled, also from a socket bound to no room; not acked when dropped by the rate limit |
 | `im-ready` | - | Player ready to start (session player; payload ignored). Once the game is over: answered with `game-state` |
 | `photo-sent` | `{ photo }` | Photo uploaded; only from the current owner, `photo` must be a path the owner got from `/upload` in this room (`/temp/<32 hex>.jpg\|png\|webp`) for the photo awaited now (uploaded during this `waiting-photo`'s round as their turn photo; not a planted photo, not one from an earlier round) |

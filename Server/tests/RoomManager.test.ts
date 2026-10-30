@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MAX_PLAYERS_PER_ROOM, RoomManager } from "../managers/RoomManager";
+import { MAX_PLAYERS_PER_ROOM, MAX_REVOKED_TOKENS_PER_ROOM, RoomManager } from "../managers/RoomManager";
 
 const ROOM_CLEANUP_DELAY = 30 * 60 * 1000;
 
@@ -152,6 +152,92 @@ describe("joinRoom", () => {
     const room = rm.createRoom("alice", "sock-alice");
     rm.joinRoom(room.gameCode, "bob", "sock-bob");
     expect(rm.joinRoom(room.gameCode, "Bob", "sock-bob", undefined, "bob")).toMatchObject({ success: true });
+  });
+});
+
+// EXP-337: a kicked player's app that missed player-removed (offline) comes back with its old token. That join is
+// refused with its own reason instead of entering as a new player; a join without the token still enters (DEC-016).
+describe("revokeRejoinToken", () => {
+  /** Lobby alice (host) + bob; bob is kicked: removed and his token revoked, as remove-player does. */
+  const kickBob = () => {
+    const room = rm.createRoom("alice", "sock-alice");
+    rm.joinRoom(room.gameCode, "bob", "sock-bob");
+    const token = rm.getPlayer(room.gameCode, "bob")!.rejoinToken;
+    rm.removePlayer(room.gameCode, "bob");
+    rm.revokeRejoinToken(room, token);
+    return { room, token };
+  };
+
+  it("refuses a join that carries the kicked player's token, and lets nobody in", () => {
+    const { room, token } = kickBob();
+    expect(rm.joinRoom(room.gameCode, "bob", "sock-bob-2", token)).toEqual({ success: false, message: "Removed by host" });
+    expect(room.players.map((p) => p.username)).toEqual(["alice"]);
+  });
+
+  it("tells the kicked player so even once a game started (before \"Game already started\")", () => {
+    const { room, token } = kickBob();
+    room.started = true;
+    expect(rm.joinRoom(room.gameCode, "bob", "sock-bob-2", token)).toMatchObject({ message: "Removed by host" });
+  });
+
+  it("lets the same name join again by hand (no token) as a new player with a new token", () => {
+    const { room, token } = kickBob();
+    expect(rm.joinRoom(room.gameCode, "bob", "sock-bob-2")).toEqual({ success: true, room });
+    const bob = rm.getPlayer(room.gameCode, "bob")!;
+    expect(bob.rejoinToken).not.toBe(token);
+    expect(bob.points).toBe(0);
+  });
+
+  it("only applies in the room that kicked them", () => {
+    const { token } = kickBob();
+    const other = rm.createRoom("carol", "sock-carol");
+    expect(rm.joinRoom(other.gameCode, "bob", "sock-bob-2", token)).toMatchObject({ success: true });
+  });
+
+  it(`remembers at most ${MAX_REVOKED_TOKENS_PER_ROOM} tokens per room, forgetting the oldest`, () => {
+    const room = rm.createRoom("alice", "sock-alice");
+    // Shaped like real tokens (24 base64url characters): anything else is treated as no token at all
+    const tokens = Array.from({ length: MAX_REVOKED_TOKENS_PER_ROOM + 1 }, (_, i) => `kicked-token-${i}`.padEnd(24, "x"));
+    tokens.forEach((token) => rm.revokeRejoinToken(room, token));
+    expect(rm.joinRoom(room.gameCode, "bob", "sock-bob", tokens[0])).toMatchObject({ success: true });
+    expect(rm.joinRoom(room.gameCode, "dan", "sock-dan", tokens[1])).toMatchObject({ message: "Removed by host" });
+  });
+});
+
+// A join's token is compared with every player's and every revoked one: a value that can't be a token (not 24
+// base64url characters, e.g. a megabyte-long string) is treated as no token, without copying or comparing it
+describe("rejoin token shape", () => {
+  const HUGE_TOKEN = "A".repeat(1024 * 1024);
+
+  it.each([
+    ["a huge string", HUGE_TOKEN],
+    ["one character short", "A".repeat(23)],
+    ["one character long", "A".repeat(25)],
+    ["non-base64url characters", "A".repeat(23) + "+"],
+    ["a number", 123],
+    ["an object", { length: 24 }],
+  ])("treats %s as no token: no rejoin, a plain new-player answer", (_label, token) => {
+    const room = rm.createRoom("alice", "sock-alice");
+    expect(rm.canRejoin(room.gameCode, "alice", token)).toBe(false);
+    expect(rm.joinRoom(room.gameCode, "alice", "sock-x", token)).toEqual({ success: false, message: "Username already taken" });
+    expect(rm.authenticate(room.gameCode, token as string)).toBeNull();
+  });
+
+  it("never copies a token of the wrong length to compare it", () => {
+    const room = rm.createRoom("alice", "sock-alice");
+    rm.revokeRejoinToken(room, "B".repeat(24));
+    const from = vi.spyOn(Buffer, "from");
+    rm.joinRoom(room.gameCode, "bob", "sock-bob", HUGE_TOKEN);
+    rm.authenticate(room.gameCode, HUGE_TOKEN);
+    expect(from.mock.calls.some(([value]) => value === HUGE_TOKEN)).toBe(false);
+    from.mockRestore();
+  });
+
+  it("still rejoins with a real token", () => {
+    const room = rm.createRoom("alice", "sock-alice");
+    const token = room.players[0].rejoinToken;
+    expect(token).toMatch(/^[A-Za-z0-9_-]{24}$/);
+    expect(rm.joinRoom(room.gameCode, "alice", "sock-alice-2", token)).toMatchObject({ success: true, rejoin: true });
   });
 });
 

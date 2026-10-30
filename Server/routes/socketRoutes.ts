@@ -482,8 +482,10 @@ io.on("connection", (socket: Socket) => {
       if (!s || !s.player.isHost || s.room.started) return;
       if (typeof data?.username !== "string" || data.username === s.player.username) return;
       const { room } = s;
-      // Cut off the kicked player's current socket and any other socket still bound to them in this room
+      // Cut off the kicked player's token, current socket and any other socket still bound to them in this room: an app
+      // that was offline and missed player-removed is told when it rejoins with that token
       gameEngine.removePlayer(room, data.username, "kicked", (kicked) => {
+        roomManager.revokeRejoinToken(room, kicked.rejoinToken);
         const target = io.sockets.sockets.get(kicked.socketId);
         if (target) evictSocket(target, room.gameCode);
         socketsOf(room.gameCode, kicked.username).forEach((old) => evictSocket(old, room.gameCode));

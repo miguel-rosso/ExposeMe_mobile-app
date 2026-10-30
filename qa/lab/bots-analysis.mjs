@@ -634,12 +634,19 @@ function checkRoomExits(r, ctx) {
   return out;
 }
 
-/** A kicked bot: told first (player-removed naming itself), then its connection closed by the server, nothing after. */
+/**
+ * A kicked bot: told first (player-removed naming itself), then its connection closed by the server, nothing after;
+ * coming back with its old token, the server refused it with "Removed by host" (EXP-337, "kick-rejoin-refused").
+ */
 function checkKickedBot(r, name) {
   const removed = r.events.find((e) => e.bot === name && e.ev === "player-removed" && e.payload?.username === name);
   if (!removed) return [`${name}: kicked without getting player-removed`];
   const out = [];
-  if (!r.events.some((e) => e.bot === name && e.ev === "kicked-out" && e.t >= removed.t)) out.push(`${name}: still connected after being kicked`);
+  const kickedOut = r.events.find((e) => e.bot === name && e.ev === "kicked-out" && e.t >= removed.t);
+  if (!kickedOut) out.push(`${name}: still connected after being kicked`);
+  else if (!r.events.some((e) => e.bot === name && e.ev === "kick-rejoin-refused" && e.t >= kickedOut.t)) {
+    out.push(`${name}: no "Removed by host" refusal for its rejoin with the old token after being kicked`);
+  }
   const after = r.events.filter((e) => e.bot === name && e.t > removed.t && GAME_EVENTS.includes(e.ev)).map((e) => e.ev);
   if (after.length) out.push(`${name}: got ${[...new Set(after)].join(", ")} after being kicked`);
   return out;

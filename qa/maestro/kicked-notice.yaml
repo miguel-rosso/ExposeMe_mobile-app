@@ -1,7 +1,8 @@
 # EXP-139 / EXP-045: the host removes the device from the lobby. The device is sent back to the home screen with the
 # notice in its language ("The host removed you from the room." / "El anfitrión te ha sacado de la sala."), never
-# a raw server text, and can join again from there. A waiting room link without a room code then keeps it on home
-# (EXP-342: the room it was removed from is forgotten, not rejoined).
+# a raw server text. A waiting room link without a room code then keeps it on home (EXP-342: the room it was removed
+# from is forgotten, not rejoined), and it can join again by hand (same code and name) as a new player (DEC-016),
+# since the app forgot its rejoin token, which the server refuses after a kick (EXP-337).
 # Run with ONE bot (the host) and ONE device; the host bot kicks the device by its label (its username in the room)
 # 5 s after it joined, then the bots run ends (reason "lobby-kick", nobody left to play with):
 #   qa/lab/lab.sh play --flow kicked-notice --bots 1 --devices <label> --bot-args '--kick <label>'
@@ -48,3 +49,5 @@ appId: com.socketNull.ExposeMe
 - assertVisible:
     id: "join-game-button"
 - takeScreenshot: kicked-codeless-link-home-${USERNAME}
+# Back by hand: the lobby again, not a second "removed" notice (a kept token would be refused with it)
+- runFlow: join-room.yaml

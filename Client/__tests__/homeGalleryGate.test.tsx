@@ -28,11 +28,13 @@ jest.mock("../app/components/LanguageToggle", () => () => null);
 jest.mock("../app/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: 1 }) }));
 jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/en").default }) }));
 const mockSetGameCode = jest.fn();
+const mockSetJoinCodeDraft = jest.fn();
 const mockRequestNewRoom = jest.fn();
-let mockGameCode: string | null = null;
+let mockJoinCodeDraft = "";
 jest.mock("../app/providers/GameContext", () => ({
   useGameContext: () => ({
-    username: "ana", setUsername: jest.fn(), gameCode: mockGameCode, setGameCode: mockSetGameCode, socket: null, endSocket: jest.fn(),
+    username: "ana", setUsername: jest.fn(), gameCode: null, setGameCode: mockSetGameCode, socket: null, endSocket: jest.fn(),
+    joinCodeDraft: mockJoinCodeDraft, setJoinCodeDraft: mockSetJoinCodeDraft,
     requestNewRoom: mockRequestNewRoom,
   }),
 }));
@@ -81,13 +83,15 @@ beforeEach(() => {
     return { remove: () => { appStateHandlers = appStateHandlers.filter((x) => x !== h); } };
   }) as typeof AppState.addEventListener);
   mockPush.mockClear();
+  mockSetGameCode.mockClear();
+  mockSetJoinCodeDraft.mockClear();
   mockRequestNewRoom.mockClear();
   mockReplace.mockClear();
   mockRequest.mockClear();
   mockPicker.mockClear();
   mockPhotos.length = 0;
   mockGalleryListeners.length = 0;
-  mockGameCode = null;
+  mockJoinCodeDraft = "";
 });
 afterEach(() => {
   jest.clearAllTimers();
@@ -127,11 +131,14 @@ describe("Home Create/Join gallery gate (EXP-118)", () => {
   it("limited access with a selected photo: joins a room", async () => {
     mockPerm = { status: "granted", canAskAgain: true, accessPrivileges: "limited" };
     mockPhotos.push({ id: "p1", mediaType: "image" });
-    mockGameCode = "K7MQ4X";
+    mockJoinCodeDraft = "K7MQ4X";
     const r = await mount();
     await press(r.root, TEST_IDS.joinGameButton);
     await press(r.root, TEST_IDS.searchRoomButton);
     expect(mockPush).toHaveBeenCalledWith("/screens/WaitingRoom");
+    // The typed code becomes the room to join (EXP-342: it is only a draft until then)
+    expect(mockSetGameCode).toHaveBeenCalledWith("K7MQ4X");
+    expect(mockSetGameCode.mock.invocationCallOrder.at(-1)).toBeLessThan(mockPush.mock.invocationCallOrder.at(-1)!);
     expect(navigatedTo("SettingsInstructions")).toBe(false);
     act(() => r.unmount());
   });
@@ -222,18 +229,18 @@ describe("Home join field: alphanumeric room codes (EXP-198)", () => {
     // No native maxLength: it would cut a pasted " K7MQ4X" / "K7MQ-4X" to 5 code characters before sanitizing
     expect(input.props.maxLength).toBeUndefined();
     act(() => input.props.onChangeText("k7 mq-4x"));
-    expect(mockSetGameCode).toHaveBeenLastCalledWith("K7MQ4X");
+    expect(mockSetJoinCodeDraft).toHaveBeenLastCalledWith("K7MQ4X");
     act(() => input.props.onChangeText(" K7MQ4X"));
-    expect(mockSetGameCode).toHaveBeenLastCalledWith("K7MQ4X");
+    expect(mockSetJoinCodeDraft).toHaveBeenLastCalledWith("K7MQ4X");
     act(() => input.props.onChangeText("K7MQ4XZZZ"));
-    expect(mockSetGameCode).toHaveBeenLastCalledWith("K7MQ4X");
+    expect(mockSetJoinCodeDraft).toHaveBeenLastCalledWith("K7MQ4X");
     act(() => r.unmount());
   });
 
   it("an incomplete code does not search", async () => {
     mockPerm = { status: "granted", canAskAgain: true, accessPrivileges: "all" };
     mockPhotos.push({ id: "p1", mediaType: "image" });
-    mockGameCode = "K7MQ";
+    mockJoinCodeDraft = "K7MQ";
     const r = await mount();
     await press(r.root, TEST_IDS.joinGameButton);
     await press(r.root, TEST_IDS.searchRoomButton);

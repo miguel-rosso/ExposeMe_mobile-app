@@ -154,6 +154,31 @@ describe("GameContext leaveRoom (EXP-254)", () => {
     act(() => r.unmount());
   });
 
+  // EXP-342: a waiting room opened later without a code would otherwise rejoin the room left as a new player
+  it.each([
+    ["leaveRoom (Exit)", () => ctx.leaveRoom()],
+    ["endSocket (kicked, refused, back home)", () => ctx.endSocket()],
+  ])("%s forgets the room code", (_, leave) => {
+    const r = mount();
+    act(() => ctx.setGameCode("ABC123"));
+    act(() => ctx.startSocket());
+    act(leave);
+    expect(ctx.gameCode).toBeNull();
+    act(() => r.unmount());
+  });
+
+  it("an invite link's code set right after leaving wins (same batch)", () => {
+    const r = mount();
+    act(() => ctx.setGameCode("ABC123"));
+    act(() => ctx.startSocket());
+    act(() => {
+      ctx.leaveRoom();
+      ctx.setGameCode("654321");
+    });
+    expect(ctx.gameCode).toBe("654321");
+    act(() => r.unmount());
+  });
+
   it("without a socket only forgets the token", async () => {
     const r = mount();
     act(() => ctx.saveRejoinToken("ABC123", "bob", "tok-1"));

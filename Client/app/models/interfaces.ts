@@ -175,7 +175,12 @@ export type PlantUploadState = "idle" | "uploading" | "failed";
 
 export interface GameContextProps {
   socket: Socket | null;
+  /** Room this app is in or joining; null when it has none (Create game, or after leaving: Exit, kicked, refused) */
   gameCode: string | null;
+  /** Room code typed in home's join panel. Kept when a join is refused, so the panel shows it again; Search room
+   *  makes it the gameCode */
+  joinCodeDraft: string;
+  setJoinCodeDraft: (code: string) => void;
   username: string | null;
   /** The name saved on this device has been read at app start: `username` is now that name, or null if none */
   usernameLoaded: boolean;
@@ -192,8 +197,10 @@ export interface GameContextProps {
   setUsername: (name: string | null) => void;
   setPlayersProvider: React.Dispatch<React.SetStateAction<Player[]>>;
   startSocket: () => void;
+  /** Close the socket and forget the room (gameCode) and the planted photo; the rejoin token is kept */
   endSocket: () => void;
-  /** Leave the room for good: leave-room (socket closed once the server acks it), rejoin token forgotten */
+  /** Leave the room for good: like endSocket, but sends leave-room first (socket closed once the server acks it)
+   *  and forgets the rejoin token too */
   leaveRoom: () => void;
   setRoundsOfGame: (rounds: number) => void;
   /** Photo picked to plant in this game (cleared when the game socket ends) */

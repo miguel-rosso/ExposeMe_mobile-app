@@ -175,6 +175,8 @@ const GameScreen = () => {
     uploadPhoto(SERVER_URL, uri, await resolvePhotoAuth(getRejoinToken, gameCode, username));
   const [photoHeaders, setPhotoHeaders] = useState<Record<string, string> | undefined>(undefined);
   useEffect(() => {
+    // Leaving the game forgets the room (EXP-342): no session to look up, nothing to warn about
+    if (!gameCode) return;
     let live = true;
     resolvePhotoAuth(getRejoinToken, gameCode, username)
       .then((auth) => {

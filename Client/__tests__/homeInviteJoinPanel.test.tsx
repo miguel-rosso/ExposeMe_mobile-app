@@ -37,8 +37,8 @@ jest.mock("@/app/hooks/useGalleryAccessGuard", () => ({
 }));
 jest.mock("@/app/components/modals/GalleryAccessModal", () => () => null);
 
-// A stateful game context, like the real provider: the code and pending invite outlive a remount of home
-const mockContext = { pendingInviteCode: null as string | null, gameCode: null as string | null };
+// A stateful game context, like the real provider: the codes and pending invite outlive a remount of home
+const mockContext = { pendingInviteCode: null as string | null, gameCode: null as string | null, joinCodeDraft: "" };
 let mockNameAtPush: string | null | undefined;
 jest.mock("../app/providers/GameContext", () => {
   const { useState } = require("react");
@@ -47,10 +47,15 @@ jest.mock("../app/providers/GameContext", () => {
       const [username, setUsername] = useState(null);
       const [gameCode, setGameCodeState] = useState(mockContext.gameCode);
       const [pendingInviteCode, setPendingState] = useState(mockContext.pendingInviteCode);
+      const [joinCodeDraft, setDraftState] = useState(mockContext.joinCodeDraft);
       const setGameCode = (code: string | null) => { mockContext.gameCode = code; setGameCodeState(code); };
+      const setJoinCodeDraft = (code: string) => { mockContext.joinCodeDraft = code; setDraftState(code); };
       const setPendingInviteCode = (code: string | null) => { mockContext.pendingInviteCode = code; setPendingState(code); };
       mockPush.mockImplementation(() => { mockNameAtPush = username; });
-      return { username, setUsername, gameCode, setGameCode, pendingInviteCode, setPendingInviteCode, socket: null, endSocket: () => {} };
+      return {
+        username, setUsername, gameCode, setGameCode, joinCodeDraft, setJoinCodeDraft, pendingInviteCode,
+        setPendingInviteCode, socket: null, endSocket: () => {},
+      };
     },
   };
 });
@@ -66,7 +71,8 @@ let mounted: TestRenderer.ReactTestRenderer | null = null;
 beforeEach(() => {
   mockHasSeenInitialScreen = "true";
   mockContext.pendingInviteCode = LINKED_ROOM; // set by the waiting room before it sent us home
-  mockContext.gameCode = LINKED_ROOM;
+  mockContext.gameCode = null; // the waiting room forgot it on its way out (EXP-342)
+  mockContext.joinCodeDraft = "";
   mockNameAtPush = undefined;
   mockPush.mockReset();
 });
@@ -122,6 +128,7 @@ describe("Home after an invite link opened without a name (EXP-334)", () => {
     expect(mockGalleryCheck).toHaveBeenCalled();
     expect(mockPush).toHaveBeenCalledWith("/screens/WaitingRoom");
     expect(mockNameAtPush).toBe("Ana");
+    expect(mockContext.gameCode).toBe(LINKED_ROOM); // Search makes the panel's code the room to join
   });
 
   it("Search without a name joins nothing", async () => {

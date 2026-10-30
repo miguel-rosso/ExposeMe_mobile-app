@@ -191,7 +191,8 @@ describe("WaitingRoom opened by a cold invite link (EXP-334)", () => {
 
     expect(mockDismissTo).toHaveBeenCalledWith("/");
     expect(ctx.pendingInviteCode).toBe(LINKED_ROOM);
-    expect(ctx.gameCode).toBe(LINKED_ROOM);
+    // Home fills the join panel from pendingInviteCode; the room itself is forgotten on the way out (EXP-342)
+    expect(ctx.gameCode).toBeNull();
     expect(ctx.socket).toBeNull();
     expect(mockSockets.every((s) => joins(s).length === 0)).toBe(true);
   });

@@ -1,6 +1,7 @@
 # EXP-139 / EXP-045: the host removes the device from the lobby. The device is sent back to the home screen with the
 # notice in its language ("The host removed you from the room." / "El anfitrión te ha sacado de la sala."), never
-# a raw server text, and can join again from there.
+# a raw server text, and can join again from there. A waiting room link without a room code then keeps it on home
+# (EXP-342: the room it was removed from is forgotten, not rejoined).
 # Run with ONE bot (the host) and ONE device; the host bot kicks the device by its label (its username in the room)
 # 5 s after it joined, then the bots run ends (reason "lobby-kick", nobody left to play with):
 #   qa/lab/lab.sh play --flow kicked-notice --bots 1 --devices <label> --bot-args '--kick <label>'
@@ -24,3 +25,26 @@ appId: com.socketNull.ExposeMe
     visible:
       id: "join-game-button"
     timeout: 10000
+# EXP-342: the room the device was removed from is forgotten. The waiting room link without a room code must leave it
+# on home, not rejoin that room as a new player (the server would log "<label> joined" again)
+- openLink: "exposeme://screens/WaitingRoom"
+# iOS 26+/Xcode 27 simulators confirm custom-scheme links with a system alert
+- runFlow:
+    when:
+      platform: iOS
+      visible: "Open in Expose Me\\?|¿Abrir en Expose Me\\?"
+    commands:
+      - tapOn: "Open|Abrir"
+# Home is still visible right after the link either way: give a stale rejoin time to show what it ends in, the old
+# room's lobby (or its loading screen) or a refusal back on home ("Game not found" once the bots' room is gone, or
+# the removal notice again)
+- extendedWaitUntil:
+    visible: "(Game not found|No se ha encontrado la partida|The host removed you from the room|El anfitrión te ha sacado de la sala).*"
+    timeout: 5000
+    optional: true
+- assertNotVisible: "(Game not found|No se ha encontrado la partida|The host removed you from the room|El anfitrión te ha sacado de la sala).*"
+- assertNotVisible:
+    id: "lobby-loading|lobby-waiting|lobby-game-code|start-game-button"
+- assertVisible:
+    id: "join-game-button"
+- takeScreenshot: kicked-codeless-link-home-${USERNAME}

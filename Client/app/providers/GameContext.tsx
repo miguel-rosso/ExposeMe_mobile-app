@@ -39,6 +39,8 @@ interface PlantRun {
 export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [gameCode, setGameCode] = useState<string | null>(null);
+  // Home's typed room code: survives leaving the game flow (a refused join comes back to home with it)
+  const [joinCodeDraft, setJoinCodeDraft] = useState("");
   const [username, setUsername] = useState<string | null>(null);
   const [usernameLoaded, setUsernameLoaded] = useState(false);
   const [pendingInviteCode, setPendingInviteCode] = useState<string | null>(null);
@@ -128,11 +130,14 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
 
   /**
    * Leaving the game flow (Exit, back home, kicked, room gone): the socket is no longer the app's and none of its
-   * listeners runs again. A planted photo is for one game only. Game over keeps the socket open; "Play again" drops
-   * the planted photo itself. Returns the detached socket (still open) for the caller to close.
+   * listeners runs again. A planted photo is for one game only. The room is forgotten too: a waiting room opened
+   * later without a room code (e.g. a link without one) would otherwise join it again as a new player (home's typed
+   * code, joinCodeDraft, stays). Game over keeps the socket and the room; "Play again" drops the planted photo
+   * itself. Returns the detached socket (still open) for the caller to close.
    */
   const detachSocket = (): Socket | null => {
     setPlantedPhotoUri(null);
+    setGameCode(null);
     const detached = socketRef.current;
     detached?.removeAllListeners();
     socketRef.current = null;
@@ -280,6 +285,8 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
       value={{
         socket,
         gameCode,
+        joinCodeDraft,
+        setJoinCodeDraft,
         username,
         usernameLoaded,
         pendingInviteCode,

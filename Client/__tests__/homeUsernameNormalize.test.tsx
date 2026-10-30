@@ -36,16 +36,20 @@ jest.mock("@/app/hooks/useGalleryAccessGuard", () => ({
   useGalleryAccessGuard: () => ({ check: () => mockGalleryCheck() }),
 }));
 jest.mock("@/app/components/modals/GalleryAccessModal", () => () => null);
-// A stateful game context, like the real provider's username / gameCode state
+// A stateful game context, like the real provider's username / gameCode / join code draft state
 jest.mock("../app/providers/GameContext", () => {
   const { useState } = require("react");
   return {
     useGameContext: () => {
       const [username, setUsername] = useState(null);
-      const [gameCode, setGameCode] = useState("K7MQ4X");
+      const [gameCode, setGameCode] = useState(null);
+      const [joinCodeDraft, setJoinCodeDraft] = useState("K7MQ4X");
       mockCurrentName = username;
       const requestNewRoom = () => setGameCode(null);
-      return { username, setUsername, gameCode, setGameCode, requestNewRoom, socket: null, endSocket: () => {} };
+      return {
+        username, setUsername, gameCode, setGameCode, joinCodeDraft, setJoinCodeDraft, requestNewRoom,
+        socket: null, endSocket: () => {},
+      };
     },
   };
 });

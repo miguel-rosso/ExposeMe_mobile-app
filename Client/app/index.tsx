@@ -186,7 +186,8 @@ const Index = () => {
     setUsername,
     username,
     setGameCode,
-    gameCode,
+    joinCodeDraft,
+    setJoinCodeDraft,
     socket,
     endSocket,
     pendingInviteCode,
@@ -274,7 +275,7 @@ const Index = () => {
     useCallback(() => {
       if (!showsHomeForm || !pendingInviteCode) return;
       setPendingInviteCode(null);
-      setGameCode(pendingInviteCode);
+      setJoinCodeDraft(pendingInviteCode);
       setAskNameToJoin(true);
       setIsJoiningGame(true);
     }, [showsHomeForm, pendingInviteCode])
@@ -341,13 +342,15 @@ const Index = () => {
     // Already checked by Join game, unless the panel asks for the name itself
     if (!submitUsername()) return;
 
-    if (!isRoomCode(gameCode)) {
+    if (!isRoomCode(joinCodeDraft)) {
       (gameCodeAnimRef.current as any)?.shake?.(500);
       return;
     }
 
     if (!(await ensureGalleryAccess())) return;
 
+    // The typed code stays in the panel: a refused join comes back to home with it
+    setGameCode(joinCodeDraft);
     router.push("/screens/WaitingRoom");
   };
 
@@ -549,22 +552,22 @@ const Index = () => {
                     style={tw`p-4 rounded-xl  w-full bg-white text-center text-lg font-bold`}
                     placeholder={t.enterGameCode}
                     placeholderTextColor="#3333"
-                    value={gameCode || ""}
-                    onChangeText={(text) => setGameCode(sanitizeRoomCodeInput(text))}
+                    value={joinCodeDraft}
+                    onChangeText={(text) => setJoinCodeDraft(sanitizeRoomCodeInput(text))}
                     autoCapitalize="characters"
                     autoCorrect={false}
                     autoComplete="off"
                     spellCheck={false}
                     // No maxLength: it would cut a pasted " K7MQ4X" before sanitizing; sanitizing keeps 6 characters
                   />
-                  {gameCode && gameCode.length > 0 && (
+                  {joinCodeDraft.length > 0 && (
                     <View style={tw`absolute right-4 h-full flex justify-center items-center`}>
                       <TouchableOpacity
                         accessibilityRole="button"
                         accessibilityLabel={t.clearGameCode}
                         style={tw`  bg-gray-200 h-8 w-8 rounded-full flex items-center justify-center`}
                         onPress={() => {
-                          setGameCode("");
+                          setJoinCodeDraft("");
                           Keyboard.dismiss();
                         }}
                       >

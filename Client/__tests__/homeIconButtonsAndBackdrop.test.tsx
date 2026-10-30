@@ -34,7 +34,7 @@ let mockLang: "es" | "en" = "en";
 jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require(`../app/i18n/${mockLang}`).default }) }));
 jest.mock("../app/providers/GameContext", () => ({
   useGameContext: () => ({
-    username: "ana", setUsername: jest.fn(), gameCode: "K7", setGameCode: jest.fn(), socket: null, endSocket: jest.fn(),
+    username: "ana", setUsername: jest.fn(), gameCode: null, setGameCode: jest.fn(), joinCodeDraft: "K7", setJoinCodeDraft: jest.fn(), socket: null, endSocket: jest.fn(),
   }),
 }));
 

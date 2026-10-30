@@ -149,9 +149,6 @@ const WaitingRoom = ({}) => {
     };
   }, []);
 
-  // Android back with the chat keyboard open only closes the keyboard (EXP-058 behaviour on the home screen)
-  useBackHandler(() => dismissKeyboardOnBackPress(Keyboard));
-
   const removeChatMessage = (id: string) => {
     setChatMessages((prevMessages) => prevMessages.filter((msg) => msg.id !== id));
   };
@@ -266,7 +263,7 @@ const WaitingRoom = ({}) => {
     bindingRef.current = null;
   };
 
-  // Set once this screen leaves for home without joining: nothing may join from it any more
+  // Set once this screen leaves for home (Exit, or sent home unjoined): nothing may join or leave from it any more
   const sentHomeRef = useRef(false);
 
   /** Leave for home without joining; `inviteCode` makes home open its join panel with that code, asking for a name. */
@@ -433,10 +430,27 @@ const WaitingRoom = ({}) => {
     sendHome(isRoomCode(code) ? code : null);
   }, [usernameLoaded, username]);
 
+  /** Exit: leave the room for good (leave-room, so the server frees the name and hands the host role over) and go home. */
   const handleLeaveGame = () => {
+    if (sentHomeRef.current) return;
+    sentHomeRef.current = true;
     leaveRoom();
     navigation.replace("/");
   };
+
+  // Android back (the key and the back gesture) is Exit too: popping the lobby would only close the socket, keeping
+  // this player in the room as a lost connection (EXP-336). With the chat keyboard open it only closes the keyboard
+  // (EXP-064), and with the remove-player confirmation open (an overlay, not a native modal) it only closes that.
+  // iOS has no back here: the route disables the swipe (app/_layout.tsx).
+  useBackHandler(() => {
+    if (dismissKeyboardOnBackPress(Keyboard)) return true;
+    if (dialogVisible) {
+      setDialogVisible(false);
+      return true;
+    }
+    handleLeaveGame();
+    return true;
+  });
 
   const handleStartGame = () => {
     if (socket) {

@@ -1,9 +1,13 @@
 # EXP-064: Android hardware back with the lobby chat keyboard open only closes the keyboard (the EXP-058 home
-# behaviour); the device stays in the room. With the keyboard hidden, back keeps its default: the lobby was pushed
-# from home, so it pops back to the home screen.
+# behaviour); the device stays in the room.
+# EXP-336: with the keyboard hidden, back is the lobby's Exit (close button): it sends leave-room and goes home. A plain
+# pop used to close the socket without it, so the server kept the player as a lost connection (15 s shown connected,
+# name taken, host role held). On iOS the edge swipe no longer pops the lobby (gestureEnabled: false); the close button
+# is the way out. What the device can't see is checked in the server log of the run: after the back it must say the
+# player left voluntarily, never "disconnected — keeping in room". The unit guarantees are in
+# Client/__tests__/waitingRoomLobby.test.tsx (back = leaveRoom once, then home) and gameScreenSwipeBack.test.tsx.
 # No bots needed (the device hosts the room itself), so run it directly rather than through `lab.sh play`:
-#   ~/.maestro/bin/maestro --device <android id> test qa/maestro/lobby-keyboard-back.yaml -e USERNAME=<label> -e METRO_URL=<url-encoded>
-# On iOS the Android-only steps are skipped (there is no hardware back).
+#   ~/.maestro/bin/maestro --device <id> test qa/maestro/lobby-keyboard-back.yaml -e USERNAME=<label> -e METRO_URL=<url-encoded>
 # env: USERNAME, METRO_URL (url-encoded)
 # Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
 appId: com.socketNull.ExposeMe
@@ -25,7 +29,7 @@ appId: com.socketNull.ExposeMe
       - assertVisible:
           id: "chat-input"
       - takeScreenshot: lobby-keyboard-back-${USERNAME}
-      # Second back (keyboard hidden): default behaviour, back to home
+      # Second back (keyboard hidden): leaves the room like the close button, back to home
       - pressKey: Back
       - extendedWaitUntil:
           visible:
@@ -33,3 +37,26 @@ appId: com.socketNull.ExposeMe
           timeout: 10000
       - assertNotVisible:
           id: "lobby-game-code"
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      # The edge swipe does nothing in the lobby: still in the room
+      - swipe:
+          start: 1%, 50%
+          end: 90%, 50%
+          duration: 400
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - assertVisible:
+          id: "lobby-game-code"
+      - assertNotVisible:
+          id: "create-game-button"
+      - takeScreenshot: lobby-swipe-back-${USERNAME}
+      # The close button is the way out
+      - tapOn:
+          id: "close-button"
+      - extendedWaitUntil:
+          visible:
+            id: "create-game-button"
+          timeout: 10000

@@ -21,6 +21,8 @@ const mockCtx = {
   setPendingInviteCode: jest.fn(), takeNewRoomRequest: jest.fn(() => false),
 };
 const mockClose: { onPress?: () => void } = {};
+/** Last props of the remove-player confirmation (AlertModal) */
+const mockAlert: { visible?: boolean } = {};
 /** Context game code and route params (invite deep link), per test */
 const mockRoute: { gameCode: string | null; params: { code?: string | string[] } } = { gameCode: "K7MQ4X", params: {} };
 
@@ -52,7 +54,7 @@ jest.mock("expo-image-picker", () => ({ launchImageLibraryAsync: jest.fn() }));
 jest.mock("expo-linear-gradient", () => ({ LinearGradient: "LinearGradient" }));
 jest.mock("@/app/components/CloseButton", () => (p: { onPress: () => void }) => { mockClose.onPress = p.onPress; return null; });
 jest.mock("@/app/components/AnimatedDot", () => () => null);
-jest.mock("@/app/components/modals/AlertModal", () => () => null);
+jest.mock("@/app/components/modals/AlertModal", () => (p: { visible: boolean }) => { mockAlert.visible = p.visible; return null; });
 jest.mock("@/app/components/IngameComunication/ChatMessage", () => () => null);
 jest.mock("@/app/components/SuccessAlert", () => () => null);
 // The screen's Android hardware back handler, captured so a test can press "back"
@@ -217,6 +219,10 @@ describe("WaitingRoom: ways out (EXP-063)", () => {
     expect(mockCtx.leaveRoom).toHaveBeenCalledTimes(1);
     expect(mockCtx.endSocket).not.toHaveBeenCalled(); // the leave closes the socket itself, once acked
     expect(mockReplace).toHaveBeenCalledWith("/");
+    // A second tap before the screen goes does nothing more
+    act(() => mockClose.onPress!());
+    expect(mockCtx.leaveRoom).toHaveBeenCalledTimes(1);
+    expect(mockReplace).toHaveBeenCalledTimes(1);
     act(() => r.unmount());
   });
 
@@ -280,11 +286,73 @@ describe("WaitingRoom: Android back with the chat keyboard (EXP-064)", () => {
     act(() => r.unmount());
   });
 
-  it("with the keyboard hidden, back keeps Android's default", async () => {
+  it("the second back press, with the keyboard closed, leaves the room (EXP-336)", async () => {
     const r = await mount([player("alice", true), player("bob")]);
+    pressBack(true);
     const { consumed, dismiss } = pressBack(false);
-    expect(consumed).toBe(false);
+    expect(consumed).toBe(true);
     expect(dismiss).not.toHaveBeenCalled();
+    expect(mockCtx.leaveRoom).toHaveBeenCalledTimes(1);
+    expect(mockReplace).toHaveBeenCalledWith("/");
+    act(() => r.unmount());
+  });
+});
+
+// ── Android back is Exit (EXP-336) ──
+
+describe("WaitingRoom: Android back leaves the room like the close button (EXP-336)", () => {
+  const pressBack = () => {
+    jest.spyOn(Keyboard, "isVisible").mockReturnValue(false);
+    return mockBack.handler!();
+  };
+
+  it("with the keyboard hidden, back sends leave-room (GameContext's leave) and goes home instead of popping", async () => {
+    const r = await mount([player("alice", true), player("bob")]);
+    // Consumed: the default pop would only close the socket, a lost connection for the server
+    expect(pressBack()).toBe(true);
+    expect(mockCtx.leaveRoom).toHaveBeenCalledTimes(1);
+    expect(mockCtx.endSocket).not.toHaveBeenCalled(); // the leave closes the socket itself, once acked
+    expect(mockReplace).toHaveBeenCalledTimes(1);
+    expect(mockReplace).toHaveBeenCalledWith("/");
+    act(() => r.unmount());
+  });
+
+  it("leaves only once, however many back presses and close-button taps arrive before the screen goes", async () => {
+    const r = await mount([player("alice", true), player("bob")]);
+    pressBack();
+    pressBack();
+    act(() => mockClose.onPress!());
+    expect(mockCtx.leaveRoom).toHaveBeenCalledTimes(1);
+    expect(mockReplace).toHaveBeenCalledTimes(1);
+    act(() => r.unmount());
+  });
+
+  it("with the host's remove-player confirmation open, back only closes it and stays in the room", async () => {
+    const r = await mount([player("alice", true), player("bob")]);
+    pressId(r, lobbyPlayerId("bob"));
+    expect(mockAlert.visible).toBe(true);
+
+    let consumed!: boolean;
+    act(() => { consumed = pressBack(); });
+    expect(consumed).toBe(true);
+    expect(mockAlert.visible).toBe(false);
+    expect(mockCtx.leaveRoom).not.toHaveBeenCalled();
+    expect(emitted("remove-player")).toHaveLength(0);
+    expect(mockReplace).not.toHaveBeenCalled();
+
+    // With the confirmation closed, the next back is Exit
+    act(() => { pressBack(); });
+    expect(mockCtx.leaveRoom).toHaveBeenCalledTimes(1);
+    expect(mockReplace).toHaveBeenCalledWith("/");
+    act(() => r.unmount());
+  });
+
+  it("back after the close button does not leave again", async () => {
+    const r = await mount([player("alice", true), player("bob")]);
+    act(() => mockClose.onPress!());
+    expect(pressBack()).toBe(true);
+    expect(mockCtx.leaveRoom).toHaveBeenCalledTimes(1);
+    expect(mockReplace).toHaveBeenCalledTimes(1);
     act(() => r.unmount());
   });
 });

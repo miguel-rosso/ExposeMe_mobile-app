@@ -306,6 +306,7 @@ After last round: game-over
   on at once. Closing in the same tick as the emit can lose the leave: socket.io dispatches an event on the next tick
   and drops it if the socket disconnected meanwhile, and the player would then be treated as a lost connection
   (lobby: shown as gone for 15 s with the name taken; mid-game: the game pauses for them instead of ending).
+  In the lobby, Android's system back (key or gesture) is that same Exit, and the iOS back swipe is disabled (EXP-336).
 - **One socket = one player in one room.** The same live socket re-sending `join-create-game` for the room
   and username it is already bound to (e.g. the WaitingRoom effect re-running, a duplicate join) is a no-op:
   same `room-of-game` answer with the same token, no token needed, no broadcast. If the game has started it

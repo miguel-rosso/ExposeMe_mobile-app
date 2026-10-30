@@ -33,14 +33,17 @@ function renderedScreenOptions(name: string): Record<string, unknown> | undefine
   return calls.find(([props]) => props.name === name)?.[0].options;
 }
 
-describe("GameScreen route blocks the back gesture", () => {
-  it("disables the iOS swipe-back gesture on GameScreen", async () => {
+// EXP-336: the same goes for the waiting room: a swipe home closed the socket without leave-room, so the server kept
+// the player in the lobby as a lost connection (name taken, host role held for 15 s). Its close button is the way out;
+// Android back runs it too (WaitingRoom's hardwareBackPress handler, waitingRoomLobby.test.tsx).
+describe("Game flow routes block the back gesture", () => {
+  it.each(["screens/GameScreen", "screens/WaitingRoom"])("disables the iOS swipe-back gesture on %s", async (route) => {
     let renderer!: TestRenderer.ReactTestRenderer;
     await act(async () => {
       renderer = TestRenderer.create(<RootLayout />);
     });
 
-    const options = renderedScreenOptions("screens/GameScreen");
+    const options = renderedScreenOptions(route);
     expect(options).toBeDefined();
     expect(options?.gestureEnabled).toBe(false);
     act(() => renderer.unmount());

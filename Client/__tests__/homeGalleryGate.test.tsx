@@ -33,7 +33,7 @@ const mockRequestNewRoom = jest.fn();
 let mockJoinCodeDraft = "";
 jest.mock("../app/providers/GameContext", () => ({
   useGameContext: () => ({
-    username: "ana", setUsername: jest.fn(), gameCode: null, setGameCode: mockSetGameCode, socket: null, endSocket: jest.fn(),
+    username: "ana", saveUsername: jest.fn(), gameCode: null, setGameCode: mockSetGameCode, socket: null, endSocket: jest.fn(),
     joinCodeDraft: mockJoinCodeDraft, setJoinCodeDraft: mockSetJoinCodeDraft,
     requestNewRoom: mockRequestNewRoom,
   }),

@@ -66,7 +66,7 @@ jest.mock("../app/providers/BackgroundContext", () => ({ useBackgroundContext: (
 jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/en").default }) }));
 jest.mock("../app/providers/GameContext", () => ({
   useGameContext: () => ({
-    username: "ana", setUsername: jest.fn(), gameCode: null, setGameCode: jest.fn(), socket: null, endSocket: jest.fn(),
+    username: "ana", saveUsername: jest.fn(), gameCode: null, setGameCode: jest.fn(), socket: null, endSocket: jest.fn(),
   }),
 }));
 

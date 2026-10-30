@@ -1,6 +1,5 @@
 import React from "react";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { TEST_IDS } from "../app/utils/testIds";
 import { normalizeUsername } from "../app/utils/username";
 
@@ -16,6 +15,8 @@ jest.mock("@react-native-async-storage/async-storage", () => {
 // The game context's name on its last render, and its value when the app navigates to the waiting room (which
 // mounts with it and sends it to the server)
 let mockCurrentName: string | null = null;
+/** Every name home asked the game context to save (GameContext.saveUsername persists it for the next launch) */
+const mockSavedNames: string[] = [];
 let nameAtPush: string | null | undefined;
 const mockPush = jest.fn();
 jest.mock("expo-router", () => ({
@@ -46,8 +47,12 @@ jest.mock("../app/providers/GameContext", () => {
       const [joinCodeDraft, setJoinCodeDraft] = useState("K7MQ4X");
       mockCurrentName = username;
       const requestNewRoom = () => setGameCode(null);
+      const saveUsername = (name: string) => {
+        mockSavedNames.push(name);
+        setUsername(name);
+      };
       return {
-        username, setUsername, gameCode, setGameCode, joinCodeDraft, setJoinCodeDraft, requestNewRoom,
+        username, saveUsername, gameCode, setGameCode, joinCodeDraft, setJoinCodeDraft, requestNewRoom,
         socket: null, endSocket: () => {},
       };
     },
@@ -62,7 +67,7 @@ beforeEach(() => {
   nameAtPush = undefined;
   mockPush.mockReset();
   mockPush.mockImplementation(() => { nameAtPush = mockCurrentName; });
-  (AsyncStorage.setItem as jest.Mock).mockClear();
+  mockSavedNames.length = 0;
 });
 
 const flush = () => act(async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); });
@@ -93,8 +98,7 @@ const typeName = async (root: ReactTestInstance, text: string) => {
 };
 const inputValue = (root: ReactTestInstance) =>
   byTestId(root, TEST_IDS.usernameInput).find((n) => typeof n.props.onChange === "function")!.props.value;
-const storedNames = () =>
-  (AsyncStorage.setItem as jest.Mock).mock.calls.filter(([key]) => key === "username").map(([, value]) => value);
+const storedNames = () => mockSavedNames;
 
 async function mount() {
   let r!: TestRenderer.ReactTestRenderer;

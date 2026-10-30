@@ -177,16 +177,13 @@ export interface GameContextProps {
   socket: Socket | null;
   /** Room this app is in or joining; null when it has none (Create game, or after leaving: Exit, kicked, refused) */
   gameCode: string | null;
-  /** Room code typed in home's join panel. Kept when a join is refused, so the panel shows it again; Search room
-   *  makes it the gameCode */
+  /** Room code in home's join panel: typed there, or a refused room's (an invite link's too), so the panel shows it
+   *  again; Search room makes it the gameCode */
   joinCodeDraft: string;
   setJoinCodeDraft: (code: string) => void;
   username: string | null;
   /** The name saved on this device has been read at app start: `username` is now that name, or null if none */
   usernameLoaded: boolean;
-  /** Room of an invite link opened without a name: home opens its join panel with this code to ask for one */
-  pendingInviteCode: string | null;
-  setPendingInviteCode: (code: string | null) => void;
   /** Home's Create game: forget the room code and let the next waiting room ask the server for a new room */
   requestNewRoom: () => void;
   /** Whether a new room was asked for since the last call (the waiting room takes it once, on opening) */
@@ -195,6 +192,8 @@ export interface GameContextProps {
   roundsOfGame: number;
   setGameCode: (code: string | null) => void;
   setUsername: (name: string | null) => void;
+  /** Use `name` and save it on this device for the next launch */
+  saveUsername: (name: string) => void;
   setPlayersProvider: React.Dispatch<React.SetStateAction<Player[]>>;
   startSocket: () => void;
   /** Close the socket and forget the room (gameCode) and the planted photo; the rejoin token is kept */

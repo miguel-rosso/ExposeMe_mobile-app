@@ -5,10 +5,11 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import WaitingRoom from "../app/screens/WaitingRoom";
 import { GameProvider, useGameContext } from "../app/providers/GameContext";
 import { TEST_IDS } from "../app/utils/testIds";
+import { inviteNameInput, pressInviteJoin, showsInviteDialog } from "../testUtils/inviteConfirm";
 
 // EXP-334: an invite link that cold-starts the app mounts the waiting room (home is only an unfocused screen under it),
-// with the real GameProvider and nothing in memory. It must join with the name saved on this device, and without a
-// saved name send the player home to type one (the room's code kept for the join panel) instead of loading forever.
+// with the real GameProvider and nothing in memory. Its invite dialog (EXP-347) must offer the name saved on this
+// device, once read, and without a saved name ask for one right there instead of loading forever.
 
 jest.mock("@react-native-async-storage/async-storage", () =>
   require("@react-native-async-storage/async-storage/jest/async-storage-mock")
@@ -162,39 +163,41 @@ describe("WaitingRoom opened by a cold invite link (EXP-334)", () => {
   it("joins the linked room with the saved name (normalized) and keeps the stored token for it", async () => {
     await AsyncStorage.setItem("username", " bob ");
     await AsyncStorage.setItem("rejoinToken", JSON.stringify({ gameCode: LINKED_ROOM, username: "bob", token: "tok-linked" }));
-    await openColdInviteLink();
+    const r = await openColdInviteLink();
+    expect(inviteNameInput(r).props.value).toBe("bob");
+    await pressInviteJoin(r);
 
     const socket = await connectSocket();
     expect(joins(socket)).toEqual([{ gameCode: LINKED_ROOM, username: "bob", rejoinToken: "tok-linked" }]);
     expect(mockDismissTo).not.toHaveBeenCalled();
   });
 
-  it("joins once the saved name is read, even when the socket connected first", async () => {
+  it("asks only once the saved name is read, with that name filled in", async () => {
     await AsyncStorage.setItem("username", "bob");
     const releaseStoredName = holdStoredNameRead();
     const r = await openColdInviteLink();
-    const socket = await connectSocket();
-    expect(joins(socket)).toEqual([]);
+    expect(showsInviteDialog(r)).toBe(false);
     expect(showsLoading(r)).toBe(true);
     expect(mockDismissTo).not.toHaveBeenCalled(); // not read yet: no name is not the same as none saved
 
     await releaseStoredName();
+    expect(inviteNameInput(r).props.value).toBe("bob");
+    await pressInviteJoin(r);
+    const socket = await connectSocket();
     expect(joins(socket)).toEqual([{ gameCode: LINKED_ROOM, username: "bob" }]);
   });
 
   it.each([
     ["no name saved (fresh install)", null],
     ["a blank saved name", "   "],
-  ])("with %s sends the player home to type one, the room's code kept for the join panel", async (_, stored) => {
+  ])("with %s asks for one in the dialog instead of sending the player home", async (_, stored) => {
     if (stored !== null) await AsyncStorage.setItem("username", stored);
-    await openColdInviteLink();
+    const r = await openColdInviteLink();
 
-    expect(mockDismissTo).toHaveBeenCalledWith("/");
-    expect(ctx.pendingInviteCode).toBe(LINKED_ROOM);
-    // Home fills the join panel from pendingInviteCode; the room itself is forgotten on the way out (EXP-342)
-    expect(ctx.gameCode).toBeNull();
-    expect(ctx.socket).toBeNull();
-    expect(mockSockets.every((s) => joins(s).length === 0)).toBe(true);
+    expect(showsInviteDialog(r)).toBe(true);
+    expect(inviteNameInput(r).props.value).toBe("");
+    expect(mockDismissTo).not.toHaveBeenCalled();
+    expect(mockSockets).toHaveLength(0); // nothing joins until Join
   });
 });
 
@@ -209,7 +212,6 @@ describe("WaitingRoom opened without a room code (EXP-334)", () => {
     await openColdInviteLink();
 
     expect(mockDismissTo).toHaveBeenCalledWith("/");
-    expect(ctx.pendingInviteCode).toBeNull();
     expect(mockSockets).toHaveLength(0); // never even connected
   });
 

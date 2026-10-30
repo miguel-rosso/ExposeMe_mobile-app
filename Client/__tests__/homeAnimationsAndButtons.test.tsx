@@ -66,7 +66,7 @@ jest.mock("../app/providers/GameContext", () => {
       const [joinCodeDraft, setJoinCodeDraft] = useState("");
       return {
         username, setUsername, setGameCode: () => {}, joinCodeDraft, setJoinCodeDraft, requestNewRoom: () => {},
-        pendingInviteCode: null, setPendingInviteCode: () => {}, socket: null, endSocket: () => {},
+        saveUsername: setUsername, socket: null, endSocket: () => {},
       };
     },
   };

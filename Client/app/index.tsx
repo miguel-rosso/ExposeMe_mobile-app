@@ -45,7 +45,7 @@ import { handleHomeBackPress } from "./utils/homeBackPress";
 import { isRoomCode, sanitizeRoomCodeInput } from "./utils/roomCode";
 import { translateServerMessage } from "./utils/serverMessage";
 import { MAX_USERNAME_INPUT_LENGTH } from "./utils/protocolLimits";
-import { normalizeUsername, USERNAME_STORAGE_KEY } from "./utils/username";
+import { normalizeUsername } from "./utils/username";
 import {
   HOME_TOP_ROW_HEIGHT,
   HOME_TOP_ROW_TOP,
@@ -69,21 +69,17 @@ const Index = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [hasSeenInitialScreen, setHasSeenInitialScreen] = useState(false);
   const {
-    setUsername,
+    saveUsername,
     username,
     setGameCode,
     joinCodeDraft,
     setJoinCodeDraft,
     socket,
     endSocket,
-    pendingInviteCode,
-    setPendingInviteCode,
     requestNewRoom,
   } = useGameContext();
   const { backgroundImage } = useBackgroundContext();
   const [isJoiningGame, setIsJoiningGame] = useState(false);
-  // The join panel also asks for the name (opened for an invite link that came without one)
-  const [askNameToJoin, setAskNameToJoin] = useState(false);
   const [shouldAnimateCreateGameButton, setShouldAnimateCreateGameButton] = useState(false);
   const [isFirstMount, setIsFirstMount] = useState(true);
   const gameCodeInputRef = useRef<TextInput>(null);
@@ -150,20 +146,6 @@ const Index = () => {
     }, [socket, endSocket])
   );
 
-  // An invite link opened without a name (the waiting room sent us here): once the home form shows (after the
-  // first-run screen, if any), open the join panel with the link's code, asking for the name there too. On focus
-  // only: on a cold start the stack keeps a hidden home under the waiting room.
-  const showsHomeForm = !isLoading && hasSeenInitialScreen;
-  useFocusEffect(
-    useCallback(() => {
-      if (!showsHomeForm || !pendingInviteCode) return;
-      setPendingInviteCode(null);
-      setJoinCodeDraft(pendingInviteCode);
-      setAskNameToJoin(true);
-      setIsJoiningGame(true);
-    }, [showsHomeForm, pendingInviteCode])
-  );
-
   // When the join panel closes, the home form comes back: the name bounces up and Join game bounces down
   useEffect(() => {
     if (!isJoiningGame && !isFirstMount) {
@@ -182,10 +164,7 @@ const Index = () => {
   );
 
   // Name typed (or cleared): kept in the game context and saved for the next launch
-  const handleUsernameChange = async (text: string) => {
-    setUsername(text);
-    await AsyncStorage.setItem(USERNAME_STORAGE_KEY, text);
-  };
+  const handleUsernameChange = (text: string) => saveUsername(text);
 
   /**
    * Saves the typed name without stray spaces before Create / Join (normalized here, not while typing, so the space
@@ -220,9 +199,7 @@ const Index = () => {
 
   // Search room: joins the typed room through the waiting room
   const handleSearchRoom = async () => {
-    // Already checked by Join game, unless the panel asks for the name itself
-    if (!submitUsername()) return;
-
+    // The name was already checked (and saved normalized) by Join game, which opened this panel
     if (!isRoomCode(joinCodeDraft)) {
       gameCodeAnimRef.current?.shake?.(SHAKE_MS);
       return;
@@ -250,11 +227,10 @@ const Index = () => {
   // Closes the join panel (tap outside it, or Android back); the home form animates back in (effect above)
   const handleCancelJoinGame = () => {
     setIsJoiningGame(false);
-    setAskNameToJoin(false);
     setShouldAnimateCreateGameButton(true);
   };
 
-  /** The name field with its clear button: on the home form, and in the join panel when it asks for the name */
+  /** The home form's name field with its clear button */
   const renderUsernameInput = (animation: string | undefined) => (
     <Animatable.View
       ref={usernameInputRef}
@@ -387,11 +363,10 @@ const Index = () => {
             </>
           )}
 
-          {/* Join panel: room code (and the name, for an invite) and Search room; tapping outside closes it */}
+          {/* Join panel: room code and Search room; tapping outside closes it */}
           {isJoiningGame && (
             <TouchableWithoutFeedback accessible={false} onPress={handleCancelJoinGame}>
               <View style={tw`flex-1 w-full justify-center items-center`}>
-                {askNameToJoin && renderUsernameInput("slideInDownBounce")}
                 {/* Room code input */}
                 <Animatable.View
                   ref={gameCodeAnimRef}

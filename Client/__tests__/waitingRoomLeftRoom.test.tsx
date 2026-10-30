@@ -5,6 +5,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import WaitingRoom from "../app/screens/WaitingRoom";
 import { GameProvider, useGameContext } from "../app/providers/GameContext";
 import type { FakeSocket } from "../testUtils/fakeSocket";
+import { pressInviteJoin } from "../testUtils/inviteConfirm";
 
 // EXP-342: a room the player left (Exit, kicked) is forgotten by the real GameProvider. A waiting room opened
 // afterwards without a room code (e.g. the link exposeme://screens/WaitingRoom) goes home instead of rejoining it as
@@ -98,9 +99,15 @@ const connectLatestSocket = async () => {
   return socket;
 };
 
+/** An invite link opens the waiting room, confirmed with Join (EXP-347). */
+const openInviteLinkAndJoin = async (code: string) => {
+  await openWaitingRoom({ code: code.toLowerCase() });
+  await pressInviteJoin(app!);
+};
+
 /** In LEFT_ROOM's lobby: opened by its invite link, joined, and the server answered with the room and a token. */
 const joinRoom = async () => {
-  await openWaitingRoom({ code: LEFT_ROOM.toLowerCase() });
+  await openInviteLinkAndJoin(LEFT_ROOM);
   const socket = await connectLatestSocket();
   await act(async () => {
     socket.fire("room-of-game", {
@@ -197,7 +204,7 @@ describe("A room the player left is forgotten (EXP-342)", () => {
     await pressExit();
     await closeWaitingRoom();
 
-    await openWaitingRoom({ code: OTHER_ROOM.toLowerCase() });
+    await openInviteLinkAndJoin(OTHER_ROOM);
     const socket = await connectLatestSocket();
 
     expect(joinsOn(socket)).toEqual([{ gameCode: OTHER_ROOM, username: USERNAME }]);
@@ -208,7 +215,7 @@ describe("A room the player left is forgotten (EXP-342)", () => {
     await startApp();
     const left = await joinRoom();
 
-    await openWaitingRoom({ code: OTHER_ROOM.toLowerCase() });
+    await openInviteLinkAndJoin(OTHER_ROOM);
     expect(left.emitted.some(([ev]) => ev === "leave-room")).toBe(true);
     const socket = await connectLatestSocket();
 

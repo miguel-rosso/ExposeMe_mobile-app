@@ -43,7 +43,6 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   const [joinCodeDraft, setJoinCodeDraft] = useState("");
   const [username, setUsername] = useState<string | null>(null);
   const [usernameLoaded, setUsernameLoaded] = useState(false);
-  const [pendingInviteCode, setPendingInviteCode] = useState<string | null>(null);
   const [playersProvider, setPlayersProvider] = useState<Player[]>([]);
   const [roundsOfGame, setRoundsOfGame] = useState<number>(5);
   // Photo picked in the lobby to plant in this game (dropped when the game/room ends), and whether the server has it
@@ -170,6 +169,12 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     });
   }, []);
 
+  /** The player's name, saved for later launches too (as given: home saves it while it is typed) */
+  const saveUsername = (name: string) => {
+    setUsername(name);
+    AsyncStorage.setItem(USERNAME_STORAGE_KEY, name).catch(() => {});
+  };
+
   // ── New room ──
 
   // In memory only (a link can't forge it): a waiting room opened without a room code asks the server for a new room
@@ -289,8 +294,6 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
         setJoinCodeDraft,
         username,
         usernameLoaded,
-        pendingInviteCode,
-        setPendingInviteCode,
         requestNewRoom,
         takeNewRoomRequest,
         playersProvider,
@@ -300,6 +303,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
         leaveRoom,
         setGameCode,
         setUsername,
+        saveUsername,
         setPlayersProvider,
         setRoundsOfGame,
         plantedPhotoUri,

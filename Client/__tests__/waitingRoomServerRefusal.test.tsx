@@ -18,7 +18,7 @@ jest.mock("expo-router", () => ({
 }));
 jest.mock("../app/providers/GameContext", () => ({
   useGameContext: () => ({
-    startSocket: jest.fn(), endSocket: jest.fn(), gameCode: "ABC123", setGameCode: jest.fn(),
+    startSocket: jest.fn(), endSocket: jest.fn(), gameCode: "ABC123", setGameCode: jest.fn(), setJoinCodeDraft: jest.fn(),
     setPlayersProvider: jest.fn(), socket: mockSocket, username: "bob",
     setRoundsOfGame: jest.fn(), roundsOfGame: 10, setPlantedPhotoUri: jest.fn(),
     saveRejoinToken: jest.fn(), getRejoinToken: async () => "tok-123", clearRejoinToken: mockClearRejoinToken,

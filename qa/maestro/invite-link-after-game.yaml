@@ -1,7 +1,8 @@
 # EXP-206: an invite link always wins over the room left from a previous game. The device plays a short game in room A,
 # taps "Play again" (back in A's lobby, socket still bound to A), then opens the invite deep link of room B: it must
 # leave A and land in B's lobby (B's code, B's players), not rejoin A. Before the fix the lobby ignored the link
-# while GameContext still held A's code.
+# while GameContext still held A's code. EXP-347 (DEC-046): B is only joined after Join in the invite dialog, which
+# shows B's code and the saved name.
 # Room A has 2 bots and room B 3 (bot names repeat across bots.mjs processes, but each room is separate on the
 # server): lobby-player-bot3 only exists in B. A's bots record the device's player-left when it switches rooms.
 # Run from the repo root against the lab server (never production), one device at a time:
@@ -38,6 +39,18 @@ appId: com.socketNull.ExposeMe
       visible: "Open in Expose Me\\?|¿Abrir en Expose Me\\?"
     commands:
       - tapOn: "Open|Abrir"
+# Asked first: B's code, the saved name filled in
+- extendedWaitUntil:
+    visible:
+      id: "invite-room-code"
+      text: "${NEW_CODE}"
+    timeout: 30000
+- assertVisible:
+    id: "invite-name-input"
+    text: "${USERNAME}"
+- takeScreenshot: invite-confirm-${USERNAME}
+- tapOn:
+    id: "invite-join-button"
 # Room B's lobby, not A's
 - extendedWaitUntil:
     visible:

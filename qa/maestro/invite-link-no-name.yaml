@@ -1,6 +1,7 @@
 # EXP-334: an invite link opened by a player with no saved name (fresh install). Before the fix the waiting room
-# waited forever for a name to join with ("Loading room…"); now it sends the player home with the join panel open,
-# the link's code filled in and the name field in it, so they only type a name and tap Search.
+# waited forever for a name to join with ("Loading room…"). EXP-347 (DEC-046): the waiting room's invite dialog asks
+# for it right there (the link's code shown, the name field empty, Join disabled until a name is typed), and nothing
+# joins until Join.
 # The app starts with clearState (no saved name) and gets past the first-run screen, then opens the link from home.
 # A link that cold-starts the app can't be driven here: the dev client always starts on its own launch link (see
 # dev-client-boot.yaml) and drops the app's. The no-name path is the same either way (the stored-name cold start is
@@ -21,27 +22,27 @@ appId: com.socketNull.ExposeMe
       visible: "Open in Expose Me\\?|¿Abrir en Expose Me\\?"
     commands:
       - tapOn: "Open|Abrir"
-# Home's join panel with the link's code, asking for the name (not the endless lobby spinner)
+# The invite dialog with the link's code and an empty name field (not the endless lobby spinner, not home)
 - extendedWaitUntil:
     visible:
-      id: "game-code-input"
+      id: "invite-room-code"
       text: "${GAME_CODE}"
     timeout: 30000
-- assertNotVisible:
-    id: "lobby-loading"
 - assertVisible:
-    id: "search-room-button"
-- takeScreenshot: invite-no-name-panel-${USERNAME}
+    id: "invite-name-input"
+- assertNotVisible:
+    id: "lobby-waiting"
+- takeScreenshot: invite-no-name-dialog-${USERNAME}
 - tapOn:
-    id: "username-input"
+    id: "invite-name-input"
 - inputText: ${USERNAME}
-# Submit instead of hideKeyboard (see join-room.yaml); a tap outside the fields would close the join panel
+# Return only closes the keyboard here (hideKeyboard would send Back on Android: Cancel); joining is the Join tap
 - pressKey: Enter
 - assertVisible:
-    id: "username-input"
+    id: "invite-name-input"
     text: "${USERNAME}"
 - tapOn:
-    id: "search-room-button"
+    id: "invite-join-button"
 # In the linked room's lobby (or its game, if the host bot already started it)
 - extendedWaitUntil:
     visible:

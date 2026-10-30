@@ -165,6 +165,11 @@ export default {
   // WinnerModal singular
   pointsOne: "{points} punto",
 
+  // WaitingRoom: confirmation shown when an invite link opens it
+  inviteJoinTitle: "¿Entrar en esta sala?",
+  inviteNameLabel: "Tu nombre",
+  inviteJoin: "Entrar",
+
   // WaitingRoom: player gone (disconnected past the server's grace)
   playerDisconnected: "desconectado",
 

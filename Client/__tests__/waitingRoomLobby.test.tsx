@@ -6,6 +6,7 @@ import WaitingRoom from "../app/screens/WaitingRoom";
 import { TEST_IDS, lobbyPlayerId, roundsOptionId } from "../app/utils/testIds";
 import { KICKED_BY_HOST_MESSAGE } from "../app/utils/serverMessage";
 import { Keyboard } from "react-native";
+import { pressInviteJoin } from "../testUtils/inviteConfirm";
 
 // EXP-063: the lobby's socket flow. Joining (with the stored rejoin token), the player list following
 // player-joined / player-left / player-removed, the host's start controls (only with 2+ players), rounds, entering
@@ -18,7 +19,7 @@ const mockCtx = {
   startSocket: jest.fn(), endSocket: jest.fn(), leaveRoom: jest.fn(), setGameCode: jest.fn(), setPlayersProvider: jest.fn(),
   setRoundsOfGame: jest.fn(), setPlantedPhotoUri: jest.fn(), plantPhoto: jest.fn(), saveRejoinToken: jest.fn(),
   getRejoinToken: jest.fn(async (..._a: unknown[]) => "tok-123" as string | null), clearRejoinToken: jest.fn(),
-  setPendingInviteCode: jest.fn(), takeNewRoomRequest: jest.fn(() => false),
+  saveUsername: jest.fn(), setJoinCodeDraft: jest.fn(), takeNewRoomRequest: jest.fn(() => false),
 };
 const mockClose: { onPress?: () => void } = {};
 /** Last props of the remove-player confirmation (AlertModal) */
@@ -32,7 +33,8 @@ jest.mock("expo-router", () => ({
 }));
 jest.mock("../app/providers/GameContext", () => ({
   useGameContext: () => ({
-    ...mockCtx, gameCode: mockRoute.gameCode, socket: mockSocket, username: "alice", roundsOfGame: 10, plantedPhotoUri: null,
+    ...mockCtx, gameCode: mockRoute.gameCode, socket: mockSocket, username: "alice", usernameLoaded: true, roundsOfGame: 10,
+    plantedPhotoUri: null,
   }),
 }));
 jest.mock("../app/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: null }) }));
@@ -138,6 +140,7 @@ describe("WaitingRoom: joining (EXP-063)", () => {
     act(() => mockSocket.fire("room-of-game", { success: false, message: "Room is full" }));
     expect(mockCtx.endSocket).toHaveBeenCalledTimes(1);
     expect(mockReplace).toHaveBeenCalledWith({ pathname: "/", params: { message: "Room is full" } });
+    expect(mockCtx.setJoinCodeDraft).toHaveBeenCalledWith("K7MQ4X"); // home's join panel offers it again
     act(() => r.unmount());
   });
 });
@@ -368,6 +371,7 @@ describe("WaitingRoom: room code (EXP-198)", () => {
     mockRoute.gameCode = null;
     mockRoute.params = { code: " k7mq4x " };
     const r = await mount();
+    await pressInviteJoin(r); // confirmed in the invite dialog (EXP-347)
     expect(mockCtx.setGameCode).toHaveBeenCalledWith("K7MQ4X");
     act(() => r.unmount());
   });

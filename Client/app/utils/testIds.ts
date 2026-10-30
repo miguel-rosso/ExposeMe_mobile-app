@@ -28,6 +28,12 @@ export const TEST_IDS = {
   lobbyLoading: "lobby-loading", // shown until the join answer says this is a lobby (a started game opens the game)
   chatInput: "chat-input",
   chatSendButton: "chat-send-button",
+  // Invite link confirmation (DEC-046): nothing joins until Join
+  inviteConfirmModal: "invite-confirm-modal",
+  inviteRoomCode: "invite-room-code",
+  inviteNameInput: "invite-name-input",
+  inviteJoinButton: "invite-join-button",
+  inviteCancelButton: "invite-cancel-button",
   // ── Game ──
   gameWaitingReady: "game-waiting-ready",
   gameLoading: "game-loading", // opened on a game in progress: shown until the server's snapshot says its phase

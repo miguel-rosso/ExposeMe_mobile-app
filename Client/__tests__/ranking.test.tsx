@@ -1,6 +1,6 @@
 import React from "react";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
-import { getWinners, rankScores } from "../app/utils/ranking";
+import { getWinners, hasResult, rankScores } from "../app/utils/ranking";
 import { ScoreRound } from "../app/models/interfaces";
 import { TEST_IDS, finalRankId, finalWinnerId, scoreRankId, winnerNameId } from "../app/utils/testIds";
 import WinnerModal from "../app/components/modals/WinnerModal";
@@ -133,5 +133,61 @@ describe("tie rendering", () => {
     expect(textOf(r.root, scoreRankId("bob"))).toBe("2");
     expect(textOf(r.root, scoreRankId("cid"))).toBe("2");
     act(() => r.unmount());
+  });
+});
+
+// ── No result (EXP-341 / DEC-044) ──
+// A game where nobody scored (no rounds played, or everyone at 0) has no winner: no celebration, just the table.
+
+describe("hasResult", () => {
+  it("is true as soon as someone scored", () => {
+    expect(hasResult([p("a", 0), p("b", 1)])).toBe(true);
+    expect(hasResult([p("a", 10), p("b", 10)])).toBe(true);
+  });
+
+  it("is false when everyone is at 0 or there are no scores", () => {
+    expect(hasResult([p("solo", 0)])).toBe(false);
+    expect(hasResult([p("a", 0), p("b", 0)])).toBe(false);
+    expect(hasResult([])).toBe(false);
+  });
+});
+
+describe("FinalScoreModal without a result", () => {
+  beforeEach(() => { jest.useFakeTimers(); mockT = en; });
+  afterEach(() => { jest.clearAllTimers(); jest.useRealTimers(); });
+
+  const texts = (root: ReactTestInstance) =>
+    root.findAll((n) => (n.type as unknown) === "Text").map((n) => n.props.children);
+  const confetti = (root: ReactTestInstance) => root.findAll((n) => (n.type as unknown) === "LottieView");
+
+  it("titles it «No result», with no winner or confetti, and keeps the table and both buttons (en/es)", () => {
+    let r = render(<FinalScoreModal visible finalScore={[sr("ana", 0), sr("bob", 0)]} />);
+    expect(textOf(r.root, TEST_IDS.finalTitle)).toBe("No result");
+    expect(texts(r.root)).toContain("Nobody scored any points");
+    expect(confetti(r.root)).toHaveLength(0);
+    expect(has(r.root, finalWinnerId("ana"))).toBe(false);
+    expect(has(r.root, finalWinnerId("bob"))).toBe(false);
+    expect(textOf(r.root, finalRankId("ana"))).toBe("1");
+    expect(textOf(r.root, finalRankId("bob"))).toBe("1");
+    expect(has(r.root, TEST_IDS.playAgainButton)).toBe(true);
+    expect(has(r.root, TEST_IDS.finalExitButton)).toBe(true);
+    act(() => r.unmount());
+
+    mockT = es;
+    r = render(<FinalScoreModal visible finalScore={[sr("ana", 0)]} />);
+    expect(textOf(r.root, TEST_IDS.finalTitle)).toBe("Partida sin resultado");
+    expect(texts(r.root)).toContain("Nadie ha sumado puntos");
+    expect(confetti(r.root)).toHaveLength(0);
+    act(() => r.unmount());
+  });
+
+  it("a game with a winner or a tie keeps the title, the winners and the confetti", () => {
+    for (const finalScore of [[sr("ana", 3), sr("bob", 0)], [sr("ana", 2), sr("bob", 2)]]) {
+      const r = render(<FinalScoreModal visible finalScore={finalScore} />);
+      expect(textOf(r.root, TEST_IDS.finalTitle)).toBe("Final Results");
+      expect(confetti(r.root)).toHaveLength(1);
+      expect(has(r.root, finalWinnerId("ana"))).toBe(true);
+      act(() => r.unmount());
+    }
   });
 });

@@ -306,7 +306,7 @@ first_open_wait_ms="$(grep -oE 'timeout: [0-9]+' "$MAESTRO_DIR/dev-client-boot.y
   && [ "$LOBBY_WAIT_MS" -ge "$(((STUCK_ATTEMPT_S + RETRY_OPEN_JOIN_S) * 1000))" ] && [ "$LOBBY_WAIT_MS" -ge 420000 ] \
   && ok "lobby budget: stuck attempt > open-app's bundle wait ($first_open_wait_ms ms), lobby >= stuck attempt + retry" \
   || ko "lobby budget" "stuck=$STUCK_ATTEMPT_S open=$first_open_wait_ms lobby=$LOBBY_WAIT_MS"
-for f in play-rounds many-players tie-game waiting-photo; do
+for f in play-rounds many-players no-result-game waiting-photo; do
   grep -q -- "- runFlow: wait-game-start.yaml" "$MAESTRO_DIR/$f.yaml" && ok "$f.yaml waits in the lobby with the budget" || ko "$f.yaml uses wait-game-start.yaml"
 done
 

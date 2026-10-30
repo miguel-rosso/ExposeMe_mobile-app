@@ -70,6 +70,7 @@ export const TEST_IDS = {
   winnerContinue: "winner-continue",
   winnerTitle: "winner-title",
   finalScoreModal: "final-score-modal",
+  finalTitle: "final-title", // "Final Results", or "No result" when nobody scored (DEC-044)
   finalExitButton: "final-exit-button",
   playAgainButton: "play-again-button",
   // ── Language ──

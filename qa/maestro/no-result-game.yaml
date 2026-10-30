@@ -1,0 +1,47 @@
+# EXP-341 / DEC-044: nobody answers, so everyone ends on 0 points and the game has no result. There is no winner
+# screen (no confetti): the final scoreboard opens at once titled "No result", with no winner highlighted, and
+# "Play again" still takes the device back to the lobby. Bots must never answer either:
+#   qa/lab/lab.sh play --flow no-result-game --bots 1 --devices pair --bot-args --no-answer
+# Keep it to <= 3 players so every final-score row fits without scrolling.
+# env: GAME_CODE, USERNAME, METRO_URL (url-encoded)
+# Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
+appId: com.socketNull.ExposeMe
+---
+- runFlow: open-app.yaml
+- runFlow: join-room.yaml
+- runFlow: wait-game-start.yaml
+- extendedWaitUntil:
+    visible:
+      id: "game-waiting-ready|game-waiting-photo|player-option-.*|score-modal"
+    timeout: 60000
+# Play without ever tapping a player option (empty guess every round)
+- repeat:
+    while:
+      notVisible:
+        id: "winner-modal|final-score-modal"
+    commands:
+      - evalScript: ${output.shot = (output.shot || 0) + 1}
+      - takeScreenshot: no-result-round-${USERNAME}-${output.shot}
+      - waitForAnimationToEnd:
+          timeout: 4000
+- assertVisible:
+    id: "final-score-modal"
+- assertNotVisible:
+    id: "winner-modal"
+- assertVisible:
+    id: "final-title"
+    text: "No result|Partida sin resultado"
+- assertNotVisible:
+    id: "final-winner-${USERNAME}|final-winner-bot1"
+- assertVisible:
+    id: "final-rank-${USERNAME}"
+- assertVisible:
+    id: "final-rank-bot1"
+- takeScreenshot: no-result-${USERNAME}
+- tapOn:
+    id: "play-again-button"
+- extendedWaitUntil:
+    visible:
+      id: "lobby-game-code"
+    timeout: 20000
+- takeScreenshot: no-result-lobby-${USERNAME}

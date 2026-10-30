@@ -111,6 +111,9 @@ export default {
   // FinalScoreModal
   gameOver: "GAME OVER",
   finalResults: "Final Results",
+  // Nobody scored (DEC-044): no winner and no celebration
+  noResult: "No result",
+  noResultHint: "Nobody scored any points",
   exit: "Exit",
   playAgain: "Play Again",
   pts: "pts",

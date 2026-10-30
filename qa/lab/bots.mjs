@@ -12,7 +12,7 @@
 //   --help prints the options (no network); unknown options exit 2. The server in use is printed at start.
 //   options: --server URL  --photos DIR  --out FILE  --chaos 0.1  --upload-fail 0.2  --timeout 600
 //            --no-ready K   the last K bots never send im-ready (game must start via the server's ready timeout)
-//            --no-answer    bots always submit an empty guess (everyone ends on 0 points: final tie, see qa/maestro/tie-game.yaml)
+//            --no-answer    bots always submit an empty guess (nobody scores: no result, DEC-044, see qa/maestro/no-result-game.yaml)
 //            --drop-round R --drop-secs S [--drop-bot K]
 //                           bot K (1-based, default the last one) drops at round R's round-start and reconnects
 //                           S seconds later (rejoin + game-state snapshot). With --bots 2 the game must pause
@@ -324,7 +324,7 @@ const PHOTO_UNAVAILABLE = Number(args["photo-unavailable"] || 0);
 const NO_READY = Number(args["no-ready"] || 0);
 const PLANT = Number(args.plant || 0);
 const NO_ANSWER = !!args["no-answer"];
-// --no-answer: bots submit an empty guess like a player who never taps, so nobody scores (tie at 0).
+// --no-answer: bots submit an empty guess like a player who never taps, so nobody scores: no result (DEC-044).
 // Nobody is told whose photo it is, the owner included (EXP-252): every bot guesses at random among all the round's
 // options, those who left during the round included (DEC-038).
 const pickGuess = (bot) => {

@@ -29,7 +29,7 @@
 #                               summary, the device render skew per phase (qa/runs/<RUN_ID>/render-skew.json) and how
 #                               many scoreboards each device checked (play-rounds.yaml), and keeps the game's raw
 #                               telemetry rows (qa/runs/<RUN_ID>/telemetry.jsonl); warns unless Maestro is 2.11.x
-#                               (--bot-args: extra bots.mjs flags, e.g. --flow tie-game --bot-args --no-answer);
+#                               (--bot-args: extra bots.mjs flags, e.g. --flow no-result-game --bot-args --no-answer);
 #                               a device whose flow failed while the dev client was still booting (stuck on its
 #                               "Downloading N%", or dev-client-boot.yaml's loaded check failed: launcher, ANR dialog,
 #                               "There was a problem loading the project") is force-stopped and runs the flow once

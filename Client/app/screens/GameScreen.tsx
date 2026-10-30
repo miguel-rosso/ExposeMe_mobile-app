@@ -19,7 +19,7 @@ import { TEST_IDS } from "@/app/utils/testIds";
 import ProgressBar from "@/app/components/ProgressBar";
 import FinalScoreModal from "@/app/components/modals/FinalScoreModal";
 import WinnerModal from "@/app/components/modals/WinnerModal";
-import { getWinners } from "@/app/utils/ranking";
+import { getWinners, hasResult } from "@/app/utils/ranking";
 import EmojiReactionLane, { EmojiReactionData } from "@/app/components/IngameComunication/EmojiReactionLane";
 import EmojisButton from "@/app/components/IngameComunication/EmojisButtons";
 import AnswerOption, { answerOptionState } from "@/app/components/AnswerOption";
@@ -266,7 +266,13 @@ const GameScreen = () => {
     }
     setPauseEndsAt(null);
     setFinalScore(finalScore);
-    if (finalScore?.length > 0) { setWinners(getWinners(finalScore)); setShowWinner(true); }
+    // Nobody scored (no rounds played, or everyone at 0): no winner to celebrate, straight to the table (DEC-044)
+    if (hasResult(finalScore ?? [])) {
+      setWinners(getWinners(finalScore));
+      setShowWinner(true);
+    } else {
+      setShowFinalScore(true);
+    }
   };
 
   // ── Socket listeners ─────────────────────────────────

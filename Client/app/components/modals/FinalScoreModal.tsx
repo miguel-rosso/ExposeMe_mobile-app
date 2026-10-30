@@ -10,7 +10,7 @@ import LottieView from "lottie-react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useI18n } from "../../i18n";
 import { TEST_IDS, finalRankId, finalWinnerId } from "@/app/utils/testIds";
-import { Ranked, rankScores } from "@/app/utils/ranking";
+import { Ranked, hasResult, rankScores } from "@/app/utils/ranking";
 
 interface FinalScoreModalProps {
   visible: boolean;
@@ -24,6 +24,7 @@ const ACCENT_DIM = "rgba(167, 139, 250, 0.15)";
 const GOLD = "#FACC15";
 const SILVER = "#94A3B8";
 const BRONZE = "#D97706";
+const OFF_PODIUM = "#4B5563";
 
 const FinalScoreModal: React.FC<FinalScoreModalProps> = ({ visible, finalScore }) => {
   const { t } = useI18n();
@@ -33,9 +34,11 @@ const FinalScoreModal: React.FC<FinalScoreModalProps> = ({ visible, finalScore }
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const confettiRef = useRef<LottieView>(null);
 
-  // Tied players share the position (1, 1, 3) and everyone at rank 1 is a winner
+  // Tied players share the position (1, 1, 3) and everyone at rank 1 is a winner. When nobody scored there is no
+  // winner, podium or celebration: just the table (DEC-044)
   const sortedScores = rankScores(finalScore);
-  const winners = sortedScores.filter((s) => s.rank === 1);
+  const scored = hasResult(finalScore);
+  const winners = scored ? sortedScores.filter((s) => s.rank === 1) : [];
 
   useEffect(() => {
     if (visible) {
@@ -81,13 +84,14 @@ const FinalScoreModal: React.FC<FinalScoreModalProps> = ({ visible, finalScore }
     if (rank === 1) return GOLD;
     if (rank === 2) return SILVER;
     if (rank === 3) return BRONZE;
-    return "#4B5563";
+    return OFF_PODIUM;
   };
 
   const renderScore = ({ item, index }: { item: Ranked<ScoreRound>; index: number }) => {
-    const isWinner = item.rank === 1;
-    const podium = item.rank <= 3;
-    const accent = getRankAccent(item.rank);
+    // Without a result everyone shares rank 1, but nobody is on the podium
+    const isWinner = scored && item.rank === 1;
+    const podium = scored && item.rank <= 3;
+    const accent = podium ? getRankAccent(item.rank) : OFF_PODIUM;
 
     return (
       <Animatable.View animation="fadeInUp" delay={index * 150} duration={500}>
@@ -157,16 +161,18 @@ const FinalScoreModal: React.FC<FinalScoreModalProps> = ({ visible, finalScore }
 
   return (
     <View testID={TEST_IDS.finalScoreModal} style={tw`absolute inset-0 flex-1 justify-center items-center z-100`}>
-      {/* Confetti */}
-      <View style={[tw`absolute inset-0`, { zIndex: 1 }]}>
-        <LottieView
-          ref={confettiRef}
-          source={require("@/assets/animations/confetiAnimation.json")}
-          autoPlay
-          loop={false}
-          style={{ width: "100%", height: "100%" }}
-        />
-      </View>
+      {/* Confetti, only when someone won */}
+      {scored && (
+        <View style={[tw`absolute inset-0`, { zIndex: 1 }]}>
+          <LottieView
+            ref={confettiRef}
+            source={require("@/assets/animations/confetiAnimation.json")}
+            autoPlay
+            loop={false}
+            style={{ width: "100%", height: "100%" }}
+          />
+        </View>
+      )}
 
       {/* Backdrop */}
       <Animated.View
@@ -196,14 +202,17 @@ const FinalScoreModal: React.FC<FinalScoreModalProps> = ({ visible, finalScore }
                 { backgroundColor: ACCENT_DIM, borderWidth: 1, borderColor: "rgba(167, 139, 250, 0.3)" },
               ]}
             >
-              <Ionicons name="trophy" size={30} color={ACCENT} />
+              <Ionicons name={scored ? "trophy" : "flag"} size={30} color={ACCENT} />
             </View>
           </Animatable.View>
 
           <Text style={[tw`text-xs font-semibold tracking-widest mb-1`, { color: ACCENT, letterSpacing: 3 }]}>
             {t.gameOver}
           </Text>
-          <Text style={[tw`text-2xl font-bold`, { color: "#FAFAFA", letterSpacing: 0.5 }]}>{t.finalResults}</Text>
+          <Text testID={TEST_IDS.finalTitle} style={[tw`text-2xl font-bold`, { color: "#FAFAFA", letterSpacing: 0.5 }]}>
+            {scored ? t.finalResults : t.noResult}
+          </Text>
+          {!scored && <Text style={[tw`text-sm mt-2`, { color: "#9CA3AF" }]}>{t.noResultHint}</Text>}
 
           {/* Winner highlight: one pill per tied winner, wrapping onto new lines */}
           {winners.length > 0 && (

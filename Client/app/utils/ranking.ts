@@ -16,3 +16,9 @@ export const rankScores = <T extends { points: number }>(scores: T[]): Ranked<T>
 /** Every player tied for first place (empty list when there are no scores). */
 export const getWinners = <T extends { points: number }>(scores: T[]): Ranked<T>[] =>
   rankScores(scores).filter((s) => s.rank === 1);
+
+/**
+ * Whether a finished game has a result: someone scored. When nobody did (no rounds played, or everyone at 0 points)
+ * there is no winner to celebrate (DEC-044).
+ */
+export const hasResult = (scores: { points: number }[]): boolean => scores.some((s) => s.points > 0);

@@ -427,6 +427,8 @@ After last round: game-over
   **`im-ready` that arrives once the game is no longer running** (`!started`) is answered with `game-state` to that
   socket only (the not-started snapshot with the final scores, as a rejoin after the game ended gets): the app's game
   screen shows the game over from it, and the final screens ignore a not-started snapshot.
+  A final score where nobody is above 0 (no round played, or nobody scored) has no result (DEC-044): the app skips
+  the winner screen and opens the final table at once, titled "No result", with no winner and no confetti.
   `game-over` resets `isReady`, `started` and `phase` and clears unused planted photos
   (`plantedPhoto`, `hasPlantedPhoto`) for every player; `start-game` resets `points`, `lastGuess` and
   `lastAnswerCorrect` ("Play again" in the same room starts from zero).

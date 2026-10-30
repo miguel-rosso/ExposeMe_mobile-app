@@ -106,8 +106,9 @@ export class RoomManager {
     if (room.started) return { success: false, message: "Game already started" };
     // Before comparing names, so a full room tells nothing about who is in it
     if (others.length >= MAX_PLAYERS_PER_ROOM) return { success: false, message: "Room is full" };
-    // Another spelling of a player's name ("bob ", "Bob", "bob" with a Cyrillic o) is taken, even with that player's
-    // token; a different name that only reads alike in some fonts ("AIice", "Clara" next to "Dara") is too similar
+    // Another spelling of a player's name ("Bob", full-width "bob", "bob" with a Cyrillic o) is taken, even with that
+    // player's token; a different name that only reads alike in some fonts ("AIice", "Clara" next to "Dara") is too
+    // similar
     const keys = nameKeys(username);
     const clashes = others.map((p) => nameClash(this.nameKeysOf(p), keys));
     if (clashes.includes("same")) return { success: false, message: "Username already taken" };

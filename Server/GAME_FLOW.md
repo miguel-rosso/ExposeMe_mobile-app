@@ -196,8 +196,9 @@ After last round: game-over
 - `join-create-game { gameCode, username, rejoinToken? }`: `gameCode: null` creates a room (sender is host).
   `username` (`managers/playerName.ts`) is free-form: any script, emoji, symbols, punctuation or ASCII art, also with
   no letter at all (`¯\_(ツ)_/¯`, `(•_•)`, `<3 <3`, `🔥🔥`). It must be a string of 1–15 chars (UTF-16 units, as many as the app's name input takes) and at
-  most 60 after NFKC (one Arabic ligature such as U+FDFA expands to 18 letters), not blank, with no combining mark at
-  the start (after any leading spaces) or on a trailing space, at most four combining marks in a row (Tibetan and
+  most 60 after NFKC (one Arabic ligature such as U+FDFA expands to 18 letters), not blank, with no space at either
+  end or two in a row (the app trims the name and collapses its spaces, so `bob ` or `Ana  María` only come from
+  another client), no combining mark at the start or on a trailing space, at most four combining marks in a row (Tibetan and
   pointed Hebrew stack three; more is "Zalgo" text), no mark on a kana with a voiced form (`た`, `は`, `ウ`; or on a
   symbol or kanji drawn like one, such as `〈` for `く` or `力` for `カ`) other than one voicing mark it takes (so `は` +
   ring above, `た` + diaeresis, `力` + handakuten, or two voicing marks such as `ぱ` + dakuten, which read like
@@ -233,7 +234,8 @@ After last round: game-over
   `SYMBOL_CONFUSABLES`, applied before and after the skeleton because NFKC turns `¯`, `´` or `¸` into a space and a
   mark; it also holds the kana and kanji that UTS #39 draws alike, such as `カ` and `力`, `ロ` and `口`, `ニ` and `二`,
   katakana `ヘ` and hiragana `へ`, and `朩` and `ホ`; a voicing mark on a symbol or kanji that this table reads as a
-  kana counts as on that kana, also typed as a spacing `゛` or `゜`, so `〈` + dakuten reads as `ぐ` and `力` + dakuten
+  kana counts as on that kana, also typed as a spacing `゛` or `゜` (also after a character NFKC turns into one, such as
+  the Kangxi radical `⼒` or U+2329 `〈`), so `〈` + dakuten reads as `ぐ` and `力` + dakuten
   as `ガ`, while `力` stays apart from `ガ`), then I / l / | / 1 read as `l`, `rn` as `m`, `vv` as `w`, `cl` as `d` and
   `0` as `o`. The symbol table
   leaves out what reads as a different name: a clearly different size (measured in Roboto and SF: `•` and `∙` apart
@@ -249,19 +251,24 @@ After last round: game-over
   samekh and vav, or by an Arabic-Indic five and a vav, reads `Milo`). Stored order is compared with stored
   order and drawn order with drawn order, so a right-to-left name never meets its own reversal. Each player's keys
   are computed once, when they join.
-  - Same `nameKey` = the **same name**: with `bob` in the room, `bob `, `Bob`, full-width `bob`, `bob` with a dot
+  - Same `nameKey` = the **same name**: with `bob` in the room, `Bob`, full-width `bob`, `bob` with a dot
     below or `BOB` in Cyrillic capitals get `"Username already taken"`, and so do `Dave` written with a Latin small
     capital A or in Cherokee letters, `ᗅlice` (Canadian Syllabics) or `A│ice` (box drawing) next to `Alice`, `Raſe`
     next to `Rafe`, `Mike` in Cyrillic or Greek letters, `Bంb` (Telugu anusvara) next to `Bob`, `Mi` + Hebrew
-    samekh and vav next to `Milo`, and `(•_•) ` or full-width `<3` next to `(•_•)` or `<3`. This holds even with the
+    samekh and vav next to `Milo`, and full-width `(•_•)` or `<3` next to `(•_•)` or `<3`. This holds even with the
     existing player's token: a rejoin needs the exact stored name. Kana that only differ by a voicing mark are
     different names (`たいき` and `だいき`, `はな`, `ばな` and `ぱな`, `ハル` and `バル`, also in half-width katakana),
     while `だ` typed precomposed, as `た` + combining dakuten or as `た` + spacing `゛` is the same name (a spacing
-    `゛` or `゜` after a kana that takes it voices it, like half-width `ﾞ`; anywhere else it stays a separate mark).
+    `゛` or `゜` after a kana that takes it voices it, like half-width `ﾞ`; anywhere else it stays a separate mark; a
+    combining or half-width voicing mark typed after a space, also with other marks on that space, counts as a
+    spacing one, so `た` + space + combining dakuten and `た ﾞ` are `だ` too; `た ゛`, with a space before the spacing
+    mark, only looks like `だ` and gets `"Username too similar"`).
     A Korean name typed as conjoining jamo (`이민지` as `ᄋ` `ᅵ` `ᄆ` `ᅵ` `ᆫ` `ᄌ` `ᅵ`) is the same name as the
     precomposed one. Compatibility jamo (U+3131–318E) and their half-width forms, which fonts draw as separate letters,
     are kept out of NFKC (which would compose `ㄱㅏ` into `가`), and conjoining jamo left on their own after composing
     read as their compatibility letter: `ㄱㅏ`, half-width `ﾡￂ` and lone `ᄀ ᅡ` are one name, different from `가`.
+    A consonant has a leading and a trailing jamo but NFKC gives back only one per letter: the other form, alone, reads
+    as the letter of the same Unicode name too (`Kim ᆨ` is `Kim ㄱ`).
   - Only the same `visualKey` = a **different name that looks too alike**: `AIice` next to `Alice`, `b0b` next to
     `bob`, real names such as `Clara` next to `Dara` or `Arnie` next to `Amie`, and symbol lookalikes such as
     `(∙_∙)` next to `(•_•)`, `ǃǃ` next to `!!`, `ˉ\_(ツ)_/ˉ` next to `¯\_(ツ)_/¯`, `(˚_˚)` or `(º_º)` next to `(°_°)`,

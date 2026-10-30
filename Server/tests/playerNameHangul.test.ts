@@ -145,3 +145,56 @@ describe("Hangul compatibility jamo", () => {
     expect(looksLike(asJamo("가"), "\u3131\u314F")).toBe(false);
   });
 });
+
+// EXP-333: most consonants exist as a leading and a trailing conjoining jamo, and NFKC gives back only one of them for
+// each compatibility letter (ㄱ is ᄀ). The other form, alone, is drawn like the letter in many fonts too, so it reads
+// as that letter: "Kim ᆨ" is the same name as "Kim ㄱ".
+
+const FIRST_MODERN_TRAILING_CONSONANT = 0x11a8;
+const LAST_MODERN_TRAILING_CONSONANT = 0x11c2;
+const MODERN_TRAILING_CONSONANTS = Array.from(
+  { length: LAST_MODERN_TRAILING_CONSONANT - FIRST_MODERN_TRAILING_CONSONANT + 1 },
+  (_, i) => String.fromCodePoint(FIRST_MODERN_TRAILING_CONSONANT + i),
+);
+const FIRST_COMPATIBILITY_CONSONANT = 0x3131;
+const LAST_COMPATIBILITY_CONSONANT = 0x314e;
+// ㄸ, ㅃ and ㅉ never end a syllable: without them the modern compatibility consonants are in trailing jamo order
+const NEVER_TRAILING = ["\u3138", "\u3143", "\u3149"];
+const TRAILING_CONSONANT_LETTERS = Array.from(
+  { length: LAST_COMPATIBILITY_CONSONANT - FIRST_COMPATIBILITY_CONSONANT + 1 },
+  (_, i) => String.fromCodePoint(FIRST_COMPATIBILITY_CONSONANT + i),
+).filter((letter) => !NEVER_TRAILING.includes(letter));
+
+describe("Hangul trailing consonant jamo", () => {
+  it("a lone trailing kiyeok is the same name as the letter kiyeok", () => {
+    expect(isValidUsername("Kim \u11A8")).toBe(true);
+    expect(sameName("Kim \u11A8", "Kim \u3131")).toBe(true);
+    expect(sameName("Kim \u11A8", "Kim \u1100")).toBe(true);
+  });
+
+  it("every modern trailing consonant, alone, is the same name as its compatibility letter", () => {
+    expect(TRAILING_CONSONANT_LETTERS).toHaveLength(MODERN_TRAILING_CONSONANTS.length);
+    const apart = MODERN_TRAILING_CONSONANTS.filter((jamo, i) => !sameName(jamo, TRAILING_CONSONANT_LETTERS[i]));
+    expect(apart).toEqual([]);
+  });
+
+  it.each([
+    ["trailing ssangnieun", "\u11FF", "\u3165"],
+    ["trailing ssangtikeut (extended block)", "\uD7CD", "\u3138"],
+    ["leading nieun-cieuc", "\u115C", "\u3135"],
+    ["leading rieul-kiyeok (extended block)", "\uA964", "\u313A"],
+  ])("the archaic %s %s is the same name as %s", (_label, jamo, letter) => {
+    expect(isValidUsername(jamo)).toBe(true);
+    expect(sameName(jamo, letter)).toBe(true);
+  });
+
+  it("keeps different trailing consonants apart", () => {
+    expect(looksLike("\u11A8", "\u11AB")).toBe(false);
+    expect(looksLike("\u11A8", "\u3132")).toBe(false);
+  });
+
+  it("a trailing consonant after a syllable is still that syllable's final, not a letter", () => {
+    expect(sameName("가\u11A8", "각")).toBe(true);
+    expect(looksLike("가\u11A8", "가\u3131")).toBe(false);
+  });
+});

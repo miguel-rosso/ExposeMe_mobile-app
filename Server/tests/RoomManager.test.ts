@@ -85,7 +85,7 @@ describe("joinRoom", () => {
 
   // EXP-032: a name that reads the same as a player's on screen is that player's name
   it.each([
-    ["trailing space", "bob", "bob "],
+    ["math bold letters", "bob", "\u{1D41B}\u{1D428}\u{1D41B}"],
     ["case variant", "bob", "Bob"],
     ["Cyrillic o", "bob", "b\u043Eb"],
     ["full-width", "bob", "\uFF42\uFF4F\uFF42"],
@@ -96,7 +96,7 @@ describe("joinRoom", () => {
     ["long s as f", "Rafe", "Ra\u017Fe"],
     ["all-Cyrillic with small ka", "Mike", "\u041C\u0456\u043A\u0435"],
     ["Hebrew drawn reversed", "Milo", "Mi\u05E1\u05D5"],
-    ["kaomoji with a trailing space", "(\u2022_\u2022)", "(\u2022_\u2022) "],
+    ["kaomoji with full-width brackets", "(\u2022_\u2022)", "\uFF08\u2022_\u2022\uFF09"],
   ])("refuses another spelling of an existing name (%s), even with that player's token", (_label, existing, lookalike) => {
     const room = rm.createRoom("host", "sock-host");
     rm.joinRoom(room.gameCode, existing, "sock-existing");
@@ -130,12 +130,12 @@ describe("joinRoom", () => {
   });
 
   it("still admits distinct names and rejoins with the exact stored name", () => {
-    const room = rm.createRoom("bob ", "sock-bob");
+    const room = rm.createRoom("BoB", "sock-bob");
     expect(rm.joinRoom(room.gameCode, "rob", "sock-rob").success).toBe(true);
     expect(rm.joinRoom(room.gameCode, "bobby", "sock-bobby").success).toBe(true);
     const token = room.players[0].rejoinToken;
-    expect(rm.joinRoom(room.gameCode, "bob ", "sock-bob-2", token)).toMatchObject({ success: true, rejoin: true });
-    expect(room.players.map((p) => p.username)).toEqual(["bob ", "rob", "bobby"]);
+    expect(rm.joinRoom(room.gameCode, "BoB", "sock-bob-2", token)).toMatchObject({ success: true, rejoin: true });
+    expect(room.players.map((p) => p.username)).toEqual(["BoB", "rob", "bobby"]);
   });
 
   it("answers a full room before comparing names, and still lets its players rejoin", () => {

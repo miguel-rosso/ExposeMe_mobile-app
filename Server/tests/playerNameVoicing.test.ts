@@ -150,3 +150,76 @@ describe("marks on kana", () => {
     expect(isValidUsername(`漢${DIAERESIS}`)).toBe(true);
   });
 });
+
+// EXP-320: a voicing mark typed after a space is drawn where a spacing ゛ or ゜ would be (a combining one sits on the
+// space, a half-width one fills the rest of the cell), so it voices the kana before the space like the spacing mark.
+// Spacing marks also voice symbols and kanji that only NFKC turns into a kana lookalike.
+describe("voicing marks after a space", () => {
+  it.each([
+    ["combining dakuten", `た ${DAKUTEN}いき`, "だいき"],
+    ["combining handakuten", `は ${HANDAKUTEN}な`, "ぱな"],
+    ["half-width dakuten", `た ${HALFWIDTH_DAKUTEN}いき`, "だいき"],
+    ["half-width handakuten after half-width katakana", `ﾊ ${HALFWIDTH_HANDAKUTEN}ﾙ`, "パル"],
+  ])("a %s after a space reads like the spacing mark (%j is the same name as %j)", (_label, spaced, voiced) => {
+    expect(isValidUsername(spaced)).toBe(true);
+    expect(sameName(spaced, voiced)).toBe(true);
+  });
+
+  it("after a letter that doesn't take it, a voicing mark after a space keys like the spacing mark, as before", () => {
+    for (const spaced of [`a ${DAKUTEN}b`, `a ${HALFWIDTH_DAKUTEN}b`, `あ ${DAKUTEN}い`]) {
+      const spacing = spaced.replace(/ ./u, SPACING_DAKUTEN);
+      expect(isValidUsername(spaced)).toBe(true);
+      expect(sameName(spaced, spacing)).toBe(true);
+      expect(sameName(spaced, spaced.replace(/ ./u, ""))).toBe(false);
+    }
+  });
+
+  it("a mark on a kana after the space-and-voicing-mark spelling is refused like on the voiced kana", () => {
+    expect(isValidUsername(`た ${DAKUTEN}${DIAERESIS}いき`)).toBe(false);
+  });
+
+  it.each([
+    ["Kangxi radical power (NFKC: kanji power, drawn like カ)", "\u2F12", "ガ"],
+    ["left-pointing angle bracket (NFKC: CJK angle bracket, drawn like く)", "\u2329", "ぐ"],
+  ])("a spacing dakuten after %s %j looks like %j", (_label, symbol, voiced) => {
+    expect(isValidUsername(`${symbol}${SPACING_DAKUTEN}み`)).toBe(true);
+    expect(looksLike(`${symbol}${SPACING_DAKUTEN}み`, `${voiced}み`)).toBe(true);
+  });
+
+  // Other marks on the space may come before the voicing mark (NFC/NFD order a dot below or an acute after it)
+  it.each([
+    ["dot below", "\u0323"],
+    ["acute", "\u0301"],
+  ])("another mark (%s) on the space, before or after the voicing mark, is refused like on the voiced kana", (_label, mark) => {
+    for (const voicing of [DAKUTEN, HALFWIDTH_DAKUTEN]) {
+      expect(isValidUsername(`た ${mark}${voicing}いき`)).toBe(false);
+      expect(isValidUsername(`た ${voicing}${mark}いき`)).toBe(false);
+      expect(nameKey(`た ${mark}${voicing}いき`)).toBe(nameKey("だいき"));
+      expect(nameKey(`た ${voicing}${mark}いき`)).toBe(nameKey("だいき"));
+    }
+  });
+
+  it.each([
+    ["dot below", "\u0323"],
+    ["acute", "\u0301"],
+  ])("after a letter that doesn't take it, another mark (%s) and a voicing mark on a space key alike in either order", (_label, mark) => {
+    for (const voicing of [DAKUTEN, HALFWIDTH_DAKUTEN]) {
+      expect(isValidUsername(`a ${mark}${voicing}b`)).toBe(true);
+      expect(nameKey(`a ${mark}${voicing}b`)).toBe(nameKey(`a ${voicing}${mark}b`));
+      expect(visualKey(`a ${mark}${voicing}b`)).toBe(visualKey(`a ${voicing}${mark}b`));
+    }
+  });
+
+  // A spacing mark typed after a space leaves a gap before it: a different name from the voiced kana, but one that
+  // looks like it, as do the other spellings of the mark after a space
+  it.each([
+    [`た ${SPACING_DAKUTEN}いき`, "だいき", `た ${HALFWIDTH_DAKUTEN}いき`],
+    [`は ${SPACING_HANDAKUTEN}な`, "ぱな", `は ${HANDAKUTEN}な`],
+    [`ﾀ ${SPACING_DAKUTEN}ｲｷ`, "ﾀﾞｲｷ", `ﾀ ${HALFWIDTH_DAKUTEN}ｲｷ`],
+  ])("%j looks like %j and %j without being the same name", (spaced, voiced, otherSpelling) => {
+    expect(isValidUsername(spaced)).toBe(true);
+    expect(looksLike(spaced, voiced)).toBe(true);
+    expect(sameName(spaced, voiced)).toBe(false);
+    expect(looksLike(spaced, otherSpelling)).toBe(true);
+  });
+});

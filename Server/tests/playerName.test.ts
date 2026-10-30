@@ -8,7 +8,6 @@ import { isValidUsername, looksLike, nameKey, sameName, visualKey } from "../man
 describe("isValidUsername", () => {
   it.each([
     ["plain", "bob"],
-    ["trailing space (iOS autocorrect)", "bob "],
     ["inner space", "Ana Mar\u00EDa"],
     ["diaeresis", "Zo\u00EB"],
     ["Han", "\u674E\u96F7"],
@@ -93,14 +92,14 @@ describe("isValidUsername", () => {
     ["lone surrogate", "bob\uD800"],
     ["five combining marks in a row (Zalgo)", "bo\u0301\u0301\u0301\u0301\u0301b"],
     ["mark on a trailing space", "bob \u0323"],
-    ["mark on a space before trailing spaces", "bob \u0323  "],
+    ["two marks on a trailing space", "bob \u0323\u0301"],
     ["zero-width joiner between Latin letters", "an\u200Da"],
     ["zero-width non-joiner after a Persian word", "\u0645\u06CC\u200C"],
     ["zero-width joiner before a Sinhala word", "\u200D\u0DC1\u0DCA"],
     ["zero-width joiner between Sinhala and Latin", "\u0DC1\u0DCA\u200Da"],
     ["zero-width non-joiner between symbols", "<3\u200C<3"],
     ["starts with a combining mark", "\u0301bob"],
-    ["combining mark after leading spaces", "  \u0301bob"],
+    ["starts with a spacing mark", "\u0903ab"],
     ["combining mark alone", "\u20DD"],
     ["Latin with a Greek nu", "Da\u03BDe"],
     ["Latin with a Greek upsilon", "Pa\u03C5l"],
@@ -125,6 +124,11 @@ describe("isValidUsername", () => {
     ["Latin with a Cyrillic o next to Han", "b\u043Eb \u674E"],
     ["symbol name with a zero-width space", "(\u2022_\u2022)\u200B"],
     ["blank braille between symbols", "<3\u2800<3"],
+    // Spaces the app never sends: it trims the name and collapses its spaces (EXP-263, EXP-327)
+    ["trailing space (iOS autocorrect)", "bob "],
+    ["leading space", " bob"],
+    ["two spaces in a row", "Ana  Mar\u00EDa"],
+    ["two spaces between symbols", "<3  <3"],
     ["empty", ""],
     ["blank", "   "],
     ["too long (16 characters)", "a".repeat(16)],
@@ -139,9 +143,9 @@ describe("isValidUsername", () => {
 
 describe("looksLike", () => {
   it.each([
-    ["trailing space", "bob", "bob "],
-    ["leading space", "bob", " bob"],
-    ["inner space run", "ana maria", "ana   maria"],
+    ["math italic letters", "bob", "\u{1D44F}\u{1D45C}\u{1D44F}"],
+    ["circled letters", "bob", "\u24D1\u24DE\u24D1"],
+    ["full-width letters after a space", "ana maria", "ana \uFF4D\uFF41\uFF52\uFF49\uFF41"],
     ["case", "bob", "BoB"],
     ["full-width letters", "bob", "\uFF42\uFF4F\uFF42"],
     ["math bold letters", "bob", "\u{1D41B}\u{1D428}\u{1D41B}"],
@@ -171,11 +175,11 @@ describe("looksLike", () => {
     ["cl as d", "dara", "clara"],
     ["zero as o", "bob", "b0b"],
     ["emoji presentation selector", "\u2764 ana", "\u2764\uFE0F ana"],
-    ["kaomoji with a trailing space", "(\u2022_\u2022)", "(\u2022_\u2022) "],
-    ["shrug with a leading space", "\u00AF\\_(\u30C4)_/\u00AF", " \u00AF\\_(\u30C4)_/\u00AF"],
-    ["hearts with a space run", "<3 <3", "<3   <3"],
+    ["kaomoji with full-width brackets", "(\u2022_\u2022)", "\uFF08\u2022_\u2022\uFF09"],
+    ["shrug with full-width underscores", "\u00AF\\_(\u30C4)_/\u00AF", "\u00AF\\\uFF3F(\u30C4)\uFF3F/\u00AF"],
+    ["hearts with a full-width less-than sign", "<3 <3", "\uFF1C3 <3"],
     ["full-width symbols", "<3 <3", "\uFF1C\uFF13 \uFF1C\uFF13"],
-    ["emoji with a trailing space", "\u{1F525}\u{1F525}", "\u{1F525}\u{1F525} "],
+    ["emoji with a presentation selector", "\u{1F525}\u{1F525}", "\u{1F525}\uFE0F\u{1F525}"],
     // Lookalikes from any script or category (UTS #39 confusables with an ASCII prototype)
     ["Canadian Syllabics A", "Alice", "\u15C5lice"],
     ["box-drawing line as l", "Alice", "A\u2502ice"],
@@ -240,7 +244,7 @@ describe("looksLike", () => {
   });
 
   it.each([
-    ["bob", "Bob "],
+    ["bob", "\uFF22ob"],
     ["bob", "b\u043Eb"],
     ["Alice", "A\u2502ice"],
     ["Milo", "Mi\u05E1\u05D5"],

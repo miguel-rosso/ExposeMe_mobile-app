@@ -57,6 +57,8 @@ describe("join-create-game player names", () => {
     ["zero-width space", "bob\u200B"],
     ["right-to-left override", "\u202Ebob"],
     ["hangul filler only", "\u3164"],
+    ["a trailing space", "bob "],
+    ["two spaces in a row", "Ana  Mar\u00EDa"],
     ["a compound vowel typed as two jamo", "\uac00\u1175"],
   ])("refuses a name with %s as \"Invalid username\" (create and join)", async (_label, name) => {
     expect(await joinAs(null, name)).toEqual({ success: false, message: "Invalid username" });
@@ -75,7 +77,7 @@ describe("join-create-game player names", () => {
   });
 
   it.each([
-    ["trailing space", "bob", "bob "],
+    ["full-width", "bob", "\uFF42\uFF4F\uFF42"],
     ["case variant", "bob", "BOB"],
     ["Latin small capital", "Dave", "D\u1D00ve"],
     ["all-Cherokee", "Dave", "\u13A0\u13AA\u13D9\u13AC"],
@@ -105,18 +107,18 @@ describe("join-create-game player names", () => {
     for (const name of ["\u00AF\\_(\u30C4)_/\u00AF", "\u{1F525}\u{1F525}", "<3 <3", "!!", "(\u30CE\u0CA0\u76CA\u0CA0)\u30CE"]) {
       expect((await joinAs(gameCode, name)).success).toBe(true);
     }
-    expect(await joinAs(gameCode, "(\u2022_\u2022) ")).toEqual({ success: false, message: "Username already taken" });
+    expect(await joinAs(gameCode, "\uFF08\u2022_\u2022\uFF09")).toEqual({ success: false, message: "Username already taken" });
     expect(await joinAs(gameCode, "\uFF1C\uFF13 <3")).toEqual({ success: false, message: "Username already taken" });
   });
 
   it("keeps the name as typed and rejoins with it and its token", async () => {
-    const created = await joinAs(null, "bob ");
+    const created = await joinAs(null, "BoB");
     const gameCode = created.room!.gameCode;
-    expect(created.room!.players.map((p) => p.username)).toEqual(["bob "]);
+    expect(created.room!.players.map((p) => p.username)).toEqual(["BoB"]);
     clients[0].disconnect();
 
-    const back = await joinAs(gameCode, "bob ", created.rejoinToken);
+    const back = await joinAs(gameCode, "BoB", created.rejoinToken);
     expect(back).toMatchObject({ success: true, rejoinToken: created.rejoinToken });
-    expect(back.room!.players.map((p) => p.username)).toEqual(["bob "]);
+    expect(back.room!.players.map((p) => p.username)).toEqual(["BoB"]);
   });
 });

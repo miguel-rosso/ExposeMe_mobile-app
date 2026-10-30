@@ -250,6 +250,100 @@ describe("im-ready and ready timeout", () => {
     expect(events("game-over")).toHaveLength(0);
   });
 
+  describe("everyone but one leaves (DEC-011: end at once if nobody can come back)", () => {
+    it("ends the game right away, with no round played, when the only other player leaves", () => {
+      room = roomManager.createRoom("alice", "sock-alice");
+      roomManager.joinRoom(room.gameCode, "bob", "sock-bob");
+      engine.startGame(room);
+      engine.markReady(room, player("alice"));
+      engine.removePlayer(room, "bob", "left");
+
+      expect(roomEvents("game-over")).toHaveLength(1);
+      expect(lastEvent("game-over")!.args[0]).toEqual({ finalScore: [expect.objectContaining({ username: "alice", points: 0 })] });
+      expect(room.started).toBe(false);
+      expect(room.phase).toBeNull();
+      expect(player("alice").isReady).toBe(false);
+      expect(vi.getTimerCount()).toBe(0); // the ready timeout is gone: no late round 1
+      vi.advanceTimersByTime(READY_TIMEOUT + GAME_START_DELAY);
+      expect(events("waiting-photo")).toHaveLength(0);
+      expect(events("game-paused")).toHaveLength(0);
+      expect(events("game-over")).toHaveLength(1);
+    });
+
+    it("ends the game when the last connected player but one leaves and nobody is disconnected", () => {
+      room = startedNotReady();
+      engine.removePlayer(room, "carol", "left");
+      expect(events("game-over")).toHaveLength(0); // alice and bob can still play
+      engine.removePlayer(room, "bob", "left");
+      expect(events("game-over")).toHaveLength(1);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("does not end the game while someone who left one alone is only disconnected (they may come back)", () => {
+      room = startedNotReady();
+      roomManager.markDisconnected(room.gameCode, "carol", "sock-carol");
+      engine.checkReady(room);
+      engine.onConnectionChange(room);
+      engine.removePlayer(room, "bob", "left");
+      expect(events("game-over")).toHaveLength(0);
+      expect(room.started).toBe(true);
+      expect(room.phase).toBeNull();
+      // Same as before: the ready timeout starts and, with fewer than 2 connected, the game pauses for carol
+      vi.advanceTimersByTime(READY_TIMEOUT + GAME_START_DELAY);
+      expect(events("game-paused")).toHaveLength(1);
+      expect(events("game-over")).toHaveLength(0);
+    });
+
+    it("does not end the game when the others only disconnect", () => {
+      room = startedNotReady();
+      engine.markReady(room, player("alice"));
+      for (const name of ["bob", "carol"]) {
+        roomManager.markDisconnected(room.gameCode, name, `sock-${name}`);
+        engine.checkReady(room);
+        engine.onConnectionChange(room);
+      }
+      expect(events("game-over")).toHaveLength(0);
+      expect(room.started).toBe(true);
+      expect(room.phase).toBeNull();
+    });
+
+    it("ends the game when a rejoin leaves a single player in the room (the other one left meanwhile)", () => {
+      room = roomManager.createRoom("alice", "sock-alice");
+      roomManager.joinRoom(room.gameCode, "bob", "sock-bob");
+      engine.startGame(room);
+      roomManager.markDisconnected(room.gameCode, "bob", "sock-bob");
+      engine.onConnectionChange(room);
+      engine.removePlayer(room, "alice", "left");
+      expect(events("game-over")).toHaveLength(0); // bob may still come back
+
+      const bob = player("bob");
+      expect(roomManager.joinRoom(room.gameCode, "bob", "sock-bob2", bob.rejoinToken)).toMatchObject({ success: true, rejoin: true });
+      engine.onPlayerRejoined(room, bob);
+      expect(events("game-over")).toHaveLength(1);
+      expect(room.started).toBe(false);
+      expect(vi.getTimerCount()).toBe(0);
+      // The rejoiner's snapshot says the game is over
+      expect(lastEvent("game-state")).toMatchObject({ target: "sock-bob2", args: [expect.objectContaining({ started: false })] });
+    });
+  });
+
+  it("answers an im-ready sent after the game ended with a not-started game-state to that player only", () => {
+    room = roomManager.createRoom("alice", "sock-alice");
+    roomManager.joinRoom(room.gameCode, "bob", "sock-bob");
+    engine.startGame(room);
+    engine.removePlayer(room, "bob", "left"); // game-over goes out before alice's game screen listens for it
+    expect(events("game-over")).toHaveLength(1);
+
+    engine.markReady(room, player("alice"));
+    expect(events("game-state")).toHaveLength(1);
+    const reply = lastEvent("game-state")!;
+    expect(reply.target).toBe("sock-alice");
+    expect(reply.args[0]).toMatchObject({ started: false, phase: null, scores: [expect.objectContaining({ username: "alice", points: 0 })] });
+    expect(player("alice").isReady).toBe(false);
+    expect(room.started).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("ignores im-ready outside the ready window", () => {
     room = roomManager.createRoom("alice", "sock-alice");
     roomManager.joinRoom(room.gameCode, "bob", "sock-bob");

@@ -113,6 +113,40 @@ describe("leave-room ack (EXP-254)", () => {
     expect(await notPaused).toBe(true);
   });
 
+  it("ready phase, a leave closed on the ack ends a 2-player game at once, before the ready timeout (EXP-338)", async () => {
+    const { alice, bob } = await lobby();
+    const started = [alice, bob].map((c) => once(c, "game-started"));
+    alice.emit("start-game");
+    await Promise.all(started);
+    alice.emit("im-ready");
+
+    // Well under READY_TIMEOUT (10 s): the game ends on the leave, not when the first round would start
+    const gameOver = once<{ finalScore: { username: string; points: number }[] }>(alice, "game-over", 1_500);
+    const noRound = silent(alice, "waiting-photo");
+    const notPaused = silent(alice, "game-paused");
+    await leaveLikeTheApp(bob);
+
+    expect((await gameOver).finalScore.map((s) => [s.username, s.points])).toEqual([["alice", 0]]);
+    expect(await noRound).toBe(true);
+    expect(await notPaused).toBe(true);
+  });
+
+  it("ready phase, an im-ready sent after a missed game-over gets the finished game's game-state (EXP-338)", async () => {
+    const { alice, bob } = await lobby();
+    const started = [alice, bob].map((c) => once(c, "game-started"));
+    alice.emit("start-game");
+    await Promise.all(started);
+    // bob leaves while alice is still on her way to the game screen: nobody listens for her game-over yet
+    await leaveLikeTheApp(bob);
+    await new Promise((resolve) => setTimeout(resolve, QUIET_MS));
+
+    const snapshot = once<{ started: boolean; scores: { username: string; points: number }[] }>(alice, "game-state", 1_500);
+    alice.emit("im-ready"); // the game screen mounted
+    const snap = await snapshot;
+    expect(snap.started).toBe(false);
+    expect(snap.scores.map((s) => [s.username, s.points])).toEqual([["alice", 0]]);
+  });
+
   it("a socket bound to no room gets the ack too (nothing to leave)", async () => {
     const stranger = await newClient();
     await expect(stranger.timeout(ACK_TIMEOUT_MS).emitWithAck("leave-room")).resolves.toBeUndefined();

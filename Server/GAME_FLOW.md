@@ -383,6 +383,15 @@ After last round: game-over
   backgrounds the app or drops before the game screen mounts can't block the game. The photo owner is still
   picked only among connected players (ready or not); later `im-ready`s are ignored. If fewer than 2 players
   are connected by then, the game pauses (see "Pause and reconnect" below).
+  **Leaves end it at once** (DEC-011, as mid-game): when a leave during this phase leaves fewer than 2 players
+  connected and nobody disconnected who could come back (everyone else left), `game-over` is sent right away with
+  no round played (`finalScore` with everyone at 0), instead of waiting for the ready timeout. The same goes for a
+  rejoin that finds itself alone in the room (the others left while it was away): `game-over`, then its `game-state`
+  (not started). Mere disconnects never end it here: a lone player waits for the timeout or a rejoin, as above.
+  Such a `game-over` can go out a few ms after `game-started`, before a client's game screen listens for it, so an
+  **`im-ready` that arrives once the game is no longer running** (`!started`) is answered with `game-state` to that
+  socket only (the not-started snapshot with the final scores, as a rejoin after the game ended gets): the app's game
+  screen shows the game over from it, and the final screens ignore a not-started snapshot.
   `game-over` resets `isReady`, `started` and `phase` and clears unused planted photos
   (`plantedPhoto`, `hasPlantedPhoto`) for every player; `start-game` resets `points`, `lastGuess` and
   `lastAnswerCorrect` ("Play again" in the same room starts from zero).
@@ -567,7 +576,7 @@ All game events are **atomic** — each contains everything the client needs.
 | `round-skipped` | - | `{ round, reason?: "timeout" \| "unavailable" }` | No photo for this round; the next `waiting-photo` follows. `reason` only in the awaited owner's own copy (the room gets `{ round }`) |
 | `game-paused` | any | `{ duration, waitingFor, pause, maxPauses }` | Fewer than 2 connected: freeze, show countdown and "pause N of M" |
 | `game-resumed` | any | `{ phase, duration, phaseTotal }` | Paused phase continues with remaining time (`phaseTotal`: the phase's full duration) |
-| `game-state` | any | snapshot (see "Pause and reconnect") | Only to a rejoining socket (or one re-sending its join in a started game): render current phase |
+| `game-state` | any | snapshot (see "Pause and reconnect") | Only to a rejoining socket (or one re-sending its join in a started game, or sending `im-ready` once the game is over): render current phase |
 | `game-over` | - | `{ finalScore }` | Show final results (`finalScore`: same shape as `round-scores.scores`) |
 | `player-connection` | lobby | `{ username, connected }` | A player is gone (disconnected > 15 s) or back: dim / undim them in the lobby list |
 | `new-host` | any | public player | The host left (lobby or mid-game), was removed at game start, or has been gone > 15 s in the lobby (also checked at game-over): this player is the host now |
@@ -583,7 +592,7 @@ All game events are **atomic** — each contains everything the client needs.
 | `start-game` | - | Host only |
 | `remove-player` | `{ username }` | Host only, lobby only (ignored while a game is running): removes that player (not the host) and evicts their sockets |
 | `leave-room` | - (with an ack callback) | Explicit leave (Exit button): player removed, host handed over, `player-left` to the room; from a socket replaced by a rejoin it only detaches that socket. Acked (no data) once handled, also from a socket bound to no room; not acked when dropped by the rate limit |
-| `im-ready` | - | Player ready to start (session player; payload ignored) |
+| `im-ready` | - | Player ready to start (session player; payload ignored). Once the game is over: answered with `game-state` |
 | `photo-sent` | `{ photo }` | Photo uploaded; only from the current owner, `photo` must be a path the owner got from `/upload` in this room (`/temp/<32 hex>.jpg\|png\|webp`) for the photo awaited now (uploaded during this `waiting-photo`'s round as their turn photo; not a planted photo, not one from an earlier round) |
 | `photo-unavailable` | `{ round, attempt }` (from its `your-turn`) | The awaited owner has no photo to send (no access, no photos, upload failed): skip the round now |
 | `submit-answer` | `{ guess }` | Player's pick, sent on every tap (the photo owner's too, scored like any other). Only during `answering`, the last one counts (`""` withdraws it); ignored in `reveal`/`scores`, or if `guess` is not one of the round's options (the players in the room at its `round-start`, those who left since included); at most 10 per socket, refilled 5/s (excess dropped). No guess is stored and sent in scores as `lastGuess: ""` (the app shows its own translated "No guess") |

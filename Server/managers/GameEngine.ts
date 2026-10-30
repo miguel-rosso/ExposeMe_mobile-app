@@ -186,7 +186,8 @@ export class GameEngine {
    * Takes `username` out of the room (uploads released, a removed host's role handed over, the room deleted later if
    * nobody connected is left) and tells the room, by `reason`:
    * - "left" (leave-room, or a socket joining another room): `new-host` if the host left, then `player-left`; then the
-   *   game reviews who is left (ready phase: start if all are ready; mid-game: pause or end; lobby: reviewLobby).
+   *   game reviews who is left (ready phase: start if all are ready, or end if one is left alone for good; mid-game:
+   *   pause or end; lobby: reviewLobby).
    * - "kicked" (the host's remove-player, lobby only): `player-removed`; `detach` cuts the kicked player's sockets off
    *   before that review, so the removal is the last thing they hear. The host is never kicked (refused), so a kick
    *   never hands the host role over.
@@ -213,9 +214,17 @@ export class GameEngine {
     return player;
   }
 
-  /** im-ready: only counts between game-started and the first round (phase is null until then). */
+  /**
+   * im-ready: only counts between game-started and the first round (phase is null until then). One sent after the
+   * game already ended gets a `game-state` (not started, final scores) back: the game screen that sends it may have
+   * mounted after its game-over went out (a ready phase ended by a leave), and would otherwise wait on "Ready?" forever.
+   */
   markReady(room: Room, player: Player): void {
-    if (!room.started || room.phase !== null) return;
+    if (!room.started) {
+      this.io.to(player.socketId).emit("game-state", this.gameStateFor(room, player));
+      return;
+    }
+    if (room.phase !== null) return;
     player.isReady = true;
     this.checkReady(room);
   }
@@ -400,23 +409,24 @@ export class GameEngine {
   // ── Connection changes: pause / resume / resync ──────
 
   /**
-   * Call after a player disconnects, rejoins, leaves or is removed. Mid-game (after the ready phase):
-   * fewer than 2 connected → pause, or game over if nobody who is gone can come back (they all left);
-   * 2 or more connected while paused → resume (not before PAUSE_MIN_DURATION). Ready phase: checkReady.
-   * Lobby: reviewLobby. `rejoined`: the player whose rejoin this is (see onPlayerRejoined).
+   * Call after a player disconnects, rejoins, leaves or is removed. Once the game has started (ready phase included):
+   * fewer than 2 connected and nobody who is gone can come back (they all left) → game over at once (DEC-011).
+   * Ready phase: otherwise nothing here (checkReady and READY_TIMEOUT decide; a lone player waits for the others).
+   * Mid-game: fewer than 2 connected → pause; 2 or more connected while paused → resume (not before
+   * PAUSE_MIN_DURATION). Lobby: reviewLobby. `rejoined`: the player whose rejoin this is (see onPlayerRejoined).
    */
   onConnectionChange(room: Room, rejoined?: Player): void {
     this.forgetLeaversWaits(room); // a leave or kick: a newcomer under the same name doesn't inherit their waits
     if (!room.started) { this.reviewLobby(room); return; }
-    if (room.phase === null) return;
     const connected = room.players.filter((p) => p.connected).length;
+    if (connected < 2 && this.nobodyCanReturn(room)) { this.endGame(room); return; }
+    if (room.phase === null) return;
     if (connected >= 2) {
       this.resumeGame(room, rejoined);
       // A rejoin reviews the owner after the rejoiner's snapshot (onPlayerRejoined)
       if (!rejoined) this.reviewAwaitedOwner(room);
       return;
     }
-    if (room.players.length === connected) { this.endGame(room); return; } // nobody can come back
     if (!room.paused) { this.pauseGame(room); return; }
     // Still paused: a resume scheduled by a rejoin is off, and the others learn who is still missing
     if (room._resumeTimer) { clearTimeout(room._resumeTimer); room._resumeTimer = null; }
@@ -635,6 +645,11 @@ export class GameEngine {
     return room.players.filter((p) => !p.connected).map((p) => p.username);
   }
 
+  /** Every player still in the room is connected: whoever is missing left for good, so waiting can't bring them back. */
+  private nobodyCanReturn(room: Room): boolean {
+    return room.players.every((p) => p.connected);
+  }
+
   /**
    * Running photo wait whose photo can't come (EXP-029, DEC-035): its owner (or a planted round's planter) left the
    * room, or a disconnected owner with free owner changes left isn't back within OWNER_RETURN_WINDOW. The owner is
@@ -740,7 +755,7 @@ export class GameEngine {
     // Only connected players can play; disconnected ones stay in the room to rejoin
     const connected = room.players.filter((p) => p.connected);
     if (connected.length < 2) {
-      if (room.players.length === connected.length) { this.endGame(room); return; } // nobody can come back
+      if (this.nobodyCanReturn(room)) { this.endGame(room); return; }
       // Between rounds, no owner picked yet: wait for someone to return, then start this round
       room.phase = "waiting-photo";
       room.currentPlayer = null;

@@ -33,3 +33,6 @@ export const brandTitleShadow = (fontSize: number): TextStyle => {
     textShadowRadius: Math.max(MIN_SHADOW_RADIUS, Math.round(LOGO_SHADOW_RADIUS * scale)),
   };
 };
+
+/** The home logo's own shadow: the same at every screen width, whatever its font size */
+export const BRAND_LOGO_SHADOW = brandTitleShadow(LOGO_REFERENCE_FONT_SIZE);

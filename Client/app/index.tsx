@@ -12,7 +12,6 @@ import {
   Alert,
   LayoutChangeEvent,
 } from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
 import tw from "twrnc";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -23,8 +22,6 @@ import { StatusBar } from "react-native";
 import * as Animatable from "react-native-animatable";
 import { useBackHandler } from "@react-native-community/hooks";
 import { useFocusEffect } from "expo-router";
-// import logoIndex from "@/assets/images/icon_index.png";
-import { useFonts } from "expo-font";
 import * as SplashScreen from "expo-splash-screen";
 import { useBackgroundContext } from "./providers/BackgroundContext";
 import { useGalleryAccessGuard } from "@/app/hooks/useGalleryAccessGuard";
@@ -34,6 +31,15 @@ import { Ionicons } from "@expo/vector-icons";
 import { useI18n } from "./i18n";
 import LanguageToggle from "./components/LanguageToggle";
 import LimitedAccessBanner from "./components/LimitedAccessBanner";
+import BrandButton from "./components/BrandButton";
+import { BRAND_DISPLAY_FONT, BRAND_LOGO_SHADOW } from "./theme/brand";
+import {
+  HOME_ANIMATION_MS,
+  REAPPEAR_BOUNCE_DOWN,
+  REAPPEAR_BOUNCE_UP,
+  registerHomeAnimations,
+  SHAKE_MS,
+} from "./theme/homeAnimations";
 import { TEST_IDS } from "./utils/testIds";
 import { handleHomeBackPress } from "./utils/homeBackPress";
 import { isRoomCode, sanitizeRoomCodeInput } from "./utils/roomCode";
@@ -54,127 +60,7 @@ SplashScreen.preventAutoHideAsync();
 /** How much the home background photo is blurred */
 const BACKDROP_BLUR_RADIUS = 3;
 
-// Animaciones personalizadas para React Native Animatable
-Animatable.initializeRegistryWithDefinitions({
-  slideInDownBounce: {
-    0: {
-      opacity: 0,
-      translateY: -15,
-    },
-    0.6: {
-      opacity: 1,
-      translateY: 10,
-    },
-    0.75: {
-      opacity: 1,
-      translateY: -5,
-    },
-    0.9: {
-      opacity: 1,
-      translateY: 2,
-    },
-    1: {
-      opacity: 1,
-      translateY: 0,
-    },
-  },
-  slideInUpBounce: {
-    0: {
-      opacity: 0,
-      translateY: 15,
-    },
-    0.6: {
-      opacity: 1,
-      translateY: -10,
-    },
-    0.75: {
-      opacity: 1,
-      translateY: 5,
-    },
-    0.9: {
-      opacity: 1,
-      translateY: -2,
-    },
-    1: {
-      opacity: 1,
-      translateY: 0,
-    },
-  },
-  slideOutUpBounce: {
-    0: {
-      opacity: 0,
-      translateY: 0,
-    },
-    0.25: {
-      opacity: 1,
-      translateY: -10,
-    },
-    0.5: {
-      opacity: 1,
-      translateY: -5,
-    },
-    0.75: {
-      opacity: 1,
-      translateY: 5,
-    },
-    1: {
-      opacity: 1,
-      translateY: 0,
-    },
-  },
-  slideOutDownBounce: {
-    0: {
-      opacity: 0,
-      translateY: 0,
-    },
-    0.25: {
-      opacity: 1,
-      translateY: 10,
-    },
-    0.5: {
-      opacity: 1,
-      translateY: 5,
-    },
-    0.75: {
-      opacity: 1,
-      translateY: -5,
-    },
-    1: {
-      opacity: 1,
-      translateY: 0,
-    },
-  },
-  slideOutDownFar: {
-    0: {
-      opacity: 1,
-      translateY: 0,
-    },
-    1: {
-      opacity: 0,
-      translateY: 100,
-    },
-  },
-  slideOutUpFar: {
-    0: {
-      opacity: 1,
-      translateY: 0,
-    },
-    1: {
-      opacity: 0,
-      translateY: -200,
-    },
-  },
-  slideInDownFar: {
-    0: {
-      opacity: 0,
-      translateY: -200,
-    },
-    1: {
-      opacity: 1,
-      translateY: 0,
-    },
-  },
-});
+registerHomeAnimations();
 
 const Index = () => {
   const router = useRouter();
@@ -224,10 +110,8 @@ const Index = () => {
     setBannerBottom(bannerHeight > 0 ? HOME_TOP_ROW_TOP + y + bannerHeight : null);
   };
 
-  // Get screen dimensions
-  const { width, height } = Dimensions.get('window');
-  
-  // Calculate text size based on screen dimensions
+  // The logo's font size follows the screen width
+  const { width } = Dimensions.get('window');
   const getTitleFontSize = () => {
     // Base size for standard screens (adjust these thresholds as needed)
     if (width >= 400) {
@@ -239,7 +123,7 @@ const Index = () => {
     }
   };
 
-  // useEffect para cargar datos iniciales
+  // Initial data: whether the first-run screen was seen, and the server notice that sent us home
   useEffect(() => {
     const checkInitialScreen = async () => {
       const value = await AsyncStorage.getItem("hasSeenInitialScreen");
@@ -257,11 +141,10 @@ const Index = () => {
     }
   }, []);
 
-  // useFocusEffect para manejar el intervalo de cambio de fondo
+  // Home never keeps a game connection: close the one left over from the last room whenever home is focused
   useFocusEffect(
     useCallback(() => {
       if (socket) {
-        console.log("desconectando socket");
         endSocket();
       }
     }, [socket, endSocket])
@@ -281,25 +164,24 @@ const Index = () => {
     }, [showsHomeForm, pendingInviteCode])
   );
 
-  // useEffect para manejar las animaciones cuando cambia el estado isJoiningGame
+  // When the join panel closes, the home form comes back: the name bounces up and Join game bounces down
   useEffect(() => {
     if (!isJoiningGame && !isFirstMount) {
-      console.log("RESET CREATE GAME BUTTON ANIMATION");
       setShouldAnimateCreateGameButton(true);
-      (usernameInputRef.current as any)?.slideOutUpBounce?.(600);
-      (JoingameButtonRef.current as any)?.slideOutDownBounce?.(600);
+      usernameInputRef.current?.animate(REAPPEAR_BOUNCE_UP, HOME_ANIMATION_MS);
+      JoingameButtonRef.current?.animate(REAPPEAR_BOUNCE_DOWN, HOME_ANIMATION_MS);
     }
     if (isFirstMount) {
       setIsFirstMount(false);
     }
   }, [isJoiningGame]);
 
-  // Manejar el evento de retroceso en Android
+  // Android back: closes the keyboard, then the join panel
   useBackHandler(() =>
     handleHomeBackPress({ keyboard: Keyboard, isJoiningGame, cancelJoin: handleCancelJoinGame })
   );
 
-  // Manejar el cambio de nombre de usuario
+  // Name typed (or cleared): kept in the game context and saved for the next launch
   const handleUsernameChange = async (text: string) => {
     setUsername(text);
     await AsyncStorage.setItem(USERNAME_STORAGE_KEY, text);
@@ -312,38 +194,37 @@ const Index = () => {
   const submitUsername = (): boolean => {
     const name = normalizeUsername(username);
     if (!name) {
-      (usernameInputRef.current as any)?.shake?.(500);
+      usernameInputRef.current?.shake?.(SHAKE_MS);
       return false;
     }
     if (name !== username) handleUsernameChange(name);
     return true;
   };
 
-  // Manejar la acción de unirse a un juego
+  // Join game: opens the join panel
   const handleJoinGame = () => {
     if (!submitUsername()) return;
 
     setIsJoiningGame(true);
   };
 
-  // Manejar la acción de crear un juego
+  // Create game: the waiting room asks the server for a new room
   const handleCreateGame = async () => {
     if (!submitUsername()) return;
 
     if (!(await ensureGalleryAccess())) return;
 
-    requestNewRoom(); // No room code: the waiting room asks the server for a new room
-    console.log("Navigating to WaitingRoom");
+    requestNewRoom();
     router.push("/screens/WaitingRoom");
   };
 
-  // Manejar la acción de buscar una sala
+  // Search room: joins the typed room through the waiting room
   const handleSearchRoom = async () => {
     // Already checked by Join game, unless the panel asks for the name itself
     if (!submitUsername()) return;
 
     if (!isRoomCode(joinCodeDraft)) {
-      (gameCodeAnimRef.current as any)?.shake?.(500);
+      gameCodeAnimRef.current?.shake?.(SHAKE_MS);
       return;
     }
 
@@ -366,14 +247,11 @@ const Index = () => {
   // Both the dice button and its "Photo Explorer" label open it
   const openPhotoExplorer = () => navigateWithExit("/screens/OwnPhotos");
 
-  // Manejar la acción de cancelar unirse a un juego
+  // Closes the join panel (tap outside it, or Android back); the home form animates back in (effect above)
   const handleCancelJoinGame = () => {
-    console.log("CANCEL JOIN GAME");
     setIsJoiningGame(false);
     setAskNameToJoin(false);
     setShouldAnimateCreateGameButton(true);
-    (usernameInputRef.current as any)?.slideInDownBounce?.(600);
-    (JoingameButtonRef.current as any)?.slideInUpBounce?.(600);
   };
 
   /** The name field with its clear button: on the home form, and in the join panel when it asks for the name */
@@ -381,7 +259,7 @@ const Index = () => {
     <Animatable.View
       ref={usernameInputRef}
       animation={animation}
-      duration={600}
+      duration={HOME_ANIMATION_MS}
       style={tw`w-full flex items-center justify-center mb-4 relative`}
     >
       <TextInput
@@ -413,7 +291,7 @@ const Index = () => {
     </Animatable.View>
   );
 
-  // Mostrar un indicador de carga si los datos iniciales aún se están cargando
+  // Spinner while the initial data loads
   if (isLoading) {
     return (
       <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
@@ -422,7 +300,7 @@ const Index = () => {
     );
   }
 
-  // Mostrar la pantalla inicial si el usuario no la ha visto antes
+  // First run: the welcome screen that asks for photo access
   if (!hasSeenInitialScreen) {
     return <InitialScreen />;
   }
@@ -452,11 +330,11 @@ const Index = () => {
           </View>
         </View>
 
-        {/* Logo en la parte superior */}
+        {/* Logo at the top */}
         <Animatable.View
           ref={topLogoRef}
           animation="slideInDown"
-          duration={600}
+          duration={HOME_ANIMATION_MS}
           style={tw`absolute top-[10%]`}
           onLayout={handleLogoLayout}
         >
@@ -464,12 +342,8 @@ const Index = () => {
             <Text
               style={[
                 tw`text-white ${getTitleFontSize()}  z-10 text-center pt-15`,
-                {
-                  fontFamily: "IconFont",
-                  textShadowColor: "rgba(0, 0, 0, 0.5)",
-                  textShadowOffset: { width: 10, height: 5 },
-                  textShadowRadius: 3,
-                },
+                { fontFamily: BRAND_DISPLAY_FONT },
+                BRAND_LOGO_SHADOW,
               ]}
             >
               {t.appName}
@@ -488,61 +362,41 @@ const Index = () => {
         </Animatable.View>
 
         <View style={tw`px-2 flex-1 w-full max-w-[500px] self-center justify-center pt-[18%] items-center`}>
-          {/* Mostrar el formulario de ingreso de usuario y botones si no se está uniendo a un juego */}
+          {/* Home form: name, Create game and Join game */}
           {!isJoiningGame && (
             <>
               {renderUsernameInput(shouldAnimateCreateGameButton ? "fadeIn" : undefined)}
 
-              {/* Botón para crear un juego */}
               <Animatable.View
                 ref={createGameButtonRef}
                 animation={shouldAnimateCreateGameButton ? "fadeIn" : undefined}
-                duration={600}
+                duration={HOME_ANIMATION_MS}
                 style={tw`w-full`}
               >
-                <LinearGradient
-                  colors={["#9d0420", "#e9042e", "#9d0420"]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={tw`p-4 rounded-2xl mb-4 w-full`}
-                >
-                  <TouchableOpacity testID={TEST_IDS.createGameButton} style={tw`w-full`} onPress={handleCreateGame}>
-                    <Text style={tw`text-white text-center text-lg font-bold`}>{t.createGame}</Text>
-                  </TouchableOpacity>
-                </LinearGradient>
+                <BrandButton testID={TEST_IDS.createGameButton} label={t.createGame} onPress={handleCreateGame} />
               </Animatable.View>
 
-              {/* Botón para unirse a un juego */}
               <Animatable.View
                 ref={JoingameButtonRef}
                 animation={shouldAnimateCreateGameButton ? "fadeIn" : undefined}
-                duration={600}
+                duration={HOME_ANIMATION_MS}
                 style={tw`w-full`}
               >
-                <LinearGradient
-                  colors={["#9d0420", "#e9042e", "#9d0420"]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={tw`p-4 rounded-2xl mb-4 w-full`}
-                >
-                  <TouchableOpacity testID={TEST_IDS.joinGameButton} onPress={handleJoinGame}>
-                    <Text style={tw`text-white text-center text-lg font-bold`}>{t.joinGame}</Text>
-                  </TouchableOpacity>
-                </LinearGradient>
+                <BrandButton testID={TEST_IDS.joinGameButton} label={t.joinGame} onPress={handleJoinGame} />
               </Animatable.View>
             </>
           )}
 
-          {/* Mostrar el formulario de ingreso de código de juego si se está uniendo a un juego */}
+          {/* Join panel: room code (and the name, for an invite) and Search room; tapping outside closes it */}
           {isJoiningGame && (
             <TouchableWithoutFeedback accessible={false} onPress={handleCancelJoinGame}>
               <View style={tw`flex-1 w-full justify-center items-center`}>
                 {askNameToJoin && renderUsernameInput("slideInDownBounce")}
-                {/* Input para ingresar el código del juego */}
+                {/* Room code input */}
                 <Animatable.View
                   ref={gameCodeAnimRef}
                   animation="slideInDownBounce"
-                  duration={600}
+                  duration={HOME_ANIMATION_MS}
                   style={tw`w-full mb-4 relative`}
                 >
                   <TextInput
@@ -577,25 +431,15 @@ const Index = () => {
                   )}
                 </Animatable.View>
 
-                {/* Botón para buscar una sala */}
-                <Animatable.View animation="slideInUpBounce" duration={600} style={tw`w-full`}>
-                  <LinearGradient
-                    colors={["#9d0420", "#e9042e", "#9d0420"]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                    style={tw`p-4 rounded-2xl mb-4 w-full`}
-                  >
-                    <TouchableOpacity testID={TEST_IDS.searchRoomButton} style={tw` w-full `} onPress={handleSearchRoom}>
-                      <Text style={tw`text-white text-center text-lg font-bold`}>{t.searchRoom}</Text>
-                    </TouchableOpacity>
-                  </LinearGradient>
+                <Animatable.View animation="slideInUpBounce" duration={HOME_ANIMATION_MS} style={tw`w-full`}>
+                  <BrandButton testID={TEST_IDS.searchRoomButton} label={t.searchRoom} onPress={handleSearchRoom} />
                 </Animatable.View>
               </View>
             </TouchableWithoutFeedback>
           )}
         </View>
-        {/* Botón para navegar a la pantalla de fotos propias */}
-        <Animatable.View ref={buttonRef} animation="slideInUp" duration={600} style={tw`absolute bottom-22 items-center`}>
+        {/* Photo explorer button */}
+        <Animatable.View ref={buttonRef} animation="slideInUp" duration={HOME_ANIMATION_MS} style={tw`absolute bottom-22 items-center`}>
           <TouchableOpacity
             testID={TEST_IDS.ownPhotosButton}
             accessibilityRole="button"
@@ -606,7 +450,7 @@ const Index = () => {
             <Ionicons name="dice" size={44} color="white" />
           </TouchableOpacity>
         </Animatable.View>
-        <Animatable.View ref={textRef} animation="slideInUp" duration={600} style={tw`absolute bottom-15`}>
+        <Animatable.View ref={textRef} animation="slideInUp" duration={HOME_ANIMATION_MS} style={tw`absolute bottom-15`}>
           {/* Tappable for sighted users; hidden from screen readers, which already get the dice button (EXP-283) */}
           <TouchableOpacity accessible={false} aria-hidden onPress={openPhotoExplorer}>
             <Text style={tw`text-white font-bold`}>{t.photoExplorer}</Text>

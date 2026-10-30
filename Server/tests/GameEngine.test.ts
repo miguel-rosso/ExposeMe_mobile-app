@@ -773,11 +773,14 @@ describe("hold", () => {
     expect(events("your-turn")).toHaveLength(1);
     expect(room.phase).toBe("scores");
 
+    expect(lastEvent("hold-start")!.target).toBe(room.gameCode);
     expect(engine.handleRelease(room, ownerSocket)).toBe(true);
     expect(room.held).toBe(false);
     const resume = lastEvent("hold-resume")!;
     expect(resume.target).toBe(room.gameCode);
     expect(resume.args[0]).toEqual({ phase: "scores", duration: SCORE_DISPLAY_TIME - 2_000, phaseTotal: SCORE_DISPLAY_TIME });
+    // The engine tells the room both: the time left, then that the hold is over
+    expect(emits.slice(-2).map((e) => [e.event, e.target])).toEqual([["hold-resume", room.gameCode], ["hold-end", room.gameCode]]);
 
     vi.advanceTimersByTime(SCORE_DISPLAY_TIME - 2_000 - 1);
     expect(events("your-turn")).toHaveLength(1);
@@ -830,6 +833,9 @@ describe("hold", () => {
     const other = room.players.find((p) => p.socketId !== ownerSocket)!.socketId;
     expect(engine.handleRelease(room, other)).toBe(false);
     expect(room.held).toBe(true);
+    // Only the accepted hold was announced, and nothing was released
+    expect(events("hold-start")).toHaveLength(1);
+    expect(events("hold-end")).toHaveLength(0);
   });
 
   it("rejects release when not held", () => {
@@ -878,6 +884,7 @@ describe("hold", () => {
     expect(engine.handleHold(room, ownerSocket)).toBe(true);
     vi.advanceTimersByTime(20_000);
     expect(engine.handleRelease(room, ownerSocket)).toBe(true);
+    const holdEndsBefore = events("hold-end").length;
 
     // The second hold only gets what is left of the budget (10s), then is force-released
     expect(engine.handleHold(room, ownerSocket)).toBe(true);
@@ -885,7 +892,7 @@ describe("hold", () => {
     expect(room.held).toBe(true);
     vi.advanceTimersByTime(1);
     expect(room.held).toBe(false);
-    expect(events("hold-end")).toHaveLength(1);
+    expect(events("hold-end")).toHaveLength(holdEndsBefore + 1);
 
     // Budget used up: no third hold this round
     expect(engine.handleHold(room, ownerSocket)).toBe(false);

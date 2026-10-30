@@ -131,7 +131,7 @@ function isHolding(room: Room, socketId: string): boolean {
 
 /**
  * The photo owner on `socketId` is going away (leave, disconnect): end their hold of the scores screen now
- * (hold-end + hold-resume) instead of leaving everyone frozen until the hold budget runs out.
+ * (hold-resume + hold-end) instead of leaving everyone frozen until the hold budget runs out.
  */
 function releaseHoldOf(room: Room, socketId: string): void {
   if (isHolding(room, socketId)) gameEngine.forceRelease(room);
@@ -425,9 +425,7 @@ io.on("connection", (socket: Socket) => {
       if (!holdBucket.take()) return;
       const s = session(socket);
       if (!s) return;
-      if (gameEngine.handleHold(s.room, s.player.socketId)) {
-        io.to(s.room.gameCode).emit("hold-start");
-      }
+      gameEngine.handleHold(s.room, s.player.socketId); // an accepted hold tells the room (hold-start)
     } catch (e) { console.error("hold-start error:", e); }
   });
 
@@ -437,11 +435,7 @@ io.on("connection", (socket: Socket) => {
       // tightly), so a release always gets through, and a flood from a socket that holds nothing stops here
       const s = session(socket);
       if (!s || !isHolding(s.room, socket.id) || !gameEvents.take("hold-end")) return;
-      if (gameEngine.handleRelease(s.room, s.player.socketId)) {
-        // hold-resume is emitted by doRelease in GameEngine
-        // hold-end tells clients the hold is over
-        io.to(s.room.gameCode).emit("hold-end");
-      }
+      gameEngine.handleRelease(s.room, s.player.socketId); // hold-resume, then hold-end to the room
     } catch (e) { console.error("hold-end error:", e); }
   });
 

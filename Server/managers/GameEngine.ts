@@ -31,6 +31,8 @@ const PHASE_TOTAL: Record<RoundPhase, number> = {
 export const MAX_HOLDS_PER_ROUND = 3;
 export const HOLD_BUDGET_PER_ROUND = 30_000;
 const HOLD_MIN_REMAINING = 1_500; // Stop allowing hold when less than this remains
+// A frozen (held or paused) phase timer keeps at least this much, so its callback never fires the moment it re-arms
+const MIN_FROZEN_TIME_LEFT = 100;
 const MAX_CONSECUTIVE_SKIPS = 3; // End the game after this many photo timeouts in a row
 export const PAUSE_TIMEOUT = 5 * 60_000; // Fewer than 2 connected: countdown of each pause before game over
 export const MAX_PAUSES = 3; // Counted pauses per game; when another one would be needed the game ends
@@ -171,7 +173,7 @@ export class GameEngine {
     console.log(`[${room.gameCode}] Game started`);
     this.io.to(room.gameCode).emit("game-started", this.roomManager.publicPlayers(room), room.rounds);
     // Don't wait forever for a player who backgrounds the app or drops before GameScreen mounts
-    this.setTimer(room, READY_TIMEOUT, () => {
+    this.armPhaseTimer(room, READY_TIMEOUT, () => {
       if (!room.started || room.phase !== null) return;
       const missing = room.players.filter((p) => !p.isReady).map((p) => p.username);
       console.log(`[${room.gameCode}] Ready timeout — starting without: ${missing.join(", ")}`);
@@ -267,7 +269,7 @@ export class GameEngine {
     this.startGameRun(room); // a new game: round numbers start over
     this.assignPlantedSlots(room);
     console.log(`[${room.gameCode}] All ready, planted slots: [${[...room.plantedSlots].join(",")}]`);
-    this.setTimer(room, GAME_START_DELAY, () => this.startRound(room));
+    this.armPhaseTimer(room, GAME_START_DELAY, () => this.startRound(room));
   }
 
   onPhotoReceived(room: Room, photo: string, username: string): void {
@@ -299,7 +301,7 @@ export class GameEngine {
     const data: RoundStartData = { photo, round: room.round, duration: SHOWN_ANSWER_TIME };
     this.io.to(room.gameCode).emit("round-start", data);
 
-    this.setTimer(room, ANSWER_TIME, () => this.enterReveal(room));
+    this.armPhaseTimer(room, ANSWER_TIME, () => this.enterReveal(room));
   }
 
   /**
@@ -363,15 +365,17 @@ export class GameEngine {
 
   // ── Hold ─────────────────────────────────────────────
 
+  /**
+   * hold-start: the photo owner freezes the scores phase, within the round's hold limits. Accepted: `hold-start` to
+   * the room and true; refused: nothing is sent and false.
+   */
   handleHold(room: Room, socketId: string): boolean {
     if (room.currentPlayer?.socketId !== socketId) return false;
     if (room.held || room.paused) return false;
     if (room.phase !== "scores") return false;
 
     // Don't allow hold if not enough time remaining
-    const elapsed = Date.now() - room._timerStartedAt;
-    const remaining = room._timerDuration - elapsed;
-    if (remaining < HOLD_MIN_REMAINING) return false;
+    if (this.phaseTimeLeft(room) < HOLD_MIN_REMAINING) return false;
 
     // Hold limits of this round
     const run = this.run(room);
@@ -382,11 +386,10 @@ export class GameEngine {
     usage.count++;
     usage.since = Date.now();
 
-    // Pause: clear the phase timer, save remaining time
     room.held = true;
-    this.pauseTimer(room);
+    this.freezePhaseTimer(room);
 
-    console.log(`[${room.gameCode}] HOLD — paused "${room.phase}", ${this.getTimerRemaining(room)}ms left`);
+    console.log(`[${room.gameCode}] HOLD — paused "${room.phase}", ${this.phaseTimeLeft(room)}ms left`);
 
     // Safety timeout: what is left of this round's hold budget
     room._holdSafetyTimer = setTimeout(() => {
@@ -397,23 +400,25 @@ export class GameEngine {
       }
     }, budgetLeft);
 
+    this.io.to(room.gameCode).emit("hold-start");
     return true;
   }
 
+  /** hold-end from the photo owner: the hold is released (see releaseHold); false if they hold nothing. */
   handleRelease(room: Room, socketId: string): boolean {
     if (room.currentPlayer?.socketId !== socketId) return false;
     if (!room.held) return false;
 
     console.log(`[${room.gameCode}] HOLD released`);
-    this.doRelease(room);
+    this.releaseHold(room);
     return true;
   }
 
+  /** Ends an active hold for everyone, like the owner's release (the owner went away, or the hold budget ran out). */
   forceRelease(room: Room): void {
     if (!room.held) return;
     console.log(`[${room.gameCode}] HOLD force-released`);
-    this.doRelease(room);
-    this.io.to(room.gameCode).emit("hold-end");
+    this.releaseHold(room);
   }
 
   // ── Connection changes: pause / resume / resync ──────
@@ -521,9 +526,7 @@ export class GameEngine {
   snapshot(room: Room): RoomStateSnapshot {
     const inRound = room.phase === "answering" || room.phase === "reveal" || room.phase === "scores";
     const shown = this.isRevealed(room);
-    // Running timer: what is left of it; paused/held timer: the frozen remaining time
-    const remaining = room._timer ? Math.max(0, room._timerDuration - (Date.now() - room._timerStartedAt)) : room._timerDuration;
-    const { duration, phaseTotal } = room.started ? this.phaseTiming(room, remaining) : { duration: 0, phaseTotal: 0 };
+    const { duration, phaseTotal } = room.started ? this.phaseTiming(room, this.phaseTimeLeft(room)) : { duration: 0, phaseTotal: 0 };
     // Guesses of the round in play are secret until round-scores (points already count a correct one), also through
     // the scores' order (see buildScores)
     const scores = this.buildScores(room, this.roomManager.guessesHidden(room));
@@ -566,12 +569,10 @@ export class GameEngine {
     }
     if (room.held) {
       // The hold already froze the phase timer; the pause replaces it
-      this.chargeHold(room);
-      room.held = false;
-      if (room._holdSafetyTimer) { clearTimeout(room._holdSafetyTimer); room._holdSafetyTimer = null; }
+      this.endHold(room);
       this.io.to(room.gameCode).emit("hold-end");
-    } else if (room._timer) {
-      this.pauseTimer(room);
+    } else {
+      this.freezePhaseTimer(room);
     }
     const wait = this.plantedWait(room);
     if (wait) { wait.shown = this.shownDuration(room)!; wait.shownSince = null; }
@@ -588,7 +589,7 @@ export class GameEngine {
       this.endGame(room);
     }, PAUSE_TIMEOUT);
     room._pauseWaitingFor = this.missingPlayers(room);
-    console.log(`[${room.gameCode}] PAUSED "${room.phase}" (${room._timerDuration}ms left, pause ${room._pauseCount}/${MAX_PAUSES}), waiting for: ${room._pauseWaitingFor.join(", ")}`);
+    console.log(`[${room.gameCode}] PAUSED "${room.phase}" (${this.phaseTimeLeft(room)}ms left, pause ${room._pauseCount}/${MAX_PAUSES}), waiting for: ${room._pauseWaitingFor.join(", ")}`);
     this.io.to(room.gameCode).emit("game-paused", this.pauseInfo(room));
   }
 
@@ -606,27 +607,29 @@ export class GameEngine {
     if (room._pauseTimer) { clearTimeout(room._pauseTimer); room._pauseTimer = null; }
     // A short absence (back within PAUSE_GRACE) doesn't use up one of the game's MAX_PAUSES
     if (Date.now() - room._pauseStartedAt < PAUSE_GRACE) room._pauseCount--;
+    const frozen = this.phaseTimeLeft(room);
+    let remaining: number;
     const wait = this.plantedWait(room);
     if (wait) {
       // Planted photo wait: the countdown goes on from where the pause froze it, with the same minimum as a normal
       // one. The photo comes after what the pause left of the hidden delay, or a quick re-send at least (as a resumed
       // owner re-sends a photo already uploaded), always PLANTED_DELAY_MARGIN before the countdown ends
       wait.shown = Math.max(PHOTO_RESUME_MIN_REMAINING, wait.shown);
-      room._timerDuration = wait.noPhoto ? wait.shown
-        : Math.min(Math.max(room._timerDuration, this.resendDelay()), wait.shown - PLANTED_DELAY_MARGIN);
+      remaining = wait.noPhoto ? wait.shown
+        : Math.min(Math.max(frozen, this.resendDelay()), wait.shown - PLANTED_DELAY_MARGIN);
       wait.shownSince = Date.now();
     } else {
-      room._timerDuration = Math.max(this.resumeMinimum(room), room._timerDuration);
+      remaining = Math.max(this.resumeMinimum(room), frozen);
     }
-    console.log(`[${room.gameCode}] RESUMED "${room.phase}" with ${room._timerDuration}ms (${room._pauseCount}/${MAX_PAUSES} pauses counted)`);
-    const resumed: PhaseResumeData = { phase: room.phase, ...this.phaseTiming(room, room._timerDuration) };
+    console.log(`[${room.gameCode}] RESUMED "${room.phase}" with ${remaining}ms (${room._pauseCount}/${MAX_PAUSES} pauses counted)`);
+    const resumed: PhaseResumeData = { phase: room.phase, ...this.phaseTiming(room, remaining) };
     this.io.to(room.gameCode).emit("game-resumed", resumed);
     // A photo sent while paused was ignored: ask the owner again (unless they left: the owner review replaces them)
     const owner = room.currentPlayer;
     if (room.phase === "waiting-photo" && owner?.connected && room.players.includes(owner) && owner !== rejoined) {
       this.io.to(owner.socketId).emit("your-turn", this.yourTurn(room));
     }
-    this.resumeTimer(room);
+    this.resumePhaseTimer(room, remaining);
   }
 
   /**
@@ -767,7 +770,7 @@ export class GameEngine {
       room.phase = "waiting-photo";
       room.currentPlayer = null;
       room.currentPhoto = null;
-      this.setTimer(room, GAME_START_DELAY, () => this.startRound(room));
+      this.armPhaseTimer(room, GAME_START_DELAY, () => this.startRound(room));
       this.pauseGame(room);
       return;
     }
@@ -789,7 +792,7 @@ export class GameEngine {
       console.log(`[${room.gameCode}] Planted photo from ${planted.username} in ${delay}ms`);
       this.announcePhotoWait(room);
 
-      this.setTimer(room, delay, () => this.startPlantedRound(room));
+      this.armPhaseTimer(room, delay, () => this.startPlantedRound(room));
     } else {
       const others = connected.filter((p) => !exclude.has(p));
       const candidates = others.length > 0 ? others : connected;
@@ -799,7 +802,7 @@ export class GameEngine {
       this.announcePhotoWait(room);
       this.io.to(room.currentPlayer.socketId).emit("your-turn", this.yourTurn(room));
 
-      this.setTimer(room, PHOTO_WAIT_TIMEOUT, () => {
+      this.armPhaseTimer(room, PHOTO_WAIT_TIMEOUT, () => {
         if (room.phase === "waiting-photo") {
           console.log(`[${room.gameCode}] Photo timeout — skipping`);
           this.skipRound(room, "timeout");
@@ -821,7 +824,7 @@ export class GameEngine {
       uploadStore.remove(wait.photo);
       // Like an owner who never sends: no photo comes, the wait runs out (15 s from waiting-photo) and is skipped
       wait.noPhoto = true;
-      this.setTimer(room, this.shownDuration(room)!, () => {
+      this.armPhaseTimer(room, this.shownDuration(room)!, () => {
         this.run(room).plantedWait = undefined;
         if (room.phase === "waiting-photo") this.skipRound(room, "timeout");
       });
@@ -890,8 +893,7 @@ export class GameEngine {
 
   /** `owner`'s photo arrived: remember how long its wait took (pauses excluded) for their planted rounds to imitate. */
   private recordWait(room: Room, owner: Player): void {
-    const remaining = room._timer ? room._timerDuration - (Date.now() - room._timerStartedAt) : room._timerDuration;
-    const waited = Math.min(PHOTO_WAIT_TIMEOUT, Math.max(0, PHOTO_WAIT_TIMEOUT - remaining));
+    const waited = Math.min(PHOTO_WAIT_TIMEOUT, Math.max(0, PHOTO_WAIT_TIMEOUT - this.phaseTimeLeft(room)));
     this.waitHistoryOf(room).record(owner.username, waited);
   }
 
@@ -990,7 +992,7 @@ export class GameEngine {
       this.io.to(p.socketId).emit("round-reveal", reveal);
     }
 
-    this.setTimer(room, REVEAL_TIME, () => this.enterScores(room));
+    this.armPhaseTimer(room, REVEAL_TIME, () => this.enterScores(room));
   }
 
   private enterScores(room: Room): void {
@@ -1006,7 +1008,7 @@ export class GameEngine {
       duration: SCORE_DISPLAY_TIME,
     });
 
-    this.setTimer(room, SCORE_DISPLAY_TIME, () => this.startRound(room));
+    this.armPhaseTimer(room, SCORE_DISPLAY_TIME, () => this.startRound(room));
   }
 
   private endGame(room: Room): void {
@@ -1052,9 +1054,13 @@ export class GameEngine {
     this.runs.set(room, newGameRun());
   }
 
-  // ── Private: Timer (single timer per room) ───────────
+  // ── Private: Phase timer (one per room) ──────────────
 
-  private setTimer(room: Room, ms: number, callback: () => void): void {
+  /**
+   * Starts the room's phase timer (replacing any): `callback` runs once `ms` have passed, unless the timer is cleared
+   * or frozen first. A frozen timer keeps its callback and remaining time until resumePhaseTimer re-arms it.
+   */
+  private armPhaseTimer(room: Room, ms: number, callback: () => void): void {
     if (room._timer) clearTimeout(room._timer);
     room._timerDuration = ms;
     room._timerStartedAt = Date.now();
@@ -1073,18 +1079,22 @@ export class GameEngine {
     room._timerCallback = null;
   }
 
-  private pauseTimer(room: Room): void {
-    if (room._timer) {
-      clearTimeout(room._timer);
-      room._timer = null;
-    }
-    // Calculate how much time was left
-    const elapsed = Date.now() - room._timerStartedAt;
-    room._timerDuration = Math.max(100, room._timerDuration - elapsed);
-    // _timerCallback is preserved so we can resume
+  /** Time left on the phase timer (ms): what is left of a running one, the saved remaining time of a frozen one. */
+  private phaseTimeLeft(room: Room): number {
+    if (!room._timer) return room._timerDuration;
+    return Math.max(0, room._timerDuration - (Date.now() - room._timerStartedAt));
   }
 
-  private resumeTimer(room: Room): void {
+  /** Stops a running phase timer (hold, pause), keeping its callback and the time it had left. */
+  private freezePhaseTimer(room: Room): void {
+    if (!room._timer) return;
+    room._timerDuration = Math.max(MIN_FROZEN_TIME_LEFT, this.phaseTimeLeft(room));
+    clearTimeout(room._timer);
+    room._timer = null;
+  }
+
+  /** Re-arms a frozen phase timer with `remaining` ms left (end of a hold or a pause). */
+  private resumePhaseTimer(room: Room, remaining: number): void {
     const callback = room._timerCallback;
     if (!callback) {
       console.error(`[${room.gameCode}] Resume but no callback! Recovering...`);
@@ -1093,45 +1103,35 @@ export class GameEngine {
       else this.startRound(room);
       return;
     }
-
-    room._timerStartedAt = Date.now();
-    room._timer = setTimeout(() => {
-      room._timer = null;
-      room._timerCallback = null;
-      try { callback(); } catch (e) { console.error(`[${room.gameCode}] Resume timer error:`, e); }
-    }, room._timerDuration);
+    this.armPhaseTimer(room, remaining, callback);
   }
 
-  private getTimerRemaining(room: Room): number {
-    return room._timerDuration;
-  }
+  // ── Private: Hold ────────────────────────────────────
 
-  /** The active hold ends: its time counts against the round's hold budget. */
-  private chargeHold(room: Room): void {
+  /** The active hold ends (released, or replaced by a pause): its time counts against the round's hold budget. */
+  private endHold(room: Room): void {
     const usage = this.run(room).holdUsage;
-    if (usage?.since == null) return;
-    usage.usedMs += Date.now() - usage.since;
-    usage.since = null;
+    if (usage?.since != null) {
+      usage.usedMs += Date.now() - usage.since;
+      usage.since = null;
+    }
+    room.held = false;
+    if (room._holdSafetyTimer) { clearTimeout(room._holdSafetyTimer); room._holdSafetyTimer = null; }
   }
 
-  private doRelease(room: Room): void {
-    this.chargeHold(room);
-    room.held = false;
-    if (room._holdSafetyTimer) {
-      clearTimeout(room._holdSafetyTimer);
-      room._holdSafetyTimer = null;
-    }
-
-    // Ensure enough time for smooth transition after release
-    const remaining = Math.max(HOLD_MIN_REMAINING, this.getTimerRemaining(room));
-    room._timerDuration = remaining;
+  /**
+   * The hold is released (by the owner, or forced): `hold-resume` to the room with what is left of the phase (at
+   * least HOLD_MIN_REMAINING, for a smooth transition), the phase timer re-armed with it, then `hold-end`.
+   */
+  private releaseHold(room: Room): void {
+    this.endHold(room);
+    const remaining = Math.max(HOLD_MIN_REMAINING, this.phaseTimeLeft(room));
     console.log(`[${room.gameCode}] Resuming "${room.phase}" with ${remaining}ms`);
-
     // Atomic event: tells client which phase, how much time is left and the phase's full duration
     const resumed: PhaseResumeData = { phase: room.phase, ...this.phaseTiming(room, remaining) };
     this.io.to(room.gameCode).emit("hold-resume", resumed);
-
-    this.resumeTimer(room);
+    this.resumePhaseTimer(room, remaining);
+    this.io.to(room.gameCode).emit("hold-end");
   }
 
   // ── Private: Helpers ─────────────────────────────────

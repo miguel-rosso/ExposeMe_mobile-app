@@ -1,10 +1,11 @@
 // Flow simulator for maestro-selectors.test.sh and maestro-timing.test.sh: runs a flow's own YAML and JS against a fake
 // device with the Maestro 2.11 semantics the boot and round flows rely on (`when` conditions, `repeat` times/while,
 // `retry` maxRetries <= 3, lookups that wait for the element, conditions that wait less after a command acted on the
-// device, selector regex options, `below`, env variables, screen reads that take time). The YAML is read by structure, so reordering keys or steps doesn't break it; anything it
-// doesn't model (YAML, commands, selector keys, subflow files) fails with the flow's line.
+// device, selector regex options, `below`, env variables, screen reads that take time and see the screen somewhere
+// along them). The YAML is read by structure, so reordering keys or steps doesn't break it; anything it doesn't model
+// (YAML, commands, selector keys, subflow files) fails with the flow's line.
 // Usage: node maestro-sim.mjs <boot|toggle|rounds> FLOW CLIENT_APP_DIR -> one "<name>\t<ok|FAIL>\t<detail>" line per
-// scenario
+// scenario. SIM_GAMES=<n> plays n seeded random games per `rounds` profile instead of 40 (rarer outcomes, e.g. 400)
 import fs from "node:fs";
 
 const [scenario, flowFile, clientApp] = process.argv.slice(2);
@@ -205,11 +206,20 @@ function runFlow(commands, device, { skippableSubflows = [], env = {} } = {}) {
 }
 
 // ── Fake devices ──
-// readMs(device, selector): how long one screen read takes (a fast phone by default); it sees the screen as it starts
+// readMs(device, selector): how long one screen read takes (a fast phone by default). seesAt(device): where along that
+// read it sees the screen, from 0 (as it starts, the default) to 1 (as it ends); elements(device, selector) is what it
+// sees then
 const DEFAULT_READ_MS = 500;
-const device = (platform, elements, tap, readMs = () => DEFAULT_READ_MS) => {
-  const d = { platform, now: 0, due: [], elements: () => elements(d), tap: (sel) => tap(d, sel) };
-  d.read = (sel) => { const shown = d.elements(); d.tick(readMs(d, sel)); return shown; };
+const device = (platform, elements, tap, readMs = () => DEFAULT_READ_MS, seesAt = () => 0) => {
+  const d = { platform, now: 0, due: [], tap: (sel) => tap(d, sel) };
+  d.read = (sel) => {
+    const ms = readMs(d, sel);
+    const untilSeen = Math.round(ms * seesAt(d));
+    d.tick(untilSeen);
+    const shown = elements(d, sel);
+    d.tick(ms - untilSeen);
+    return shown;
+  };
   d.later = (ms, effect) => d.due.push({ at: d.now + ms, effect });
   d.tick = (ms) => {
     d.now += ms;
@@ -311,10 +321,13 @@ function onboarding(startLang, fate) {
 // readMs(time) each. Records the phase each tap on an option lands in, and by round the screen reads of the scoreboard
 // checks: the card wait's that saw the scoreboard, and the card name's and options-under-it's, whose reads that saw no
 // scoreboard (`blindChecks`) pass without checking anything; those that saw it held go to `heldReads`.
-// ownerRound: the device's photo (its card says so); ownNameRound: its card wrongly shows its own name (EXP-290).
+// ownerRound: the device's photo (its card says so); ownNameRound: its card wrongly shows its own name (EXP-290);
+// cardlessRound: its scoreboard has no card; stuckPhotoRound: its photo never loads (EXP-119).
 // holds: { <round>: { at, ms } }, the round's owner (a bot) holds its scoreboard `at` ms after it opens, for `ms`: the
 // server freezes the scoreboard's timer meanwhile and the app shows only the photo and the held marker (EXP-325).
 // Rounds whose card wait ended on the held marker (`markerPasses`) and whose held marker a look for it saw (`heldSeen`).
+// seesAt: where along each read it sees the screen (see device); startAt: when the flow starts, from the game's start
+// (when the device's wait in the lobby ends).
 const PHOTO_WAIT_MS = 500; // the owner's upload (a bot's: well under a second)
 const PHOTO_LOADING_MS = 1000; // the round photo's loading spinner
 const engineMs = (name) => {
@@ -323,7 +336,10 @@ const engineMs = (name) => {
   if (!m) throw new Error(`GameEngine.ts: no ${name}`);
   return Number(m[1].replace(/_/g, ""));
 };
-function game({ rounds, readMs, username, ownerRound = 0, ownNameRound = 0, cardlessRound = 0, holds = {} }) {
+function game({
+  rounds, readMs, seesAt, startAt = 0, username, ownerRound = 0, ownNameRound = 0, cardlessRound = 0, stuckPhotoRound = 0,
+  holds = {},
+}) {
   const phases = [["photo", PHOTO_WAIT_MS], ["answering", engineMs("ANSWER_TIME")], ["reveal", engineMs("REVEAL_TIME")],
     ["scores", engineMs("SCORE_DISPLAY_TIME")]];
   const roundMs = phases.reduce((sum, [, ms]) => sum + ms, 0);
@@ -352,13 +368,15 @@ function game({ rounds, readMs, username, ownerRound = 0, ownNameRound = 0, card
   const card = (round) => (round === cardlessRound ? [] : [
     { id: "score-answer-card" }, { id: "score-answer-name", text: cardName(round) },
   ]);
+  // The round photo, with its spinner while it loads; it stays under the scoreboard (GameScreen.tsx)
+  const photo = (round, loadingFor) => [{ id: "photo-view" },
+    ...(round === stuckPhotoRound || loadingFor < PHOTO_LOADING_MS ? [{ id: "photo-loading" }] : [])];
   const screen = ({ round, phase, into }) => ({
     photo: () => [{ id: "game-waiting-photo" }],
-    answering: () => [{ id: "round-progress", y: 1 }, { id: "photo-view" },
-      ...(into < PHOTO_LOADING_MS ? [{ id: "photo-loading" }] : []), ...options],
-    reveal: () => [{ id: "photo-view" }, ...options],
-    scores: () => [{ id: "score-modal" }, { id: "score-round-title", y: 1 }, ...card(round)],
-    held: () => [{ id: "photo-view" }, { id: "game-held" }],
+    answering: () => [{ id: "round-progress", y: 1 }, ...photo(round, into), ...options],
+    reveal: () => [...photo(round, Infinity), ...options],
+    scores: () => [...photo(round, Infinity), { id: "score-modal" }, { id: "score-round-title", y: 1 }, ...card(round)],
+    held: () => [...photo(round, Infinity), { id: "game-held" }],
     over: () => (state.final ? [{ id: "final-score-modal" }] : [{ id: "winner-modal" }, { id: "winner-continue" }]),
   })[phase]();
   // The scoreboard checks, by selector (the card wait also ends on the held marker; the looks for the marker check
@@ -370,11 +388,6 @@ function game({ rounds, readMs, username, ownerRound = 0, ownNameRound = 0, card
   };
   const d = device(
     "android",
-    (dev) => screen(phaseAt(dev.now)),
-    (dev, sel) => {
-      if (matches(sel.id || "", "winner-continue")) state.final = true;
-      else if (/^player-option-/.test(sel.id || "")) state.taps.push(phaseAt(dev.now));
-    },
     (dev, sel) => {
       const at = phaseAt(dev.now);
       const check = scoreboardCheck(sel);
@@ -385,9 +398,16 @@ function game({ rounds, readMs, username, ownerRound = 0, ownNameRound = 0, card
       else if (check && check !== "card") { // the card wait polls
         (at.phase === "held" ? state.heldReads : state.blindChecks).push({ round: at.round, check });
       }
-      return readMs(dev.now, state);
+      return screen(at);
     },
+    (dev, sel) => {
+      if (matches(sel.id || "", "winner-continue")) state.final = true;
+      else if (/^player-option-/.test(sel.id || "")) state.taps.push(phaseAt(dev.now));
+    },
+    (dev) => readMs(dev.now, state),
+    seesAt,
   );
+  d.now = startAt;
   return { d, state, env: { USERNAME: username } };
 }
 
@@ -448,6 +468,9 @@ const seededRandom = (seed) => {
   let x = seed >>> 0;
   return () => { x = (Math.imul(x, 1664525) + 1013904223) >>> 0; return x / 2 ** 32; };
 };
+// The same, with the seed scattered first (Knuth's multiplicative hash): an LCG's first draws barely differ between
+// small seeds, so streams seeded n, 2n, 3n... would start alike
+const scatteredRandom = (seed) => seededRandom(Math.imul(seed, 2654435761));
 
 function roundsScenarios(flow) {
   const ROUNDS = 6;
@@ -461,6 +484,8 @@ function roundsScenarios(flow) {
   };
   // Rounds 2 on: the first one starts from the lobby, where the device may well be late for the options
   const LATER_ROUNDS = Array.from({ length: ROUNDS - 1 }, (_, i) => i + 2);
+  // A wrong scoreboard can fail the flow on each of them but the last: the winner modal follows it
+  const CATCHABLE_ROUNDS = LATER_ROUNDS.slice(0, -1);
   const missedGuesses = (state) => [1, ...LATER_ROUNDS]
     .filter((round) => !state.taps.some((tap) => tap.round === round && tap.phase === "answering"));
   // Screen reads on the Android emulator (it136, 12-player room): 0.6-3.5 s, ~1.5 s most of the time, and now and then
@@ -472,75 +497,170 @@ function roundsScenarios(flow) {
     const revealStart = (round - 1) * roundMs + phases.photo + phases.answering;
     return t >= revealStart && t < revealStart + phases.reveal + phases.scores ? SLOW_READ_MS : STEADY_READ_MS;
   };
-  const RANDOM_GAMES = 40;
-  // Read ranges: it136's usual one, and every read it measured (0.6-3.5 s). The share of games in which a scoreboard
-  // without its card fails the flow: on a slower phone more scoreboards go by while it is still busy with the round.
-  // On 0.6-3.5 s reads about 60% of the scoreboards get checked, so whether one given round is caught varies by a few
-  // games out of 40 with any change in phase lengths (8.5 s answering, EXP-306: 23/40 caught, 149/240 checked)
-  const RANDOM_PROFILES = [
-    { range: [600, 2000], minCardlessCaught: 0.9 },
-    { range: [600, 3500], minCardlessCaught: 0.55 },
+  // Where along each screen read the device sees the screen (EXP-322): Maestro reports the screen as it was at some
+  // point of its read, so every case is played with reads that see it as they start, as they end and anywhere along
+  // them (a seeded random point per read, `varies`: each fixed case is then played over as many read-point patterns
+  // as random games). Only reads seen as they start (`exact`) rule out a scoreboard check that reads after its
+  // scoreboard closed (a blind check, which passes without checking anything), keep every card checked on a steady
+  // emulator and never fail the flow by mistake.
+  // SIM_SEE_SEED=<n> draws other read points (the bounds below must hold for any).
+  const SEE_POINT_SEED = Number(process.env.SIM_SEE_SEED) || 104729;
+  const SEE_POINTS = [
+    { name: "seen as they start", seesAt: () => () => 0, exact: true, varies: false },
+    { name: "seen as they end", seesAt: () => () => 1, exact: false, varies: false },
+    { name: "seen anywhere along them", seesAt: (seed) => scatteredRandom(seed ^ SEE_POINT_SEED), exact: false, varies: true },
   ];
-  const CARDLESS_ROUND = 3;
+  const RANDOM_GAMES = Number(process.env.SIM_GAMES) || 40;
+  // False failures: elsewhere along the reads, a read seen as it starts and the next as it ends can be more than the
+  // scoreboard's 5 s apart, so the card wait, which polls until the scoreboard has surely closed, may miss one and fail
+  // by mistake. Those profiles may fail in at most this share of their plays, plus 3 standard deviations for the
+  // sample size (SIM_GAMES=400 on 0.6-3.5 s reads seen anywhere, two read-point seeds: 40 and 34 of 3600 plays, about
+  // 1 %, and 6 and 6 of 400 with bot holds, 1.5 %; qa/loop before EXP-322: 36 and 20, 5 and 5; none otherwise, where
+  // qa/loop failed 2 seen as they start and 11 as they end). it136's burst of 4 s reads right after a guess fails far
+  // more often seen anywhere (48 and 50 of 400 read-point patterns, before 54 and 65: tracked apart), so it gets its
+  // own share. A card wait that only fails when its reads surely saw the scoreboard can't fail by mistake, but catches
+  // about a third of the missing cards on 0.6-3.5 s reads (498-533 of 1600): the options' edge its bounds come from is
+  // two reads wide.
+  const MAX_FALSE_FAILURE_SHARE = 0.02;
+  const MAX_SLOW_BURST_FALSE_FAILURE_SHARE = 0.2;
+  const allowedFalseFailures = (see, plays, share = MAX_FALSE_FAILURE_SHARE) =>
+    (see.exact ? 0 : Math.floor(share * plays + 3 * Math.sqrt(share * plays * (1 - share))));
+  // Read ranges: it136's usual one, and every read it measured (0.6-3.5 s). The share of the wrong scoreboards (one per
+  // game, on each round that can catch it) that must fail the flow, whatever the read points: on a slower phone more
+  // scoreboards go by while it is still busy with the round. The card is checked by its own wait, the device's own
+  // name only by a 1 s look after it (so it is caught less often). Each minimum is 3 standard deviations below the
+  // lowest share of the three read-point profiles over 400 games (SIM_GAMES=400, rounds 2-5 of 1600; EXP-322, seen
+  // as they start / end / anywhere: a missing card 1474, 1443, 1440 on 0.6-2 s reads and 1223, 1177, 1193 on
+  // 0.6-3.5 s, before 1468, 1438, 1434 and 1169, 1057, 1091; the own name 1446, 1427, 1395 and 791, 748, 701,
+  // before 1446, 1417, 1391 and 689, 628, 593).
+  const RANDOM_PROFILES = [
+    { range: [600, 2000], minCaught: { cardless: 0.8, ownName: 0.75 } },
+    { range: [600, 3500], minCaught: { cardless: 0.6, ownName: 0.3 } },
+  ];
+  // The wrong scoreboards and the failure each must cause
+  const WRONG_SCOREBOARDS = {
+    cardless: { what: "a round without the card", gameOption: "cardlessRound", failure: /score-answer-card/ },
+    ownName: { what: "a card showing the device's own name", gameOption: "ownNameRound", failure: /score-answer-name/ },
+  };
+  // The round the flow's baseline catch rates were measured on (EXP-312, EXP-306)
+  const BASELINE_ROUND = 3;
+  // The half-checked floor may fail a game with a wrong scoreboard first (its round was one of the few checked); any
+  // other failure there is a mistake
+  const FLOOR_FAILURE = /At least half the scoreboards/;
   // Most guesses must land: a slower phone loses some (the flow can't make a read faster), never by a false failure
   const MAX_MISSED_RANDOM = 0.05;
-
-  // ── Every guess in time, the scoreboard checked while it is up ──
-  const cases = [
-    [`steady emulator (${STEADY_READ_MS / 1000} s per screen read)`, () => STEADY_READ_MS],
-    [`slow reads (${SLOW_READ_MS / 1000} s) through round 3's reveal and scoreboard (it136)`, slowAfterGuess(3)],
-  ];
-  for (const [name, readMs] of cases) {
-    const { state, failure } = play(readMs);
-    const missed = missedGuesses(state);
-    report(`${name}: the game ends on the results`, !failure && state.final, failure || "no final ranking");
-    report(`${name}: every round's guess lands while answering`, missed.length === 0,
-      `rounds without a guess in time: ${missed.join(", ")}; taps: ${JSON.stringify(state.taps)}`);
-    report(`${name}: no scoreboard check reads after its scoreboard closed`, state.blindChecks.length === 0,
-      `checks that saw no scoreboard: ${JSON.stringify(state.blindChecks)}`);
-  }
-  const steady = play(() => STEADY_READ_MS);
-  const uncheckedCards = LATER_ROUNDS.filter((round) => !steady.state.checks.some((c) => c.round === round && c.check === "card"));
-  report(`steady emulator: the card is checked on every scoreboard after the first`, uncheckedCards.length === 0,
-    `rounds whose card went unchecked: ${uncheckedCards.join(", ")}`);
-
-  // ── Slower phones: no false failure, few lost guesses, enough scoreboards checked ──
-  // The flow itself fails when fewer than half the scoreboards (the last aside) were checked, so a game that ends on the
-  // results met that floor
-  const cardsChecked = (state) => new Set(state.checks.filter((c) => c.check === "card").map((c) => c.round)).size;
-  for (const readMs of [2000, 2500]) {
-    const { state, failure } = play(() => readMs);
-    const missed = missedGuesses(state);
-    report(`${readMs / 1000} s per screen read: the game ends on the results (${cardsChecked(state)}/${ROUNDS} scoreboards `
-      + "checked), at most one guess lost", !failure && state.final && missed.length <= 1 && state.blindChecks.length === 0,
-    `${failure || ""} rounds without a guess in time: ${missed.join(", ")}; blind checks: ${state.blindChecks.length}`);
-  }
-  // Seeded random reads: the same games on every run. Each game is played again with a scoreboard missing its card,
-  // which must fail the flow in most games (a late scoreboard goes unchecked, but never most of them: the floor)
   const randomReads = (seed, [fastest, slowest]) => {
     const random = seededRandom(seed);
     return () => Math.round(fastest + random() * (slowest - fastest));
   };
-  for (const { range, minCardlessCaught } of RANDOM_PROFILES) {
-    let failures = 0, missed = 0, blind = 0, checked = 0, caught = 0;
-    for (let seed = 1; seed <= RANDOM_GAMES; seed++) {
-      const { state, failure } = play(randomReads(seed, range));
-      if (failure || !state.final) failures++;
-      missed += missedGuesses(state).filter((round) => round > 1).length;
-      blind += state.blindChecks.length;
-      checked += cardsChecked(state);
-      const cardless = play(randomReads(seed, range), { cardlessRound: CARDLESS_ROUND });
-      if (/score-answer-card/.test(cardless.failure || "")) caught++;
+  const cardsChecked = (state) => new Set(state.checks.filter((c) => c.check === "card").map((c) => c.round)).size;
+
+  for (const see of SEE_POINTS) {
+    // One fixed case over its read-point patterns (a single one unless the points vary per read)
+    const patterns = see.varies ? RANDOM_GAMES : 1;
+    const playPatterns = (readMs) => Array.from({ length: patterns }, (_, i) => play(readMs, { seesAt: see.seesAt(i + 1) }));
+    const ofPatterns = patterns > 1 ? ` over ${patterns} read-point patterns` : "";
+    // ── Every guess in time, the scoreboard checked while it is up ──
+    const cases = [
+      [`steady emulator (${STEADY_READ_MS / 1000} s per screen read) ${see.name}`, () => STEADY_READ_MS],
+      [`slow reads (${SLOW_READ_MS / 1000} s) through round 3's reveal and scoreboard (it136) ${see.name}`, slowAfterGuess(3),
+        MAX_SLOW_BURST_FALSE_FAILURE_SHARE],
+    ];
+    for (const [name, readMs, falseFailureShare] of cases) {
+      const runs = playPatterns(readMs);
+      const failed = runs.filter(({ state, failure }) => failure || !state.final);
+      // A flow that failed stops guessing: its lost guesses count with its failure
+      const lateGuesses = runs.filter(({ state, failure }) => !failure && state.final && missedGuesses(state).length);
+      const allowed = falseFailureShare ? allowedFalseFailures(see, patterns, falseFailureShare) : 0;
+      report(`${name}: the game ends on the results${ofPatterns}${allowed ? ` in all but at most ${allowed}` : ""}`,
+        failed.length <= allowed, `${failed.length} failed: ${failed[0]?.failure || "no final ranking"}`);
+      report(`${name}: every round's guess lands while answering${ofPatterns}`, lateGuesses.length === 0,
+        `rounds without a guess in time: ${lateGuesses.map(({ state }) => missedGuesses(state).join(", ")).join("; ")}`);
+      if (see.exact) {
+        const [{ state }] = runs;
+        report(`${name}: no scoreboard check reads after its scoreboard closed`, state.blindChecks.length === 0,
+          `checks that saw no scoreboard: ${JSON.stringify(state.blindChecks)}`);
+      }
     }
-    const laterRounds = RANDOM_GAMES * LATER_ROUNDS.length;
-    const name = `${RANDOM_GAMES} games with random ${range[0] / 1000}-${range[1] / 1000} s screen reads`;
-    report(`${name}: no failed flow, no blind check, at most ${MAX_MISSED_RANDOM * 100}% of the guesses after round 1 lost`,
-      failures === 0 && blind === 0 && missed <= MAX_MISSED_RANDOM * laterRounds,
-      `failed flows: ${failures}, blind checks: ${blind}, lost guesses: ${missed}/${laterRounds}`);
-    report(`${name}: a round without the card fails at least ${minCardlessCaught * 100}% of them `
-      + `(${caught}/${RANDOM_GAMES}; ${checked}/${RANDOM_GAMES * ROUNDS} scoreboards checked)`,
-    caught >= minCardlessCaught * RANDOM_GAMES, `caught ${caught}/${RANDOM_GAMES}`);
+    if (see.exact) {
+      const steady = play(() => STEADY_READ_MS, { seesAt: see.seesAt(1) });
+      const unchecked = LATER_ROUNDS.filter((round) => !steady.state.checks.some((c) => c.round === round && c.check === "card"));
+      report(`steady emulator ${see.name}: the card is checked on every scoreboard after the first`, unchecked.length === 0,
+        `rounds whose card went unchecked: ${unchecked.join(", ")}`);
+    }
+
+    // ── Slower phones: no false failure (or a bounded share, see above), few lost guesses, enough scoreboards checked ──
+    // The flow itself fails when fewer than half the scoreboards (the last aside) were checked, so a game that ends on
+    // the results met that floor
+    for (const readMs of [2000, 2500]) {
+      const runs = playPatterns(() => readMs);
+      const wrong = runs.filter(({ state, failure }) => failure || !state.final || missedGuesses(state).length > 1
+        || (see.exact && state.blindChecks.length));
+      const checked = runs.map(({ state }) => cardsChecked(state));
+      report(`${readMs / 1000} s per screen read ${see.name}: the game ends on the results${ofPatterns} (`
+        + `${Math.min(...checked)}-${Math.max(...checked)}/${ROUNDS} scoreboards checked), at most one guess lost`,
+      wrong.length === 0, wrong.map(({ state, failure }) => `${failure || ""} rounds without a guess in time: `
+        + `${missedGuesses(state).join(", ")}; blind checks: ${state.blindChecks.length}`).slice(0, 3).join(" | "));
+    }
+    // Seeded random reads: the same games on every run. Each game is played again with a wrong scoreboard on each round
+    // that can catch it, which must fail the flow in most games and never with another failure (a late scoreboard goes
+    // unchecked, but never most of them: the floor)
+    for (const { range, minCaught } of RANDOM_PROFILES) {
+      let missed = 0, firstMissed = 0, blind = 0, checked = 0;
+      const failures = [];
+      const caught = Object.fromEntries(Object.keys(WRONG_SCOREBOARDS).map((kind) => [kind, { total: 0, baseline: 0 }]));
+      for (let seed = 1; seed <= RANDOM_GAMES; seed++) {
+        const { state, failure } = play(randomReads(seed, range), { seesAt: see.seesAt(seed) });
+        const failed = failure || !state.final;
+        if (failed) failures.push(`seed ${seed}: ${failure || "no final ranking"}`);
+        // a failed flow stops guessing: its lost guesses count with its failure
+        const missedRounds = failed ? [] : missedGuesses(state);
+        missed += missedRounds.filter((round) => round > 1).length;
+        firstMissed += missedRounds.includes(1) ? 1 : 0;
+        blind += state.blindChecks.length;
+        checked += cardsChecked(state);
+        for (const [kind, { gameOption, failure: expected }] of Object.entries(WRONG_SCOREBOARDS)) {
+          for (const round of CATCHABLE_ROUNDS) {
+            const wrong = play(randomReads(seed, range), { seesAt: see.seesAt(seed), [gameOption]: round });
+            if (expected.test(wrong.failure || "")) {
+              caught[kind].total++;
+              if (round === BASELINE_ROUND) caught[kind].baseline++;
+            } else if ((wrong.failure || !wrong.state.final) && !FLOOR_FAILURE.test(wrong.failure || "")) {
+              failures.push(`seed ${seed}, ${kind} round ${round}: ${wrong.failure || "no final ranking"}`);
+            }
+          }
+        }
+      }
+      const laterRounds = RANDOM_GAMES * LATER_ROUNDS.length;
+      const plays = RANDOM_GAMES * (1 + Object.keys(WRONG_SCOREBOARDS).length * CATCHABLE_ROUNDS.length);
+      const allowed = allowedFalseFailures(see, plays);
+      const name = `${RANDOM_GAMES} games with random ${range[0] / 1000}-${range[1] / 1000} s screen reads ${see.name}`;
+      report(`${name}: ${allowed ? `at most ${allowed} of ${plays} plays failed by mistake` : "no failed flow"}`
+        + `${see.exact ? ", no blind check" : ` (${blind} blind checks)`}, every round 1 guess in time (EXP-326), at `
+        + `most ${MAX_MISSED_RANDOM * 100}% of the later ones lost (${checked}/${RANDOM_GAMES * ROUNDS} scoreboards checked)`,
+      failures.length <= allowed && (!see.exact || blind === 0) && firstMissed === 0 && missed <= MAX_MISSED_RANDOM * laterRounds,
+      `failed flows: ${failures.length} ${failures.slice(0, 3).join("; ")}, blind checks: ${blind}, lost round 1 guesses: `
+        + `${firstMissed}/${RANDOM_GAMES}, lost later guesses: ${missed}/${laterRounds}`);
+      const wrongGames = RANDOM_GAMES * CATCHABLE_ROUNDS.length;
+      for (const [kind, { what }] of Object.entries(WRONG_SCOREBOARDS)) {
+        const { total, baseline } = caught[kind];
+        report(`${name}: ${what} on rounds ${CATCHABLE_ROUNDS[0]}-${CATCHABLE_ROUNDS.at(-1)} fails at least `
+          + `${Math.round(minCaught[kind] * 100)}% of them (${total}/${wrongGames}; round ${BASELINE_ROUND}: `
+          + `${baseline}/${RANDOM_GAMES})`,
+        total >= minCaught[kind] * wrongGames, `caught ${total}/${wrongGames}`);
+      }
+    }
   }
+
+  // ── Round 1 right after the lobby (EXP-326) ──
+  // it166's slow Android left the lobby about 1 s after round 1's options showed, with 1-2.2 s reads: the wait for the
+  // game screen and the loop's read before its first look for the options cost it the guess
+  const LATE_LOBBY_MS = 1000;
+  const lateLobby = play(() => 2000, { startAt: PHOTO_WAIT_MS + LATE_LOBBY_MS });
+  const firstTap = lateLobby.state.taps.find((tap) => tap.round === 1);
+  report(`the lobby wait ends ${LATE_LOBBY_MS / 1000} s into round 1's options (it166), 2 s per screen read: round 1's `
+    + "guess lands while answering", !lateLobby.failure && firstTap?.phase === "answering",
+  `${lateLobby.failure || ""} round 1 tap: ${JSON.stringify(firstTap)}`);
 
   // ── A wrong scoreboard still fails ──
   // EXP-290: the owner's card showing the device's own name fails the flow
@@ -549,12 +669,19 @@ function roundsScenarios(flow) {
   report("a card showing the device's own name fails the flow", /score-answer-name/.test(ownName.failure || ""),
     ownName.failure || "flow passed");
   // EXP-267: a scoreboard without the card fails on that round, not passing on a later round's card
+  const CARDLESS_ROUND = 3;
   const cardless = play(() => STEADY_READ_MS, { cardlessRound: CARDLESS_ROUND });
   const nextScoreboard = cardless.state.roundMs * CARDLESS_ROUND + cardless.state.phases.photo
     + cardless.state.phases.answering + cardless.state.phases.reveal;
   report(`a round without the card fails the flow before the next scoreboard`,
     /score-answer-card/.test(cardless.failure || "") && cardless.now < nextScoreboard,
     `${cardless.failure || "flow passed"} at ${cardless.now} ms (next scoreboard at ${nextScoreboard} ms)`);
+  // EXP-119: a round photo that never loads ends the round loop, which then fails on the game over it stopped short of
+  const STUCK_PHOTO_ROUND = 3;
+  const stuckPhoto = play(() => STEADY_READ_MS, { stuckPhotoRound: STUCK_PHOTO_ROUND });
+  report("a round photo that never loads fails the flow on its spinner", /photo-loading/.test(stuckPhoto.failure || "")
+    && stuckPhoto.now < stuckPhoto.state.roundMs * (STUCK_PHOTO_ROUND + 1),
+    `${stuckPhoto.failure || "flow passed"} at ${stuckPhoto.now} ms`);
 
   // ── Held scoreboards (EXP-325) ──
   // A bot owner holding its scoreboard (bots.mjs --hold) hides the card for up to the round's hold budget: the flow
@@ -570,22 +697,27 @@ function roundsScenarios(flow) {
     3: { at: 1000, ms: 23000 }, 4: { at: 200, ms: 500 }, 5: { at: 1500, ms: 3500 }, 6: { at: 800, ms: 21000 },
   };
   const LONG_HOLD_ROUND = 3;
+  const heldCases = [
+    [`steady emulator (${STEADY_READ_MS / 1000} s per screen read)`, () => STEADY_READ_MS],
+    [`slow reads (${SLOW_READ_MS / 1000} s) through round 3's reveal and scoreboard (it136)`, slowAfterGuess(3)],
+  ];
   // Rounds whose card a screen read saw on its scoreboard
   const cardsSeen = (state) => new Set(state.checks.filter((c) => c.check === "card").map((c) => c.round));
   const shortHoldPasses = (state) => [...state.markerPasses].filter((round) => !state.heldSeen.has(round));
-  // Every scoreboard counted as checked had its card seen, but for the short holds; every one counted as held was seen
-  // held
-  const heldProblems = (state, output) => {
+  // Every scoreboard counted as held was seen held. With reads seen as they start, every one counted as checked had
+  // its card seen, but for the short holds, and no check read after its scoreboard closed; seen elsewhere, a card wait
+  // may also pass on a later screen (the winner modal after the last scoreboard): a blind check too
+  const heldProblems = (state, output, exact = true) => {
     const { checked, held } = output.scoreboards ?? {};
     const seen = cardsSeen(state).size;
     const short = shortHoldPasses(state).length;
     return [
-      checked > seen + short && `${checked} counted checked, ${seen} cards seen, ${short} short holds`,
+      exact && checked > seen + short && `${checked} counted checked, ${seen} cards seen, ${short} short holds`,
       held !== state.heldSeen.size && `${held} counted held, ${state.heldSeen.size} seen held`,
-      state.blindChecks.length && `checks that saw no scoreboard: ${JSON.stringify(state.blindChecks)}`,
+      exact && state.blindChecks.length && `checks that saw no scoreboard: ${JSON.stringify(state.blindChecks)}`,
     ].filter(Boolean);
   };
-  for (const [name, readMs] of cases) {
+  for (const [name, readMs] of heldCases) {
     const { state, output, failure } = play(readMs, { holds: HOLDS });
     const missed = missedGuesses(state);
     const problems = heldProblems(state, output);
@@ -605,8 +737,8 @@ function roundsScenarios(flow) {
   report("rounds 4-5 held: a round without the card still fails the flow",
     /score-answer-card/.test(cardlessHeld.failure || ""), cardlessHeld.failure || "flow passed");
 
-  // Seeded random reads and holds like the bots' (bots.mjs --hold 0.5): each bot's round held with probability 0.5,
-  // pressed and let go after bots.mjs's own random delays
+  // Seeded random reads (seen anywhere along them too) and holds like the bots' (bots.mjs --hold 0.5): each bot's round
+  // held with probability 0.5, pressed and let go after bots.mjs's own random delays
   const HOLD_PROBABILITY = 0.5;
   const { HOLD_PRESS_DELAY_MS, HOLD_LENGTH_MS } = botsConstants("HOLD_PRESS_DELAY_MS", "HOLD_LENGTH_MS");
   const randomHolds = (seed) => {
@@ -615,30 +747,36 @@ function roundsScenarios(flow) {
     return Object.fromEntries([1, ...LATER_ROUNDS].filter((round) => round !== OWNER_ROUND && random() < HOLD_PROBABILITY)
       .map((round) => [round, { at: between(HOLD_PRESS_DELAY_MS), ms: between(HOLD_LENGTH_MS) }]));
   };
-  for (const { range } of RANDOM_PROFILES) {
-    let failures = 0, missed = 0, holds = 0, counted = 0, short = 0, heldReads = 0;
-    const problems = [];
-    for (let seed = 1; seed <= RANDOM_GAMES; seed++) {
-      const gameHolds = randomHolds(seed);
-      const { state, output, failure } = play(randomReads(seed, range), { holds: gameHolds });
-      if (failure || !state.final) {
-        failures++;
-        problems.push(`seed ${seed} (holds ${JSON.stringify(gameHolds)}): ${failure || "no final ranking"}`);
+  for (const see of SEE_POINTS) {
+    for (const { range } of RANDOM_PROFILES) {
+      let failures = 0, missed = 0, holds = 0, counted = 0, short = 0, heldReads = 0;
+      const problems = [], failed = [];
+      for (let seed = 1; seed <= RANDOM_GAMES; seed++) {
+        const gameHolds = randomHolds(seed);
+        const { state, output, failure } = play(randomReads(seed, range), { holds: gameHolds, seesAt: see.seesAt(seed) });
+        holds += Object.keys(gameHolds).length;
+        if (failure || !state.final) { // its counts and guesses stop with it
+          failures++;
+          failed.push(`seed ${seed} (holds ${JSON.stringify(gameHolds)}): ${failure || "no final ranking"}`);
+          continue;
+        }
+        missed += missedGuesses(state).filter((round) => round > 1).length;
+        counted += output.scoreboards?.held ?? 0;
+        short += shortHoldPasses(state).length;
+        heldReads += state.heldReads.length;
+        problems.push(...heldProblems(state, output, see.exact).map((p) => `seed ${seed}: ${p}`));
       }
-      missed += missedGuesses(state).filter((round) => round > 1).length;
-      holds += Object.keys(gameHolds).length;
-      counted += output.scoreboards?.held ?? 0;
-      short += shortHoldPasses(state).length;
-      heldReads += state.heldReads.length;
-      problems.push(...heldProblems(state, output).map((p) => `seed ${seed}: ${p}`));
+      const laterRounds = RANDOM_GAMES * LATER_ROUNDS.length;
+      const allowed = allowedFalseFailures(see, RANDOM_GAMES);
+      report(`${RANDOM_GAMES} games with random ${range[0] / 1000}-${range[1] / 1000} s screen reads ${see.name} and bot `
+        + `holds (${holds} holds: ${counted} counted held, ${short} short ones counted checked; ${heldReads} reads of a `
+        + `held screen): ${allowed ? `at most ${allowed} failed by mistake` : "no failed flow"}, only seen holds counted `
+        + `as held${see.exact ? ", only seen cards as checked, no blind check" : ""}, at most ${MAX_MISSED_RANDOM * 100}% `
+        + "of the guesses after round 1 lost",
+      failures <= allowed && problems.length === 0 && missed <= MAX_MISSED_RANDOM * laterRounds,
+      `failed flows: ${failures} ${failed.slice(0, 2).join("; ")}, lost guesses: ${missed}/${laterRounds}; `
+        + problems.slice(0, 3).join("; "));
     }
-    const laterRounds = RANDOM_GAMES * LATER_ROUNDS.length;
-    report(`${RANDOM_GAMES} games with random ${range[0] / 1000}-${range[1] / 1000} s screen reads and bot holds `
-      + `(${holds} holds: ${counted} counted held, ${short} short ones counted checked; ${heldReads} reads of a held `
-      + `screen): no failed flow, only seen cards counted as checked, no blind check, at most `
-      + `${MAX_MISSED_RANDOM * 100}% of the guesses after round 1 lost`,
-    failures === 0 && problems.length === 0 && missed <= MAX_MISSED_RANDOM * laterRounds,
-    `failed flows: ${failures}, lost guesses: ${missed}/${laterRounds}; ${problems.slice(0, 3).join("; ")}`);
   }
 }
 

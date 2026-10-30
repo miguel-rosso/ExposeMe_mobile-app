@@ -264,6 +264,18 @@ else
     && grep -qF 'giveUpAt: output.round.closesBy + output.timing.holdBudgetMs + output.timing.optionsWaitMs' "$ROUNDS" \
     && ok "play-rounds.yaml waits out a hold for GameEngine.ts's hold budget ($hold_budget ms)" \
     || ko "play-rounds.yaml's hold budget matches GameEngine.ts" "engine: ${hold_budget:-none}, flow: $flow_timing"
+  # EXP-326: between the lobby and round 1's first look for the options only scripts run (no screen read) and the round
+  # loop's condition is a script, its game-over look ending each pass; that first wait for the options covers the game's
+  # start (EXP-143: up to 180 s)
+  steps_before_loop="$(awk '/^- runFlow: wait-game-start.yaml$/ { on = 1; next } /^- repeat:$/ { exit }
+    on && /^- / { sub(/:.*/, ""); print }' "$ROUNDS" | sort -u | tr '\n' ' ')"
+  # shellcheck disable=SC2016 # Maestro expressions, not shell ones
+  [ "$steps_before_loop" = "- evalScript " ] \
+    && flow_has 'true: ${output.game.playingFrom === output.game.lookFrom}' \
+    && [ "$(flow_ms gameStartWaitMs)" -ge 180000 ] 2>/dev/null \
+    && grep -qF 'giveUpAt: Date.now() + output.timing.gameStartWaitMs' "$ROUNDS" \
+    && ok "play-rounds.yaml reads nothing between the lobby and round 1's first look for the options (EXP-326)" \
+    || ko "play-rounds.yaml reads nothing before round 1's options look" "steps: $steps_before_loop; flow: $flow_timing"
   # The scoreboard closes the three phases after the options showed: after the last look that found none
   # (closesAfter), before the options were seen (closesBy). The card wait ends at closesBy: with the options seen at the
   # latest one slow read after they showed, that comes before the next round's scoreboard, so a missing card fails on
@@ -288,10 +300,14 @@ else
     || ko "every scoreboard step guarded by closesAfter" "guards=$guards steps=${score_steps:-}"
 fi
 
-# ── play-rounds.yaml on a fake game with slow screen reads (EXP-312) ──
-# Every guess lands while answering, no scoreboard check passes after its scoreboard closed, slower phones (fixed and
-# seeded random reads) never fail by mistake and lose few guesses, a missing card or the device's own name on it still
-# fails (maestro-sim.mjs: Maestro 2.11 semantics, phase lengths from GameEngine.ts)
+# ── play-rounds.yaml on a fake game with slow screen reads (EXP-312, EXP-322, EXP-326) ──
+# With reads that see the screen as they start, as they end and anywhere along them: every guess lands while answering
+# (round 1's too, also when the lobby wait ends after its options showed), no scoreboard check passes after its
+# scoreboard closed (reads seen as they start), slower phones (fixed and seeded random reads) lose few guesses and
+# never fail by mistake with reads seen as they start, only in a bounded share of the games otherwise (a scoreboard can
+# slip between two polls), a missing card, the device's own name on it or a round photo that never loads still fail,
+# the wrong scoreboards on most rounds (maestro-sim.mjs: Maestro 2.11 semantics, phase lengths from GameEngine.ts;
+# SIM_SEE_SEED draws other read points)
 if out="$(node "$HERE/maestro-sim.mjs" rounds "$ROUNDS" "$CLIENT_APP" 2>&1)"; then
   while IFS=$'\t' read -r name verdict detail; do
     [ "$verdict" = ok ] && ok "play-rounds.yaml: $name" || ko "play-rounds.yaml: $name" "$detail"

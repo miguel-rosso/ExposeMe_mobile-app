@@ -1,12 +1,11 @@
 import fs from "fs";
 import path from "path";
-import { AddressInfo } from "net";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { io as connect, Socket as ClientSocket } from "socket.io-client";
+import type { Socket as ClientSocket } from "socket.io-client";
 import sharp from "sharp";
-import { io, server } from "../app";
 import { roomManager } from "../routes/socketRoutes";
 import { uploadStore } from "../middlewares/uploadStore";
+import { useTestServer } from "./socketHarness";
 
 // Uploaded photos are bound to a room and a player: POST /upload and GET /temp need the player's room code and
 // rejoin token, only room members can see a room's photos, and the files are deleted when the game ends or the
@@ -22,23 +21,9 @@ const UPLOAD_DIR = vi.hoisted(() => {
 
 interface Member { name: string; socket: ClientSocket; token: string; gameCode: string }
 
-let url: string;
+const harness = useTestServer();
+const { once, newClient, joinAs } = harness;
 let jpeg: Buffer;
-const clients: ClientSocket[] = [];
-
-function once<T = unknown>(socket: ClientSocket, event: string, timeoutMs = 4_000): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`timeout waiting for "${event}"`)), timeoutMs);
-    socket.once(event, (data: T) => { clearTimeout(t); resolve(data); });
-  });
-}
-
-async function newClient(): Promise<ClientSocket> {
-  const c = connect(url, { transports: ["websocket"], forceNew: true, reconnection: false });
-  clients.push(c);
-  await once(c, "connect");
-  return c;
-}
 
 /** Creates a room with `names` (first is host); returns each member with its rejoin token. */
 async function createRoom(...names: string[]): Promise<Member[]> {
@@ -46,12 +31,10 @@ async function createRoom(...names: string[]): Promise<Member[]> {
   let gameCode: string | null = null;
   for (const name of names) {
     const socket = await newClient();
-    const res = once<{ success: boolean; room: { gameCode: string }; rejoinToken: string }>(socket, "room-of-game");
-    socket.emit("join-create-game", { gameCode, username: name });
-    const r = await res;
+    const r = await joinAs(socket, gameCode, name);
     expect(r.success).toBe(true);
-    gameCode = r.room.gameCode;
-    members.push({ name, socket, token: r.rejoinToken, gameCode });
+    gameCode = r.room!.gameCode;
+    members.push({ name, socket, token: r.rejoinToken!, gameCode });
   }
   return members;
 }
@@ -61,7 +44,7 @@ const authHeaders = (m: Pick<Member, "gameCode" | "token">) => ({ Authorization:
 function upload(headers: Record<string, string> = {}) {
   const form = new FormData();
   form.append("image", new Blob([new Uint8Array(jpeg)], { type: "image/jpeg" }), "p.jpg");
-  return fetch(`${url}/upload`, { method: "POST", body: form, headers });
+  return fetch(`${harness.url}/upload`, { method: "POST", body: form, headers });
 }
 
 async function uploadAs(m: Member): Promise<string> {
@@ -70,7 +53,7 @@ async function uploadAs(m: Member): Promise<string> {
   return ((await res.json()) as { url: string }).url;
 }
 
-const get = (p: string, headers: Record<string, string> = {}) => fetch(`${url}${p}`, { headers });
+const get = (p: string, headers: Record<string, string> = {}) => fetch(`${harness.url}${p}`, { headers });
 const onDisk = (p: string) => fs.existsSync(path.join(UPLOAD_DIR, path.basename(p)));
 const filesOnDisk = () => fs.readdirSync(UPLOAD_DIR).filter((f) => /^[0-9a-f]{32}\./.test(f));
 
@@ -93,17 +76,10 @@ async function until(cond: () => boolean, ms = 2_000) {
 }
 
 beforeAll(async () => {
-  vi.spyOn(console, "log").mockImplementation(() => {});
   jpeg = await sharp({ create: { width: 8, height: 8, channels: 3, background: "#a33" } }).jpeg().toBuffer();
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
 
-afterAll(async () => {
-  clients.forEach((c) => c.disconnect());
-  await new Promise<void>((resolve) => io.close(() => resolve()));
-  roomManager.clear();
-  vi.restoreAllMocks();
+afterAll(() => {
   fs.rmSync(UPLOAD_DIR, { recursive: true, force: true });
 });
 

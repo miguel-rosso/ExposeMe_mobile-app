@@ -1,53 +1,13 @@
-import { AddressInfo } from "net";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { io as connect, Socket as ClientSocket } from "socket.io-client";
-import { io, server } from "../app";
+import { describe, expect, it, vi } from "vitest";
+import type { Socket as ClientSocket } from "socket.io-client";
 import { MAX_PLAYERS_PER_ROOM, MAX_ROOMS } from "../managers/RoomManager";
 import { roomManager } from "../routes/socketRoutes";
+import { useTestServer } from "./socketHarness";
 
 // One socket = at most one player in one room. Re-sending join for the same room and username
 // (what the app does on every reconnect / "Play again") is a no-op rejoin; anything else leaves the old binding first.
 
-interface RoomOfGame {
-  success: boolean;
-  message?: string;
-  rejoinToken?: string;
-  room?: { gameCode: string; players: { username: string; isHost: boolean; connected: boolean }[] };
-}
-
-const QUIET_MS = 300;
-
-let url: string;
-const clients: ClientSocket[] = [];
-
-function once<T = unknown>(socket: ClientSocket, event: string, timeoutMs = 4_000): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`timeout waiting for "${event}"`)), timeoutMs);
-    socket.once(event, (data: T) => { clearTimeout(t); resolve(data); });
-  });
-}
-
-/** Resolves true if `event` is NOT received within `ms`. */
-function silent(socket: ClientSocket, event: string, ms = QUIET_MS): Promise<boolean> {
-  return new Promise((resolve) => {
-    const handler = () => { clearTimeout(t); resolve(false); };
-    const t = setTimeout(() => { socket.off(event, handler); resolve(true); }, ms);
-    socket.once(event, handler);
-  });
-}
-
-async function newClient(): Promise<ClientSocket> {
-  const c = connect(url, { transports: ["websocket"], forceNew: true, reconnection: false });
-  clients.push(c);
-  await once(c, "connect");
-  return c;
-}
-
-async function joinAs(sock: ClientSocket, gameCode: string | null, username: string, rejoinToken?: string): Promise<RoomOfGame> {
-  const res = once<RoomOfGame>(sock, "room-of-game");
-  sock.emit("join-create-game", { gameCode, username, ...(rejoinToken !== undefined ? { rejoinToken } : {}) });
-  return res;
-}
+const { clients, once, silent, newClient, joinAs, lobby } = useTestServer({ resetBetweenTests: true });
 
 /** Players currently in `gameCode`, as seen by a fresh joiner (works for lobbies only). */
 async function roomPlayers(gameCode: string): Promise<{ username: string; isHost: boolean }[]> {
@@ -78,30 +38,6 @@ async function fullRoom(): Promise<{ gameCode: string; socks: ClientSocket[]; to
   }
   return { gameCode, socks, tokens };
 }
-
-async function lobby(): Promise<{ gameCode: string; alice: ClientSocket; bob: ClientSocket; tokens: Record<string, string> }> {
-  const alice = await newClient();
-  const created = await joinAs(alice, null, "alice");
-  const gameCode = created.room!.gameCode;
-  const bob = await newClient();
-  const announced = once(alice, "player-joined");
-  const joined = await joinAs(bob, gameCode, "bob");
-  await announced;
-  return { gameCode, alice, bob, tokens: { alice: created.rejoinToken!, bob: joined.rejoinToken! } };
-}
-
-beforeAll(async () => {
-  vi.spyOn(console, "log").mockImplementation(() => {});
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-});
-
-afterAll(async () => {
-  clients.forEach((c) => c.disconnect());
-  await new Promise<void>((resolve) => io.close(() => resolve()));
-  roomManager.clear();
-  vi.restoreAllMocks();
-});
 
 describe("one socket, one room binding", () => {
   it("re-sending join for the same room and username is a no-op rejoin (with or without token)", async () => {

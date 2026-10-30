@@ -1,6 +1,5 @@
-import { AddressInfo } from "net";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { io as connect, Socket as ClientSocket } from "socket.io-client";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { Socket as ClientSocket } from "socket.io-client";
 
 // EXP-164 / EXP-166: per-IP limits on sockets and on join attempts with unknown codes, emoji allowlist + rate limit.
 // Small limits so the test stays fast (read when the modules load).
@@ -14,29 +13,20 @@ vi.hoisted(() => {
   process.env.TRUST_PROXY = "1";
 });
 
-import { io, server } from "../app";
+import { io } from "../app";
 import { connections, joinMisses, roomManager } from "../routes/socketRoutes";
+import { useTestServer } from "./socketHarness";
 
-interface RoomOfGame { success: boolean; message?: string; rejoinToken?: string; room?: { gameCode: string } }
-
-let url: string;
-let clients: ClientSocket[] = [];
+const harness = useTestServer();
+const { once, joinAs: join } = harness;
 /** IP the next client connects as (X-Forwarded-For) */
 let clientIp = "10.0.0.1";
-
-function once<T = unknown>(socket: ClientSocket, event: string, timeoutMs = 4_000): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`timeout waiting for "${event}"`)), timeoutMs);
-    socket.once(event, (data: T) => { clearTimeout(t); resolve(data); });
-  });
-}
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Connects; resolves with the socket on connect, or the connect_error message. */
 function tryConnect(): Promise<{ sock: ClientSocket; error?: string }> {
-  const sock = connect(url, { transports: ["websocket"], forceNew: true, reconnection: false, extraHeaders: { "x-forwarded-for": clientIp } });
-  clients.push(sock);
+  const sock = harness.connectClient({ "x-forwarded-for": clientIp });
   return new Promise((resolve) => {
     sock.once("connect", () => resolve({ sock }));
     sock.once("connect_error", (e) => resolve({ sock, error: e.message }));
@@ -47,12 +37,6 @@ async function newClient(): Promise<ClientSocket> {
   const { sock, error } = await tryConnect();
   if (error) throw new Error(error);
   return sock;
-}
-
-function join(sock: ClientSocket, gameCode: string | null, username: string, rejoinToken?: string): Promise<RoomOfGame> {
-  const res = once<RoomOfGame>(sock, "room-of-game");
-  sock.emit("join-create-game", { gameCode, username, ...(rejoinToken ? { rejoinToken } : {}) });
-  return res;
 }
 
 /** A well-formed room code that is not `gameCode` (no other room exists in these tests). */
@@ -71,24 +55,11 @@ async function missFrom(n: number, wrong: string): Promise<string[]> {
 }
 
 async function closeAll() {
-  clients.forEach((c) => c.disconnect());
-  clients = [];
+  harness.disconnectClients();
   await sleep(150); // the server frees the per-IP slots on disconnect
 }
 
-beforeAll(async () => {
-  vi.spyOn(console, "log").mockImplementation(() => {});
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-});
-
 afterEach(closeAll);
-
-afterAll(async () => {
-  await new Promise<void>((resolve) => io.close(() => resolve()));
-  roomManager.clear();
-  vi.restoreAllMocks();
-});
 
 describe("per-IP socket limits (EXP-164)", () => {
   it("refuses connections beyond the per-IP cap and frees a slot on disconnect", async () => {
@@ -105,7 +76,7 @@ describe("per-IP socket limits (EXP-164)", () => {
   });
 
   it("frees the slot of a connection closed in the same request as its socket.io CONNECT", async () => {
-    const base = `${url}/socket.io/?EIO=4&transport=polling`;
+    const base = `${harness.url}/socket.io/?EIO=4&transport=polling`;
     for (let i = 0; i < 10; i++) {
       const open = await (await fetch(base)).text(); // engine.io OPEN packet: 0{"sid":...}
       const sid = JSON.parse(open.slice(1)).sid as string;
@@ -121,7 +92,7 @@ describe("per-IP socket limits (EXP-164)", () => {
 
   it("one socket.io socket per transport connection", async () => {
     const before = io.sockets.sockets.size;
-    const base = `${url}/socket.io/?EIO=4&transport=polling`;
+    const base = `${harness.url}/socket.io/?EIO=4&transport=polling`;
     const sid = JSON.parse((await (await fetch(base)).text()).slice(1)).sid as string;
     await fetch(`${base}&sid=${sid}`, { method: "POST", body: "40\x1e40\x1e40", headers: { "Content-Type": "text/plain" } });
     await sleep(200);

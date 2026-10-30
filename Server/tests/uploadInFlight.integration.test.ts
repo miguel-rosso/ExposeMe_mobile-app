@@ -1,13 +1,11 @@
 import fs from "fs";
 import http from "http";
-import { AddressInfo } from "net";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { io as connect, Socket as ClientSocket } from "socket.io-client";
 import sharp from "sharp";
-import { HTTP_HEADERS_TIMEOUT_MS, HTTP_REQUEST_TIMEOUT_MS, io, server } from "../app";
-import "../routes/socketRoutes";
+import { HTTP_HEADERS_TIMEOUT_MS, HTTP_REQUEST_TIMEOUT_MS, server } from "../app";
 import { MAX_FILE_SIZE } from "../middlewares/upload";
 import { uploadInFlightLimit } from "../middlewares/uploadInFlight";
+import { useTestServer } from "./socketHarness";
 
 // EXP-165: POST /upload buffers each body in memory, so the number of uploads being received at once is capped per
 // member, per room, per IP and server-wide, *after* the credentials are checked (only members take slots) and *before*
@@ -46,28 +44,14 @@ vi.mock("../controllers/sanitizeImage", async (importOriginal) => {
 
 const BOUNDARY = "----exposemeinflight";
 type Auth = Record<string, string>;
-let port: number;
-let url: string;
+const harness = useTestServer();
 // r1: alice, bob, carol (one room); dave, erin, frank: each alone in their own room
 const m: Record<string, Auth> = {};
-const clients: ClientSocket[] = [];
 const open: http.ClientRequest[] = [];
 
-function once<T = unknown>(socket: ClientSocket, event: string, timeoutMs = 4_000): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`timeout waiting for "${event}"`)), timeoutMs);
-    socket.once(event, (data: T) => { clearTimeout(t); resolve(data); });
-  });
-}
-
 async function join(gameCode: string | null, username: string): Promise<{ gameCode: string; auth: Auth }> {
-  const socket = connect(url, { transports: ["websocket"], forceNew: true, reconnection: false });
-  clients.push(socket);
-  await once(socket, "connect");
-  const joined = once<{ room: { gameCode: string }; rejoinToken: string }>(socket, "room-of-game");
-  socket.emit("join-create-game", { gameCode, username });
-  const { room, rejoinToken } = await joined;
-  return { gameCode: room.gameCode, auth: { Authorization: `Bearer ${rejoinToken}`, "X-Game-Code": room.gameCode } };
+  const { room, rejoinToken } = await harness.joinAs(await harness.newClient(), gameCode, username);
+  return { gameCode: room!.gameCode, auth: { Authorization: `Bearer ${rejoinToken!}`, "X-Game-Code": room!.gameCode } };
 }
 
 /**
@@ -83,7 +67,7 @@ function slowUpload(
   return new Promise((resolve) => {
     const req = http.request({
       host: "127.0.0.1",
-      port,
+      port: harness.port,
       method: "POST",
       path: "/upload",
       headers: {
@@ -123,10 +107,6 @@ async function waitFor(cond: () => boolean, timeoutMs = 3_000) {
 const inFlight = () => uploadInFlightLimit.inFlight().total;
 
 beforeAll(async () => {
-  vi.spyOn(console, "log").mockImplementation(() => {});
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  port = (server.address() as AddressInfo).port;
-  url = `http://127.0.0.1:${port}`;
   const alice = await join(null, "Alice");
   m.alice = alice.auth;
   m.bob = (await join(alice.gameCode, "Bob")).auth;
@@ -139,11 +119,8 @@ afterEach(async () => {
   await waitFor(() => inFlight() === 0);
 });
 
-afterAll(async () => {
-  clients.forEach((c) => c.disconnect());
-  await new Promise<void>((resolve) => io.close(() => resolve()));
+afterAll(() => {
   fs.rmSync(UPLOAD_DIR, { recursive: true, force: true });
-  vi.restoreAllMocks();
 });
 
 // ── Concurrency caps ──
@@ -201,7 +178,7 @@ describe("in-flight upload caps", () => {
     const jpeg = await sharp({ create: { width: 4, height: 4, channels: 3, background: "#33a" } }).jpeg().toBuffer();
     const form = new FormData();
     form.append("image", new Blob([new Uint8Array(jpeg)], { type: "image/jpeg" }), "p.jpg");
-    const res = await fetch(`${url}/upload`, { method: "POST", body: form, headers: { ...m.alice, "X-Forwarded-For": "10.0.4.9" } });
+    const res = await fetch(`${harness.url}/upload`, { method: "POST", body: form, headers: { ...m.alice, "X-Forwarded-For": "10.0.4.9" } });
     expect(res.status).toBe(200);
     expect(uploadInFlightLimit.inFlight()).toEqual({ total: 0, ips: 0, rooms: 0, members: 0 });
   });
@@ -222,13 +199,13 @@ describe("in-flight upload caps", () => {
       const form = new FormData();
       form.append("image", new Blob([new Uint8Array(jpeg)], { type: "image/jpeg" }), "p.jpg");
       const t0 = Date.now();
-      const res = await fetch(`${url}/upload`, { method: "POST", body: form, headers: { ...m.erin, "X-Forwarded-For": "10.0.5.9" } });
+      const res = await fetch(`${harness.url}/upload`, { method: "POST", body: form, headers: { ...m.erin, "X-Forwarded-For": "10.0.5.9" } });
       expect(Date.now() - t0).toBeGreaterThanOrEqual(2_400);
       expect(res.status).toBe(200);
       const { url: p } = (await res.json()) as { url: string };
       const added = fs.readdirSync(UPLOAD_DIR).filter((f) => !before.has(f));
       expect(added).toEqual([p.replace("/temp/", "")]); // exactly the returned photo, no orphan
-      const got = await fetch(`${url}${p}`, { headers: m.erin });
+      const got = await fetch(`${harness.url}${p}`, { headers: m.erin });
       expect(got.status).toBe(200);
     } finally {
       sanitizeDelay.ms = 0;
@@ -254,7 +231,7 @@ describe("upload size", () => {
   it("refuses an actual file over the limit with 413 JSON", async () => {
     const form = new FormData();
     form.append("image", new Blob([new Uint8Array(MAX_FILE_SIZE + 1)], { type: "image/jpeg" }), "big.jpg");
-    const res = await fetch(`${url}/upload`, { method: "POST", body: form, headers: m.alice });
+    const res = await fetch(`${harness.url}/upload`, { method: "POST", body: form, headers: m.alice });
     expect(res.status).toBe(413);
     expect(res.headers.get("content-type")).toMatch(/application\/json/);
   });
@@ -273,7 +250,7 @@ describe("HTTP server timeouts", () => {
 // ── /health ──
 describe("GET /health", () => {
   it("answers 200 with only its status (no uptime, memory or timestamp)", async () => {
-    const res = await fetch(`${url}/health`);
+    const res = await fetch(`${harness.url}/health`);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ status: "ok" });
   });

@@ -1,79 +1,29 @@
-import { AddressInfo } from "net";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { io as connect, Socket as ClientSocket } from "socket.io-client";
-import { io, server } from "../app";
+import { describe, expect, it, vi } from "vitest";
+import type { Socket as ClientSocket } from "socket.io-client";
+import type { RoomOfGameResponse } from "../models/interfaces";
 import { roomManager } from "../routes/socketRoutes";
 import { plantPhoto } from "./helpers";
+import { useTestServer } from "./socketHarness";
 
 // EXP-246: every answer join-create-game sends (create, join, rejoin, same-socket re-join, each refusal), with its
 // exact top-level keys, and how the socket is bound afterwards. A successful answer is always
 // `{ success, room, rejoinToken, hasPlantedPhoto }` (no top-level `rounds`: the room carries it), a refusal
 // `{ success: false, message }`.
 
-interface RoomOfGame {
-  success: boolean;
-  message?: string;
-  rejoinToken?: string;
-  hasPlantedPhoto?: boolean;
-  room?: { gameCode: string; rounds: number; started: boolean; players: { username: string; isHost: boolean }[] };
-}
-
-const QUIET_MS = 300;
 const JOINED_KEYS = ["hasPlantedPhoto", "rejoinToken", "room", "success"];
 const ROOM_KEYS = ["gameCode", "held", "paused", "phase", "players", "round", "rounds", "started"];
 const PHOTO = "/temp/" + "b".repeat(32) + ".jpg";
 
-let url: string;
-const clients: ClientSocket[] = [];
-
-function once<T = unknown>(socket: ClientSocket, event: string, timeoutMs = 4_000): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`timeout waiting for "${event}"`)), timeoutMs);
-    socket.once(event, (data: T) => { clearTimeout(t); resolve(data); });
-  });
-}
-
-/** Resolves true if `event` is NOT received within `ms`. */
-function silent(socket: ClientSocket, event: string, ms = QUIET_MS): Promise<boolean> {
-  return new Promise((resolve) => {
-    const handler = () => { clearTimeout(t); resolve(false); };
-    const t = setTimeout(() => { socket.off(event, handler); resolve(true); }, ms);
-    socket.once(event, handler);
-  });
-}
-
-async function newClient(): Promise<ClientSocket> {
-  const c = connect(url, { transports: ["websocket"], forceNew: true, reconnection: false });
-  clients.push(c);
-  await once(c, "connect");
-  return c;
-}
-
-function joinAs(sock: ClientSocket, gameCode: unknown, username: unknown, rejoinToken?: string): Promise<RoomOfGame> {
-  const res = once<RoomOfGame>(sock, "room-of-game");
-  sock.emit("join-create-game", { gameCode, username, ...(rejoinToken !== undefined ? { rejoinToken } : {}) });
-  return res;
-}
+const { once, silent, newClient, joinAs, lobby, startGame } = useTestServer({ resetBetweenTests: true });
 
 /** A successful answer: exactly the joined keys, the public room, and the player's own token and planted mark. */
-function expectJoined(res: RoomOfGame, gameCode: string, hasPlantedPhoto = false): void {
+function expectJoined(res: RoomOfGameResponse, gameCode: string, hasPlantedPhoto = false): void {
   expect(Object.keys(res).sort()).toEqual(JOINED_KEYS);
   expect(res.success).toBe(true);
   expect(Object.keys(res.room!).sort()).toEqual(ROOM_KEYS);
   expect(res.room!.gameCode).toBe(gameCode);
   expect(res.rejoinToken).toMatch(/^[A-Za-z0-9_-]{22,}$/);
   expect(res.hasPlantedPhoto).toBe(hasPlantedPhoto);
-}
-
-async function lobby(): Promise<{ gameCode: string; alice: ClientSocket; bob: ClientSocket; tokens: Record<string, string> }> {
-  const alice = await newClient();
-  const created = await joinAs(alice, null, "alice");
-  const gameCode = created.room!.gameCode;
-  const bob = await newClient();
-  const announced = once(alice, "player-joined"); // consumed here, so later checks only see new announcements
-  const joined = await joinAs(bob, gameCode, "bob");
-  await announced;
-  return { gameCode, alice, bob, tokens: { alice: created.rejoinToken!, bob: joined.rejoinToken! } };
 }
 
 /** A newcomer joins `gameCode` as `name`: `sock` gets its player-joined, i.e. it is in that socket.io room. */
@@ -89,25 +39,6 @@ async function expectOutOfRoomBroadcasts(sock: ClientSocket, gameCode: string, n
   expectJoined(await joinAs(await newClient(), gameCode, name), gameCode);
   expect(await quiet).toBe(true);
 }
-
-async function startGame(gameCode: string, host: ClientSocket, all: ClientSocket[]): Promise<void> {
-  const started = all.map((c) => once(c, "game-started"));
-  host.emit("start-game", { gameCode });
-  await Promise.all(started);
-}
-
-beforeAll(async () => {
-  vi.spyOn(console, "log").mockImplementation(() => {});
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-});
-
-afterAll(async () => {
-  clients.forEach((c) => c.disconnect());
-  await new Promise<void>((resolve) => io.close(() => resolve()));
-  roomManager.clear();
-  vi.restoreAllMocks();
-});
 
 // ── Successful answers ─────────────────────────────────
 
@@ -152,7 +83,7 @@ describe("join-create-game successful answers", () => {
 
   it("rejoin mid-game on a new socket: the answer, then the game-state snapshot", async () => {
     const { gameCode, alice, bob, tokens } = await lobby();
-    await startGame(gameCode, alice, [alice, bob]);
+    await startGame(alice, [alice, bob]);
     const bob2 = await newClient();
     const snapshot = once(bob2, "game-state");
     const res = await joinAs(bob2, gameCode, "bob", tokens.bob);
@@ -172,7 +103,7 @@ describe("join-create-game successful answers", () => {
 
   it("same socket mid-game: the answer plus the game state again", async () => {
     const { gameCode, alice, bob } = await lobby();
-    await startGame(gameCode, alice, [alice, bob]);
+    await startGame(alice, [alice, bob]);
     const snapshot = once(bob, "game-state");
     const res = await joinAs(bob, gameCode, "bob");
     expectJoined(res, gameCode);
@@ -262,7 +193,7 @@ describe("join-create-game refusals", () => {
 
   it("a started game: Game already started", async () => {
     const { gameCode, alice, bob } = await lobby();
-    await startGame(gameCode, alice, [alice, bob]);
+    await startGame(alice, [alice, bob]);
     expect(await joinAs(await newClient(), gameCode, "dave")).toEqual({ success: false, message: "Game already started" });
   });
 

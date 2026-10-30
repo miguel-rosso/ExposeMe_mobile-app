@@ -1,10 +1,8 @@
-import { AddressInfo } from "net";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { io as connect, Socket as ClientSocket } from "socket.io-client";
-import { io, server } from "../app";
-import { roomManager } from "../routes/socketRoutes";
+import { describe, expect, it } from "vitest";
+import type { Socket as ClientSocket } from "socket.io-client";
 import { ANSWER_GRACE, ANSWER_TIME, MAX_PAUSES, PAUSE_TIMEOUT } from "../managers/GameEngine";
 import { registerTurnUpload } from "./helpers";
+import { useTestServer } from "./socketHarness";
 
 // EXP-006: a player who drops mid-round and comes back on a new socket (socket.io reconnect) rejoins
 // with the rejoin token and gets a game-state snapshot; with only 2 players the game pauses meanwhile.
@@ -13,39 +11,7 @@ import { registerTurnUpload } from "./helpers";
 
 const PHOTO = "/temp/" + "a".repeat(32) + ".jpg"; // shape of a POST /upload result
 
-interface RoomOfGame { success: boolean; rejoinToken?: string; room?: { gameCode: string } }
-
-let url: string;
-const clients: ClientSocket[] = [];
-
-function once<T = unknown>(socket: ClientSocket, event: string, timeoutMs = 8_000): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`timeout waiting for "${event}"`)), timeoutMs);
-    socket.once(event, (data: T) => { clearTimeout(t); resolve(data); });
-  });
-}
-
-async function newClient(): Promise<ClientSocket> {
-  const c = connect(url, { transports: ["websocket"], forceNew: true, reconnection: false });
-  clients.push(c);
-  await once(c, "connect");
-  return c;
-}
-
-async function joinAs(sock: ClientSocket, gameCode: string | null, username: string, rejoinToken?: string): Promise<RoomOfGame> {
-  const res = once<RoomOfGame>(sock, "room-of-game");
-  sock.emit("join-create-game", { gameCode, username, ...(rejoinToken ? { rejoinToken } : {}) });
-  return res;
-}
-
-/** Resolves true if `event` is NOT received within `ms`. */
-function silent(socket: ClientSocket, event: string, ms = 1_500): Promise<boolean> {
-  return new Promise((resolve) => {
-    const handler = () => { clearTimeout(t); resolve(false); };
-    const t = setTimeout(() => { socket.off(event, handler); resolve(true); }, ms);
-    socket.once(event, handler);
-  });
-}
+const { once, silent, newClient, joinAs } = useTestServer({ eventTimeoutMs: 8_000, quietMs: 1_500, resetBetweenTests: true });
 
 /** Players in a started game; resolves when the first round-start reached everyone. */
 async function gameInAnsweringPhase(names: string[]) {
@@ -71,19 +37,6 @@ async function gameInAnsweringPhase(names: string[]) {
   await Promise.all(starts);
   return { gameCode, socks, tokens, owner };
 }
-
-beforeAll(async () => {
-  vi.spyOn(console, "log").mockImplementation(() => {});
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-});
-
-afterAll(async () => {
-  clients.forEach((c) => c.disconnect());
-  await new Promise<void>((resolve) => io.close(() => resolve()));
-  roomManager.clear();
-  vi.restoreAllMocks();
-});
 
 describe("reconnect mid-round", () => {
   it("3 players: the returning player gets the current phase, photo and remaining time; no pause", async () => {

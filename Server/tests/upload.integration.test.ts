@@ -1,14 +1,12 @@
 import fs from "fs";
 import path from "path";
-import { AddressInfo } from "net";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { io as connect, Socket as ClientSocket } from "socket.io-client";
+import type { Socket as ClientSocket } from "socket.io-client";
 import sharp from "sharp";
 import exifr from "exifr";
-import { io, server } from "../app";
-import { roomManager } from "../routes/socketRoutes";
 import { MAX_OUTPUT_SIDE } from "../controllers/sanitizeImage";
 import { MAX_FILE_SIZE } from "../middlewares/upload";
+import { useTestServer } from "./socketHarness";
 
 // POST /upload on a real server: random file names, metadata stripped, size limits,
 // and the returned paths are accepted by photo-sent.
@@ -27,8 +25,8 @@ const UPLOAD_PATH_RE = /^\/temp\/[0-9a-f]{32}\.(?:jpg|png|webp)$/;
 const LEAKY_NAME = "Screenshot_20261024-231502_Bank Santander.jpg";
 const HEIC_FIXTURE = path.join(__dirname, "fixtures/gps.heic"); // synthetic 64x48 HEIC with GPS EXIF
 
-let url: string;
-const clients: ClientSocket[] = [];
+const harness = useTestServer();
+const { once, newClient, joinAs } = harness;
 
 // Synthetic JPEG with GPS + device EXIF, 64x48 pixels stored with orientation 6 (display 48x64)
 async function gpsJpeg(): Promise<Buffer> {
@@ -48,13 +46,13 @@ let auth: Record<string, string> = {};
 async function uploadFile(data: Buffer, filename: string, type = "image/jpeg", headers = auth) {
   const form = new FormData();
   form.append("image", new Blob([new Uint8Array(data)], { type }), filename);
-  return fetch(`${url}/upload`, { method: "POST", body: form, headers });
+  return fetch(`${harness.url}/upload`, { method: "POST", body: form, headers });
 }
 
 async function fetchUploaded(res: Response, headers = auth): Promise<{ path: string; body: Buffer }> {
   expect(res.status).toBe(200);
   const { url: p } = (await res.json()) as { url: string };
-  const got = await fetch(`${url}${p}`, { headers });
+  const got = await fetch(`${harness.url}${p}`, { headers });
   expect(got.status).toBe(200);
   return { path: p, body: Buffer.from(await got.arrayBuffer()) };
 }
@@ -71,36 +69,13 @@ function hasApp1(jpeg: Buffer): boolean {
   return false;
 }
 
-function once<T = unknown>(socket: ClientSocket, event: string, timeoutMs = 4_000): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`timeout waiting for "${event}"`)), timeoutMs);
-    socket.once(event, (data: T) => { clearTimeout(t); resolve(data); });
-  });
-}
-
-async function newClient(): Promise<ClientSocket> {
-  const c = connect(url, { transports: ["websocket"], forceNew: true, reconnection: false });
-  clients.push(c);
-  await once(c, "connect");
-  return c;
-}
-
 beforeAll(async () => {
-  vi.spyOn(console, "log").mockImplementation(() => {});
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const host = await newClient();
-  const created = once<{ room: { gameCode: string }; rejoinToken: string }>(host, "room-of-game");
-  host.emit("join-create-game", { gameCode: null, username: "uploader" });
-  const { room, rejoinToken } = await created;
-  auth = { Authorization: `Bearer ${rejoinToken}`, "X-Game-Code": room.gameCode };
+  const { room, rejoinToken } = await joinAs(host, null, "uploader");
+  auth = { Authorization: `Bearer ${rejoinToken!}`, "X-Game-Code": room!.gameCode };
 });
 
-afterAll(async () => {
-  clients.forEach((c) => c.disconnect());
-  await new Promise<void>((resolve) => io.close(() => resolve()));
-  roomManager.clear();
-  vi.restoreAllMocks();
+afterAll(() => {
   fs.rmSync(UPLOAD_DIR, { recursive: true, force: true });
 });
 
@@ -175,7 +150,7 @@ describe("POST /upload", () => {
 
   it("answers malformed uploads with JSON, never an HTML error page", async () => {
     const tiny = await sharp({ create: { width: 2, height: 2, channels: 3, background: "#000" } }).jpeg().toBuffer();
-    const post = (form: FormData) => fetch(`${url}/upload`, { method: "POST", body: form, headers: auth });
+    const post = (form: FormData) => fetch(`${harness.url}/upload`, { method: "POST", body: form, headers: auth });
     const expectJson = async (res: Response, status: number) => {
       expect(res.status).toBe(status);
       expect(res.headers.get("content-type")).toMatch(/application\/json/);

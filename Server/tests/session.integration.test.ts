@@ -1,88 +1,21 @@
-import { AddressInfo } from "net";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { io as connect, Socket as ClientSocket } from "socket.io-client";
-import { io, server } from "../app";
+import { describe, expect, it } from "vitest";
+import type { Socket as ClientSocket } from "socket.io-client";
 import { MAX_USERNAME_LENGTH } from "../managers/playerName";
+import type { RoomOfGameResponse } from "../models/interfaces";
 import { roomManager } from "../routes/socketRoutes";
 import { registerTurnUpload, registerUpload } from "./helpers";
+import { useTestServer } from "./socketHarness";
 
 // Session hardening: identity (room + username) comes from the server-side session set on join,
 // rejoining an existing username requires the rejoin token, and the token never leaves its owner.
 
-interface RoomOfGame {
-  success: boolean;
-  message?: string;
-  rejoinToken?: string;
-  hasPlantedPhoto?: boolean;
-  room?: { gameCode: string; rounds: number; players: Record<string, unknown>[] };
-}
-
 const QUIET_MS = 300;
 
-let url: string;
-const clients: ClientSocket[] = [];
-/** Every payload received by each client, for leak checks. */
-const received = new Map<ClientSocket, { event: string; args: unknown[] }[]>();
-
-function once<T = unknown>(socket: ClientSocket, event: string, timeoutMs = 4_000): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`timeout waiting for "${event}"`)), timeoutMs);
-    socket.once(event, (data: T) => { clearTimeout(t); resolve(data); });
-  });
-}
-
-/** Resolves true if `event` is NOT received within `ms`. */
-function silent(socket: ClientSocket, event: string, ms = QUIET_MS): Promise<boolean> {
-  return new Promise((resolve) => {
-    const handler = () => { clearTimeout(t); resolve(false); };
-    const t = setTimeout(() => { socket.off(event, handler); resolve(true); }, ms);
-    socket.once(event, handler);
-  });
-}
-
-async function newClient(): Promise<ClientSocket> {
-  const c = connect(url, { transports: ["websocket"], forceNew: true, reconnection: false });
-  clients.push(c);
-  received.set(c, []);
-  c.onAny((event: string, ...args: unknown[]) => received.get(c)!.push({ event, args }));
-  await once(c, "connect");
-  return c;
-}
-
-async function joinAs(sock: ClientSocket, gameCode: string | null, username: string, rejoinToken?: string): Promise<RoomOfGame> {
-  const res = once<RoomOfGame>(sock, "room-of-game");
-  sock.emit("join-create-game", { gameCode, username, ...(rejoinToken !== undefined ? { rejoinToken } : {}) });
-  return res;
-}
-
-/** alice (host) + bob in a fresh lobby. */
-async function lobby(): Promise<{ gameCode: string; alice: ClientSocket; bob: ClientSocket; tokens: Record<string, string> }> {
-  const alice = await newClient();
-  const created = await joinAs(alice, null, "alice");
-  const gameCode = created.room!.gameCode;
-  const bob = await newClient();
-  const joined = await joinAs(bob, gameCode, "bob");
-  expect(joined.success).toBe(true);
-  return { gameCode, alice, bob, tokens: { alice: created.rejoinToken!, bob: joined.rejoinToken! } };
-}
-
-async function startGame(gameCode: string, host: ClientSocket, all: ClientSocket[]): Promise<void> {
-  const started = all.map((c) => once(c, "game-started"));
-  host.emit("start-game", { gameCode });
-  await Promise.all(started);
-}
-
-beforeAll(async () => {
-  vi.spyOn(console, "log").mockImplementation(() => {});
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-});
-
-afterAll(async () => {
-  clients.forEach((c) => c.disconnect());
-  await new Promise<void>((resolve) => io.close(() => resolve()));
-  roomManager.clear(); // pending room deletions / game timers must not outlive the server
-  vi.restoreAllMocks();
+/** `received`: every payload received by each client, for leak checks. */
+const { once, silent, newClient, joinAs, lobby, startGame, received } = useTestServer({
+  quietMs: QUIET_MS,
+  recordPayloads: true,
+  resetBetweenTests: true,
 });
 
 // ── Join / rejoin ──────────────────────────────────────
@@ -109,7 +42,7 @@ describe("join and rejoin", () => {
 
   it("rejects an existing username without a valid token after the game started", async () => {
     const { gameCode, alice, bob } = await lobby();
-    await startGame(gameCode, alice, [alice, bob]);
+    await startGame(alice, [alice, bob]);
     const other = await newClient();
     expect(await joinAs(other, gameCode, "bob")).toEqual({ success: false, message: "Game already started" });
     expect(await joinAs(other, gameCode, "bob", "not-the-token")).toEqual({ success: false, message: "Game already started" });
@@ -125,7 +58,7 @@ describe("join and rejoin", () => {
     expect(res.rejoinToken).toBe(tokens.bob);
     expect(res.room!.players.find((p) => p.username === "bob")).toMatchObject({ connected: true });
 
-    await startGame(gameCode, alice, [alice, bob2]);
+    await startGame(alice, [alice, bob2]);
     bob2.disconnect();
     const bob3 = await newClient();
     const res2 = await joinAs(bob3, gameCode, "bob", tokens.bob);
@@ -136,7 +69,7 @@ describe("join and rejoin", () => {
   it("rejects invalid usernames", async () => {
     const c = await newClient();
     for (const username of ["", "   ", "x".repeat(MAX_USERNAME_LENGTH + 1), 42, null]) {
-      const res = once<RoomOfGame>(c, "room-of-game");
+      const res = once<RoomOfGameResponse>(c, "room-of-game");
       c.emit("join-create-game", { gameCode: null, username });
       expect((await res).success).toBe(false);
     }
@@ -245,7 +178,7 @@ describe("chat and emoji", () => {
 describe("im-ready", () => {
   it("ignores im-ready from outsiders", async () => {
     const { gameCode, alice, bob } = await lobby();
-    await startGame(gameCode, alice, [alice, bob]);
+    await startGame(alice, [alice, bob]);
     const outsider = await newClient();
     const quietA = silent(alice, "your-turn", 1_500);
     const quietB = silent(bob, "your-turn", 1_500);
@@ -269,7 +202,7 @@ describe("im-ready", () => {
       const { gameCode, alice, bob } = await lobby();
       const carol = await newClient();
       const carolJoin = await joinAs(carol, gameCode, "carol");
-      await startGame(gameCode, alice, [alice, bob, carol]);
+      await startGame(alice, [alice, bob, carol]);
       alice.emit("im-ready");
       bob.emit("im-ready");
       expect(await silent(alice, "game-over", QUIET_MS)).toBe(true);
@@ -284,7 +217,7 @@ describe("im-ready", () => {
 
   it("a lone connected ready player does not start (and end) the game; a rejoin + im-ready does", async () => {
     const { gameCode, alice, bob, tokens } = await lobby();
-    await startGame(gameCode, alice, [alice, bob]);
+    await startGame(alice, [alice, bob]);
     bob.disconnect(); // backgrounded right after start
     await new Promise((r) => setTimeout(r, 100));
     const noOver = silent(alice, "game-over", 1_500);
@@ -388,7 +321,7 @@ describe("remove-player is lobby only", () => {
     const carol = await newClient();
     await joinAs(carol, gameCode, "carol");
     const sockets: Record<string, ClientSocket> = { alice, bob, carol };
-    await startGame(gameCode, alice, Object.values(sockets));
+    await startGame(alice, Object.values(sockets));
     const turn = Promise.race(Object.entries(sockets).map(([name, c]) => once(c, "your-turn").then(() => name)));
     Object.values(sockets).forEach((c) => c.emit("im-ready"));
     const ownerName = await turn;
@@ -424,7 +357,7 @@ describe("remove-player is lobby only", () => {
 describe("photo-sent", () => {
   it("only accepts an upload path from the current owner, and ignores answers from replaced sockets", async () => {
     const { gameCode, alice, bob, tokens } = await lobby();
-    await startGame(gameCode, alice, [alice, bob]);
+    await startGame(alice, [alice, bob]);
     const bob2 = await newClient();
     expect((await joinAs(bob2, gameCode, "bob", tokens.bob)).success).toBe(true);
 

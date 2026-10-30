@@ -21,7 +21,10 @@
 // whose prototype has no letters or digits other than modifier letters ("∙" as "•", "ǃ" as "!", "’" as "'", "¯"
 // as "ˉ", "一" and "ㅡ" as "ー"), every punctuation mark or symbol whatever its prototype ("—" and "―" as "ー"), and
 // (EXP-317) the letters UTS #39 draws like a kana or a kana draws like ("カ" as "力", "ロ" as "口", "ヘ" as "へ", "朩"
-// as "ホ"), which are letters of words but read as one another in a name.
+// as "ホ"), which are letters of words but read as one another in a name; so (EXP-321) are the ideographs of the CJK
+// Unified Ideographs block and its Extension A that UTS #39 draws alike: simplified, traditional and Japanese forms
+// ("吴", "吳" and "呉"; "兑" and "兌") and near twins ("囗" and "口", "士" and "土"). Later extensions are left out:
+// fonts often lack them, so they don't reliably draw like anything.
 // Each prototype is written as playerName's skeleton reads it (ASCII table, NFKC, combining marks dropped), so a name
 // typed with it gets the same key; playerName applies the table before NFKC too, which turns "¯" into a space and a
 // mark. Left out: ASCII letters and digits, ASCII_CONFUSABLES sources, marks (Indic vowel signs are letters of a
@@ -130,6 +133,12 @@ const KANA = /^[\p{Script=Hiragana}\p{Script=Katakana}]$/u;
 const isKanaLookalike = (source, prototype) => LETTER.test(source) && LETTER.test(prototype)
   && (KANA.test(source) || KANA.test(prototype));
 
+// CJK Unified Ideographs Extension A and the main block
+const COMMON_IDEOGRAPH = /^[\u3400-\u4DBF\u4E00-\u9FFF]$/u;
+
+/** An ideograph drawn like another one, both common (UTS #39: "吴" as "吳", "囗" as "口"). */
+const isIdeographLookalike = (source, prototype) => COMMON_IDEOGRAPH.test(source) && COMMON_IDEOGRAPH.test(prototype);
+
 // Drawn size (EXP-268): UTS #39 joins symbols of one shape whatever their size, but a clearly bigger, smaller or
 // bolder glyph reads as a different name. Measured ink boxes (Roboto and Noto Sans Symbols on Android, SF on iOS, in
 // em) split these groups; each source gets the prototype of its size group, or itself when it has a size of its own.
@@ -151,6 +160,15 @@ const SIZE_PROTOTYPES = new Map([
   ["\u2594", "\u2594"],
   // Tildes: the small tilde (0.29-0.35, raised) is half the tilde (0.48-0.55, mid height); the wave dash is 0.92
   ["\u02DC", "\u02DC"], ["\u301C", "\u301C"],
+  // Asterisks (EXP-286): the asterisk is raised (0.30-0.76 em above the baseline); the low asterisk hangs from the
+  // baseline (-0.20-0.28), and the asterisk operator and the Arabic five pointed star sit low too (SF, Apple Symbols,
+  // Geeza Pro, Noto Sans Math, Noto Naskh and Noto Sans Arabic: -0.05-0.53). The triangles stay one group: fonts
+  // without the small triangle and the pointer (SF has neither) draw them as big as the black triangle
+  ["\u204E", "\u204E"], ["\u2217", "\u204E"], ["\u066D", "\u204E"],
+  // Ideographs (EXP-321, PingFang and Hiragino on iOS, Noto Sans CJK on Android): the grass radical "艹" is a flat top
+  // part (0.32-0.37 high), "卄" and "卝" fill the cell (0.90). Closer sizes stay alike, as the kana lookalikes do: the
+  // enclosure "囗" is 7-12% bigger than "口", "曰" a little wider and shorter than "日"
+  ["\u5344", "\u5344"], ["\u535D", "\u535D"],
 ]);
 
 const toAscii = (text) => Array.from(text, (char) => entries.get(char)?.[0] ?? char).join("");
@@ -169,7 +187,8 @@ const keepsSymbol = (source, rawPrototype, prototype) => !ASCII_ALPHANUMERIC.tes
   && !entries.has(source) && !ANY_MARK.test(source) && !EMOJI.test(source) && !WHITESPACE.test(source)
   && !UNASSIGNED.test(source + rawPrototype) && keepsMarks(rawPrototype)
   && prototype !== "" && prototype !== skeletonOf(source) && !WHITESPACE.test(prototype) && !isCased(prototype)
-  && (PUNCTUATION_OR_SYMBOL.test(source) || !WORD_CHARACTER.test(prototype) || isKanaLookalike(source, prototype));
+  && (PUNCTUATION_OR_SYMBOL.test(source) || !WORD_CHARACTER.test(prototype) || isKanaLookalike(source, prototype)
+    || isIdeographLookalike(source, prototype));
 
 const symbols = new Map();
 for (const { source, prototype: raw, name } of confusables) {
@@ -217,7 +236,7 @@ const out = [
   ...mapLines("ASCII_CONFUSABLES", entries),
   "",
   "// Character \u2192 the symbols or kana it is drawn like, as the name skeleton reads them (bullets, dashes, quotes,",
-  "// kana and the kanji drawn like them...).",
+  "// kana and the kanji drawn like them, ideographs drawn alike...).",
   ...mapLines("SYMBOL_CONFUSABLES", symbols),
   "",
 ];

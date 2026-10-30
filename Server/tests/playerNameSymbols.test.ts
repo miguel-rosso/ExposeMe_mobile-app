@@ -35,6 +35,13 @@ describe("symbol lookalikes", () => {
     ["masculine ordinal as a degree sign", "(\u00B0_\u00B0)", "(\u00BA_\u00BA)"],
     ["superscript zero as a degree sign", "(\u00B0_\u00B0)", "(\u2070_\u2070)"],
     ["symbols read in drawn order", "\u05D0 (\u2022)", "\u05D0 (\u2219)"],
+    // EXP-286: fonts without the small triangle or the pointer (SF lacks the pointer) draw them as big as the black one
+    ["small triangle as the black triangle", "\u25B6\u25B6", "\u25B8\u25B8"],
+    ["pointer as the black triangle", "\u25B6Ana", "\u25BAAna"],
+    ["small triangle as the pointer", "\u25B8\u25B8", "\u25BA\u25BA"],
+    // The asterisk operator and the Arabic star sit low like the low asterisk
+    ["asterisk operator as a low asterisk", "\u204E\u204E", "\u2217\u2217"],
+    ["Arabic five pointed star as a low asterisk", "\u204E\u204E", "\u066D\u066D"],
   ])("%s: %j and %j look alike without being the same name", (_label, a, b) => {
     expect(looksLike(a, b)).toBe(true);
     expect(sameName(a, b)).toBe(false);
@@ -78,6 +85,10 @@ describe("symbol lookalikes", () => {
     ["(\u30FC_\u30FC)", "(\uFF0D_\uFF0D)"],
     ["\u2500\u2500", "\u2501\u2501"],
     ["~", "\u02DC"],
+    // EXP-286: the asterisk is raised, the low asterisk and the asterisk operator sit low
+    ["\u204E\u204E", "**"],
+    ["\u2217\u2217", "**"],
+    ["\u066D\u066D", "**"],
   ])("different symbols %j and %j stay distinct", (a, b) => {
     expect(looksLike(a, b)).toBe(false);
   });
@@ -86,6 +97,33 @@ describe("symbol lookalikes", () => {
     const entries = [...SYMBOL_CONFUSABLES];
     expect(entries.length).toBeGreaterThan(0);
     expect(entries.filter(([source, prototype]) => !looksLike(`x${source}x`, `x${prototype}x`))).toEqual([]);
+  });
+});
+
+// EXP-285: the symbol table reads small or circled o and zero as other symbols ("º" as "°", so "(º_º)" meets
+// "(°_°)"), but they look like the letter or digit too, which NFKC makes of them: the visual key without the table
+// still compares that.
+describe("small and circled o and zero", () => {
+  it.each([
+    ["superscript zero", "bob", "b\u2070b"],
+    ["circled zero", "bob", "b\u24EAb"],
+    ["masculine ordinal", "b0b", "b\u00BAb"],
+    ["modifier small o", "b0b", "b\u1D52b"],
+    ["superscript zero next to a zero", "b0b", "b\u2070b"],
+  ])("%s: %j and %j look alike", (_label, a, b) => {
+    expect(isValidUsername(a) && isValidUsername(b)).toBe(true);
+    expect(looksLike(a, b)).toBe(true);
+    expect(looksLike(b, a)).toBe(true);
+  });
+
+  it("still read as the degree sign next to one", () => {
+    expect(looksLike("(\u00B0_\u00B0)", "(\u00BA_\u00BA)")).toBe(true);
+    expect(looksLike("(\u00B0_\u00B0)", "(\u2070_\u2070)")).toBe(true);
+  });
+
+  it("the degree sign itself stays apart from o and zero", () => {
+    expect(looksLike("(\u00B0_\u00B0)", "(o_o)")).toBe(false);
+    expect(looksLike("b\u00B0b", "bob")).toBe(false);
   });
 });
 
@@ -104,6 +142,7 @@ const isCased = (text: string) => text.toLowerCase() !== text.toUpperCase();
 const OTHER_SIZE = new Set([
   "\u2022", "\u2219", "\u30FB", "\uFF65", "\u25CB", "\uFFEE", "\u26AC", "\u25E6", "\u2218", "\u2588", "\u25A0",
   "\uFFED", "\u25AA", "\u2013", "\u2212", "\u2012", "\u2501", "\uFF0D", "\u2594", "\u02DC", "\u301C",
+  "\u204E", "\u2217", "\u066D",
 ]);
 // Characters of symbol entries that Unicode 16 or 17 added: the generator runs on Node 20 (Unicode 15.1, the oldest the
 // server supports) and leaves them out. Newer Nodes know them, so they are listed here

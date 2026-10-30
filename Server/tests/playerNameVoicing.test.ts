@@ -70,6 +70,8 @@ describe("Japanese voicing marks", () => {
     ["ばな", `は${SPACING_DAKUTEN}な`],
     ["ぱな", `は${SPACING_HANDAKUTEN}な`],
     ["バル", `ﾊ${SPACING_DAKUTEN}ﾙ`],
+    // Before a small kana too (EXP-285): the spacing mark voices the kana before it, not the small yu after it
+    ["じゅん", `し${SPACING_DAKUTEN}ゅん`],
   ])("%j and %j are the same name", (a, b) => {
     expect(isValidUsername(b)).toBe(true);
     expect(sameName(a, b)).toBe(true);

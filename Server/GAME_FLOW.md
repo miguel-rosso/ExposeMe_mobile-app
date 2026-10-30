@@ -219,10 +219,17 @@ After last round: game-over
   block, so `ᄀ가`, `가ᅵ`, `오ᅡ` or `각ᆨ` look like `까`, `개`, `와` or `갂`. The check runs on the name as typed and
   again with every combining mark removed, since a mark between a syllable and a jamo splits the cluster but the keys
   drop it (`가` + acute + `ᅵ` is refused; `가` + acute + `ᆨ`, which keys as `각`, is fine). Lone jamo (`ᄋ`, `(ᅳ_ᅳ)`)
-  and the jamo spelling of any syllable (`ᄋ` + `ᅵ`, `이` + `ᆼ`) are fine. Otherwise:
-  `"Invalid username"`. The name
+  and the jamo spelling of any syllable (`ᄋ` + `ᅵ`, `이` + `ᆼ`) are fine. An independent vowel of the Indic scripts
+  or Sinhala (Indic_Syllabic_Category; also the Gurmukhi vowel bearers `ੲ` and `ੳ`) is refused when it carries,
+  also with other marks between, a dependent vowel sign, a virama (except the Bengali ya-phala on `অ` or `এ`, maybe
+  through a joiner: `অ্যা`, `এ্যা`) or a mark of the Latin-style combining diacritic blocks (U+0300–036F, U+1AB0–1AFF, U+1DC0–1DFF, U+20D0–20FF,
+  U+FE20–FE2F), as Unicode's "do not use" tables ask: Devanagari `ए` + `े` draws like `ऐ`, Bengali `অ` + `া` like
+  `আ`, Gurmukhi `ੲ` + `ਿ` like `ਇ`, Sinhala `එ` + `්` like `ඒ` (also before a consonant: `එ්ම` like `ඒම`) and `ए` + combining breve like `ऍ`, but the keys would
+  tell them apart. Signs on consonants (`के`), marks such as anusvara or tippi on a vowel (`अं`, `ਅੰਮ੍ਰਿਤ`) and
+  Bengali `অ্যা` (virama and ya before the sign) are fine; the check runs after NFC, so Tamil `ஒ` + `ௗ` is `ஔ`.
+  Otherwise: `"Invalid username"`. The name
   is stored and sent to everyone **exactly as typed** (the app compares its own typed name with the room's names).
-- Names that read the same on screen can't share a room. Two keys are compared. `nameKey`: Hangul conjoining jamo
+- Names that read the same on screen can't share a room. Three keys are compared. `nameKey`: Hangul conjoining jamo
   composed into syllables first (NFC on Hangul runs only, so kana keep their voicing marks), then characters drawn
   like ASCII letters or digits replaced by them (a table generated from UTS #39 `confusables.txt` covering every script,
   symbol and spacing mark, plus the lowercase forms of letters it only lists as capitals, such as Cyrillic small ka;
@@ -233,21 +240,26 @@ After last round: game-over
   symbols drawn like other symbols read as their UTS #39 prototype first (a second table in the same file,
   `SYMBOL_CONFUSABLES`, applied before and after the skeleton because NFKC turns `¯`, `´` or `¸` into a space and a
   mark; it also holds the kana and kanji that UTS #39 draws alike, such as `カ` and `力`, `ロ` and `口`, `ニ` and `二`,
-  katakana `ヘ` and hiragana `へ`, and `朩` and `ホ`; a voicing mark on a symbol or kanji that this table reads as a
+  katakana `ヘ` and hiragana `へ`, and `朩` and `ホ`, and the ideographs of the CJK Unified Ideographs block and its
+  Extension A that it draws alike: simplified, traditional and Japanese forms such as `吴`, `吳` and `呉`, and near
+  twins such as `囗` and `口` or `士` and `土`; a voicing mark on a symbol or kanji that this table reads as a
   kana counts as on that kana, also typed as a spacing `゛` or `゜` (also after a character NFKC turns into one, such as
   the Kangxi radical `⼒` or U+2329 `〈`), so `〈` + dakuten reads as `ぐ` and `力` + dakuten
   as `ガ`, while `力` stays apart from `ガ`), then I / l / | / 1 read as `l`, `rn` as `m`, `vv` as `w`, `cl` as `d` and
   `0` as `o`. The symbol table
-  leaves out what reads as a different name: a clearly different size (measured in Roboto and SF: `•` and `∙` apart
-  from `·` and `・`, `○` and `◦` from `°`, `█` and `■` from `∎`, `–` and `−` from `-` and from `—`, `˜` from `~`,
-  full-width `－` from `ー`), emoji (drawn in colour: `🍎` and `🍏`), combining and spacing marks (Indic and Khmer
-  vowel signs: `डॉली` and `डाली`), symbols whose prototype is a cased letter (case folding would join `∑` with `∫`),
-  and characters newer than Unicode 15.1 (the tables are generated with Node 20, the oldest the server supports,
-  so they read the same on every Node). Known limits: only the groups common in kaomoji were measured, the rest
-  follow UTS #39; `º`, `⁰` and `ᵒ` read as `°` in this key, so `bºb` no longer meets `b0b` (it is still the
-  same name as `bob`). Both keys are taken from the name as stored and as drawn (`managers/displayOrder.ts`: the
-  Unicode Bidirectional Algorithm via `bidi-js`, with the direction of the first strong letter, whole grapheme
-  clusters moved (a letter keeps its marks) and brackets mirrored in right-to-left runs; so `Mi` followed by Hebrew
+  leaves out what reads as a different name: a clearly different size or position (measured in Roboto, Noto Sans
+  Symbols and Noto Sans CJK on Android, SF, PingFang and Hiragino on iOS: `•` and `∙` apart from `·` and `・`, `○` and
+  `◦` from `°`, `█` and `■` from `∎`, `–` and `−` from `-` and from `—`, `˜` from `~`, full-width `－` from `ー`,
+  the low `⁎`, `∗` and `٭` from the raised `*`, `卄` and `卝` from `艹`; the triangles `▸`, `►` and `▶` stay together,
+  as fonts without the first two draw them as big as `▶`), emoji (drawn in colour: `🍎` and `🍏`), combining and
+  spacing marks (Indic and Khmer vowel signs: `डॉली` and `डाली`), symbols whose prototype is a cased letter (case
+  folding would join `∑` with `∫`), and characters newer than Unicode 15.1 (the tables are generated with Node 20, the oldest the server supports,
+  so they read the same on every Node). Only the groups common in kaomoji were measured; the rest follow UTS #39.
+  A third key, `letterVisualKey`, is the visual key without the symbol table (the skeleton with only I / l / | / 1,
+  `rn`, `vv`, `cl` and `0` read alike): a character the table reads as a symbol may also look like the letter or digit
+  NFKC makes of it, and sharing either visual key counts. All keys are taken from the name as stored and as drawn
+  (`managers/displayOrder.ts`: the Unicode Bidirectional Algorithm via `bidi-js`, with the direction of the first
+  strong letter, whole grapheme clusters moved (a letter keeps its marks) and brackets mirrored in right-to-left runs; so `Mi` followed by Hebrew
   samekh and vav, or by an Arabic-Indic five and a vav, reads `Milo`). Stored order is compared with stored
   order and drawn order with drawn order, so a right-to-left name never meets its own reversal. Each player's keys
   are computed once, when they join.
@@ -269,16 +281,17 @@ After last round: game-over
     read as their compatibility letter: `ㄱㅏ`, half-width `ﾡￂ` and lone `ᄀ ᅡ` are one name, different from `가`.
     A consonant has a leading and a trailing jamo but NFKC gives back only one per letter: the other form, alone, reads
     as the letter of the same Unicode name too (`Kim ᆨ` is `Kim ㄱ`).
-  - Only the same `visualKey` = a **different name that looks too alike**: `AIice` next to `Alice`, `b0b` next to
-    `bob`, real names such as `Clara` next to `Dara` or `Arnie` next to `Amie`, and symbol lookalikes such as
-    `(∙_∙)` next to `(•_•)`, `ǃǃ` next to `!!`, `ˉ\_(ツ)_/ˉ` next to `¯\_(ツ)_/¯`, `(˚_˚)` or `(º_º)` next to `(°_°)`,
-    `it’s` or `it´s` next to `it's`, `(一_一)` or `(—_—)` next to `(ー_ー)`, and kana lookalikes such as `力イト`
-    (kanji) next to `カイト`, `二郎` next to `ニ郎` or `べル` next to `ベル` get `"Username too similar"`, so
+  - Only the same `visualKey` or `letterVisualKey` = a **different name that looks too alike**: `AIice` next to
+    `Alice`, `b0b` or `b⁰b` next to `bob`, real names such as `Clara` next to `Dara` or `Arnie` next to `Amie`, and
+    symbol lookalikes such as `(∙_∙)` next to `(•_•)`, `ǃǃ` next to `!!`, `ˉ\_(ツ)_/ˉ` next to `¯\_(ツ)_/¯`, `(˚_˚)` or `(º_º)` next to `(°_°)`,
+    `it’s` or `it´s` next to `it's`, `(一_一)` or `(—_—)` next to `(ー_ー)`, kana lookalikes such as `力イト`
+    (kanji) next to `カイト`, `二郎` next to `ニ郎` or `べル` next to `ベル`, and ideograph lookalikes such as `吳明`
+    next to `吴明` or `囗田` next to `口田` get `"Username too similar"`, so
     the player knows the name isn't in use and only needs to differ more. Kana lookalikes stay different names
     (`nameKey`): most fonts draw the kanji a little wider or heavier (`ヘ` and `へ` look the same, and are refused
-    all the same), and a kanji name only ever meets the name spelled with its kana lookalikes, never another real
-    name (`二郎` and `次郎`, `口田` and `山田` stay apart). Letters drawn like a capital I (Cyrillic
-    І, Arabic alef) have the prototype `l` in UTS #39, so next to a name with I they also get `"Username too
+    all the same), and a kanji name only meets the names spelled with its kana lookalikes or with other forms of its
+    ideographs, rarely another real name (`二郎` and `次郎`, `口田` and `山田` stay apart). Letters drawn like a
+    capital I (Cyrillic І, Arabic alef) have the prototype `l` in UTS #39, so next to a name with I they also get `"Username too
     similar"` rather than `"Username already taken"`: both refuse the name.
   - Checked in this order: a valid rejoin (exact stored name and its token) first; then `"Removed by host"` for a
     join carrying the token of a player the host removed (see "Kicked" below); then `"Game already started"`

@@ -10,7 +10,7 @@ import { displayOrder } from "./displayOrder";
  * - names with invisible characters, unusual spaces, piles of combining marks or letters from two scripts that can be
  *   drawn like Latin are refused (isValidUsername);
  * - two names that read alike, in stored or on-screen order, share a `nameKey` (the same name) or at least a
- *   `visualKey` (too similar), and a room never holds two such players (nameKeys, nameClash).
+ *   `visualKey` or `letterVisualKey` (too similar), and a room never holds two such players (nameKeys, nameClash).
  */
 
 // Longest name in UTF-16 units: exactly what the app's name input takes (MAX_USERNAME_INPUT_LENGTH in
@@ -69,9 +69,10 @@ const withoutAllowedFormatChars = (text: string) => text
  * A name the server accepts: a string of 1–15 UTF-16 units (at most 60 after NFKC), not blank, with no invisible
  * characters or spaces other than U+0020, no space at either end or two in a row, no combining mark at the start or on
  * a trailing space, at most four combining marks in a row, no mark on a kana with a voiced form but the voicing mark
- * it takes (marksKanaOddly), no mix of Latin-lookalike scripts (see mixesLookalikeScripts) and no Hangul block of jamo
- * that don't make one syllable (splitsHangulBlock). Emoji, symbols, punctuation and digits are free: a name may be
- * made only of them.
+ * it takes (marksKanaOddly), no mix of Latin-lookalike scripts (see mixesLookalikeScripts), no Hangul block of jamo
+ * that don't make one syllable (splitsHangulBlock) and no vowel sign, virama or Latin-style diacritic on an Indic
+ * independent vowel (marksIndependentVowelOddly). Emoji, symbols, punctuation and digits are free: a name may be made
+ * only of them.
  */
 export function isValidUsername(value: unknown): value is string {
   if (typeof value !== "string" || !value.trim() || value.length > MAX_USERNAME_LENGTH) return false;
@@ -83,7 +84,8 @@ export function isValidUsername(value: unknown): value is string {
     && !MARK_PILE.test(value)
     && !marksKanaOddly(value)
     && !mixesLookalikeScripts(value)
-    && !splitsHangulBlock(value);
+    && !splitsHangulBlock(value)
+    && !marksIndependentVowelOddly(value);
 }
 
 // ── Scripts ─────────────────────────────────────────
@@ -117,6 +119,61 @@ function mixesLookalikeScripts(name: string): boolean {
   const letters = (bare.match(LETTER) ?? []).filter(readsAsLatin);
   return new Set(letters.map(lookalikeScriptOf).filter(Boolean)).size > 1;
 }
+
+// ── Indic vowels ────────────────────────────────────
+
+// Independent vowels, dependent vowel signs and viramas (Indic_Syllabic_Category Vowel_Independent, Vowel_Dependent,
+// Virama and Pure_Killer, Unicode 18) of the Indic scripts and Sinhala. The ranges also span code points unassigned
+// there, which INVISIBLE refuses, as it refuses those newer than the running Node's Unicode. Gurmukhi iri and ura
+// (U+0A72, U+0A73, Consonant_Placeholder) count as vowels: they only bear vowel signs, and iri + sign i spells the
+// vowel letter i that Unicode encodes on its own
+const INDEPENDENT_VOWEL = `[${[
+  "\\u0904-\\u0914\\u0960\\u0961\\u0972-\\u0977", // Devanagari
+  "\\u0985-\\u0994\\u09E0\\u09E1", // Bengali
+  "\\u0A05-\\u0A14\\u0A72\\u0A73", // Gurmukhi
+  "\\u0A85-\\u0A94\\u0AE0\\u0AE1", // Gujarati
+  "\\u0B05-\\u0B14\\u0B60\\u0B61", // Oriya
+  "\\u0B85-\\u0B94", // Tamil
+  "\\u0C05-\\u0C14\\u0C60\\u0C61", // Telugu
+  "\\u0C85-\\u0C94\\u0CE0\\u0CE1", // Kannada
+  "\\u0D05-\\u0D14\\u0D5F-\\u0D61", // Malayalam
+  "\\u0D85-\\u0D96", // Sinhala
+].join("")}]`;
+const DEPENDENT_VOWEL_SIGN = `[${[
+  "\\u093A\\u093B\\u093E-\\u094C\\u094E\\u094F\\u0955-\\u0957\\u0962\\u0963", // Devanagari
+  "\\u09BE-\\u09CC\\u09D7\\u09E2\\u09E3", // Bengali
+  "\\u0A3E-\\u0A4C", // Gurmukhi
+  "\\u0ABE-\\u0ACC\\u0AE2\\u0AE3", // Gujarati
+  "\\u0B3E-\\u0B4C\\u0B53-\\u0B57\\u0B62\\u0B63", // Oriya
+  "\\u0BBE-\\u0BCC\\u0BD7", // Tamil
+  "\\u0C3E-\\u0C4C\\u0C55\\u0C56\\u0C62\\u0C63", // Telugu
+  "\\u0CBE-\\u0CCC\\u0CD5\\u0CD6\\u0CE2\\u0CE3", // Kannada
+  "\\u0D3E-\\u0D4C\\u0D57\\u0D62\\u0D63", // Malayalam
+  "\\u0DCF-\\u0DDF\\u0DF2\\u0DF3", // Sinhala
+].join("")}]`;
+const VIRAMA = "[\\u094D\\u09CD\\u0A4D\\u0ACD\\u0B4D\\u0BCD\\u0C4D\\u0CCD\\u0D3B\\u0D3C\\u0D4D\\u0DCA]";
+// Combining marks of the Latin-style diacritic blocks (Script=Inherited): accents, breves, overlays, enclosing circles
+const GENERIC_DIACRITIC = "[\\u0300-\\u036F\\u1AB0-\\u1AFF\\u1DC0-\\u1DFF\\u20D0-\\u20FF\\uFE20-\\uFE2F]";
+// The one virama an independent vowel takes: the Bengali ya-phala on A or E (maybe through a joiner), which spells
+// the vowel of "Alex" and "Andrew" (অ্যা, এ্যা)
+const BENGALI_YA_PHALA_ON_VOWEL = "[\\u0985\\u098F]\\u09CD\\u200D?\\u09AF";
+// Marks that turn an independent vowel into the look of another vowel letter, maybe after other marks on it: a vowel
+// sign (EXP-295: Devanagari E + vowel sign E draws like the letter AI, Bengali A + vowel sign AA like AA), a virama
+// (Sinhala E + al-lakuna draws like EE, also before a consonant, where some renderers show no dotted circle) or a
+// Latin-style diacritic (EXP-344: Devanagari E + combining breve like candra E). The keys can't tell them from that
+// letter (they drop the mark, or keep it next to the wrong letter). Unicode's "do not use" tables for these scripts
+// ban such spellings; keyboards type the vowel letter itself
+const ODDLY_MARKED_INDEPENDENT_VOWEL = new RegExp(
+  `(?!${BENGALI_YA_PHALA_ON_VOWEL})${INDEPENDENT_VOWEL}\\p{M}*(?:${DEPENDENT_VOWEL_SIGN}|${GENERIC_DIACRITIC}|${VIRAMA})`,
+  "u",
+);
+
+/**
+ * Whether `name` puts on an independent vowel a mark that draws it like another vowel letter
+ * (ODDLY_MARKED_INDEPENDENT_VOWEL), once composed: NFC turns Tamil O + AU length mark into the letter AU, a spelling
+ * of its own. Signs after a consonant ("के") and anusvara, candrabindu or tippi on a vowel ("अं") are normal spellings.
+ */
+const marksIndependentVowelOddly = (name: string) => ODDLY_MARKED_INDEPENDENT_VOWEL.test(name.normalize("NFC"));
 
 // ── Lookalike keys ──────────────────────────────────
 
@@ -396,16 +453,32 @@ export function visualKey(name: string): string {
   const voicingMarksClosed = composeHangul(name).replace(SPACE_BEFORE_SPACING_VOICING_MARK, "");
   const symbols = foldSymbols(separateVoicing(voicingMarksClosed, SYMBOL_VOICING_STAND_INS));
   const skeletal = foldSymbols(splitVoicedKana(skeleton(symbols, SYMBOL_VOICING_STAND_INS)));
+  return readLetterLookalikes(skeletal);
+}
+
+/**
+ * The visual key without the symbol table (EXP-285): the skeleton with only the letter groups that differ in some
+ * fonts read alike. The symbol table reads small or circled o and zero as other symbols ("º", "ᵒ" and "⁰" as the
+ * degree sign, which keeps "(º_º)" next to "(°_°)"); here NFKC reads them as the letter or digit they also look like,
+ * so "b⁰b" and "b⓪b" still meet "bob", and "bºb" meets "b0b".
+ */
+export function letterVisualKey(name: string): string {
+  return readLetterLookalikes(skeleton(name));
+}
+
+/** A skeleton with I / l / | / 1 as "l", case folded, then "rn" as "m", "vv" as "w", "cl" as "d" and 0 as "o". */
+function readLetterLookalikes(skeletal: string): string {
   const folded = toAscii(foldCase(skeletal.replace(LOOKS_LIKE_L, "l")));
   return VISUAL_LOOKALIKES.reduce((key, [pattern, replacement]) => key.replace(pattern, replacement), folded);
 }
 
 // ── Comparing names ─────────────────────────────────
 
-/** The two keys of a name read in one order. */
+/** The keys of a name read in one order. */
 interface OrderKeys {
   readonly same: string;
   readonly visual: string;
+  readonly letterVisual: string;
 }
 
 /** The keys of a name as stored and as drawn on screen (right-to-left letters reversed, see displayOrder). */
@@ -417,7 +490,11 @@ export interface NameKeys {
 /** How a name compares with another: the same name, a different one that looks too alike, or distinct. */
 export type NameClash = "same" | "similar" | null;
 
-const orderKeys = (text: string): OrderKeys => ({ same: nameKey(text), visual: visualKey(text) });
+const orderKeys = (text: string): OrderKeys => ({
+  same: nameKey(text),
+  visual: visualKey(text),
+  letterVisual: letterVisualKey(text),
+});
 
 /** Keys of `name` (compute once per player: see RoomManager). */
 export function nameKeys(name: string): NameKeys {
@@ -426,13 +503,14 @@ export function nameKeys(name: string): NameKeys {
 
 /**
  * "same" when the names share a nameKey ("bob" and "BOB", "bob" with a Cyrillic o, "Milo" and "Mi" + Hebrew samekh
- * and vav, which draw as "lo"); "similar" when they only share a visualKey ("Alice" and "AIice", "Clara" and "Dara").
+ * and vav, which draw as "lo"); "similar" when they only share a visualKey or a letterVisualKey ("Alice" and "AIice",
+ * "Clara" and "Dara", "bob" and "b⁰b").
  * Stored order is compared with stored order and drawn with drawn, so a right-to-left name never meets its reversal.
  */
 export function nameClash(a: NameKeys, b: NameKeys): NameClash {
   const matches = (key: keyof OrderKeys) => a.stored[key] === b.stored[key] || a.drawn[key] === b.drawn[key];
   if (matches("same")) return "same";
-  return matches("visual") ? "similar" : null;
+  return matches("visual") || matches("letterVisual") ? "similar" : null;
 }
 
 /** Whether two names are the same name (nameClash "same"). */

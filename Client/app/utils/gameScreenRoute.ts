@@ -4,6 +4,8 @@
 // and must not paint the ready phase ("are you ready?") until it says which phase the game is in (EXP-289).
 
 export const GAME_SCREEN_PATH = "/screens/GameScreen";
+/** The game screen's route name in the root stack (its navigation state), e.g. under an invite link's waiting room */
+export const GAME_SCREEN_ROUTE_NAME = "screens/GameScreen";
 
 export type GameScreenParams = { resync?: string };
 

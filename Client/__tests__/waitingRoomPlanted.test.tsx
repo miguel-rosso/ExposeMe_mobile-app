@@ -39,6 +39,7 @@ const pendingPlant = () => {
 jest.mock("expo-router", () => ({
   useRouter: () => ({ replace: jest.fn() }),
   useLocalSearchParams: () => ({}),
+  ...require("../testUtils/screenNavigation").screenNavigationMock(),
 }));
 jest.mock("../app/providers/GameContext", () => ({
   useGameContext: () => ({

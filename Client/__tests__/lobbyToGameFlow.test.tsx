@@ -48,6 +48,7 @@ const mockReplace = jest.fn((href: MockHref) => {
 jest.mock("expo-router", () => ({
   useRouter: () => ({ replace: mockReplace }),
   useLocalSearchParams: () => mockStore.state.routeParams,
+  ...require("../testUtils/screenNavigation").screenNavigationMock(),
   useFocusEffect: () => {},
 }));
 jest.mock("../app/providers/GameContext", () => ({

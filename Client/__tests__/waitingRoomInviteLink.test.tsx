@@ -60,6 +60,8 @@ const mockStore = {
   },
 };
 let mockDeepLinkCode: string | undefined;
+// Route names under this screen, bottom first: a link pushes it over the game screen, Play again replaces that one
+let mockRoutesBelow: string[] = ["index"];
 const mockReplace = jest.fn();
 const mockRouterCalls: string[] = [];
 
@@ -71,6 +73,7 @@ jest.mock("expo-router", () => ({
     push: (href: string) => mockRouterCalls.push(`push ${href}`),
   }),
   useLocalSearchParams: () => (mockDeepLinkCode === undefined ? {} : { code: mockDeepLinkCode }),
+  ...require("../testUtils/screenNavigation").screenNavigationMock(() => mockRoutesBelow),
 }));
 jest.mock("../app/providers/GameContext", () => {
   const { useSyncExternalStore } = require("react");
@@ -161,6 +164,12 @@ const afterPreviousGame = () => {
   return oldSocket;
 };
 
+/** The link opens this screen over the previous game's screen (its final screens), still in the stack. */
+const linkOverGameScreen = (code: string) => {
+  mockRoutesBelow = ["index", "screens/GameScreen"];
+  mockDeepLinkCode = code;
+};
+
 const connectNewSocket = async () => {
   const socket = mockStore.state.socket!;
   socket.connected = true;
@@ -191,6 +200,7 @@ beforeEach(() => {
   mockStore.state = { socket: null, gameCode: null, token: null };
   mockLog.length = 0;
   mockDeepLinkCode = undefined;
+  mockRoutesBelow = ["index"];
   mockReplace.mockClear();
   mockRouterCalls.length = 0;
 });
@@ -200,7 +210,7 @@ beforeEach(() => {
 describe("WaitingRoom: invite link after a previous game (EXP-206)", () => {
   it("on Join leaves the old room, forgets its token and opens the linked room's lobby over home", async () => {
     const oldSocket = afterPreviousGame();
-    mockDeepLinkCode = LINKED_ROOM.toLowerCase(); // any case, like the shared link
+    linkOverGameScreen(LINKED_ROOM.toLowerCase()); // any case, like the shared link
     const r = await mount();
 
     expect(mockLog).toEqual([]); // the old room is only left on Join (EXP-358)
@@ -216,7 +226,7 @@ describe("WaitingRoom: invite link after a previous game (EXP-206)", () => {
 
   it("goes back to the room's screen when the link points to the room we are in, re-joining nothing", async () => {
     const socket = afterPreviousGame();
-    mockDeepLinkCode = OLD_ROOM;
+    linkOverGameScreen(OLD_ROOM);
     await mount();
 
     expect(mockLog).toEqual([]);
@@ -233,13 +243,16 @@ describe("WaitingRoom: invite link after a previous game (EXP-206)", () => {
     expect(joins(socket)).toEqual([{ gameCode: OLD_ROOM, username: "bob", rejoinToken: "tok-old" }]);
   });
 
-  it("ignores a malformed link and keeps the known room", async () => {
+  // EXP-363: a link (pushed over the game screen, unlike Play again) joins nothing from the room's socket
+  it("on a malformed link goes back to the known room's screen, re-joining nothing", async () => {
     const socket = afterPreviousGame();
-    mockDeepLinkCode = "nope";
+    linkOverGameScreen("nope");
     await mount();
 
-    expect(mockLog).toEqual(["old:join-create-game"]);
-    expect(joins(socket)).toEqual([{ gameCode: OLD_ROOM, username: "bob", rejoinToken: "tok-old" }]);
+    expect(mockLog).toEqual([]);
+    expect(joins(socket)).toEqual([]);
+    expect(mockRouterCalls).toEqual(["back"]);
+    expect(mockStore.state.gameCode).toBe(OLD_ROOM);
   });
 
   // A real cold start (nothing in memory, the name only in storage) runs the real GameProvider:

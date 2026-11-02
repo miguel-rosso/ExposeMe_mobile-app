@@ -19,6 +19,7 @@ const mockLeaveRoom = jest.fn();
 jest.mock("expo-router", () => ({
   useRouter: () => ({ replace: mockReplace }),
   useLocalSearchParams: () => ({}),
+  ...require("../testUtils/screenNavigation").screenNavigationMock(),
 }));
 jest.mock("../app/providers/GameContext", () => ({
   useGameContext: () => ({
@@ -118,6 +119,18 @@ describe("WaitingRoom: joining a game already in progress (EXP-097)", () => {
     mockSocket.emitted = [];
     act(() => r.unmount());
     expect(mockSocket.emitted).toEqual([["join-create-game", { gameCode: "ABC123", username: "bob", rejoinToken: "tok-123" }]]);
+  });
+
+  // EXP-234 (characterization): the re-request is the join it got its binding from, without a token it never had
+  it("re-requests the state without a rejoin token when the join answered none", async () => {
+    const r = await mount();
+    const { rejoinToken: _token, ...withoutToken } = roomOfGame;
+    act(() => mockSocket.fire("room-of-game", withoutToken));
+    act(() => mockSocket.fire("game-state", snapshot()));
+
+    mockSocket.emitted = [];
+    act(() => r.unmount());
+    expect(mockSocket.emitted).toEqual([["join-create-game", { gameCode: "ABC123", username: "bob" }]]);
   });
 
   it("stays in the lobby on a lobby snapshot (game not started, or ended while away)", async () => {

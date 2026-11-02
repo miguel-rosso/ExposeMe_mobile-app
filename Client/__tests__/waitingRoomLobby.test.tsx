@@ -30,6 +30,7 @@ const mockRoute: { gameCode: string | null; params: { code?: string | string[] }
 jest.mock("expo-router", () => ({
   useRouter: () => ({ replace: mockReplace, dismissTo: mockDismissTo }),
   useLocalSearchParams: () => mockRoute.params,
+  ...require("../testUtils/screenNavigation").screenNavigationMock(),
 }));
 jest.mock("../app/providers/GameContext", () => ({
   useGameContext: () => ({

@@ -18,6 +18,7 @@ const mockCtx: { gameCode: string | null } = { gameCode: "K7MQ4X" };
 jest.mock("expo-router", () => ({
   useRouter: () => ({ replace: jest.fn() }),
   useLocalSearchParams: () => ({}),
+  ...require("../testUtils/screenNavigation").screenNavigationMock(),
 }));
 jest.mock("../app/providers/GameContext", () => ({
   useGameContext: () => ({

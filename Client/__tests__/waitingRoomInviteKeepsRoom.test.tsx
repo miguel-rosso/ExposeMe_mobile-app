@@ -37,6 +37,7 @@ const mockRouter = { replace: jest.fn(), dismissTo: jest.fn(), back: jest.fn(), 
 jest.mock("expo-router", () => ({
   useRouter: () => mockRouter,
   useLocalSearchParams: () => mockLinkParams,
+  ...require("../testUtils/screenNavigation").screenNavigationMock(),
 }));
 const GALLERY_OK = { status: "ok", limited: false, canAskAgain: true };
 const mockCheckGalleryAccess = jest.fn(async (_opts: { ask: boolean }) => GALLERY_OK);

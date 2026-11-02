@@ -128,9 +128,9 @@ const inMyGame = async () => {
   return socket;
 };
 
-/** The invite link of `code` opened during the game: the waiting room is pushed over the game screen. */
-const openLink = async (code: string) => {
-  await act(async () => { openDeepLink(LOBBY, { code }); });
+/** The invite link of `code` (none: no code param) opened during the game: the waiting room is pushed over the game screen. */
+const openLink = async (code?: string) => {
+  await act(async () => { openDeepLink(LOBBY, code === undefined ? {} : { code }); });
   await flush();
   return app!;
 };
@@ -226,6 +226,39 @@ describe("Invite link over a running game (EXP-358)", () => {
     expect(stackPaths()).toEqual([HOME, GAME]);
     expect(socket.emittedPayloads("join-create-game")).toHaveLength(joins);
     expect(socket.emittedPayloads("leave-room")).toEqual([]);
+  });
+
+  // EXP-363: not "Play again" (which replaces the game screen): re-joining here left two game screens listening
+  it.each([
+    ["a malformed code", "12345O"],
+    ["an empty code", ""],
+    ["no code param at all", undefined],
+  ])("a link with %s goes back to the game, re-joining nothing", async (_name, code) => {
+    const socket = await inMyGame();
+    const listeners = gameListeners(socket);
+    const joins = socket.emittedPayloads("join-create-game").length;
+    const r = await openLink(code);
+
+    expect(showsInviteDialog(r)).toBe(false);
+    expect(stackPaths()).toEqual([HOME, GAME]);
+    expect(socket.emittedPayloads("join-create-game")).toHaveLength(joins);
+    expect(socket.emittedPayloads("leave-room")).toEqual([]);
+    expect(gameListeners(socket)).toBe(listeners);
+  });
+
+  // The same waiting room without a code, in place of the game screen (as Play again opens it), rejoins the room
+  it("Play again (replacing the game screen) still rejoins the room on its socket", async () => {
+    const socket = await inMyGame();
+    await fire(socket, "game-over", { finalScore: [] });
+    const joins = socket.emittedPayloads("join-create-game").length;
+
+    await act(async () => { stackRouter.replace(LOBBY); });
+    await flush();
+
+    expect(stackPaths()).toEqual([HOME, LOBBY]);
+    expect(socket.emittedPayloads("join-create-game")).toHaveLength(joins + 1);
+    expect(socket.emittedPayloads("join-create-game").at(-1)).toMatchObject({ gameCode: MY_ROOM, username: "bob" });
+    expect(gameListeners(socket)).toBe(0);
   });
 });
 

@@ -81,10 +81,22 @@ export const openDeepLink = (path: string, params: Params) => {
 // ── Screens ──
 
 interface ScreenState {
+  /** The route's key in the navigation state */
+  routeKey: string;
   params: Params;
   focused: boolean;
 }
-const ScreenContext = createContext<ScreenState>({ params: {}, focused: true });
+const ScreenContext = createContext<ScreenState>({ routeKey: "", params: {}, focused: true });
+
+/** A path's route name in the root stack, like expo-router's: "/" is "index", "/screens/X" is "screens/X". */
+const routeNameOf = (path: string) => (path === HOME_PATH ? "index" : path.replace(/^\//, ""));
+const routeKeyOf = (entry: StackEntry) => String(entry.key);
+
+/** The stack's navigation state, as the navigation object's getState() returns it (routes bottom to top). */
+const navigationState = () => ({
+  index: stack.length - 1,
+  routes: stack.map((entry) => ({ key: routeKeyOf(entry), name: routeNameOf(entry.path), params: entry.params })),
+});
 
 /** Every screen of the stack, mounted at once; `screens` maps a route path to its component. */
 export const StackScreens = ({ screens }: { screens: Record<string, React.ComponentType> }) => {
@@ -97,7 +109,10 @@ export const StackScreens = ({ screens }: { screens: Record<string, React.Compon
       {entries.map((entry, i) => {
         const Screen = screens[entry.path];
         return (
-          <ScreenContext.Provider key={entry.key} value={{ params: entry.params, focused: i === entries.length - 1 }}>
+          <ScreenContext.Provider
+            key={entry.key}
+            value={{ routeKey: routeKeyOf(entry), params: entry.params, focused: i === entries.length - 1 }}
+          >
             {Screen ? <Screen /> : null}
           </ScreenContext.Provider>
         );
@@ -115,4 +130,6 @@ export const expoRouterMock = {
   useRouter: () => stackRouter,
   useLocalSearchParams: () => useContext(ScreenContext).params,
   useFocusEffect,
+  useNavigation: () => ({ getState: navigationState }),
+  useRoute: () => ({ key: useContext(ScreenContext).routeKey }),
 };

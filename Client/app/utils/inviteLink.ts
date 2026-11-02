@@ -24,22 +24,29 @@ export interface LinkInput {
   linkedCode: string | null;
   /** The room the app knows (GameContext's gameCode), or null */
   roomCode: string | null;
-  /** Whether the app holds a socket (with roomCode: a room joined by another screen, if this one is idle) */
-  holdsSocket: boolean;
+  /**
+   * Whether the room's own screen (the game screen) is right under this one: only a link pushes the waiting room over
+   * it. The app's own ways in replace it (Play again, the next game) or start from home (Create game, Search room).
+   */
+  roomScreenBelow: boolean;
   mode: WaitingRoomMode;
 }
 
 /**
  * The step for the waiting room's link, and its mode after it (DEC-047: a link to another room only asks; the room the
  * player is in stays as it is until Join). A link to the room we are in rejoins it, unless that room's own screen is
- * under this one: then it goes back to it. A lobby (or a screen over the room's screen) ignores a link without a valid
+ * under this one: then it goes back to it, as it does for a link without a valid code or without any (it never joins
+ * from that screen's socket: EXP-363). A lobby (or its dialog over the room's screen) ignores a link without a valid
  * code (e.g. the one Cancel clears).
  */
-export const linkStep = ({ linkedCode, roomCode, holdsSocket, mode }: LinkInput): { step: LinkStep; mode: WaitingRoomMode } => {
+export const linkStep = ({ linkedCode, roomCode, roomScreenBelow, mode }: LinkInput): { step: LinkStep; mode: WaitingRoomMode } => {
   if (mode === "left") return { step: "none", mode };
-  const nextMode = mode === "idle" && linkedCode && holdsSocket && roomCode ? "overRoomScreen" : mode;
+  const opensOverRoomScreen = mode === "idle" && roomScreenBelow;
+  const nextMode = opensOverRoomScreen ? "overRoomScreen" : mode;
   if (linkedCode && linkedCode !== roomCode) return { step: "ask", mode: nextMode };
-  if (nextMode === "overRoomScreen") return { step: linkedCode ? "backToRoomScreen" : "none", mode: nextMode };
+  if (nextMode === "overRoomScreen") {
+    return { step: linkedCode || opensOverRoomScreen ? "backToRoomScreen" : "none", mode: nextMode };
+  }
   if (mode === "lobby") return { step: linkedCode ? "startLobby" : "none", mode };
   return { step: roomCode ? "startLobby" : "newRoomOrHome", mode };
 };

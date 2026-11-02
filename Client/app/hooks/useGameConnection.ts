@@ -3,6 +3,7 @@ import { Socket } from "socket.io-client";
 import { RoomOfGameResponse } from "../models/interfaces";
 import { attachHandlers } from "../utils/socketHandlers";
 import { shouldReplantAfterRejoin } from "../utils/plantedPhoto";
+import { emitJoin, isConnectionRefused } from "../utils/roomJoin";
 
 /** The photo picked in the lobby to plant in this game (GameContext). */
 interface PlantedPhotoState {
@@ -48,7 +49,7 @@ export const useGameConnection = ({
       if (!code || !name) return;
       const rejoinToken = await getToken(code, name);
       console.log("[GAME] Reconnected — rejoining");
-      socket.emit("join-create-game", { gameCode: code, username: name, ...(rejoinToken ? { rejoinToken } : {}) });
+      emitJoin(socket, { gameCode: code, username: name, rejoinToken });
     };
 
     const onDisconnect = (reason: string) => {
@@ -58,10 +59,9 @@ export const useGameConnection = ({
       else console.log(`[GAME] Socket disconnected (${reason}) — waiting to reconnect`);
     };
 
-    // The server refused the connection itself (e.g. "Too many connections"): socket.io won't retry that, so the
-    // "Reconnecting…" indicator would stay forever. Network errors leave the socket active and it keeps retrying.
+    // A refused connection would keep the "Reconnecting…" indicator forever: leave with the server's reason
     const onConnectError = (err: Error) => {
-      if (!socket.active) latest.current.onLeave(err.message);
+      if (isConnectionRefused(socket)) latest.current.onLeave(err.message);
     };
 
     const onRoomOfGame = (data: RoomOfGameResponse) => {

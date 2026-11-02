@@ -1,0 +1,27 @@
+# EXP-363: a waiting room link without a valid room code, or without any, opened during a game keeps the game as it
+# is: the waiting room it pushes over the game screen goes straight back to it, joining nothing and asking nothing.
+# The old bug rejoined the room from the game's socket and left a second game screen listening under the first; on
+# screen that second one looks like the game going on, so only the jest suite can see it
+# (Client/__tests__/waitingRoomInviteOverGame.test.tsx counts the game screen's listeners). This flow checks what the
+# player sees: the game, no lobby, no invite dialog and no reconnection. Used by invite-link-mid-game.yaml.
+# env: LINK (the deep link to open), USERNAME
+appId: com.socketNull.ExposeMe
+---
+- openLink: "${LINK}"
+# iOS 26+/Xcode 27 simulators confirm custom-scheme links with a system alert
+- runFlow:
+    when:
+      platform: iOS
+      visible: "Open in Expose Me\\?|¿Abrir en Expose Me\\?"
+    commands:
+      - tapOn: "Open|Abrir"
+# The game is on screen before the link lands too: give the waiting room time to open and go back (the game's
+# progress bar never settles, so this waits the whole timeout)
+- waitForAnimationToEnd:
+    timeout: 2000
+- extendedWaitUntil:
+    visible:
+      id: "game-waiting-ready|game-waiting-photo|answer-options|score-modal|game-held|round-skipped-notice"
+    timeout: 30000
+- assertNotVisible:
+    id: "lobby-game-code|lobby-loading|invite-confirm-modal|reconnecting-banner"

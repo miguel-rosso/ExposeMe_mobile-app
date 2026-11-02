@@ -35,6 +35,7 @@ const mockReplace = jest.fn();
 jest.mock("expo-router", () => ({
   useRouter: () => ({ replace: mockReplace, dismissTo: mockDismissTo }),
   useLocalSearchParams: () => mockLinkParams,
+  ...require("../testUtils/screenNavigation").screenNavigationMock(),
 }));
 jest.mock("../app/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: null }) }));
 jest.mock("../app/providers/PhotoContext", () => ({

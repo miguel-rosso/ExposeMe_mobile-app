@@ -28,13 +28,15 @@ import { useI18n } from "../i18n";
 import { TEST_IDS, lobbyPlayerId, lobbyPlayerOfflineId, roundsOptionId } from "../utils/testIds";
 import { isHostIn, withConnection, withHost, withoutPlayer } from "../utils/roomPlayers";
 import { attachHandlers, SocketHandlers } from "../utils/socketHandlers";
+import { emitJoin, isConnectionRefused } from "../utils/roomJoin";
 import { parseRoomCodeParam } from "../utils/roomCode";
 import { linkStep, WaitingRoomMode } from "../utils/inviteLink";
 import { normalizeUsername } from "../utils/username";
 import { isKickedByHost, KICKED_BY_HOST_MESSAGE } from "../utils/serverMessage";
 import { ROUND_OPTIONS } from "../utils/protocolLimits";
 import { dismissKeyboardOnBackPress } from "../utils/keyboardBackPress";
-import { GAME_SCREEN_PATH, RESYNC_GAME_SCREEN } from "../utils/gameScreenRoute";
+import { GAME_SCREEN_PATH, GAME_SCREEN_ROUTE_NAME, RESYNC_GAME_SCREEN } from "../utils/gameScreenRoute";
+import { useRouteBelow } from "../hooks/useRouteBelow";
 import { useBackHandler } from "@react-native-community/hooks";
 
 /** This screen's route */
@@ -60,6 +62,7 @@ const HINT_SHADOW: TextStyle = {
 const WaitingRoom = () => {
   const { t } = useI18n();
   const navigation = useRouter();
+  const routeBelow = useRouteBelow();
   const { code: deepLinkCode } = useLocalSearchParams<{ code?: string | string[] }>();
   const {
     startSocket,
@@ -265,10 +268,16 @@ const WaitingRoom = () => {
   // ours asks the player to confirm (Join, with their name) before anything joins the linked one, and the room they
   // are in stays as it is until then (DEC-047). With no room code at all, the join would ask the server for a new room
   // (it creates one for a null/empty code): only home's Create game may do that, anything else (e.g. a link without a
-  // valid code) goes home.
+  // valid code) goes home, or back to the room's screen it was opened over (EXP-363). Only a link opens it over that
+  // screen: the app's own ways in never leave the game screen under it (routeBelow).
   useEffect(() => {
     const linkedCode = parseRoomCodeParam(deepLinkCode);
-    const { step, mode } = linkStep({ linkedCode, roomCode: gameCodeRef.current, holdsSocket: !!socket, mode: modeRef.current });
+    const { step, mode } = linkStep({
+      linkedCode,
+      roomCode: gameCodeRef.current,
+      roomScreenBelow: routeBelow() === GAME_SCREEN_ROUTE_NAME,
+      mode: modeRef.current,
+    });
     modeRef.current = mode;
     if (step === "ask") {
       console.log("Deep link code:", linkedCode);
@@ -330,7 +339,7 @@ const WaitingRoom = () => {
       console.log("Joining room:", code);
       setIsLoading(true);
       const rejoinToken = code ? await getRejoinToken(code, username) : null;
-      socket.emit("join-create-game", { gameCode: code, username, ...(rejoinToken ? { rejoinToken } : {}) });
+      emitJoin(socket, { gameCode: code, username, rejoinToken });
     };
 
     // Back to the home screen, which shows the reason (a server refusal, or kicked) in the user's language. Kicked
@@ -349,10 +358,9 @@ const WaitingRoom = () => {
         doJoin();
       },
 
-      // The server refused the connection itself (e.g. "Too many connections"): socket.io won't retry that, so the
-      // loading screen would spin forever. Network errors leave the socket active and it keeps retrying on its own.
+      // A refused connection would keep the loading screen spinning forever: home, with the server's reason
       connect_error: (err: Error) => {
-        if (socket.active) return;
+        if (!isConnectionRefused(socket)) return;
         setIsLoading(false);
         leaveWithMessage(err.message);
       },
@@ -432,11 +440,7 @@ const WaitingRoom = () => {
       const binding = bindingRef.current;
       if (resyncOnLeaveRef.current && binding) {
         resyncOnLeaveRef.current = false;
-        socket.emit("join-create-game", {
-          gameCode: binding.gameCode,
-          username,
-          ...(binding.rejoinToken ? { rejoinToken: binding.rejoinToken } : {}),
-        });
+        emitJoin(socket, { gameCode: binding.gameCode, username, rejoinToken: binding.rejoinToken });
       }
     };
   }, [socket, username]);

@@ -47,9 +47,12 @@ let mockLinkParams: { code?: string } = {};
 const mockDismissTo = jest.fn();
 const mockReplace = jest.fn();
 const mockBackNavigation = jest.fn();
+// Route names under the waiting room, bottom first (a link opened mid-game pushes it over the game screen)
+let mockRoutesBelow: string[] = ["index"];
 jest.mock("expo-router", () => ({
   useRouter: () => ({ replace: mockReplace, dismissTo: mockDismissTo, back: mockBackNavigation }),
   useLocalSearchParams: () => mockLinkParams,
+  ...require("../testUtils/screenNavigation").screenNavigationMock(() => mockRoutesBelow),
 }));
 jest.mock("../app/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: null }) }));
 jest.mock("../app/providers/PhotoContext", () => ({
@@ -135,6 +138,7 @@ beforeEach(async () => {
   mockCheckGalleryAccess.mockClear();
   mockGalleryAccess = GALLERY_OK;
   mockLinkParams = {};
+  mockRoutesBelow = ["index"];
 });
 afterEach(() => {
   act(() => app?.unmount());
@@ -423,6 +427,7 @@ describe("Joins that never ask (EXP-347)", () => {
 
     // The game screen took over (it keeps the socket), then the link opens the waiting room over it
     await act(async () => { app!.update(<GameProvider><Probe /></GameProvider>); });
+    mockRoutesBelow = ["index", "screens/GameScreen"];
     const joins = socket.emittedPayloads("join-create-game").length;
     const r = await openInviteLink();
     expect(showsInviteDialog(r)).toBe(false);

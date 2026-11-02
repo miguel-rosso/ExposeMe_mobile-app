@@ -15,6 +15,7 @@ const mockClearRejoinToken = jest.fn();
 jest.mock("expo-router", () => ({
   useRouter: () => ({ replace: mockReplace }),
   useLocalSearchParams: () => ({}),
+  ...require("../testUtils/screenNavigation").screenNavigationMock(),
 }));
 jest.mock("../app/providers/GameContext", () => ({
   useGameContext: () => ({

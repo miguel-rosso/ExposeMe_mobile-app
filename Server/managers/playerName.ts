@@ -90,8 +90,8 @@ const withoutAllowedFormatChars = (text: string) => text
  * the voicing mark it takes (marksKanaOddly), no mix of Latin-lookalike scripts (see mixesLookalikeScripts), no Hangul
  * block of jamo that don't make one syllable (splitsHangulBlock), no vowel sign or virama on an Indic independent vowel
  * (marksIndependentVowelOddly) and no Indic vowel sign but one on a letter of its script, which carries only marks of
- * that script, and no length mark left alone (marksIndicLetterOddly). Emoji, symbols, punctuation and digits are free:
- * a name may be made only of them.
+ * that script, no length mark left alone and no rare mark hiding a vowel sign (marksIndicLetterOddly). Emoji, symbols,
+ * punctuation and digits are free: a name may be made only of them.
  */
 export function isValidUsername(value: unknown): value is string {
   if (typeof value !== "string" || !value.trim() || value.length > MAX_USERNAME_LENGTH) return false;
@@ -207,6 +207,10 @@ const INHERITED_MARK = /^\p{Script=Inherited}$/u;
 // over sits alone on a letter, drawn as that vowel cut in half (Kannada "ದೕವ" almost like "ದೇವ", Tamil "கௗ" like
 // "கள", UTS #39). Not the Malayalam AU length mark, which alone is the modern spelling of AU ("കൗ")
 const LENGTH_MARK = /^[\u09D7\u0B56\u0B57\u0BD7\u0C55\u0C56\u0CD5\u0CD6]$/u;
+// Rare marks drawn where vowel signs go (EXP-362): the Gurmukhi yakash under the letter, like the U signs, and the
+// Gujarati marks for Arabic sounds (sukun, shadda, maddah, the nuktas above) over it, like the E and AI signs. Next
+// to a vowel sign they hide it, and the keys keep the sign but drop the mark
+const MARK_HIDING_VOWEL_SIGN = /^[\u0A75\u0AFA-\u0AFF]$/u;
 
 const indicBlockOf = (char: string) => Math.floor(char.codePointAt(0)! / INDIC_BLOCK_SIZE);
 
@@ -220,8 +224,8 @@ const isOwnMark = (letter: string, mark: string) =>
  * vowel signs, so "राज" and "राजु" are different names, but drop other marks; so two signs on a letter (क + ा + े draws
  * like को, ु + े like े + ु, Sinhala ෙ + ෙ like ෛ), a sign on another script's letter, a digit or a space, or a mark
  * drawn like a sign (क + combining breve like कॅ, क + Devanagari grave accent like के) would look like a name the keys
- * don't see; so would a length mark alone (LENGTH_MARK). Real spellings put one vowel sign on a letter, with marks of
- * its own script (nukta, anusvara, virama).
+ * don't see; so would a length mark alone (LENGTH_MARK) or a vowel sign hidden by a rare mark (MARK_HIDING_VOWEL_SIGN).
+ * Real spellings put one vowel sign on a letter, with marks of its own script (nukta, anusvara, virama).
  */
 function marksIndicLetterOddly(name: string): boolean {
   return Array.from(name.normalize("NFC").matchAll(LETTER_WITH_MARKS)).some(([, base, marks]) => {
@@ -229,6 +233,7 @@ function marksIndicLetterOddly(name: string): boolean {
     const vowelSigns = markList.filter((mark) => VOWEL_SIGN.test(mark)).length;
     if (!INDIC_LETTER.test(base)) return vowelSigns > 0;
     return vowelSigns > 1
+      || (vowelSigns > 0 && markList.some((mark) => MARK_HIDING_VOWEL_SIGN.test(mark)))
       || markList.some((mark) => LENGTH_MARK.test(mark))
       || !markList.every((mark) => isOwnMark(base, mark));
   });
@@ -239,9 +244,15 @@ function marksIndicLetterOddly(name: string): boolean {
 // Indic dependent vowel signs, which the keys keep (EXP-343): "राज" and "राजु", Kannada "ಕರಣ" and "ಕಿರಣ" are different
 // names. But the Devanagari sign OE, which iOS draws blank
 const KEPT_VOWEL_SIGN = `(?!\\u093A)${DEPENDENT_VOWEL_SIGN}`;
+// The Sinhala al-lakuna that NFD splits off the long E and long O signs (EXP-357: ේ is kombuva + al-lakuna, ෝ kombuva
+// + aela-pilla + al-lakuna), part of the vowel sign and kept with it: "කේ" and "කෙ" are different names
+const LONG_VOWEL_AL_LAKUNA = "(?<=\\u0DD9\\u0DCF?)\\u0DCA";
 // Marks on a letter or symbol, voicing marks and kept vowel signs aside (see withoutMarks). A mark on a space stays:
 // NFKC turns spacing accents (the arms of "¯\_(ツ)_/¯", ´, ¨) into a space plus a mark, and that mark is all they draw
-const COMBINING_MARK = new RegExp(`(?<!\\s)(?![\\u3099\\u309A]|${KEPT_VOWEL_SIGN})\\p{Mn}`, "gu");
+const COMBINING_MARK = new RegExp(
+  `(?<!\\s)(?![\\u3099\\u309A]|${KEPT_VOWEL_SIGN}|${LONG_VOWEL_AL_LAKUNA})\\p{Mn}`,
+  "gu",
+);
 // Joiners and subdivision tags an accepted name may still carry (variation selectors go with the marks)
 const IGNORABLE_IN_KEY = /[\u200C\u200D\u{E0020}-\u{E007F}]/gu;
 const WHITESPACE_RUN = /\s+/gu;
@@ -254,24 +265,58 @@ const VISUAL_LOOKALIKES: ReadonlyArray<[RegExp, string]> = [[/rn/g, "m"], [/vv/g
 // Visual keys only: marks drawn like a vowel sign the keys keep, read as that sign (measured in Kohinoor and the Sangam
 // fonts on iOS and Noto Sans on Android, drawn alike by UTS #39, or by their shape): the Devanagari and Gujarati
 // candrabindu like their candra E but for a dot, the Devanagari short E and short O like E and O, the Oriya overline
-// like the hook of sign I over the letter, the Malayalam UU and vocalic R like U, and the long vocalic signs (RR, LL),
-// which only Sanskrit spells and fonts draw as the short ones with one more curl, like those
+// like the hook of sign I over the letter, the Malayalam UU and vocalic R like U, the Sinhala candrabindu like the
+// al-lakuna of the long E and long O (Android: KA + kombuva + candrabindu like KA + long E, EXP-357), and the long
+// vocalic signs (RR, LL), which only Sanskrit spells and fonts draw as the short ones with one more curl, like those
 const VOWEL_SIGN_LOOKALIKES: ReadonlyMap<string, string> = new Map([
   ["\u0901", "\u0945"], ["\u0A81", "\u0AC5"], ["\u0946", "\u0947"], ["\u094A", "\u094B"], ["\u0B55", "\u0B3F"],
-  ["\u0D42", "\u0D41"], ["\u0D43", "\u0D41"],
+  ["\u0D42", "\u0D41"], ["\u0D43", "\u0D41"], ["\u0D81", "\u0DCA"],
   // Vocalic RR as vocalic R (Malayalam's as U, like its R)
   ["\u0944", "\u0943"], ["\u09C4", "\u09C3"], ["\u0AC4", "\u0AC3"], ["\u0B44", "\u0B43"], ["\u0D44", "\u0D41"],
   // Vocalic LL as vocalic L
   ["\u0963", "\u0962"], ["\u09E3", "\u09E2"], ["\u0AE3", "\u0AE2"], ["\u0B63", "\u0B62"], ["\u0C63", "\u0C62"],
   ["\u0CE3", "\u0CE2"], ["\u0D63", "\u0D62"],
 ]);
+// Visual keys only: Indic characters drawn like a letter of their script and a vowel sign, or a sign drawn like a
+// letter, read as those (EXP-356, drawn alike by UTS #39)
+const LETTER_AND_SIGN_LOOKALIKES: ReadonlyMap<string, string> = new Map([
+  // Telugu HA like VA + AA, MA like VA + U ("హరి" next to "వారి")
+  ["\u0C39", "\u0C35\u0C3E"], ["\u0C2E", "\u0C35\u0C41"],
+  // Malayalam NGA, vocalic L and the date mark like NA + U
+  ["\u0D19", "\u0D28\u0D41"], ["\u0D0C", "\u0D28\u0D41"], ["\u0D79", "\u0D28\u0D41"],
+  // Sinhala IRUYANNA like SA + GAETTA-PILLA
+  ["\u0D8D", "\u0DC3\u0DD8"],
+  // Tamil sign AA and RA like the letter II, the AU length mark like LLA, so (read decomposed) the O and OO signs like
+  // E and EE + II, the AU sign like E + LLA ("கௌரி" next to "கெளரி") and the letter AU like O + LLA ("ஔவை" next to
+  // "ஒளவை"), and digits and signs like a letter + vowel sign (digit five like "ரு")
+  ["\u0BBE", "\u0B88"], ["\u0BB0", "\u0B88"], ["\u0BD7", "\u0BB3"],
+  ["\u0BEB", "\u0B88\u0BC1"], ["\u0BEC", "\u0B9A\u0BC1"], ["\u0BF2", "\u0B9A\u0BC2"], ["\u0BFA", "\u0BA8\u0BC0"],
+  ["\u0BF4", "\u0BAE\u0BC0"],
+  // Devanagari and Gujarati candra O (sign and letter) like AA + candra E, and the candra E and candra A letters like
+  // E or A + candra E (EXP-362): a candrabindu, read as candra E, differs by a dot ("चाँदनी" next to "चॉदनी")
+  ["\u0949", "\u093E\u0945"], ["\u0911", "\u0906\u0945"], ["\u090D", "\u090F\u0945"], ["\u0972", "\u0905\u0945"],
+  ["\u0AC9", "\u0ABE\u0AC5"], ["\u0A91", "\u0A86\u0AC5"], ["\u0A8D", "\u0A85\u0AC5"],
+]);
+// Both tables at once: no character of one is in the other, nor in what the other reads. Exported for tests
+export const INDIC_LOOKALIKES: ReadonlyMap<string, string> = new Map([
+  ...VOWEL_SIGN_LOOKALIKES, ...LETTER_AND_SIGN_LOOKALIKES,
+]);
+
+// Letters, signs and digits of the Indic scripts and Sinhala, the blocks INDIC_LOOKALIKES reads
+const INDIC_CHAR = /[\u0900-\u0DFF]/gu;
 
 /** `text` with each character found in `table` replaced by its entry. */
 const replaceChars = (text: string, table: ReadonlyMap<string, string>) =>
   Array.from(text, (char) => table.get(char) ?? char).join("");
 
-/** Marks drawn like an Indic vowel sign replaced by it (VOWEL_SIGN_LOOKALIKES: candrabindu as candra E). */
-const readVowelSignLookalikes = (text: string) => replaceChars(text, VOWEL_SIGN_LOOKALIKES);
+/**
+ * Indic marks drawn like a vowel sign replaced by it, and characters drawn like a letter and a vowel sign by those
+ * (INDIC_LOOKALIKES: candrabindu as candra E, Telugu HA as VA + AA). Indic characters are decomposed first (NFD), so
+ * one that holds a character the table reads (the Tamil O and AU signs, the letter AU) reads like its parts, however
+ * it was typed.
+ */
+const readIndicLookalikes = (text: string) =>
+  replaceChars(text.replace(INDIC_CHAR, (char) => char.normalize("NFD")), INDIC_LOOKALIKES);
 
 // Code points Unicode 15.1 reserves for emoji, which names may use (see UNASSIGNED_IN_TABLES): a phone whose fonts lack
 // the emoji, or any phone for those still unassigned, draws them all as the same empty box ("Ana 🫩" like "Ana 🫆").
@@ -280,8 +325,11 @@ const UNASSIGNED_EMOJI = new RegExp(codePointClass(UNASSIGNED_EMOJI_RANGES), "gu
 // What the visual keys read them as: a private-use character, which names can't use, so it only meets another of them
 const EMPTY_BOX = "\uE000";
 
-/** Visual keys only: marks drawn like an Indic vowel sign read as it, emoji newer than Unicode 15.1 as one box. */
-const readDrawnAlike = (text: string) => readVowelSignLookalikes(text).replace(UNASSIGNED_EMOJI, EMPTY_BOX);
+/**
+ * Visual keys only: Indic characters drawn like a vowel sign or a letter and a sign read as those, emoji newer than
+ * Unicode 15.1 as one box.
+ */
+const readDrawnAlike = (text: string) => readIndicLookalikes(text).replace(UNASSIGNED_EMOJI, EMPTY_BOX);
 
 // ── Japanese voicing marks ──────────────────────────
 
@@ -505,10 +553,11 @@ const foldCase = (text: string) => text.toUpperCase().toLowerCase();
 /**
  * Hangul conjoining jamo composed into syllables, lookalikes read as ASCII (case kept: Greek small nu reads as "v" but
  * capital nu as "N"), then NFKC (full-width, styled letters) but for compatibility jamo, accents and other combining
- * marks on a letter or symbol dropped (but an Indic vowel sign, and a voicing mark on a kana that takes it, or on a
- * letter that `standIns` reads as one), conjoining jamo still on their own read as compatibility letters, the table
- * again for what NFKC and the marks uncovered, joiners dropped, whitespace trimmed and collapsed. The table runs before
- * NFKC too because NFKC can lose the look: long s reads as "f" but NFKC turns it into "s".
+ * marks on a letter or symbol dropped (but an Indic vowel sign, with the al-lakuna of a Sinhala long vowel, and a
+ * voicing mark on a kana that takes it, or on a letter that `standIns` reads as one), conjoining jamo still on their
+ * own read as compatibility letters, the table again for what NFKC and the marks uncovered, joiners dropped, whitespace
+ * trimmed and collapsed. The table runs before NFKC too because NFKC can lose the look: long s reads as "f" but NFKC
+ * turns it into "s".
  */
 function skeleton(name: string, standIns = NO_STAND_INS): string {
   const lookalikesRead = toAscii(separateVoicing(composeHangul(name), standIns));
@@ -536,7 +585,8 @@ export function nameKey(name: string): string {
  * kanji or kana drawn like them ("カ" as "力", "ヘ" as "へ"), and a voicing mark on a symbol or kanji read as a kana
  * counts as on that kana: "〈" + dakuten reads as ぐ, "力" + dakuten as ガ; so does a spacing ゛ or ゜ after a space
  * ("た ゛" looks like だ). Voiced kana that NFKC made (squared "㌎" is ガロン) are split again so the second pass sees
- * the kana. Marks drawn like an Indic vowel sign read as that sign (EXP-343: "सँम" like "सॅम"), and every emoji
+ * the kana. Marks drawn like an Indic vowel sign read as that sign (EXP-343: "सँम" like "सॅम"), Indic characters
+ * drawn like a letter and a vowel sign as those (EXP-356: "హరి" like "వారి", "चॉदनी" like "चाँदनी"), and every emoji
  * newer than Unicode 15.1 as the same empty box, as phones without it draw it ("Ana 🫩" like "Ana 🫆").
  */
 export function visualKey(name: string): string {
@@ -549,8 +599,8 @@ export function visualKey(name: string): string {
 
 /**
  * The visual key without the symbol table (EXP-285): the skeleton with only the letter groups that differ in some
- * fonts, the marks drawn like an Indic vowel sign and the emoji newer than Unicode 15.1 read alike. The symbol table reads small or circled o and zero
- * as other symbols ("º", "ᵒ" and "⁰" as the degree sign, which keeps "(º_º)" next to "(°_°)"); here NFKC reads them as
+ * fonts, the marks drawn like an Indic vowel sign, the Indic characters drawn like a letter and a vowel sign (EXP-356)
+ * and the emoji newer than Unicode 15.1 read alike. The symbol table reads small or circled o and zero as other symbols ("º", "ᵒ" and "⁰" as the degree sign, which keeps "(º_º)" next to "(°_°)"); here NFKC reads them as
  * the letter or digit they also look like, so "b⁰b" and "b⓪b" still meet "bob", and "bºb" meets "b0b".
  */
 export function letterVisualKey(name: string): string {

@@ -242,6 +242,9 @@ After last round: game-over
   mark, the second half of a two-part vowel, left alone on a letter (Kannada `ದ` + `ೕ` draws almost like `ದೇ`, Tamil
   `க` + `ௗ` like `கள`; Kannada, Telugu and Oriya length marks, Bengali, Oriya and Tamil AU length marks): NFC joins
   it with the first half (`ದ` + `ೆ` + `ೕ` is `ದೇ`, `ক` + `ে` + `ৗ` is `কৌ`). The Malayalam AU length mark is fine alone, the modern spelling of AU (`കൗ`).
+  A letter with a vowel sign may not also carry the Gurmukhi yakash (U+0A75) or a Gujarati mark U+0AFA–0AFF (sukun,
+  shadda, maddah, the nuktas above): drawn where the vowel signs go, they hide the sign, which the keys keep while
+  they drop the mark (EXP-362); alone on a letter they are fine.
   Otherwise: `"Invalid username"`. The name
   is stored and sent to everyone **exactly as typed** (the app compares its own typed name with the room's names).
 - Names that read the same on screen can't share a room. Three keys are compared. `nameKey`: Hangul conjoining jamo
@@ -251,7 +254,8 @@ After last round: game-over
   `managers/asciiConfusables.ts`, regenerated with `scripts/generateAsciiConfusables.mjs`), then NFKC, combining
   marks and accents dropped unless they sit on a space, are an Indic dependent vowel sign (EXP-343: `राज` and `राजु`
   are different names; but the Devanagari sign OE, which iOS draws blank; nukta, anusvara, candrabindu and virama are
-  still dropped, so `राज़` and `राजं` are `राज`) or are a Japanese voicing mark (dakuten, handakuten) on a kana
+  still dropped, so `राज़` and `राजं` are `राज`; the Sinhala al-lakuna that NFD splits off the long E and long O
+  signs is kept with them, EXP-357: `කේ` and `කෙ`, `කෝ` and `කො` are different names) or are a Japanese voicing mark (dakuten, handakuten) on a kana
   that takes it (NFC joins them: `た` + dakuten is `だ`; on a Latin letter, `ん` or a kanji it is dropped), the
   table again, case-folded, joiners dropped, whitespace trimmed and collapsed. The table runs before NFKC too, so long s still reads as `f`. `visualKey`: the same, but
   symbols drawn like other symbols read as their UTS #39 prototype first (a second table in the same file,
@@ -267,7 +271,15 @@ After last round: game-over
   Sangam fonts on iOS and Noto Sans on Android, alike in UTS #39, or by their shape): the Devanagari and Gujarati
   candrabindu as their candra E (`सँम` next to `सॅम`), the Devanagari short E and short O as E and O, the Oriya
   overline as sign I (`କ୕` next to `କି`), the Malayalam UU and vocalic R as U, and the long
-  vocalic signs RR and LL, only spelled in Sanskrit, as R and L (`कॄष्ण` next to `कृष्ण`). The code points Unicode
+  vocalic signs RR and LL, only spelled in Sanskrit, as R and L (`कॄष्ण` next to `कृष्ण`). Characters UTS #39 draws
+  like a letter of their script and a vowel sign, or a sign drawn like a letter, read as those (EXP-356, EXP-362):
+  Telugu `హ` as `వా` and `మ` as `వు` (`హరి` next to `వారి`), Malayalam `ങ`, `ഌ` and `൹` as `നു`, Sinhala `ඍ` as
+  `සෘ`, Tamil `ா` and `ர` as `ஈ` and `ௗ` as `ள` (so `ௌ` as `ெள`: `கௌரி` next to `கெளரி`), the Tamil digits and
+  signs `௫`, `௬`, `௲`, `௺`, `௴` as `ரு`, `சு`, `சூ`, `நீ`, `மீ`, and the Devanagari and Gujarati candra O as AA +
+  candra E (`ॉ` as `ाॅ`, `ऑ` as `आॅ`, `ૉ` as `ાૅ`, `ઑ` as `આૅ`: `चॉदनी` next to `चाँदनी`), with the candra E and
+  candra A letters as E or A + candra E (`ऍ` as `एॅ`, `ॲ` as `अॅ`, `ઍ` as `અૅ`). So real Tamil names such as `கரன்`
+  (Karan) and `கான்` (Khan), or Telugu `రామ` (Rama) and `రావు` (Rao), count as `similar`, the same criterion as
+  `Clara` and `Dara`. The code points Unicode
   15.1 reserves for emoji (`UNASSIGNED_EMOJI_RANGES`, a fixed list, the same on every Node) all read as one empty box:
   a phone whose fonts lack a newer emoji, or any phone for one still unassigned, draws it so (`Ana 🫩` next to
   `Ana 🫆` and to `Ana` + U+1FC00, but apart from `Ana 😀`). The symbol table

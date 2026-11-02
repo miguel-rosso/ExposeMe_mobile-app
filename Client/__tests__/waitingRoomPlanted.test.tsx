@@ -243,3 +243,43 @@ describe("WaitingRoom: planted photo state", () => {
     act(() => r.unmount());
   });
 });
+
+// ── Busy overlays (EXP-330 characterization) ─────────────
+
+const textsIn = (node: TestRenderer.ReactTestInstance) =>
+  node.findAll((n) => typeof n.type === "string" && typeof n.props.children === "string").map((n) => n.props.children);
+
+describe("WaitingRoom: busy overlays", () => {
+  it("until the room answers, a loading overlay says it is loading the room and asks to wait", async () => {
+    const r = await mount();
+    const loading = r.root.find((n) => n.props.testID === TEST_IDS.lobbyLoading && typeof n.type === "string");
+    expect(textsIn(loading)).toEqual([en.loadingGameRoom, en.pleaseWait]);
+    act(() => mockSocket.fire("room-of-game", roomOfGame(false)));
+    expect(has(r, TEST_IDS.lobbyLoading)).toBe(false);
+    act(() => r.unmount());
+  });
+
+  it("while the gallery picker is open an overlay says a photo is being selected, and the plant button is disabled", async () => {
+    const picker = require("expo-image-picker");
+    let closePicker!: () => void;
+    picker.launchImageLibraryAsync.mockImplementationOnce(
+      () => new Promise((resolve) => { closePicker = () => resolve({ canceled: true, assets: null }); })
+    );
+    const alert = jest.spyOn(Alert, "alert").mockImplementation((_t, _m, buttons) => { buttons?.[1]?.onPress?.(); });
+    const r = await mount();
+    act(() => mockSocket.fire("room-of-game", roomOfGame(false)));
+    const selectingShown = () => r.root.findAll((n) => n.props.children === en.selectingPhoto).length > 0;
+    expect(selectingShown()).toBe(false);
+
+    await act(async () => { plantButton(r).props.onPress(); });
+    await flush();
+    expect(selectingShown()).toBe(true);
+    expect(plantButton(r).props.disabled).toBe(true);
+
+    await act(async () => { closePicker(); });
+    expect(selectingShown()).toBe(false);
+    expect(mockPlantPhoto).not.toHaveBeenCalled();
+    alert.mockRestore();
+    act(() => r.unmount());
+  });
+});

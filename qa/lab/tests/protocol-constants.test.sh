@@ -54,9 +54,9 @@ within "CHAT_COOLDOWN_MS is at least the server's CHAT_MESSAGE_LIMIT window" \
 
 # ── The app uses the named limits, not literals ──
 grep -q 'maxLength={MAX_USERNAME_INPUT_LENGTH}' "$CLIENT_SRC/app/index.tsx" && ok "home name input uses MAX_USERNAME_INPUT_LENGTH" || ko "home name input uses MAX_USERNAME_INPUT_LENGTH"
-grep -q 'maxLength={MAX_CHAT_LENGTH}' "$CLIENT_SRC/app/screens/WaitingRoom.tsx" && ok "lobby chat input uses MAX_CHAT_LENGTH" || ko "lobby chat input uses MAX_CHAT_LENGTH"
+grep -q 'maxLength={MAX_CHAT_LENGTH}' "$CLIENT_SRC/app/components/LobbyChat.tsx" && ok "lobby chat input uses MAX_CHAT_LENGTH" || ko "lobby chat input uses MAX_CHAT_LENGTH"
 grep -q 'ROUND_OPTIONS.map(' "$CLIENT_SRC/app/screens/WaitingRoom.tsx" && ok "lobby rounds picker uses ROUND_OPTIONS" || ko "lobby rounds picker uses ROUND_OPTIONS"
-grep -q '>= CHAT_COOLDOWN_MS' "$CLIENT_SRC/app/screens/WaitingRoom.tsx" && ok "lobby chat cooldown uses CHAT_COOLDOWN_MS" || ko "lobby chat cooldown uses CHAT_COOLDOWN_MS"
+grep -q '< CHAT_COOLDOWN_MS' "$CLIENT_SRC/app/hooks/useLobbyChat.ts" && ok "lobby chat cooldown uses CHAT_COOLDOWN_MS" || ko "lobby chat cooldown uses CHAT_COOLDOWN_MS"
 
 echo "# $pass passed, $fail failed"
 [ "$fail" = 0 ]

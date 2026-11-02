@@ -1,6 +1,6 @@
 import React from "react";
 import TestRenderer, { act } from "react-test-renderer";
-import { Alert, Keyboard, Share } from "react-native";
+import { Alert, Keyboard, Platform, Share, StyleSheet } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { FakeSocket } from "../testUtils/fakeSocket";
 import { TEST_IDS } from "../app/utils/testIds";
@@ -195,6 +195,40 @@ describe("WaitingRoom: lobby chat (EXP-186)", () => {
   });
 });
 
+// EXP-330 characterization: the chat footer stays above the keyboard
+describe("WaitingRoom: chat footer above the keyboard", () => {
+  const KEYBOARD_HEIGHT = 300;
+
+  it("the chat input is lifted by the keyboard's height while it is open (Android), and drops back once it closes", async () => {
+    const androidOs = jest.replaceProperty(Platform, "OS", "android");
+    const keyboardListeners = new Map<string, (e?: unknown) => void>();
+    const addListenerSpy = jest.spyOn(Keyboard, "addListener").mockImplementation(((event: string, listener: (e?: unknown) => void) => {
+      keyboardListeners.set(event, listener);
+      return { remove: () => keyboardListeners.delete(event) };
+    }) as unknown as typeof Keyboard.addListener);
+    // Bottom paddings of the chat input's ancestors: the footer's follows the keyboard
+    const inputLift = () => {
+      const paddings: unknown[] = [];
+      for (let n: TestRenderer.ReactTestInstance | null = byId(r, TEST_IDS.chatInput); n; n = n.parent) {
+        if (typeof n.type === "string") paddings.push(StyleSheet.flatten(n.props.style)?.paddingBottom);
+      }
+      return paddings;
+    };
+
+    const r = await mount();
+    expect(inputLift()).not.toContain(KEYBOARD_HEIGHT);
+    act(() => keyboardListeners.get("keyboardDidShow")!({ endCoordinates: { height: KEYBOARD_HEIGHT } }));
+    expect(inputLift()).toContain(KEYBOARD_HEIGHT);
+    act(() => keyboardListeners.get("keyboardDidHide")!());
+    expect(inputLift()).not.toContain(KEYBOARD_HEIGHT);
+
+    act(() => r.unmount());
+    expect(keyboardListeners.size).toBe(0);
+    addListenerSpy.mockRestore();
+    androidOs.restore();
+  });
+});
+
 // ── Copy and share the room code ─────────────────────────
 
 describe("WaitingRoom: copy the code and share the invite link (EXP-186)", () => {
@@ -218,6 +252,15 @@ describe("WaitingRoom: copy the code and share the invite link (EXP-186)", () =>
     const { message } = shareSpy.mock.calls[0][0] as { message: string };
     expect(message.startsWith(en.shareMessage)).toBe(true);
     expect(message.slice(en.shareMessage.length)).toMatch(new RegExp(`^https://[^\\s/]+/join/${ROOM_CODE}$`));
+    act(() => r.unmount());
+  });
+
+  // EXP-330 characterization: a QA build (local server) still shares the production link, the one that opens the app
+  it("the invite link always points at the production server's join page", async () => {
+    const r = await mount();
+    await pressId(r, TEST_IDS.shareCodeButton);
+    const { message } = shareSpy.mock.calls[0][0] as { message: string };
+    expect(message).toBe(`${en.shareMessage}https://exposeme-mobile-app-f72q.onrender.com/join/${ROOM_CODE}`);
     act(() => r.unmount());
   });
 

@@ -1,17 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
-import {
-  View,
-  Text,
-  FlatList,
-  StatusBar,
-  TouchableOpacity,
-  Alert,
-  TextInput,
-  Keyboard,
-  Animated,
-  Share,
-  Image,
-} from "react-native";
+import { View, Text, FlatList, StatusBar, TouchableOpacity, Alert, Keyboard, Share, Image, TextStyle } from "react-native";
 import tw from "twrnc";
 import { useGameContext } from "@/app/providers/GameContext";
 import { useRouter, useLocalSearchParams } from "expo-router";
@@ -20,7 +8,6 @@ import { RoomOfGameResponse, Player, GameStateSnapshot, PlayerConnectionData } f
 import { useBackgroundContext } from "@/app/providers/BackgroundContext";
 import { usePhotoContext } from "@/app/providers/PhotoContext";
 import CloseButton from "@/app/components/CloseButton";
-import Icon from "react-native-vector-icons/FontAwesome";
 import AnimatedDot from "@/app/components/AnimatedDot";
 import * as Animatable from "react-native-animatable";
 import * as Clipboard from "expo-clipboard";
@@ -29,23 +16,22 @@ import AlertModal from "@/app/components/modals/AlertModal";
 import GalleryAccessModal from "@/app/components/modals/GalleryAccessModal";
 import InviteConfirmModal from "@/app/components/modals/InviteConfirmModal";
 import { useGalleryAccessGuard } from "@/app/hooks/useGalleryAccessGuard";
-import { useKeyboardPadding } from "@/app/hooks/useKeyboardPadding";
+import { useLobbyChat } from "@/app/hooks/useLobbyChat";
 import { Ionicons } from "@expo/vector-icons";
-import ChatMessage from "@/app/components/IngameComunication/ChatMessage";
-import { appendCapped, MAX_CHAT_MESSAGES } from "@/app/utils/reactions";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { LobbyChatFooter, LobbyChatMessages } from "@/app/components/LobbyChat";
+import BusyOverlay from "@/app/components/BusyOverlay";
 import SuccessAlert from "@/app/components/SuccessAlert";
 import PlantPhotoButton from "@/app/components/PlantPhotoButton";
-import { LinearGradient } from "expo-linear-gradient";
+import { BRAND_RED } from "@/app/theme/brand";
+import { INVITE_BASE_URL } from "@/config";
 import { useI18n } from "../i18n";
 import { TEST_IDS, lobbyPlayerId, lobbyPlayerOfflineId, roundsOptionId } from "../utils/testIds";
 import { isHostIn, withConnection, withHost, withoutPlayer } from "../utils/roomPlayers";
 import { attachHandlers, SocketHandlers } from "../utils/socketHandlers";
-import { emitWhileConnected } from "../utils/socketEmit";
 import { parseRoomCodeParam } from "../utils/roomCode";
 import { normalizeUsername } from "../utils/username";
 import { isKickedByHost, KICKED_BY_HOST_MESSAGE } from "../utils/serverMessage";
-import { CHAT_COOLDOWN_MS, MAX_CHAT_LENGTH, ROUND_OPTIONS } from "../utils/protocolLimits";
+import { ROUND_OPTIONS } from "../utils/protocolLimits";
 import { dismissKeyboardOnBackPress } from "../utils/keyboardBackPress";
 import { GAME_SCREEN_PATH, RESYNC_GAME_SCREEN } from "../utils/gameScreenRoute";
 import { useBackHandler } from "@react-native-community/hooks";
@@ -53,16 +39,22 @@ import { useBackHandler } from "@react-native-community/hooks";
 /** How much the lobby background photo is blurred */
 const BACKDROP_BLUR_RADIUS = 10;
 
-// Define chat message interface
-interface ChatMessageType {
-  id: string;
-  username: string;
-  message: string;
-}
+// ── Text shadows: keep the headings and hints legible over the background photo ──
 
-const WaitingRoom = ({}) => {
+const HEADING_SHADOW: TextStyle = {
+  textShadowColor: "rgba(0, 0, 0, 0.5)",
+  textShadowOffset: { width: 2, height: 2 },
+  textShadowRadius: 5,
+};
+const TITLE_SHADOW: TextStyle = { ...HEADING_SHADOW, textShadowRadius: 4 };
+const HINT_SHADOW: TextStyle = {
+  textShadowColor: "rgba(0, 0, 0, 0.7)",
+  textShadowOffset: { width: 1, height: 1 },
+  textShadowRadius: 3,
+};
+
+const WaitingRoom = () => {
   const { t } = useI18n();
-  const insets = useSafeAreaInsets();
   const navigation = useRouter();
   const { code: deepLinkCode } = useLocalSearchParams<{ code?: string | string[] }>();
   const {
@@ -105,47 +97,9 @@ const WaitingRoom = ({}) => {
   const galleryGuard = useGalleryAccessGuard({ watch: true });
   const [showPhotoAddedMessage, setShowPhotoAddedMessage] = useState<boolean>(false);
   const [isSelecting, setIsSelecting] = useState<boolean>(false);
-  const [isLoading, setIsLoading] = useState<boolean>(true); // New loading state
-
-  // New state for chat functionality
-  const [chatMessage, setChatMessage] = useState<string>("");
-  const [chatMessages, setChatMessages] = useState<ChatMessageType[]>([]);
-  const [lastSentTime, setLastSentTime] = useState<number>(0);
-
-  // Keeps the chat footer above the keyboard
-  const keyboardPadding = useKeyboardPadding();
-
-  const removeChatMessage = (id: string) => {
-    setChatMessages((prevMessages) => prevMessages.filter((msg) => msg.id !== id));
-  };
-
-  const sendChatMessage = () => {
-    if (!chatMessage.trim()) return;
-    const currentTime = Date.now();
-
-    // Check cooldown
-    if (currentTime - lastSentTime >= CHAT_COOLDOWN_MS) {
-      // Offline it is not sent (nor shown): the text stays in the input to send once back
-      const sent = !!gameCode && emitWhileConnected(socket, "chat-message", {
-        gameCode,
-        username,
-        message: chatMessage.trim(),
-      });
-      if (sent) {
-        // Add message locally for the sender
-        const messageId = `${Date.now()}-${Math.random()}`;
-        setChatMessages((prev) =>
-          appendCapped(prev, { id: messageId, username: username || "You", message: chatMessage.trim() }, MAX_CHAT_MESSAGES)
-        );
-
-        setChatMessage("");
-        setLastSentTime(currentTime);
-        Keyboard.dismiss();
-      }
-    } else {
-      Alert.alert(t.slowDown, t.pleaseWaitBeforeSending);
-    }
-  };
+  // Until the room answers (or a started game's snapshot opens the game screen)
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const chat = useLobbyChat(socket, gameCode, username);
 
   /** Plants the picked photo; once one is in, the server keeps a planted photo of mine whatever a replacement does. */
   const plantPickedPhoto = async (): Promise<boolean> => {
@@ -223,7 +177,7 @@ const WaitingRoom = ({}) => {
   // Forget everything this lobby showed for the previous room (an invite link can switch rooms in place)
   const resetLobbyState = () => {
     setPlayers([]);
-    setChatMessages([]);
+    chat.clear();
     setServerPlanted(false);
     setIsLoading(true);
     setDialogVisible(false);
@@ -380,12 +334,7 @@ const WaitingRoom = ({}) => {
         }
       },
 
-      "chat-message": (data: { username: string; message: string }) => {
-        if (data.username !== username) {
-          const msg = { id: `${Date.now()}-${Math.random()}`, username: data.username, message: data.message };
-          setChatMessages((prev) => appendCapped(prev, msg, MAX_CHAT_MESSAGES));
-        }
-      },
+      "chat-message": chat.receive,
 
       "rounds-updated": (rounds: number) => setRoundsOfGame(rounds),
       "player-joined": (p: Player) => setPlayers((prev) => [...prev, p]),
@@ -508,7 +457,7 @@ const WaitingRoom = ({}) => {
     if (!gameCode) return;
     try {
       await Share.share({
-        message: t.shareMessage + `https://exposeme-mobile-app-f72q.onrender.com/join/${gameCode}`,
+        message: t.shareMessage + `${INVITE_BASE_URL}/${gameCode}`,
       });
     } catch (e) {
       // User cancelled share
@@ -578,30 +527,10 @@ const WaitingRoom = ({}) => {
       </View>
       <CloseButton onPress={handleClose} accessibilityLabel={invitedCode ? t.cancel : t.leaveRoom} />
 
-      {/* Chat messages container - unchanged */}
-      <View style={tw`absolute top-20 left-0 right-0 z-40 items-center`}>
-        {chatMessages.map((msg) => (
-          <ChatMessage
-            key={msg.id}
-            username={msg.username}
-            message={msg.message}
-            onAnimationEnd={() => removeChatMessage(msg.id)}
-          />
-        ))}
-      </View>
+      <LobbyChatMessages chat={chat} />
 
       {/* Loading overlay and notifications */}
-      {isLoading && (
-        <View testID={TEST_IDS.lobbyLoading} style={tw`absolute top-0 left-0 right-0 bottom-0 z-50 flex justify-center items-center bg-black bg-opacity-50`}>
-          <View style={tw`px-8 py-6 rounded-xl bg-gray-800 flex items-center`}>
-            <Animatable.View animation="rotate" iterationCount="infinite" easing="linear" duration={1500}>
-              <Icon name="spinner" size={40} color="white" />
-            </Animatable.View>
-            <Text style={tw`text-white mt-4 text-lg font-bold`}>{t.loadingGameRoom}</Text>
-            <Text style={tw`text-white mt-2 text-sm opacity-70`}>{t.pleaseWait}</Text>
-          </View>
-        </View>
-      )}
+      {isLoading && <BusyOverlay testID={TEST_IDS.lobbyLoading} title={t.loadingGameRoom} subtitle={t.pleaseWait} />}
 
       {/* Copy notification overlay - centered on screen */}
       {showCopyMessage && <SuccessAlert text={t.gameCodeCopied} />}
@@ -610,16 +539,7 @@ const WaitingRoom = ({}) => {
       {showPhotoAddedMessage && <SuccessAlert text={t.photoSelectedForGame} />}
 
       {/* Photo selection */}
-      {isSelecting && (
-        <View style={tw`absolute top-0 left-0 right-0 bottom-0 z-50 flex justify-center items-center bg-black bg-opacity-50`}>
-          <View style={tw`px-8 py-6 rounded-xl bg-gray-800 flex items-center`}>
-            <Animatable.View animation="rotate" iterationCount="infinite" easing="linear" duration={1500}>
-              <Icon name="spinner" size={40} color="white" />
-            </Animatable.View>
-            <Text style={tw`text-white mt-4 text-lg font-bold`}>{t.selectingPhoto}</Text>
-          </View>
-        </View>
-      )}
+      {isSelecting && <BusyOverlay title={t.selectingPhoto} />}
 
       {/* Main container */}
       <View style={tw`flex-1`}>
@@ -627,14 +547,7 @@ const WaitingRoom = ({}) => {
           {/* Main content area */}
           <View style={tw`flex-1 pt-14 px-4 max-w-[500px] w-full self-center ${isLoading ? "opacity-0" : "opacity-100"}`}>
             <View style={tw`items-center mb-2`}>
-              <Text
-                style={[
-                  tw`text-xl text-white font-bold mb-1`,
-                  { textShadowColor: "rgba(0, 0, 0, 0.5)", textShadowOffset: { width: 2, height: 2 }, textShadowRadius: 4 },
-                ]}
-              >
-                {t.gameCode}
-              </Text>
+              <Text style={[tw`text-xl text-white font-bold mb-1`, TITLE_SHADOW]}>{t.gameCode}</Text>
 
               <View style={tw`flex-row items-center mb-1 max-w-full`}>
                 <TouchableOpacity
@@ -653,7 +566,7 @@ const WaitingRoom = ({}) => {
                   adjustsFontSizeToFit
                   style={[
                     tw`text-5xl text-white font-extrabold mx-1 shrink`,
-                    { lineHeight: 60, textShadowColor: "rgba(0, 0, 0, 0.5)", textShadowOffset: { width: 2, height: 2 }, textShadowRadius: 5 },
+                    { lineHeight: 60, ...HEADING_SHADOW },
                   ]}
                 >
                   {gameCode}
@@ -669,12 +582,7 @@ const WaitingRoom = ({}) => {
                 </TouchableOpacity>
               </View>
 
-              <Text
-                style={[
-                  tw`text-white font-extrabold mb-2`,
-                  { textShadowColor: "rgba(0, 0, 0, 0.5)", textShadowOffset: { width: 2, height: 2 }, textShadowRadius: 5 },
-                ]}
-              >
+              <Text style={[tw`text-white font-extrabold mb-2`, HEADING_SHADOW]}>
                 {roundsOfGame} {t.rounds}
               </Text>
 
@@ -709,9 +617,7 @@ const WaitingRoom = ({}) => {
                         onPress={() => handleSetRounds(rounds)}
                         style={[
                           tw`flex-1 py-2 rounded-full items-center`,
-                          roundsOfGame === rounds
-                            ? { backgroundColor: "#e9042e" }
-                            : {},
+                          roundsOfGame === rounds ? { backgroundColor: BRAND_RED } : {},
                         ]}
                       >
                         <Text style={tw`text-white text-sm ${roundsOfGame === rounds ? "font-bold" : "opacity-60"}`}>
@@ -726,10 +632,7 @@ const WaitingRoom = ({}) => {
                     testID={TEST_IDS.startGameButton}
                     onPress={handleStartGame}
                     activeOpacity={0.8}
-                    style={[
-                      tw`w-full py-4 rounded-2xl items-center`,
-                      { backgroundColor: "#e9042e" },
-                    ]}
+                    style={[tw`w-full py-4 rounded-2xl items-center`, { backgroundColor: BRAND_RED }]}
                   >
                     <Text style={tw`text-white font-bold text-lg`}>{t.startGame}</Text>
                   </TouchableOpacity>
@@ -748,16 +651,7 @@ const WaitingRoom = ({}) => {
                   {/* Host explanation message */}
                   {isHost && players.length <= 1 && (
                     <Animatable.View animation="fadeIn">
-                      <Text
-                        style={[
-                          tw`text-white text-center italic opacity-80 `,
-                          {
-                            textShadowColor: "rgba(0, 0, 0, 0.7)",
-                            textShadowOffset: { width: 1, height: 1 },
-                            textShadowRadius: 3,
-                          },
-                        ]}
-                      >
+                      <Text style={[tw`text-white text-center italic opacity-80 `, HINT_SHADOW]}>
                         {t.sendCodeToFriends}
                       </Text>
                     </Animatable.View>
@@ -766,34 +660,11 @@ const WaitingRoom = ({}) => {
               )}
             </View>
           </View>
-          {/* Chat footer */}
-          <Animated.View style={[tw`w-full mb-5`, { paddingBottom: keyboardPadding }]}>
-            <View style={tw`px-2 py-2 flex-row items-center max-w-[500px] w-full self-center`}>
-              <TextInput
-                testID={TEST_IDS.chatInput}
-                value={chatMessage}
-                onChangeText={setChatMessage}
-                placeholder={t.typeMessage}
-                placeholderTextColor="#999"
-                style={tw`flex-1 bg-gray-800/90 text-white px-4 py-3 rounded-full mr-2`}
-                maxLength={MAX_CHAT_LENGTH}
-              />
-              <TouchableOpacity
-                testID={TEST_IDS.chatSendButton}
-                accessibilityRole="button"
-                accessibilityLabel={t.sendMessage}
-                onPress={sendChatMessage}
-                disabled={!chatMessage.trim()}
-                style={tw`rounded-full w-10 h-10 ${!chatMessage.trim() ? "bg-gray-600" : "bg-[#ff8605]"} items-center justify-center`}
-              >
-                <Ionicons name="send" size={20} color="white" />
-              </TouchableOpacity>
-            </View>
-          </Animated.View>
+          <LobbyChatFooter chat={chat} />
         </View>
       </View>
 
-      {/* Dialog modal - unchanged */}
+      {/* Remove-player confirmation (host only) */}
       <AlertModal
         visible={dialogVisible}
         title={t.confirmRemovePlayer}

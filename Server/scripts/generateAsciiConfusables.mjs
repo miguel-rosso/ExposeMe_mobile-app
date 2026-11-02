@@ -5,13 +5,20 @@
 // Run it with the oldest Node the server supports (20.x, Unicode 15.1; the generated header records the version): the
 // output depends on Node's Unicode data (NFKC, character categories), and characters a newer Unicode adds are left out
 // of the symbol table, so the tables read the same on every newer Node.
+// UNASSIGNED_NON_EMOJI_RANGES (EXP-284) lists the code points this Unicode version leaves unassigned but those it
+// reserves for emoji: playerName refuses them in names, so a newer Node never accepts a letter the tables don't know
+// (one drawn like a letter they read), while a newer emoji, which the tables leave out anyway, is fine on every Node.
+// UNASSIGNED_EMOJI_RANGES lists those reserved ones: the visual keys read them all alike, as phones that lack them
+// draw the same empty box. EXTENDED_PICTOGRAPHIC_RANGES lists this version's emoji, assigned or reserved, which may
+// carry an emoji joiner or presentation selector in a name: Unicode 17 took 689 of them out of the property, so the
+// running Node's \p{Extended_Pictographic} would accept "★" + emoji selector on Node 20 and refuse it on Node 24.
 //
 // Keeps every character, whatever its script or category (letters, math and box-drawing symbols, punctuation such as
 // an inverted exclamation mark), whose prototype is 1-3 ASCII letters or digits once combining marks are dropped and
 // Latin small capitals are read as their letter. Left out: ASCII itself (playerName.visualKey handles 1/l/I/0),
-// nonspacing marks and characters that decompose to one (playerName drops them; spacing marks such as the Telugu
-// anusvara are drawn like an "o" and kept), and characters that NFKC with marks dropped already turns into their
-// prototype (playerName applies NFKC after this table).
+// nonspacing marks and characters that decompose to one (playerName drops them, but Indic vowel signs, which are drawn
+// like no ASCII letter; spacing marks such as the Telugu anusvara are drawn like an "o" and kept), and characters that
+// NFKC with marks dropped already turns into their prototype (playerName applies NFKC after this table).
 // confusables.txt often lists only the capital (Cyrillic KA as "K", Greek MU as "M"): the lowercase letter, when it
 // has no entry of its own, is added with the lowercase prototype ("к" as "k"), as the player sees the same shape.
 // Except under an "l" prototype: capitals drawn like I share it with l, but their lowercase looks like an i (small
@@ -213,6 +220,43 @@ for (const [source, [prototype]] of symbols) {
   }
 }
 
+// ── Unassigned ranges ───────────────────────────────
+
+const LAST_CODE_POINT = 0x10ffff;
+// Emoji, and the code points Unicode reserves for future ones (Extended_Pictographic while still unassigned). Taken
+// from this Node's Unicode and written into the tables, as newer versions take some of them out of the property
+const EXTENDED_PICTOGRAPHIC = /\p{Extended_Pictographic}/u;
+
+/** Whether this Node's Unicode leaves `codePoint` unassigned (general category Cn) and not reserved for an emoji. */
+const isUnassignedNonEmoji = (codePoint) => {
+  const char = String.fromCodePoint(codePoint);
+  return UNASSIGNED.test(char) && !EXTENDED_PICTOGRAPHIC.test(char);
+};
+
+/** Whether this Node's Unicode counts `codePoint` as an emoji, assigned or reserved (Extended_Pictographic). */
+const isExtendedPictographic = (codePoint) => EXTENDED_PICTOGRAPHIC.test(String.fromCodePoint(codePoint));
+
+/** Whether this Node's Unicode leaves `codePoint` unassigned but reserves it for an emoji. */
+const isUnassignedEmoji = (codePoint) => {
+  const char = String.fromCodePoint(codePoint);
+  return UNASSIGNED.test(char) && EXTENDED_PICTOGRAPHIC.test(char);
+};
+
+/** The code points that satisfy `predicate`, as [first, last] ranges. */
+function rangesOf(predicate) {
+  const ranges = [];
+  let first = null;
+  for (let codePoint = 0; codePoint <= LAST_CODE_POINT + 1; codePoint += 1) {
+    const included = codePoint <= LAST_CODE_POINT && predicate(codePoint);
+    if (included && first === null) first = codePoint;
+    if (!included && first !== null) {
+      ranges.push([first, codePoint - 1]);
+      first = null;
+    }
+  }
+  return ranges;
+}
+
 // ── Output ──────────────────────────────────────────
 
 /** `text` as the body of a double-quoted TypeScript string: printable ASCII as is, anything else escaped. */
@@ -228,6 +272,18 @@ const mapLines = (exportName, table) => [
   "]);",
 ];
 
+const hex = (codePoint) => `0x${codePoint.toString(16).toUpperCase().padStart(4, "0")}`;
+const RANGES_PER_LINE = 6;
+/** [first, last] code point ranges, a few per line. */
+const rangeLines = (exportName, ranges) => [
+  `export const ${exportName}: ReadonlyArray<readonly [number, number]> = [`,
+  ...Array.from({ length: Math.ceil(ranges.length / RANGES_PER_LINE) }, (_, line) => `  ${ranges
+    .slice(line * RANGES_PER_LINE, (line + 1) * RANGES_PER_LINE)
+    .map(([first, last]) => `[${hex(first)}, ${hex(last)}],`)
+    .join(" ")}`),
+  "];",
+];
+
 const out = [
   `// Generated by Server/scripts/generateAsciiConfusables.mjs from Unicode confusables.txt ${version} (UTS #39)`,
   `// with Node ${process.version} (Unicode ${process.versions.unicode}). Do not edit.`,
@@ -238,6 +294,19 @@ const out = [
   "// Character \u2192 the symbols or kana it is drawn like, as the name skeleton reads them (bullets, dashes, quotes,",
   "// kana and the kanji drawn like them, ideographs drawn alike...).",
   ...mapLines("SYMBOL_CONFUSABLES", symbols),
+  "",
+  `// Code points unassigned in Unicode ${process.versions.unicode}, the version of the tables above, but those reserved`,
+  "// for emoji (Extended_Pictographic), as [first, last] ranges: names may only use characters the tables know, or",
+  "// emoji, which they leave out (playerName.isValidUsername).",
+  ...rangeLines("UNASSIGNED_NON_EMOJI_RANGES", rangesOf(isUnassignedNonEmoji)),
+  "",
+  `// Code points unassigned in Unicode ${process.versions.unicode} but reserved for emoji, as [first, last] ranges: names`,
+  "// may use them, but a phone without the emoji draws them all as the same empty box (playerName.visualKey).",
+  ...rangeLines("UNASSIGNED_EMOJI_RANGES", rangesOf(isUnassignedEmoji)),
+  "",
+  `// Code points Unicode ${process.versions.unicode} counts as emoji, assigned or reserved (Extended_Pictographic), as`,
+  "// [first, last] ranges: those that may carry an emoji joiner or presentation selector (playerName.isValidUsername).",
+  ...rangeLines("EXTENDED_PICTOGRAPHIC_RANGES", rangesOf(isExtendedPictographic)),
   "",
 ];
 process.stdout.write(out.join("\n"));

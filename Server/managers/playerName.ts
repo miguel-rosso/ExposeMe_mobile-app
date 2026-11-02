@@ -1,4 +1,7 @@
-import { ASCII_CONFUSABLES, SYMBOL_CONFUSABLES } from "./asciiConfusables";
+import {
+  ASCII_CONFUSABLES, EXTENDED_PICTOGRAPHIC_RANGES, SYMBOL_CONFUSABLES, UNASSIGNED_EMOJI_RANGES,
+  UNASSIGNED_NON_EMOJI_RANGES,
+} from "./asciiConfusables";
 import { displayOrder } from "./displayOrder";
 
 /**
@@ -21,11 +24,19 @@ const MAX_NORMALIZED_LENGTH = 60;
 
 // ── Validation ──────────────────────────────────────
 
+/** A regex character class matching the [first, last] code point `ranges`. */
+const codePointClass = (ranges: ReadonlyArray<readonly [number, number]>) =>
+  `[${ranges.map(([first, last]) => `\\u{${first.toString(16)}}-\\u{${last.toString(16)}}`).join("")}]`;
+
+// Emoji, assigned or reserved, of Unicode 15.1 (Extended_Pictographic, a fixed list): Unicode 17 took 689 code points
+// out of the property, so the running Node's \p{Extended_Pictographic} would accept "★" + emoji selector on Node 20
+// and refuse it on Node 24
+const EMOJI = codePointClass(EXTENDED_PICTOGRAPHIC_RANGES);
 // Pieces that only make sense inside an emoji: the zero-width joiner of a sequence (woman technologist, rainbow flag),
 // the selectors that ask for emoji or text presentation (red heart, keycap one) and the tag letters of a subdivision
 // flag (black flag + tags + cancel tag, e.g. England). Allowed there; anywhere else they are invisible characters.
-const EMOJI_JOINER = /(?<=\p{Extended_Pictographic}\p{Emoji_Modifier}?\uFE0F?)\u200D(?=\p{Extended_Pictographic})/gu;
-const EMOJI_PRESENTATION = /(?<=[\p{Extended_Pictographic}#*0-9])[\uFE0E\uFE0F]/gu;
+const EMOJI_JOINER = new RegExp(`(?<=${EMOJI}\\p{Emoji_Modifier}?\\uFE0F?)\\u200D(?=${EMOJI})`, "gu");
+const EMOJI_PRESENTATION = new RegExp(`(?<=${EMOJI}|[#*0-9])[\\uFE0E\\uFE0F]`, "gu");
 const EMOJI_TAG_SEQUENCE = /(?<=\u{1F3F4})[\u{E0020}-\u{E007E}]+\u{E007F}/gu;
 // Scripts whose spelling needs a zero-width joiner or non-joiner between letters (the Sinhala "Sri" conjunct, the
 // Persian half-space, Devanagari half forms). Allowed between two letters of these scripts; anywhere else they are
@@ -42,11 +53,17 @@ const SCRIPT_JOINER = new RegExp(
   "gv",
 );
 
-// Controls, format characters (zero-width, bidi overrides, BOM, tags), private-use/unassigned/surrogate code points,
+// Controls, format characters (zero-width, bidi overrides, BOM, tags), private-use/surrogate code points,
 // line/paragraph separators, default-ignorable characters (fillers, variation selectors, combining grapheme joiner),
 // characters drawn blank (braille blank, Khitan filler, musical null notehead, object replacement) and every space
-// other than the plain one (no-break, ideographic, en/em spaces...).
-const INVISIBLE = /[\p{C}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}\u2800\u{16FE4}\u{1D159}\uFFFC]|(?!\u0020)\p{Zs}/u;
+// other than the plain one (no-break, ideographic, en/em spaces...). Unassigned code points: UNASSIGNED_IN_TABLES.
+const INVISIBLE =
+  /[\p{Cc}\p{Cf}\p{Co}\p{Cs}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}\u2800\u{16FE4}\u{1D159}\uFFFC]|(?!\u0020)\p{Zs}/u;
+// Code points unassigned in the Unicode version of the lookalike tables (15.1, see asciiConfusables.ts), also those a
+// newer Node knows (EXP-284): the tables don't, so a letter added since could be drawn like another one without
+// sharing its keys. Not those Unicode 15.1 reserves for emoji, which the tables leave out anyway (drawn in colour):
+// newer emoji are fine. A fixed list rather than the running Node's categories, so every Node accepts the same names
+const UNASSIGNED_IN_TABLES = new RegExp(codePointClass(UNASSIGNED_NON_EMOJI_RANGES), "u");
 // A space at either end or two in a row: the app never sends them (it trims the name and collapses its spaces,
 // EXP-263), and since the name is shown as typed everyone would see it padded or split (EXP-327)
 const STRAY_SPACES = /^\u0020|\u0020$|\u0020\u0020/u;
@@ -67,25 +84,29 @@ const withoutAllowedFormatChars = (text: string) => text
 
 /**
  * A name the server accepts: a string of 1–15 UTF-16 units (at most 60 after NFKC), not blank, with no invisible
- * characters or spaces other than U+0020, no space at either end or two in a row, no combining mark at the start or on
- * a trailing space, at most four combining marks in a row, no mark on a kana with a voiced form but the voicing mark
- * it takes (marksKanaOddly), no mix of Latin-lookalike scripts (see mixesLookalikeScripts), no Hangul block of jamo
- * that don't make one syllable (splitsHangulBlock) and no vowel sign, virama or Latin-style diacritic on an Indic
- * independent vowel (marksIndependentVowelOddly). Emoji, symbols, punctuation and digits are free: a name may be made
- * only of them.
+ * characters, characters the lookalike tables don't know (unassigned in their Unicode 15.1; newer emoji are fine, and
+ * read alike by visualKey) or spaces other than U+0020, no space at either end or two in a row, no combining mark at
+ * the start or on a trailing space, at most four combining marks in a row, no mark on a kana with a voiced form but
+ * the voicing mark it takes (marksKanaOddly), no mix of Latin-lookalike scripts (see mixesLookalikeScripts), no Hangul
+ * block of jamo that don't make one syllable (splitsHangulBlock), no vowel sign or virama on an Indic independent vowel
+ * (marksIndependentVowelOddly) and no Indic vowel sign but one on a letter of its script, which carries only marks of
+ * that script, and no length mark left alone (marksIndicLetterOddly). Emoji, symbols, punctuation and digits are free:
+ * a name may be made only of them.
  */
 export function isValidUsername(value: unknown): value is string {
   if (typeof value !== "string" || !value.trim() || value.length > MAX_USERNAME_LENGTH) return false;
   if (value.normalize("NFKC").length > MAX_NORMALIZED_LENGTH) return false;
   return !STRAY_SPACES.test(value)
     && !INVISIBLE.test(withoutAllowedFormatChars(value))
+    && !UNASSIGNED_IN_TABLES.test(value)
     && !LEADING_MARK.test(value)
     && !TRAILING_MARK.test(value)
     && !MARK_PILE.test(value)
     && !marksKanaOddly(value)
     && !mixesLookalikeScripts(value)
     && !splitsHangulBlock(value)
-    && !marksIndependentVowelOddly(value);
+    && !marksIndependentVowelOddly(value)
+    && !marksIndicLetterOddly(value);
 }
 
 // ── Scripts ─────────────────────────────────────────
@@ -124,9 +145,9 @@ function mixesLookalikeScripts(name: string): boolean {
 
 // Independent vowels, dependent vowel signs and viramas (Indic_Syllabic_Category Vowel_Independent, Vowel_Dependent,
 // Virama and Pure_Killer, Unicode 18) of the Indic scripts and Sinhala. The ranges also span code points unassigned
-// there, which INVISIBLE refuses, as it refuses those newer than the running Node's Unicode. Gurmukhi iri and ura
-// (U+0A72, U+0A73, Consonant_Placeholder) count as vowels: they only bear vowel signs, and iri + sign i spells the
-// vowel letter i that Unicode encodes on its own
+// there, which UNASSIGNED_IN_TABLES refuses. Gurmukhi iri and ura (U+0A72, U+0A73, Consonant_Placeholder)
+// count as vowels: they only bear vowel signs, and iri + sign i spells the vowel letter i that Unicode encodes on its
+// own
 const INDEPENDENT_VOWEL = `[${[
   "\\u0904-\\u0914\\u0960\\u0961\\u0972-\\u0977", // Devanagari
   "\\u0985-\\u0994\\u09E0\\u09E1", // Bengali
@@ -152,19 +173,17 @@ const DEPENDENT_VOWEL_SIGN = `[${[
   "\\u0DCF-\\u0DDF\\u0DF2\\u0DF3", // Sinhala
 ].join("")}]`;
 const VIRAMA = "[\\u094D\\u09CD\\u0A4D\\u0ACD\\u0B4D\\u0BCD\\u0C4D\\u0CCD\\u0D3B\\u0D3C\\u0D4D\\u0DCA]";
-// Combining marks of the Latin-style diacritic blocks (Script=Inherited): accents, breves, overlays, enclosing circles
-const GENERIC_DIACRITIC = "[\\u0300-\\u036F\\u1AB0-\\u1AFF\\u1DC0-\\u1DFF\\u20D0-\\u20FF\\uFE20-\\uFE2F]";
 // The one virama an independent vowel takes: the Bengali ya-phala on A or E (maybe through a joiner), which spells
 // the vowel of "Alex" and "Andrew" (অ্যা, এ্যা)
 const BENGALI_YA_PHALA_ON_VOWEL = "[\\u0985\\u098F]\\u09CD\\u200D?\\u09AF";
 // Marks that turn an independent vowel into the look of another vowel letter, maybe after other marks on it: a vowel
-// sign (EXP-295: Devanagari E + vowel sign E draws like the letter AI, Bengali A + vowel sign AA like AA), a virama
-// (Sinhala E + al-lakuna draws like EE, also before a consonant, where some renderers show no dotted circle) or a
-// Latin-style diacritic (EXP-344: Devanagari E + combining breve like candra E). The keys can't tell them from that
-// letter (they drop the mark, or keep it next to the wrong letter). Unicode's "do not use" tables for these scripts
-// ban such spellings; keyboards type the vowel letter itself
+// sign (EXP-295: Devanagari E + vowel sign E draws like the letter AI, Bengali A + vowel sign AA like AA) or a virama
+// (Sinhala E + al-lakuna draws like EE, also before a consonant, where some renderers show no dotted circle). The keys
+// can't tell them from that letter (they drop the mark, or keep it next to the wrong letter). Unicode's "do not use"
+// tables for these scripts ban such spellings; keyboards type the vowel letter itself. Latin-style diacritics (EXP-344:
+// Devanagari E + combining breve like candra E) are refused on every Indic letter (marksIndicLetterOddly)
 const ODDLY_MARKED_INDEPENDENT_VOWEL = new RegExp(
-  `(?!${BENGALI_YA_PHALA_ON_VOWEL})${INDEPENDENT_VOWEL}\\p{M}*(?:${DEPENDENT_VOWEL_SIGN}|${GENERIC_DIACRITIC}|${VIRAMA})`,
+  `(?!${BENGALI_YA_PHALA_ON_VOWEL})${INDEPENDENT_VOWEL}\\p{M}*(?:${DEPENDENT_VOWEL_SIGN}|${VIRAMA})`,
   "u",
 );
 
@@ -175,11 +194,54 @@ const ODDLY_MARKED_INDEPENDENT_VOWEL = new RegExp(
  */
 const marksIndependentVowelOddly = (name: string) => ODDLY_MARKED_INDEPENDENT_VOWEL.test(name.normalize("NFC"));
 
+// ── Indic vowel signs ───────────────────────────────
+
+// The Indic scripts and Sinhala have a block of 128 code points each, from U+0900 (Devanagari) to U+0DFF (Sinhala)
+const INDIC_BLOCK_SIZE = 0x80;
+const INDIC_LETTER = /^(?=\p{L})[\u0900-\u0DFF]$/u;
+const VOWEL_SIGN = new RegExp(`^${DEPENDENT_VOWEL_SIGN}$`, "u");
+// Marks shared by many scripts: Latin-style diacritics, Vedic accents (the Devanagari udatta and grave accent)
+const INHERITED_MARK = /^\p{Script=Inherited}$/u;
+// Length marks, the second half of a two-part vowel sign: NFC joins them with the first half (Kannada E + length mark
+// is EE, Telugu and Oriya E + AI length mark is AI, Bengali, Oriya and Tamil E + AU length mark is AU), so one left
+// over sits alone on a letter, drawn as that vowel cut in half (Kannada "ದೕವ" almost like "ದೇವ", Tamil "கௗ" like
+// "கள", UTS #39). Not the Malayalam AU length mark, which alone is the modern spelling of AU ("കൗ")
+const LENGTH_MARK = /^[\u09D7\u0B56\u0B57\u0BD7\u0C55\u0C56\u0CD5\u0CD6]$/u;
+
+const indicBlockOf = (char: string) => Math.floor(char.codePointAt(0)! / INDIC_BLOCK_SIZE);
+
+/** Whether `mark` is a mark of the script of the Indic `letter` alone: from its block, and not shared with others. */
+const isOwnMark = (letter: string, mark: string) =>
+  indicBlockOf(mark) === indicBlockOf(letter) && !INHERITED_MARK.test(mark);
+
+/**
+ * Whether `name`, once composed (NFC joins the two parts of a vowel such as Bengali O), carries a dependent vowel sign
+ * anywhere but alone on a letter of its script, or a mark of another script on an Indic letter (EXP-343). The keys keep
+ * vowel signs, so "राज" and "राजु" are different names, but drop other marks; so two signs on a letter (क + ा + े draws
+ * like को, ु + े like े + ु, Sinhala ෙ + ෙ like ෛ), a sign on another script's letter, a digit or a space, or a mark
+ * drawn like a sign (क + combining breve like कॅ, क + Devanagari grave accent like के) would look like a name the keys
+ * don't see; so would a length mark alone (LENGTH_MARK). Real spellings put one vowel sign on a letter, with marks of
+ * its own script (nukta, anusvara, virama).
+ */
+function marksIndicLetterOddly(name: string): boolean {
+  return Array.from(name.normalize("NFC").matchAll(LETTER_WITH_MARKS)).some(([, base, marks]) => {
+    const markList = Array.from(marks);
+    const vowelSigns = markList.filter((mark) => VOWEL_SIGN.test(mark)).length;
+    if (!INDIC_LETTER.test(base)) return vowelSigns > 0;
+    return vowelSigns > 1
+      || markList.some((mark) => LENGTH_MARK.test(mark))
+      || !markList.every((mark) => isOwnMark(base, mark));
+  });
+}
+
 // ── Lookalike keys ──────────────────────────────────
 
-// Marks on a letter or symbol, voicing marks aside (see withoutMarks). A mark on a space stays: NFKC turns spacing
-// accents (the arms of "¯\_(ツ)_/¯", ´, ¨) into a space plus a mark, and that mark is all they draw
-const COMBINING_MARK = /(?<!\s)(?![\u3099\u309A])\p{Mn}/gu;
+// Indic dependent vowel signs, which the keys keep (EXP-343): "राज" and "राजु", Kannada "ಕರಣ" and "ಕಿರಣ" are different
+// names. But the Devanagari sign OE, which iOS draws blank
+const KEPT_VOWEL_SIGN = `(?!\\u093A)${DEPENDENT_VOWEL_SIGN}`;
+// Marks on a letter or symbol, voicing marks and kept vowel signs aside (see withoutMarks). A mark on a space stays:
+// NFKC turns spacing accents (the arms of "¯\_(ツ)_/¯", ´, ¨) into a space plus a mark, and that mark is all they draw
+const COMBINING_MARK = new RegExp(`(?<!\\s)(?![\\u3099\\u309A]|${KEPT_VOWEL_SIGN})\\p{Mn}`, "gu");
 // Joiners and subdivision tags an accepted name may still carry (variation selectors go with the marks)
 const IGNORABLE_IN_KEY = /[\u200C\u200D\u{E0020}-\u{E007F}]/gu;
 const WHITESPACE_RUN = /\s+/gu;
@@ -189,10 +251,37 @@ const LOOKS_LIKE_L = /[Il|1]/g;
 // before it, as the other spellings of a voicing mark after a space do (EXP-320)
 const SPACE_BEFORE_SPACING_VOICING_MARK = /\u0020(?=[\u309B\u309C])/gu;
 const VISUAL_LOOKALIKES: ReadonlyArray<[RegExp, string]> = [[/rn/g, "m"], [/vv/g, "w"], [/cl/g, "d"], [/0/g, "o"]];
+// Visual keys only: marks drawn like a vowel sign the keys keep, read as that sign (measured in Kohinoor and the Sangam
+// fonts on iOS and Noto Sans on Android, drawn alike by UTS #39, or by their shape): the Devanagari and Gujarati
+// candrabindu like their candra E but for a dot, the Devanagari short E and short O like E and O, the Oriya overline
+// like the hook of sign I over the letter, the Malayalam UU and vocalic R like U, and the long vocalic signs (RR, LL),
+// which only Sanskrit spells and fonts draw as the short ones with one more curl, like those
+const VOWEL_SIGN_LOOKALIKES: ReadonlyMap<string, string> = new Map([
+  ["\u0901", "\u0945"], ["\u0A81", "\u0AC5"], ["\u0946", "\u0947"], ["\u094A", "\u094B"], ["\u0B55", "\u0B3F"],
+  ["\u0D42", "\u0D41"], ["\u0D43", "\u0D41"],
+  // Vocalic RR as vocalic R (Malayalam's as U, like its R)
+  ["\u0944", "\u0943"], ["\u09C4", "\u09C3"], ["\u0AC4", "\u0AC3"], ["\u0B44", "\u0B43"], ["\u0D44", "\u0D41"],
+  // Vocalic LL as vocalic L
+  ["\u0963", "\u0962"], ["\u09E3", "\u09E2"], ["\u0AE3", "\u0AE2"], ["\u0B63", "\u0B62"], ["\u0C63", "\u0C62"],
+  ["\u0CE3", "\u0CE2"], ["\u0D63", "\u0D62"],
+]);
 
 /** `text` with each character found in `table` replaced by its entry. */
 const replaceChars = (text: string, table: ReadonlyMap<string, string>) =>
   Array.from(text, (char) => table.get(char) ?? char).join("");
+
+/** Marks drawn like an Indic vowel sign replaced by it (VOWEL_SIGN_LOOKALIKES: candrabindu as candra E). */
+const readVowelSignLookalikes = (text: string) => replaceChars(text, VOWEL_SIGN_LOOKALIKES);
+
+// Code points Unicode 15.1 reserves for emoji, which names may use (see UNASSIGNED_IN_TABLES): a phone whose fonts lack
+// the emoji, or any phone for those still unassigned, draws them all as the same empty box ("Ana 🫩" like "Ana 🫆").
+// A fixed list, so every Node reads the same ones alike
+const UNASSIGNED_EMOJI = new RegExp(codePointClass(UNASSIGNED_EMOJI_RANGES), "gu");
+// What the visual keys read them as: a private-use character, which names can't use, so it only meets another of them
+const EMPTY_BOX = "\uE000";
+
+/** Visual keys only: marks drawn like an Indic vowel sign read as it, emoji newer than Unicode 15.1 as one box. */
+const readDrawnAlike = (text: string) => readVowelSignLookalikes(text).replace(UNASSIGNED_EMOJI, EMPTY_BOX);
 
 // ── Japanese voicing marks ──────────────────────────
 
@@ -416,10 +505,10 @@ const foldCase = (text: string) => text.toUpperCase().toLowerCase();
 /**
  * Hangul conjoining jamo composed into syllables, lookalikes read as ASCII (case kept: Greek small nu reads as "v" but
  * capital nu as "N"), then NFKC (full-width, styled letters) but for compatibility jamo, accents and other combining
- * marks on a letter or symbol dropped (but a voicing mark on a kana that takes it, or on a letter that `standIns` reads
- * as one), conjoining jamo still on their own read as compatibility letters, the table again for what NFKC and the
- * marks uncovered, joiners dropped, whitespace trimmed and collapsed. The table runs before NFKC too because NFKC can
- * lose the look: long s reads as "f" but NFKC turns it into "s".
+ * marks on a letter or symbol dropped (but an Indic vowel sign, and a voicing mark on a kana that takes it, or on a
+ * letter that `standIns` reads as one), conjoining jamo still on their own read as compatibility letters, the table
+ * again for what NFKC and the marks uncovered, joiners dropped, whitespace trimmed and collapsed. The table runs before
+ * NFKC too because NFKC can lose the look: long s reads as "f" but NFKC turns it into "s".
  */
 function skeleton(name: string, standIns = NO_STAND_INS): string {
   const lookalikesRead = toAscii(separateVoicing(composeHangul(name), standIns));
@@ -447,10 +536,12 @@ export function nameKey(name: string): string {
  * kanji or kana drawn like them ("カ" as "力", "ヘ" as "へ"), and a voicing mark on a symbol or kanji read as a kana
  * counts as on that kana: "〈" + dakuten reads as ぐ, "力" + dakuten as ガ; so does a spacing ゛ or ゜ after a space
  * ("た ゛" looks like だ). Voiced kana that NFKC made (squared "㌎" is ガロン) are split again so the second pass sees
- * the kana.
+ * the kana. Marks drawn like an Indic vowel sign read as that sign (EXP-343: "सँम" like "सॅम"), and every emoji
+ * newer than Unicode 15.1 as the same empty box, as phones without it draw it ("Ana 🫩" like "Ana 🫆").
  */
 export function visualKey(name: string): string {
-  const voicingMarksClosed = composeHangul(name).replace(SPACE_BEFORE_SPACING_VOICING_MARK, "");
+  const voicingMarksClosed = composeHangul(readDrawnAlike(name))
+    .replace(SPACE_BEFORE_SPACING_VOICING_MARK, "");
   const symbols = foldSymbols(separateVoicing(voicingMarksClosed, SYMBOL_VOICING_STAND_INS));
   const skeletal = foldSymbols(splitVoicedKana(skeleton(symbols, SYMBOL_VOICING_STAND_INS)));
   return readLetterLookalikes(skeletal);
@@ -458,12 +549,12 @@ export function visualKey(name: string): string {
 
 /**
  * The visual key without the symbol table (EXP-285): the skeleton with only the letter groups that differ in some
- * fonts read alike. The symbol table reads small or circled o and zero as other symbols ("º", "ᵒ" and "⁰" as the
- * degree sign, which keeps "(º_º)" next to "(°_°)"); here NFKC reads them as the letter or digit they also look like,
- * so "b⁰b" and "b⓪b" still meet "bob", and "bºb" meets "b0b".
+ * fonts, the marks drawn like an Indic vowel sign and the emoji newer than Unicode 15.1 read alike. The symbol table reads small or circled o and zero
+ * as other symbols ("º", "ᵒ" and "⁰" as the degree sign, which keeps "(º_º)" next to "(°_°)"); here NFKC reads them as
+ * the letter or digit they also look like, so "b⁰b" and "b⓪b" still meet "bob", and "bºb" meets "b0b".
  */
 export function letterVisualKey(name: string): string {
-  return readLetterLookalikes(skeleton(name));
+  return readLetterLookalikes(skeleton(readDrawnAlike(name)));
 }
 
 /** A skeleton with I / l / | / 1 as "l", case folded, then "rn" as "m", "vv" as "w", "cl" as "d" and 0 as "o". */

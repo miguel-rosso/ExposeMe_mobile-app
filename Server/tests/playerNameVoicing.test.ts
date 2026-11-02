@@ -118,7 +118,7 @@ describe("Japanese voicing marks", () => {
 
   // Keys alone (names a room never holds): another mark doesn't stop a kana from taking its voicing mark
   it("a kana with any other mark before its dakuten keeps the voiced key", () => {
-    expect(OTHER_MARKS.length).toBeGreaterThan(1000);
+    expect(OTHER_MARKS.length).toBeGreaterThan(900); // Indic vowel signs only go on their letters (EXP-343)
     const unvoiced = OTHER_MARKS.filter((mark) => nameKey(`た${mark}${DAKUTEN}いき`) !== nameKey("だいき"));
     expect(unvoiced.map((mark) => mark.codePointAt(0)?.toString(16))).toEqual([]);
   });

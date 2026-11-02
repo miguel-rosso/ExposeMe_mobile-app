@@ -205,10 +205,16 @@ After last round: game-over
   another voiced kana, are refused; marks on
   `あ`, `ん` or the `ﾉ` of `(ﾉﾟ∀ﾟ)ﾉ` are free), and none of: controls, format characters (zero-width characters,
   bidi overrides/isolates, BOM), default-ignorable characters (fillers, variation selectors, combining grapheme
-  joiner), private-use/unassigned code points, characters drawn blank (U+2800, U+16FE4, U+1D159, U+FFFC) or spaces
+  joiner), private-use code points, code points unassigned in Unicode 15.1, the version of the lookalike tables below
+  (also those a newer Node knows, so a letter added since can't dodge the tables; but not those Unicode 15.1 reserves
+  for emoji: `🫩`, Unicode 16, is fine, and the visual keys read them all alike, see below. A fixed list,
+  `UNASSIGNED_NON_EMOJI_RANGES` in `managers/asciiConfusables.ts`, so every Node accepts the same names), characters
+  drawn blank (U+2800, U+16FE4, U+1D159, U+FFFC) or spaces
   other than U+0020 (no-break, ideographic, em...). Allowed where they belong: inside an emoji the zero-width joiner
   of a sequence (woman technologist), the emoji/text presentation selectors (red heart, keycaps) and the tags of a
-  subdivision flag (England); the zero-width joiner and non-joiner between two letters of Arabic, Syriac or the Indic
+  subdivision flag (England), "emoji" meaning the Extended_Pictographic code points of Unicode 15.1, a fixed list
+  (`EXTENDED_PICTOGRAPHIC_RANGES`), as Unicode 17 took some out (`★` + emoji selector is fine on every Node); the
+  zero-width joiner and non-joiner between two letters of Arabic, Syriac or the Indic
   scripts and Sinhala (Persian half-space, Sinhala "Sri"). Letters that read as Latin (Latin ones, and those of other
   scripts listed in the confusables table below), with their accents dropped, may not come from two of the
   Latin-lookalike scripts (Latin, Greek, Cyrillic, Armenian, Cherokee, Lisu, Coptic), so `Dave` with a Greek nu,
@@ -221,12 +227,21 @@ After last round: game-over
   drop it (`가` + acute + `ᅵ` is refused; `가` + acute + `ᆨ`, which keys as `각`, is fine). Lone jamo (`ᄋ`, `(ᅳ_ᅳ)`)
   and the jamo spelling of any syllable (`ᄋ` + `ᅵ`, `이` + `ᆼ`) are fine. An independent vowel of the Indic scripts
   or Sinhala (Indic_Syllabic_Category; also the Gurmukhi vowel bearers `ੲ` and `ੳ`) is refused when it carries,
-  also with other marks between, a dependent vowel sign, a virama (except the Bengali ya-phala on `অ` or `এ`, maybe
-  through a joiner: `অ্যা`, `এ্যা`) or a mark of the Latin-style combining diacritic blocks (U+0300–036F, U+1AB0–1AFF, U+1DC0–1DFF, U+20D0–20FF,
-  U+FE20–FE2F), as Unicode's "do not use" tables ask: Devanagari `ए` + `े` draws like `ऐ`, Bengali `অ` + `া` like
-  `আ`, Gurmukhi `ੲ` + `ਿ` like `ਇ`, Sinhala `එ` + `්` like `ඒ` (also before a consonant: `එ්ම` like `ඒම`) and `ए` + combining breve like `ऍ`, but the keys would
-  tell them apart. Signs on consonants (`के`), marks such as anusvara or tippi on a vowel (`अं`, `ਅੰਮ੍ਰਿਤ`) and
-  Bengali `অ্যা` (virama and ya before the sign) are fine; the check runs after NFC, so Tamil `ஒ` + `ௗ` is `ஔ`.
+  also with other marks between, a dependent vowel sign or a virama (except the Bengali ya-phala on `অ` or `এ`, maybe
+  through a joiner: `অ্যা`, `এ্যা`), as Unicode's "do not use" tables ask: Devanagari `ए` + `े` draws like `ऐ`, Bengali
+  `অ` + `া` like `আ`, Gurmukhi `ੲ` + `ਿ` like `ਇ`, Sinhala `එ` + `්` like `ඒ` (also before a consonant: `එ්ම` like
+  `ඒම`), but the keys would tell them apart. Signs on consonants (`के`), marks such as anusvara or tippi on a vowel
+  (`अं`, `ਅੰਮ੍ਰਿਤ`) and Bengali `অ্যা` (virama and ya before the sign) are fine; the check runs after NFC, so Tamil
+  `ஒ` + `ௗ` is `ஔ`. A dependent vowel sign (Indic_Syllabic_Category Vowel_Dependent) must sit alone on a letter of
+  its own script, and a letter of an Indic script or Sinhala (U+0900–0DFF) carries only marks of its own block
+  other than the Vedic accents (checked after NFC, which joins two-part vowels such as Bengali `ো`): two signs on a letter (`क` +
+  `ा` + `े` draws like `को`, `ु` + `े` like `े` + `ु`, Sinhala `ෙ` + `ෙ` like `ෛ`), a sign on a letter of another
+  script, a digit or a space, and a Latin-style diacritic, Vedic accent or mark of another script on an Indic letter
+  (`क` + combining breve draws like `कॅ`, `क` + the Devanagari grave accent like `के`; also on an independent vowel:
+  `ए` + combining breve like `ऍ`) are refused, since the keys keep vowel signs but drop those marks. So is a length
+  mark, the second half of a two-part vowel, left alone on a letter (Kannada `ದ` + `ೕ` draws almost like `ದೇ`, Tamil
+  `க` + `ௗ` like `கள`; Kannada, Telugu and Oriya length marks, Bengali, Oriya and Tamil AU length marks): NFC joins
+  it with the first half (`ದ` + `ೆ` + `ೕ` is `ದೇ`, `ক` + `ে` + `ৗ` is `কৌ`). The Malayalam AU length mark is fine alone, the modern spelling of AU (`കൗ`).
   Otherwise: `"Invalid username"`. The name
   is stored and sent to everyone **exactly as typed** (the app compares its own typed name with the room's names).
 - Names that read the same on screen can't share a room. Three keys are compared. `nameKey`: Hangul conjoining jamo
@@ -234,7 +249,9 @@ After last round: game-over
   like ASCII letters or digits replaced by them (a table generated from UTS #39 `confusables.txt` covering every script,
   symbol and spacing mark, plus the lowercase forms of letters it only lists as capitals, such as Cyrillic small ka;
   `managers/asciiConfusables.ts`, regenerated with `scripts/generateAsciiConfusables.mjs`), then NFKC, combining
-  marks and accents dropped unless they sit on a space or are a Japanese voicing mark (dakuten, handakuten) on a kana
+  marks and accents dropped unless they sit on a space, are an Indic dependent vowel sign (EXP-343: `राज` and `राजु`
+  are different names; but the Devanagari sign OE, which iOS draws blank; nukta, anusvara, candrabindu and virama are
+  still dropped, so `राज़` and `राजं` are `राज`) or are a Japanese voicing mark (dakuten, handakuten) on a kana
   that takes it (NFC joins them: `た` + dakuten is `だ`; on a Latin letter, `ん` or a kanji it is dropped), the
   table again, case-folded, joiners dropped, whitespace trimmed and collapsed. The table runs before NFKC too, so long s still reads as `f`. `visualKey`: the same, but
   symbols drawn like other symbols read as their UTS #39 prototype first (a second table in the same file,
@@ -246,15 +263,22 @@ After last round: game-over
   kana counts as on that kana, also typed as a spacing `゛` or `゜` (also after a character NFKC turns into one, such as
   the Kangxi radical `⼒` or U+2329 `〈`), so `〈` + dakuten reads as `ぐ` and `力` + dakuten
   as `ガ`, while `力` stays apart from `ガ`), then I / l / | / 1 read as `l`, `rn` as `m`, `vv` as `w`, `cl` as `d` and
-  `0` as `o`. The symbol table
+  `0` as `o`. Marks drawn like an Indic vowel sign the keys keep read as that sign first (measured in Kohinoor and the
+  Sangam fonts on iOS and Noto Sans on Android, alike in UTS #39, or by their shape): the Devanagari and Gujarati
+  candrabindu as their candra E (`सँम` next to `सॅम`), the Devanagari short E and short O as E and O, the Oriya
+  overline as sign I (`କ୕` next to `କି`), the Malayalam UU and vocalic R as U, and the long
+  vocalic signs RR and LL, only spelled in Sanskrit, as R and L (`कॄष्ण` next to `कृष्ण`). The code points Unicode
+  15.1 reserves for emoji (`UNASSIGNED_EMOJI_RANGES`, a fixed list, the same on every Node) all read as one empty box:
+  a phone whose fonts lack a newer emoji, or any phone for one still unassigned, draws it so (`Ana 🫩` next to
+  `Ana 🫆` and to `Ana` + U+1FC00, but apart from `Ana 😀`). The symbol table
   leaves out what reads as a different name: a clearly different size or position (measured in Roboto, Noto Sans
   Symbols and Noto Sans CJK on Android, SF, PingFang and Hiragino on iOS: `•` and `∙` apart from `·` and `・`, `○` and
   `◦` from `°`, `█` and `■` from `∎`, `–` and `−` from `-` and from `—`, `˜` from `~`, full-width `－` from `ー`,
   the low `⁎`, `∗` and `٭` from the raised `*`, `卄` and `卝` from `艹`; the triangles `▸`, `►` and `▶` stay together,
   as fonts without the first two draw them as big as `▶`), emoji (drawn in colour: `🍎` and `🍏`), combining and
   spacing marks (Indic and Khmer vowel signs: `डॉली` and `डाली`), symbols whose prototype is a cased letter (case
-  folding would join `∑` with `∫`), and characters newer than Unicode 15.1 (the tables are generated with Node 20, the oldest the server supports,
-  so they read the same on every Node). Only the groups common in kaomoji were measured; the rest follow UTS #39.
+  folding would join `∑` with `∫`), and characters newer than Unicode 15.1 (the tables are generated with Node 20, the
+  oldest the server supports, so they read the same on every Node; names may not use those characters either, emoji aside). Only the groups common in kaomoji were measured; the rest follow UTS #39.
   A third key, `letterVisualKey`, is the visual key without the symbol table (the skeleton with only I / l / | / 1,
   `rn`, `vv`, `cl` and `0` read alike): a character the table reads as a symbol may also look like the letter or digit
   NFKC makes of it, and sharing either visual key counts. All keys are taken from the name as stored and as drawn

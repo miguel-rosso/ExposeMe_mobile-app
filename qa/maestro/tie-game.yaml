@@ -1,0 +1,73 @@
+# EXP-348 / DEC-013: a tie with points. The bots vote for the photo's owner every round and the device never taps,
+# so bot1 and bot2 end tied 1st on one point per round and the device last on 0. The winner screen must list both
+# bots under "WINNERS!" (not the device), and the final scoreboard ("Final Results", not "No result") must rank
+# them both 1 and the device 3. Exactly one device: with a second one the bots can't tell whose photo a device round
+# is and they would only score their own rounds (still tied, maybe on 0):
+#   qa/lab/lab.sh play --flow tie-game --bots 2 --rounds 3 --devices <label> --bot-args --answer-right
+# bots.mjs fails the run if its bots did not end tied on one point per round (its "tie" check).
+# Keep it to <= 3 players so every final-score row fits without scrolling.
+# env: GAME_CODE, USERNAME, METRO_URL (url-encoded)
+# Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
+appId: com.socketNull.ExposeMe
+---
+- runFlow: open-app.yaml
+- runFlow: join-room.yaml
+- runFlow: wait-game-start.yaml
+- extendedWaitUntil:
+    visible:
+      id: "game-waiting-ready|game-waiting-photo|player-option-.*|score-modal"
+    timeout: 60000
+# Play without ever tapping a player option (empty guess every round)
+- repeat:
+    while:
+      notVisible:
+        id: "winner-modal|final-score-modal"
+    commands:
+      - evalScript: ${output.shot = (output.shot || 0) + 1}
+      - takeScreenshot: tie-round-${USERNAME}-${output.shot}
+      - waitForAnimationToEnd:
+          timeout: 4000
+- assertVisible:
+    id: "winner-modal"
+- extendedWaitUntil:
+    visible:
+      id: "winner-title"
+      text: "WINNERS!|¡GANADORES!"
+    timeout: 5000
+- assertVisible:
+    id: "winner-name-bot1"
+- assertVisible:
+    id: "winner-name-bot2"
+- assertNotVisible:
+    id: "winner-name-${USERNAME}"
+- takeScreenshot: tie-winners-${USERNAME}
+# "Tap anywhere to continue" only renders once the winner animation is tappable
+- extendedWaitUntil:
+    visible:
+      id: "winner-continue"
+    timeout: 15000
+- tapOn:
+    id: "winner-continue"
+- extendedWaitUntil:
+    visible:
+      id: "final-score-modal"
+    timeout: 20000
+- assertVisible:
+    id: "final-title"
+    text: "Final Results|Resultados Finales"
+- assertVisible:
+    id: "final-winner-bot1"
+- assertVisible:
+    id: "final-winner-bot2"
+- assertNotVisible:
+    id: "final-winner-${USERNAME}"
+- assertVisible:
+    id: "final-rank-bot1"
+    text: "1"
+- assertVisible:
+    id: "final-rank-bot2"
+    text: "1"
+- assertVisible:
+    id: "final-rank-${USERNAME}"
+    text: "3"
+- takeScreenshot: tie-results-${USERNAME}

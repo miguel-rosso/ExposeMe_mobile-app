@@ -487,5 +487,60 @@ got="$(server_ended_hold server-ended)"
 [ "$got" = "$want" ] && ok "hold ended by the server without hold-resume: reported in its own round, each hold counted once" || ko "server-ended hold" "expected [$want] got [$got]"
 got="$(server_ended_hold paused)"
 [ "$got" = "holds=2 lag_max=21.0" ] && ok "hold ended by a pause: hold-end only, no hold-resume due" || ko "pause-ended hold" "$got"
+
+# ── Tie with points (--answer-right, EXP-348) ──
+# A synthetic game of our bots bot1 and bot2 plus the players in OTHERS (devices), one round per owner in OWNERS
+# ("-": skipped, no reveal), ending on FINAL ("name:points,..."). With GAME2_OWNERS / GAME2_FINAL a second game
+# follows, recorded as "g2-<event>". Prints the "tie:" errors of the room, one per line.
+tie_room() { # others owners final [game2-owners game2-final]
+  node --input-type=module -e '
+    const { analyseRoom } = await import(process.argv[1]);
+    const [others, owners, final, g2Owners, g2Final] = process.argv.slice(2);
+    const players = ["bot1", "bot2"];
+    const everyone = [...players, ...others.split(",").filter(Boolean)];
+    const events = [];
+    let t = 0;
+    const all = (ev, round, payload) => players.forEach((bot) => events.push({ bot, ev, round, t: (t += 10), payload }));
+    const scores = (spec) => spec.split(",").map((p) => { const [username, points] = p.split(":"); return { username, points: Number(points) }; });
+    const playGame = (prefix, ownerList, finalSpec) => {
+      all(`${prefix}game-started`, 0, { rounds: ownerList.split(",").length, players: everyone });
+      ownerList.split(",").forEach((owner, i) => {
+        const round = i + 1;
+        all(`${prefix}waiting-photo`, round, { round, duration: 15000 });
+        if (owner === "-") { all(`${prefix}round-skipped`, round, { round }); return; }
+        all(`${prefix}round-start`, round, { photo: `/temp/p${round}.jpg`, duration: 7700 });
+        all(`${prefix}round-reveal`, round, { correctAnswer: owner, yourGuess: owner });
+      });
+      all(`${prefix}game-over`, ownerList.split(",").length, { finalScore: scores(finalSpec) });
+    };
+    playGame("", owners, final);
+    if (g2Owners) playGame("g2-", g2Owners, g2Final);
+    const r = { code: "QAROOM", reason: "game-over", players, errors: [], uploads: [], rateLimited: 0, events };
+    const opts = { host: true, rounds: 3, playAgainLingerS: 0, lingerBot: 0, startNextGameS: 0, answerRight: true };
+    console.log(analyseRoom(r, opts).consistency_errors.filter((e) => e.includes("tie:")).join("\n"));
+  ' "$ANALYSIS" "$@"
+}
+got="$(tie_room ios-a ios-a,bot2,ios-a bot1:3,bot2:3,ios-a:0)"
+[ -z "$got" ] && ok "tie with points: the bots on one point per round, the device on 0" || ko "tie with points passes" "$got"
+got="$(tie_room ios-a,android-a android-a,bot1,ios-a bot1:1,bot2:1,ios-a:0,android-a:0)"
+[ -z "$got" ] && ok "two devices: only the bots' own rounds count" || ko "two devices: own rounds count" "$got"
+got="$(tie_room ios-a,android-a android-a,bot1,ios-a bot1:1,bot2:1,ios-a:0)"
+[ -z "$got" ] && ok "a device that left mid-game still counts as another player (from game-started)" || ko "left device counted from game-started" "$got"
+got="$(tie_room ios-a ios-a,bot2,ios-a bot1:3,bot2:2,ios-a:0)"
+[ "$got" = "tie: the bots are not tied (bot1 3, bot2 2)" ] && ok "bots not tied: reported" || ko "bots not tied reported" "$got"
+got="$(tie_room ios-a ios-a,bot2,ios-a bot1:2,bot2:2,ios-a:0)"
+[ "$got" = "tie: the bots should all have 3 points, one per round they could tell (bot1 2, bot2 2)" ] \
+  && ok "tied on fewer points than rounds they could tell: reported" || ko "tied on too few points reported" "$got"
+got="$(tie_room ios-a -,-,- bot1:0,bot2:0,ios-a:0)"
+[ "$got" = "tie: no round scored, the game has no result (bot1 0, bot2 0)" ] && ok "everyone on 0 (no result, DEC-044): reported" || ko "all on 0 reported" "$got"
+got="$(tie_room ios-a,android-a ios-a,android-a,ios-a bot1:0,bot2:0,ios-a:0,android-a:0)"
+[ "$got" = "tie: no round scored, the game has no result (bot1 0, bot2 0)" ] && ok "no round the bots could tell: reported as no result" || ko "no known round reported" "$got"
+got="$(tie_room ios-a ios-a,bot2,ios-a bot1:3,ios-a:0)"
+[ "$got" = $'tie: bot2 is missing from the final score' ] && ok "a bot missing from the final score: reported" || ko "missing bot reported" "$got"
+got="$(tie_room ios-a ios-a,bot2,ios-a bot1:3,bot2:3,ios-a:0 bot1,ios-a bot1:2,bot2:2,ios-a:0)"
+[ -z "$got" ] && ok "second game: its own g2-round-reveal rounds count" || ko "second game counted on its own" "$got"
+got="$(tie_room ios-a ios-a,bot2,ios-a bot1:3,bot2:3,ios-a:0 bot1,ios-a bot1:3,bot2:3,ios-a:0)"
+[ "$got" = "second game: tie: the bots should all have 2 points, one per round they could tell (bot1 3, bot2 3)" ] \
+  && ok "second game: a wrong count is reported as the second game's" || ko "second game wrong count reported" "$got"
 echo "# $pass passed, $fail failed"
 [ "$fail" = 0 ]

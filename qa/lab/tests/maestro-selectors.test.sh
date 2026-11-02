@@ -74,16 +74,46 @@ app_text_hits() {
   ' "$1" "$2"
 }
 
-# unknown_ids FLOW -> each alternative of an `id:` selector that matches no testID in Client/app/utils/testIds.ts
+# unknown_ids FLOW -> each alternative of an `id:` selector that matches no testID in Client/app/utils/testIds.ts:
+# neither one of its strings nor an id of one of its helpers (`(username: string) => \`winner-name-${username}\``).
+# A helper's id is its prefix followed by a flow variable (${USERNAME}), .* / .+, or a value of the helper's
+# parameter: a name (letters, digits, "_": no "-", so a misspelt longer prefix like lobby-player-offlne-bot1 is not
+# read as lobby-player-'s name) for a string, digits or \d+ for a number. Nor may it be the start of a longer
+# prefix's rest (lobby-player-offline is not lobby-player-'s player "offline").
 unknown_ids() {
   grep -oE '^[[:space:]]*id: "[^"]*"' "$1" | sed -E 's/.*id: "(.*)"/\1/' | tr '|' '\n' | sort -u >"$TMP/ids"
   grep -oE '"[a-z0-9-]+"' "$2/utils/testIds.ts" | tr -d '"' >"$TMP/known-ids"
+  # "<prefix> <parameter type>" of each helper
+  grep -oE ': (string|number)\) => `[a-z0-9-]+\$\{' "$2/utils/testIds.ts" \
+    | sed -E 's/^: (string|number)\) => `(.*)\$\{$/\2 \1/' >"$TMP/known-helpers"
   perl -e '
     open my $fh, "<", $ARGV[1] or die; chomp(my @known = <$fh>); close $fh;
+    open $fh, "<", $ARGV[2] or die; my @helpers = map { chomp; [split / /] } <$fh>; close $fh;
+    my %value = (string => qr/\A[A-Za-z0-9_]+\z/, number => qr/\A(?:[0-9]+|\\d\+)\z/);
+    my $any = qr/\A(?:\$\{[A-Za-z_][A-Za-z0-9_]*\}|\.\*|\.\+)\z/;
+    sub helper_id {
+      my ($id) = @_;
+      for my $h (@helpers) {
+        my ($prefix, $type) = @$h;
+        next unless index($id, $prefix) == 0;
+        my $rest = substr($id, length $prefix);
+        next if grep { my $p = $_->[0]; length($p) > length($prefix) && index($p, $prefix) == 0
+          && index(substr($p, length $prefix), $rest) == 0 } @helpers;
+        return 1 if $rest =~ $any || $rest =~ $value{$type};
+      }
+      return 0;
+    }
     open $fh, "<", $ARGV[0] or die;
-    while (my $id = <$fh>) { chomp $id; my $re = qr/\A(?:$id)\z/ism; print "$id\n" unless grep { $_ =~ $re } @known }
-  ' "$TMP/ids" "$TMP/known-ids"
+    while (my $id = <$fh>) {
+      chomp $id;
+      next if helper_id($id);
+      my $re = eval { qr/\A(?:$id)\z/ism };
+      print "$id\n" unless $re && grep { $_ =~ $re } @known;
+    }
+  ' "$TMP/ids" "$TMP/known-ids" "$TMP/known-helpers"
 }
+# Flows besides the boot ones whose ids are all checked against testIds.ts (EXP-176, EXP-348)
+ID_CHECKED_FLOWS="tie-game.yaml hold-used-up.yaml"
 
 # ── The checker catches app text (fixture flow) ──
 mkdir -p "$TMP/app/i18n" "$TMP/app/utils"
@@ -121,6 +151,21 @@ done
   && ok "checker skips id+text, dev-client text and comments" || ko "checker reports only app text" "$(cat "$TMP/hits")"
 [ "$(unknown_ids "$TMP/flow.yaml" "$TMP/app")" = initial-screen ] \
   && ok "checker flags an id missing from testIds.ts" || ko "checker flags unknown ids" "$(unknown_ids "$TMP/flow.yaml" "$TMP/app")"
+# Per-player / per-item ids come from the helpers: a value of the helper's parameter, a flow variable or a pattern
+# after its prefix; a misspelt prefix, an empty or wrong-typed value, or a cut longer prefix is flagged
+cat >>"$TMP/app/utils/testIds.ts" <<'EOF'
+export const winnerNameId = (username: string) => `winner-name-${username}`;
+export const lobbyPlayerId = (username: string) => `lobby-player-${username}`;
+export const lobbyPlayerOfflineId = (username: string) => `lobby-player-offline-${username}`;
+export const roundsOptionId = (rounds: number) => `rounds-option-${rounds}`;
+EOF
+good_ids='winner-name-bot1|winner-name-${USERNAME}|winner-name-.*|lobby-player-bot1|lobby-player-${USERNAME}|lobby-player-offline-${USERNAME}|lobby-player-offline-.*|rounds-option-10|rounds-option-\d+|rounds-option-${ROUNDS}|rounds-option-.*'
+bad_ids='winner-name-|winner-nmae-bot1|lobby-player-offlne-${USERNAME}|lobby-player-offlne-bot1|lobby-player-offline|lobby-player-offline-|rounds-option-ten|winner-name-${USERNAME}x'
+printf -- '- assertVisible:\n    id: "%s|%s"\n' "$good_ids" "$bad_ids" >"$TMP/ids-flow.yaml"
+got="$(unknown_ids "$TMP/ids-flow.yaml" "$TMP/app" | sort | tr '\n' '|')"
+want="$(tr '|' '\n' <<<"$bad_ids" | sort | tr '\n' '|')"
+[ "$got" = "$want" ] \
+  && ok "checker takes ids of testIds.ts helpers, flags misspelt, empty, wrong-typed and cut ones" || ko "checker takes helper ids" "flagged [$got] want [$want]"
 
 # ── The boot flows find the app by testID ──
 app_strings "$TMP/strings" "$CLIENT_APP"
@@ -129,6 +174,10 @@ for flow in $BOOT_FLOWS; do
   text_selectors "$MAESTRO_DIR/$flow" >"$TMP/selectors"
   hits="$(app_text_hits "$TMP/selectors" "$TMP/strings")"
   [ -z "$hits" ] && ok "$flow: no text selector matches app text" || ko "$flow: text selectors match app text" "$(tr '\t\n' ' ;' <<<"$hits")"
+  missing="$(unknown_ids "$MAESTRO_DIR/$flow" "$CLIENT_APP")"
+  [ -z "$missing" ] && ok "$flow: every id is in testIds.ts" || ko "$flow: ids missing from testIds.ts" "$(tr '\n' ' ' <<<"$missing")"
+done
+for flow in $ID_CHECKED_FLOWS; do
   missing="$(unknown_ids "$MAESTRO_DIR/$flow" "$CLIENT_APP")"
   [ -z "$missing" ] && ok "$flow: every id is in testIds.ts" || ko "$flow: ids missing from testIds.ts" "$(tr '\n' ' ' <<<"$missing")"
 done
@@ -149,9 +198,7 @@ for param in 'url=${METRO_URL}' disableOnboarding=1 disableAutoLaunch=1 __expo_d
 done
 
 # ── hold-used-up.yaml checks the hold button's text in both languages (EXP-176) ──
-HOLD_FLOW="$MAESTRO_DIR/hold-used-up.yaml"
-missing="$(unknown_ids "$HOLD_FLOW" "$CLIENT_APP")"
-[ -z "$missing" ] && ok "hold-used-up.yaml: every id is in testIds.ts" || ko "hold-used-up.yaml: ids missing from testIds.ts" "$(tr '\n' ' ' <<<"$missing")"
+HOLD_FLOW="$MAESTRO_DIR/hold-used-up.yaml"   # its ids are checked with ID_CHECKED_FLOWS
 no_holds_left="$(i18n_value noHoldsLeft)"
 hold_texts="$(sed -nE 's/^[[:space:]]*text: "(.*)"$/\1/p' "$HOLD_FLOW" | sort -u)"
 # The only text filter, on the line after the hold button's id (the same selector)

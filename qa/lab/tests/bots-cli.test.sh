@@ -222,6 +222,22 @@ done
 mirrors managers/GameEngine.ts "$BOTS" HOLD_BUDGET_PER_ROUND HOLD_BUDGET_PER_ROUND
 mirrors managers/GameEngine.ts "$ANALYSIS" MAX_HOLDS_PER_ROUND MAX_HOLDS_PER_ROUND
 
+# ── --answer-right: the bots vote for the owner and end tied with points (EXP-348) ──
+# Options that make a bot miss or change a vote would break the tie, so they are refused with it
+for clash in "--no-answer" "--plant 1" "--chaos 0.1" "--drop-round 2" "--drop-rounds 2,3" "--leave-round 2" "--play-again-linger 5"; do
+  # shellcheck disable=SC2086
+  run 2 "--answer-right with $clash exits 2" --bots 3 --host --answer-right $clash --timeout 1
+  [[ "$err" == *"--answer-right can't be combined with ${clash%% *}"* ]] && ok "--answer-right with $clash is named" || ko "--answer-right with $clash is named" "$err"
+done
+for good in "--answer-right" "--answer-right --hold 0.5 --rounds 3" "--answer-right --quit-after-game-over"; do
+  # shellcheck disable=SC2086
+  SERVER_URL="$URL" node "$BOTS" --bots 3 --host $good --timeout 1 >/dev/null 2>"$TMP/err"; rc=$?
+  [[ "$rc" != 2 ]] && ok "$good is accepted" || ko "$good is accepted" "$(cat "$TMP/err")"
+done
+[[ "$(node "$BOTS" --help)" == *"--answer-right"* ]] && ok "--help lists --answer-right" || ko "--help lists --answer-right"
+grep -q -- "--bot-args --answer-right" "$HERE/../../maestro/tie-game.yaml" 2>/dev/null \
+  && ok "tie-game.yaml says how to run it (--bot-args --answer-right)" || ko "tie-game.yaml runs with --bot-args --answer-right"
+
 # ── A valid run says which server it uses before connecting ──
 SERVER_URL="$URL" node "$BOTS" --bots 1 --host --timeout 1 >/dev/null 2>"$TMP/err"
 err="$(cat "$TMP/err")"

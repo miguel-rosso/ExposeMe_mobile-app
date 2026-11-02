@@ -13,6 +13,15 @@
 //   options: --server URL  --photos DIR  --out FILE  --chaos 0.1  --upload-fail 0.2  --timeout 600
 //            --no-ready K   the last K bots never send im-ready (game must start via the server's ready timeout)
 //            --no-answer    bots always submit an empty guess (nobody scores: no result, DEC-044, see qa/maestro/no-result-game.yaml)
+//            --answer-right bots vote for the round's owner whenever this run can tell it: one of its bots sent the
+//                           photo, or exactly one player in the room is not one of its bots (EXP-348). They all end tied,
+//                           above 0 with at most one other player (qa/maestro/tie-game.yaml). Each game's final score must
+//                           show every bot on one point per revealed round whose owner it could tell, and more than 0 (a
+//                           game nobody scored has no result) ("consistency", "tie: ..."). Not with --no-answer,
+//                           --plant, --chaos, --drop-round(s), --leave-round or --play-again-linger; the other players
+//                           (devices) must play the whole game: the check counts them from game-started, so one leaving
+//                           would let the bots tell owners the check does not expect them to.
+//   node qa/lab/bots.mjs --bots 3 --host --rounds 3 --answer-right       # bot1, bot2 and bot3 tied on 3 points
 //            --drop-round R --drop-secs S [--drop-bot K]
 //                           bot K (1-based, default the last one) drops at round R's round-start and reconnects
 //                           S seconds later (rejoin + game-state snapshot). With --bots 2 the game must pause
@@ -171,7 +180,7 @@ import { analyseRoom, DISCONNECT_GRACE_MS, skipReasonLeak } from "./bots-analysi
 // ── Command line ──
 // Parsed and validated before anything touches the network (EXP-197): --help and bad arguments never connect
 const BOOL_FLAGS = new Set([
-  "host", "no-answer", "app-resync", "lobby-host-drop", "drop-on-turn", "quit-after-game-over", "leave-owner", "help",
+  "host", "no-answer", "answer-right", "app-resync", "lobby-host-drop", "drop-on-turn", "quit-after-game-over", "leave-owner", "help",
 ]);
 const VALUE_FLAGS = new Set([
   "server", "bots", "rooms", "rounds", "wait-players", "code", "code-file", "photos", "out", "chaos", "upload-fail",
@@ -197,6 +206,8 @@ Headless ExposeMe players (see the header of qa/lab/bots.mjs for every scenario)
   --photos DIR  --out FILE   photos to upload (*.jpg) / write the summary + events as JSON
   --timeout S                give up after S seconds (default 900)
   --chaos P  --upload-fail P  --photo-unavailable P  --no-ready K  --no-answer  --plant K
+  --answer-right             every bot votes for the photo's owner when it can tell (a bot of this run sent the photo,
+                             or one other player is in the room): the bots end tied with points (qa/maestro/tie-game.yaml)
   --drop-round R | --drop-rounds R1,R2,...  --drop-secs S [--drop-bot K | --drop-on-turn (--drop-round only)]
   --app-resync  --lobby-host-drop
   --leave-round R [--leave-owner]  the last bot (or, with --leave-owner, round R's photo owner) leaves the room
@@ -332,10 +343,19 @@ const NO_READY = Number(args["no-ready"] || 0);
 const PLANT = Number(args.plant || 0);
 const NO_ANSWER = !!args["no-answer"];
 // --no-answer: bots submit an empty guess like a player who never taps, so nobody scores: no result (DEC-044).
-// Nobody is told whose photo it is, the owner included (EXP-252): every bot guesses at random among all the round's
-// options, those who left during the round included (DEC-038).
+// --answer-right (EXP-348): every bot votes for the round's owner whenever this run can tell it (knownOwner in
+// runRoom), so all bots end tied, on one point per round played when at most one other player is in the room.
+const ANSWER_RIGHT = !!args["answer-right"];
+// Options that make a bot miss or change a vote (or hide who sent the photo) would break that tie
+// (a bot lingering on the final screens sits the second game out)
+const TIE_BREAKING_OPTIONS = ["no-answer", "plant", "chaos", "drop-round", "drop-rounds", "leave-round", "play-again-linger"];
+const tieBreaker = ANSWER_RIGHT && TIE_BREAKING_OPTIONS.find((o) => args[o] !== undefined);
+if (tieBreaker) exitUsage(`--answer-right can't be combined with --${tieBreaker} (the bots would no longer tie)`);
+// Otherwise nobody is told whose photo it is, the owner included (EXP-252): every bot guesses at random among all
+// the round's options, those who left during the round included (DEC-038).
 const pickGuess = (bot) => {
   if (NO_ANSWER) return "";
+  if (ANSWER_RIGHT) return bot.knownOwner() ?? "";
   const options = [...bot.players, ...bot.leavers];
   return options[Math.floor(Math.random() * options.length)] || "";
 };
@@ -438,7 +458,7 @@ const KICKED_REFUSAL = "Removed by host";
 // What the room checks need to know about this run (qa/lab/bots-analysis.mjs)
 const ANALYSIS_OPTS = {
   host: !!args.host, rounds: ROUNDS, playAgainLingerS: PLAY_AGAIN_LINGER_S, lingerBot: LINGER_BOT, startNextGameS: START_NEXT_GAME_S,
-  quitAfterGameOver: QUIT_AFTER_GAME_OVER,
+  quitAfterGameOver: QUIT_AFTER_GAME_OVER, answerRight: ANSWER_RIGHT,
 };
 const PHOTOS = args.photos ? fs.readdirSync(args.photos).filter((f) => f.endsWith(".jpg")).map((f) => path.join(args.photos, f)) : [];
 
@@ -568,6 +588,18 @@ function runRoom(roomIdx, fixedCode) {
       done("timeout");
     }, TIMEOUT_S * 1000);
 
+    // ── Voting for the owner (--answer-right, EXP-348) ──
+    const roomBotNames = new Set(Array.from({ length: N_BOTS }, (_, i) => botName(roomIdx, i)));
+    // round -> the bot of this run that sent its photo; forgotten when the round's photo is awaited again or skipped,
+    // so a photo-sent the server ignored (or a previous game's round) never names a stale owner
+    const photoSenders = new Map();
+    /** Round's owner as far as this run can tell: the bot that sent its photo, else the only player that isn't ours. */
+    const knownOwner = (bot) => {
+      if (photoSenders.has(bot.round)) return photoSenders.get(bot.round);
+      const others = [...bot.players, ...bot.leavers].filter((n) => !roomBotNames.has(n));
+      return others.length === 1 ? others[0] : undefined;
+    };
+
     const checkPhotoAccess = async (name, photo, auth, round) => {
       try {
         const member = await fetch(`${SERVER}${photo}`, { headers: auth });
@@ -588,6 +620,7 @@ function runRoom(roomIdx, fixedCode) {
       const isHost = !!args.host && i === 0;
       const socket = io(SERVER, { transports: ["websocket"], reconnection: true });
       const bot = { name, socket, isHost, players: [], leavers: [], guess: "", round: 0, token: null, plants: i < PLANT, droppedRounds: new Set() };
+      bot.knownOwner = () => knownOwner(bot);
       bots.push(bot);
       // Second game (--play-again-linger-bot): recorded apart so the first game's checks only see the first game
       const rec = (ev, round, payload) =>
@@ -822,6 +855,7 @@ function runRoom(roomIdx, fixedCode) {
           if (!stillInForce("photo")) return;
           socket.emit("photo-sent", { photo: up.url });
           bot.photoRound = d.round; // --leave-owner: this round's photo is ours
+          photoSenders.set(d.round, name);
           rec("photo-sent", d.round, { attempt: d.attempt });
         } catch (e) {
           if (e.rateLimited) rateLimited++;
@@ -900,9 +934,13 @@ function runRoom(roomIdx, fixedCode) {
       socket.on("waiting-photo", (d) => {
         bot.phase = "waiting-photo";
         bot.leavers = []; // the round is over: those who left during it are no longer options
+        photoSenders.delete(d.round);
         rec("waiting-photo", d.round, d);
       });
-      socket.on("round-skipped", (d) => rec("round-skipped", d?.round ?? bot.round, d));
+      socket.on("round-skipped", (d) => {
+        photoSenders.delete(d?.round ?? bot.round);
+        rec("round-skipped", d?.round ?? bot.round, d);
+      });
       // Rejoin snapshot: catch up like the app does (pick again in answering, im-ready in the ready phase)
       socket.on("game-state", (d) => {
         rec("game-state", d.round, {

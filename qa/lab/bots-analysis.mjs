@@ -43,9 +43,9 @@ const GAME_EVENTS = ["game-started", "waiting-photo", "your-turn", "round-start"
 
 /**
  * @typedef {{ host: boolean, rounds: number, playAgainLingerS: number, lingerBot: number, startNextGameS: number,
- *   quitAfterGameOver?: boolean }} AnalysisOpts
+ *   quitAfterGameOver?: boolean, answerRight?: boolean }} AnalysisOpts
  *   the run's options: --host, --rounds, --play-again-linger, --play-again-linger-bot (0-based, -1 = a device lingers),
- *   --start-next-game, --quit-after-game-over
+ *   --start-next-game, --quit-after-game-over, --answer-right
  */
 
 // ── Helpers ──
@@ -776,6 +776,37 @@ function secondGameReadyMs(r) {
   return w ? Math.round(w.t - g2s.t) : null;
 }
 
+// ── Tie with points (--answer-right, EXP-348) ──
+const GAME_PREFIXES = ["", "g2-"]; // the first game's events, and a second game's (recorded as "g2-<event>")
+
+/**
+ * One game of an --answer-right run, from its final score: every bot that played it (recorded game-started) is in
+ * the final score, all on one point per revealed round whose owner they could tell (one of them, or any owner
+ * when at most one other player started the game, those who left during it included), and that is more than 0:
+ * a game nobody scored has no result.
+ */
+function tieErrors(r, prefix) {
+  const starts = new Map(r.events.filter((e) => e.ev === `${prefix}game-started`).map((e) => [e.bot, e]));
+  const inGame = r.players.filter((n) => starts.has(n));
+  const over = r.events.find((e) => inGame.includes(e.bot) && e.ev === `${prefix}game-over`);
+  if (!over) return [];
+  const game = prefix ? "second game: " : "";
+  const finalScore = over.payload?.finalScore ?? [];
+  const ours = finalScore.filter((s) => inGame.includes(s.username));
+  const othersCount = (starts.get(over.bot).payload?.players ?? []).filter((n) => !r.players.includes(n)).length;
+  const ownerKnown = (owner) => r.players.includes(owner) || othersCount <= 1;
+  const expected = r.events.filter((e) => e.bot === over.bot && e.ev === `${prefix}round-reveal` && ownerKnown(e.payload?.correctAnswer)).length;
+  const listed = ours.map((s) => `${s.username} ${s.points}`).join(", ");
+  const errors = inGame.filter((n) => !ours.some((s) => s.username === n)).map((n) => `${game}tie: ${n} is missing from the final score`);
+  if (expected === 0) errors.push(`${game}tie: no round scored, the game has no result (${listed})`);
+  else if (new Set(ours.map((s) => s.points)).size > 1) errors.push(`${game}tie: the bots are not tied (${listed})`);
+  else if (ours.some((s) => s.points !== expected)) errors.push(`${game}tie: the bots should all have ${expected} points, one per round they could tell (${listed})`);
+  return errors;
+}
+
+/** --answer-right: each game ended with our bots tied on points. */
+const checkTie = (r, opts) => (opts.answerRight ? GAME_PREFIXES.flatMap((prefix) => tieErrors(r, prefix)) : []);
+
 // ── Room summary ──
 /**
  * `r`: { code, reason, players, errors, uploads, rateLimited, events } of one room (bots.mjs runRoom).
@@ -810,6 +841,7 @@ export function analyseRoom(r, opts) {
     ...holdChecks.errors,
     ...checkHoldsLeft(r),
     ...checkRoundNumbering(ctx),
+    ...checkTie(r, opts),
   ];
   return {
     code: r.code,

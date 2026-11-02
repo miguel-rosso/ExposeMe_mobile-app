@@ -47,7 +47,7 @@ afterAll(() => jest.restoreAllMocks());
 // Every event the game screen reacts to while the game runs
 const GAME_SCREEN_EVENTS = [
   "waiting-photo", "your-turn", "round-start", "round-reveal", "round-scores", "hold-start", "hold-end", "hold-resume",
-  "round-skipped", "game-paused", "game-resumed", "game-state", "game-over", "player-left", "player-removed",
+  "hold-closed", "round-skipped", "game-paused", "game-resumed", "game-state", "game-over", "player-left", "player-removed",
   "new-host", "emoji-reaction",
 ];
 // Events other components (the waiting room, hooks) may also listen to on the same socket

@@ -2,10 +2,10 @@
 # The boot flows find the app by testID, never by its translated text (EXP-048): open-app.yaml and its
 # dev-client-boot.yaml subflow may only use text for the Expo dev-client UI and system alerts, or to check the
 # language of an element already matched by id. A text selector that matches any app string (Client/app/i18n) breaks
-# in other languages and can hit the app instead of the dev menu. hold-used-up.yaml filters the hold button by its
-# noHoldsLeft text: in both languages, as the app has it (EXP-176). The kick flows read the host's removal notice, a
-# system alert, by its text: message, title and button as the app has them in both languages (EXP-346).
-# Static: no devices, servers or network.
+# in other languages and can hit the app instead of the dev menu. hold-used-up.yaml and hold-closed.yaml filter the
+# hold button by its noHoldsLeft text: in both languages, as the app has it (EXP-176, EXP-354). The kick flows read the
+# host's removal notice, a system alert, by its text: message, title and button as the app has them in both languages
+# (EXP-346). Static: no devices, servers or network.
 # Run: qa/lab/tests/maestro-selectors.test.sh
 set -uo pipefail
 
@@ -114,8 +114,8 @@ unknown_ids() {
     }
   ' "$TMP/ids" "$TMP/known-ids" "$TMP/known-helpers"
 }
-# Flows besides the boot ones whose ids are all checked against testIds.ts (EXP-176, EXP-348, EXP-346)
-ID_CHECKED_FLOWS="tie-game.yaml hold-used-up.yaml kicked-after-game.yaml kicked-while-offline.yaml join-room.yaml search-room.yaml"
+# Flows besides the boot ones whose ids are all checked against testIds.ts (EXP-176, EXP-348, EXP-346, EXP-354)
+ID_CHECKED_FLOWS="tie-game.yaml hold-used-up.yaml hold-closed.yaml kicked-after-game.yaml kicked-while-offline.yaml join-room.yaml search-room.yaml"
 # Flows that read the host's removal notice, a system alert matched by its text (EXP-139, EXP-346)
 KICK_NOTICE_FLOWS="kicked-notice.yaml kicked-after-game.yaml kicked-while-offline.yaml"
 
@@ -254,15 +254,17 @@ for param in 'url=${METRO_URL}' disableOnboarding=1 disableAutoLaunch=1 __expo_d
     || ko "dev-client-boot.yaml: openLink carries $param" "$(tr '\n' '&' <<<"$link_params")"
 done
 
-# ── hold-used-up.yaml checks the hold button's text in both languages (EXP-176) ──
-HOLD_FLOW="$MAESTRO_DIR/hold-used-up.yaml"   # its ids are checked with ID_CHECKED_FLOWS
+# ── hold-used-up.yaml and hold-closed.yaml check the hold button's text in both languages (EXP-176, EXP-354) ──
 no_holds_left="$(i18n_value noHoldsLeft)"
-hold_texts="$(sed -nE 's/^[[:space:]]*text: "(.*)"$/\1/p' "$HOLD_FLOW" | sort -u)"
-# The only text filter, on the line after the hold button's id (the same selector)
-[ -n "$hold_texts" ] && [ "$hold_texts" = "$no_holds_left" ] \
-  && grep -B1 -F "text: \"$no_holds_left\"" "$HOLD_FLOW" | grep -qF 'id: "hold-button"' \
-  && ok "hold-used-up.yaml: the hold button's text filter is noHoldsLeft in en and es ($no_holds_left)" \
-  || ko "hold-used-up.yaml: text filter is the hold button's noHoldsLeft in en|es" "app: $no_holds_left; flow: $(tr '\n' ';' <<<"$hold_texts")"
+for name in hold-used-up.yaml hold-closed.yaml; do # their ids are checked with ID_CHECKED_FLOWS
+  HOLD_FLOW="$MAESTRO_DIR/$name"
+  hold_texts="$(sed -nE 's/^[[:space:]]*text: "(.*)"$/\1/p' "$HOLD_FLOW" | sort -u)"
+  # The only text filter, on the line after the hold button's id (the same selector)
+  [ -n "$hold_texts" ] && [ "$hold_texts" = "$no_holds_left" ] \
+    && grep -B1 -F "text: \"$no_holds_left\"" "$HOLD_FLOW" | grep -qF 'id: "hold-button"' \
+    && ok "$name: the hold button's text filter is noHoldsLeft in en and es ($no_holds_left)" \
+    || ko "$name: text filter is the hold button's noHoldsLeft in en|es" "app: $no_holds_left; flow: $(tr '\n' ';' <<<"$hold_texts")"
+done
 
 # ── Flow simulator ──
 # maestro-sim.mjs runs a flow's own YAML and JS against a fake device with Maestro 2.11's semantics (see its header)

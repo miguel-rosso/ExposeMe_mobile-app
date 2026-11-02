@@ -366,6 +366,52 @@ hold_taps="$(awk '/^[ \t]*- tapOn:/ { tap = 1; next } tap && /^[ \t]*repeat:/ { 
     "engine: scores=$scores min=$hold_min holds=$max_holds budget=$hold_budget; flow: taps=$hold_taps $hold_timing"
 [ "$(blocks_of hold-used-up.yaml scores)" = 1 ] \
   && ok "hold-used-up.yaml budgets its steps on the device's scoreboard" || ko "hold-used-up.yaml has a scores block"
+# EXP-354: hold-closed greys the button out by itself from the 1.5 s mark, so the "no holds left" wait and the 4th tap
+# end before it could (closingFrom): the wait's last read starts readMs before it (one that started just before it
+# could see the screen after hold-closed), the 4th tap also leaves its latency, and nothing is bound to the
+# scoreboard's close any more
+# shellcheck disable=SC2016
+closing_from='${output.round.closingFrom = output.look.hiddenFrom + output.timing.scoresMs - output.timing.holdMinMs}'
+used_up_bounded() { # FLOW -> whether its used-up checks all end before closingFrom
+  # shellcheck disable=SC2016
+  grep -qF "evalScript: $closing_from" "$1" \
+    && grep -qF 'timeout: ${output.round.closingFrom - output.round.readMs - Date.now()}' "$1" \
+    && grep -qF '&& output.round.closingFrom - output.round.readMs - Date.now() > 0}' "$1" \
+    && grep -qF 'true: ${output.round.closingFrom - output.round.readMs - output.timing.tapLatencyMs - Date.now() > 0}' "$1" \
+    && ! grep -qF 'timeout: ${output.round.closingFrom - Date.now()}' "$1" \
+    && ! grep -q 'closesAfter' "$1"
+}
+used_up_bounded "$HOLD_FLOW" \
+  && ok "hold-used-up.yaml checks the used up holds only with reads that end before hold-closed could grey the button out" \
+  || ko "hold-used-up.yaml's checks bound by closingFrom minus a read (hiddenFrom + scores - hold min)"
+# The bound before EXP-354's last pass: the wait kept starting reads until closingFrom itself
+# shellcheck disable=SC2016
+sed 's/timeout: ${output.round.closingFrom - output.round.readMs - Date.now()}/timeout: ${output.round.closingFrom - Date.now()}/' \
+  "$HOLD_FLOW" >"$TMP/hold-used-up-late-read.yaml"
+! used_up_bounded "$TMP/hold-used-up-late-read.yaml" \
+  && ok "checker rejects a used-up wait whose last read may start just before closingFrom" \
+  || ko "checker rejects the unmargined used-up wait"
+
+# ── hold-closed.yaml's times fit the server's (EXP-354) ──
+# Without tapping: the button is enabled while the hold window is surely open (until hiddenFrom + SCORE_DISPLAY_TIME -
+# HOLD_MIN_REMAINING), then greyed out before the scoreboard is surely over (seenAt + SCORE_DISPLAY_TIME)
+CLOSED_FLOW="$MAESTRO_DIR/hold-closed.yaml"
+closed_timing="$(sed -nE 's/^- evalScript: "\$\{output\.timing = \{ (.*) \}\}"$/\1/p' "$CLOSED_FLOW")"
+closed_ms() { tr ',' '\n' <<<"$closed_timing" | sed -nE "s/^ *$1: ([0-9]+) *$/\1/p"; } # KEY -> its value in the flow
+[ -n "$hold_min" ] && [ -n "$scores" ] && [ "$(closed_ms scoresMs)" = "$scores" ] && [ "$(closed_ms holdMinMs)" = "$hold_min" ] \
+  && ok "hold-closed.yaml copies GameEngine.ts's scoreboard and hold window times ($scores/$hold_min ms)" \
+  || ko "hold-closed.yaml's times match GameEngine.ts" "engine: scores=$scores min=$hold_min; flow: $closed_timing"
+# shellcheck disable=SC2016
+grep -qF "evalScript: $closing_from" "$CLOSED_FLOW" \
+  && grep -qF 'evalScript: ${output.round.closesBy = output.look.seenAt + output.timing.scoresMs}' "$CLOSED_FLOW" \
+  && grep -qF 'true: ${output.round.known && Date.now() + output.round.readMs < output.round.closingFrom}' "$CLOSED_FLOW" \
+  && grep -qF 'timeout: ${output.round.closingFrom - Date.now()}' "$CLOSED_FLOW" \
+  && grep -qF 'timeout: ${output.round.closesBy - Date.now()}' "$CLOSED_FLOW" \
+  && ok "hold-closed.yaml waits for the enabled button until closingFrom and the greyed out one until closesBy" \
+  || ko "hold-closed.yaml's waits bound by closingFrom / closesBy"
+[ "$(blocks_of hold-closed.yaml scores)" = 1 ] && ! grep -qE '^[[:space:]]*- (tapOn|longPressOn|swipe):' "$CLOSED_FLOW" \
+  && ok "hold-closed.yaml budgets its steps on the device's scoreboard and taps nothing" \
+  || ko "hold-closed.yaml has a scores block and no taps"
 
 # ── The kick after the game comes when the flows expect it (EXP-346) ──
 # The host bot removes the device D s after game over (--kick-after-game D, as each flow documents its run). By then the

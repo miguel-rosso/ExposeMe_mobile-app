@@ -138,14 +138,16 @@
 //                           own name, a bot presses hold (hold-start) with probability P and lets go (hold-end) after a
 //                           random time within the server's hold budget; like the app, it presses again (probability P)
 //                           while the server's hold-end says holds are left (holdsLeft > 0, EXP-176), and never once
-//                           it says 0. With --chaos C it goes away instead of letting go
+//                           it says 0 or the scoreboard's hold-closed came (EXP-354). With --chaos C it goes away
+//                           instead of letting go
 //                           with probability C: half the time it drops (back 1.5-3.5 s later), half the time it rejoins on a
 //                           new socket while holding, like the app reconnecting before the server noticed its old
 //                           connection was lost (EXP-299). Every player still in the room must get hold-end and
 //                           hold-resume within 1 s of the holder letting go, leaving, dropping or rejoining, and of the
 //                           server ending the hold itself (hold-resume is not due when a pause ended it), every hold-end
 //                           must carry holdsLeft (at most 3 minus the round's holds so far), and the server must accept
-//                           no hold in a round after saying none are left ("consistency"); summary: holds,
+//                           no hold in a round after saying none are left (a hold-end with 0, or hold-closed), whose
+//                           scoreboard snapshots then say 0 too ("consistency"); summary: holds,
 //                           hold_release_ms.
 //                           play-rounds.yaml's simulator (qa/lab/tests/maestro-sim.mjs) models a single hold per round,
 //                           not these presses again (EXP-355 will extend it).
@@ -344,7 +346,8 @@ const HOLD_BUDGET_PER_ROUND = 30_000;
 // A hold lasts this long (min, max): a tap at least, and let go before the budget runs out (a later hold of the same
 // round may still reach what is left of it and be force-released)
 const HOLD_LENGTH_MS = [500, HOLD_BUDGET_PER_ROUND - 2_000];
-// Pressed this long after round-scores (min, max): the scores phase lasts 5 s and a hold needs 1.5 s of it left
+// Pressed this long after round-scores (min, max): the scores phase lasts 5 s and a hold needs more than 1.5 s of it
+// left (the server sends hold-closed when it gets there)
 const HOLD_PRESS_DELAY_MS = [200, 1_500];
 const UPLOAD_FAIL = Number(args["upload-fail"] || 0);
 const PHOTO_UNAVAILABLE = Number(args["photo-unavailable"] || 0);
@@ -949,6 +952,7 @@ function runRoom(roomIdx, fixedCode) {
       });
       socket.on("round-scores", (d) => {
         bot.phase = "scores";
+        bot.holdClosed = false; // a new scoreboard: holds are taken until its hold-closed
         rec("round-scores", d.round, { scores: d.scores });
         if (HOLD && bot.ownedRound === d.round && !bot.lingering && Math.random() < HOLD) pressHold(d.round);
       });
@@ -997,9 +1001,10 @@ function runRoom(roomIdx, fixedCode) {
       });
       socket.on("game-resumed", (d) => rec("game-resumed", bot.round, { phase: d.phase }));
       // ── Holding the scoreboard (--hold, EXP-303) ──
-      // bot.hold: our own press, from hold-start sent until it is over ({ round, accepted })
+      // bot.hold: our own press, from hold-start sent until it is over ({ round, accepted }). Like the app's greyed out
+      // button, no press once the server said the scoreboard is too short for a hold (bot.holdClosed, EXP-354)
       const pressHold = (round) => setTimeout(() => {
-        if (bot.phase !== "scores" || bot.round !== round || !socket.connected) return;
+        if (bot.phase !== "scores" || bot.round !== round || bot.holdClosed || !socket.connected) return;
         bot.hold = { round, accepted: false };
         rec("hold-sent", round);
         socket.emit("hold-start");
@@ -1025,6 +1030,11 @@ function runRoom(roomIdx, fixedCode) {
         if (HOLD && ours && holdsLeft > 0 && Math.random() < HOLD) pressHold(bot.round);
       });
       socket.on("hold-resume", (d) => rec("hold-resume", bot.round, d));
+      // The running scoreboard is down to 1.5 s: no hold is accepted any more this round (EXP-354)
+      socket.on("hold-closed", () => {
+        rec("hold-closed", bot.round);
+        bot.holdClosed = true;
+      });
       // Let go, or (--chaos) go away while holding: drop, or rejoin on a new socket
       const endHold = (hold) => {
         if (bot.hold !== hold) return; // already over

@@ -33,8 +33,11 @@ export interface RoundView {
   gameHeld: boolean;
   /** My finger is on the hold button */
   pressing: boolean;
-  /** The server says the round's holds are used up (`holdsLeft` 0): the hold button is greyed out */
-  holdsUsedUp: boolean;
+  /**
+   * The server says no hold can start any more this round: its holds are used up (`holdsLeft` 0) or the scoreboard is
+   * down to its last moments (`hold-closed`). The hold button is greyed out
+   */
+  noHoldsLeft: boolean;
   /**
    * Players who left during the round in play: still its answer options until the next photo wait (DEC-038). One of
    * them may be the photo's owner, who stays the answer, and the app can't tell which (secret until the reveal)
@@ -46,7 +49,7 @@ export interface RoundView {
 
 export const initialRoundView: RoundView = {
   photo: null, round: 0, phase: null, phaseDuration: 0, phaseTotal: 0, phaseKey: 0, correctAnswer: "", scores: null,
-  mySelection: "", gameHeld: false, pressing: false, holdsUsedUp: false, leavers: [], totalRounds: 0,
+  mySelection: "", gameHeld: false, pressing: false, noHoldsLeft: false, leavers: [], totalRounds: 0,
 };
 
 /**
@@ -68,6 +71,7 @@ export type RoundAction =
   | { type: "hold-start" }
   | { type: "hold-end"; data: HoldEndData }
   | { type: "hold-resume"; data: HoldResumeData }
+  | { type: "hold-closed" }
   | { type: "game-paused" }
   | { type: "game-resumed"; data: GameResumedData }
   | { type: "game-state"; snap: GameStateSnapshot; serverUrl: string };
@@ -93,7 +97,7 @@ export const phaseElapsed = ({ phaseDuration, phaseTotal }: Pick<RoundView, "pha
 
 /** Leaves the previous round: no answer, scores, pick, hold or leavers left over (a new round has all its holds) */
 const PER_ROUND_RESET = {
-  correctAnswer: "", scores: null, mySelection: "", gameHeld: false, pressing: false, holdsUsedUp: false, leavers: [],
+  correctAnswer: "", scores: null, mySelection: "", gameHeld: false, pressing: false, noHoldsLeft: false, leavers: [],
 } as const;
 
 const inRoundPhase = (phase: ServerPhase | null) => phase === "answering" || phase === "reveal" || phase === "scores";
@@ -133,7 +137,7 @@ const snapshotLeavers = (snap: GameStateSnapshot): RoundLeaver[] =>
 const applySnapshot = (state: RoundView, snap: GameStateSnapshot, serverUrl: string): RoundView => {
   if (!snap.started) return { ...state, pressing: false, gameHeld: false };
   const held = {
-    ...state, pressing: false, gameHeld: snap.held, holdsUsedUp: snap.holdsLeft === 0, totalRounds: snap.totalRounds,
+    ...state, pressing: false, gameHeld: snap.held, noHoldsLeft: snap.holdsLeft === 0, totalRounds: snap.totalRounds,
   };
 
   if (showsRound(snap)) {
@@ -224,7 +228,10 @@ export const roundReducer = (state: RoundView, action: RoundAction): RoundView =
     // after I pressed again, and that new press must still send its release. A release after a hold the server ended
     // by itself is ignored by the server (I hold nothing).
     case "hold-end":
-      return { ...state, gameHeld: false, holdsUsedUp: action.data.holdsLeft === 0 };
+      return { ...state, gameHeld: false, noHoldsLeft: action.data.holdsLeft === 0 };
+    // Too little of the scoreboard is left for a hold: no hold can start any more, as when they are used up
+    case "hold-closed":
+      return { ...state, noHoldsLeft: true };
     case "game-paused":
       return { ...state, gameHeld: false, pressing: false };
     // The held phase continues with the remaining time

@@ -25,7 +25,7 @@ describe("round-start (EXP-001)", () => {
     const prev = view({ phaseKey: 4, correctAnswer: "alice", scores: [], mySelection: "bob" });
     expect(start(prev)).toEqual({
       photo: "http://srv/temp/a.jpg", round: 3, phase: "answering", phaseDuration: 10000, phaseTotal: 10000, phaseKey: 5,
-      correctAnswer: "", scores: null, mySelection: "", gameHeld: false, pressing: false, holdsUsedUp: false, leavers: [],
+      correctAnswer: "", scores: null, mySelection: "", gameHeld: false, pressing: false, noHoldsLeft: false, leavers: [],
       totalRounds: 0,
     });
   });
@@ -253,21 +253,29 @@ describe("reveal, scores, hold and pause", () => {
   // EXP-176: the server says when the round's holds are used up; the app doesn't count them itself
   it("hold-end with no holds left greys the button out until the next round", () => {
     const scores = view({ ...answering, phase: "scores", gameHeld: true });
-    expect(roundReducer(scores, { type: "hold-end", data: { holdsLeft: 1 } }).holdsUsedUp).toBe(false);
+    expect(roundReducer(scores, { type: "hold-end", data: { holdsLeft: 1 } }).noHoldsLeft).toBe(false);
     const usedUp = roundReducer(scores, { type: "hold-end", data: { holdsLeft: 0 } });
-    expect(usedUp).toMatchObject({ gameHeld: false, holdsUsedUp: true });
+    expect(usedUp).toMatchObject({ gameHeld: false, noHoldsLeft: true });
     // A pause or a resume doesn't give them back; the next round does
-    expect(roundReducer(usedUp, { type: "game-paused" }).holdsUsedUp).toBe(true);
-    expect(roundReducer(usedUp, { type: "hold-resume", data: { phase: "scores", duration: 1_500, phaseTotal: 5_000 } }).holdsUsedUp).toBe(true);
-    expect(roundReducer(usedUp, { type: "waiting-photo", data: { round: 3, duration: 15_000 } }).holdsUsedUp).toBe(false);
+    expect(roundReducer(usedUp, { type: "game-paused" }).noHoldsLeft).toBe(true);
+    expect(roundReducer(usedUp, { type: "hold-resume", data: { phase: "scores", duration: 1_500, phaseTotal: 5_000 } }).noHoldsLeft).toBe(true);
+    expect(roundReducer(usedUp, { type: "waiting-photo", data: { round: 3, duration: 15_000 } }).noHoldsLeft).toBe(false);
     const next = roundReducer(usedUp, { type: "round-start", data: { photo: "/temp/b.jpg", round: 3, duration: 7_700 }, serverUrl: "" });
-    expect(next.holdsUsedUp).toBe(false);
+    expect(next.noHoldsLeft).toBe(false);
+  });
+
+  // EXP-354: the server says when the running scoreboard is too short for a hold; the app keeps no timer for it
+  it("hold-closed greys the button out until the next round, leaving the hold and my press alone", () => {
+    const scores = view({ ...answering, phase: "scores", pressing: true });
+    const closed = roundReducer(scores, { type: "hold-closed" });
+    expect(closed).toEqual({ ...scores, noHoldsLeft: true });
+    expect(roundReducer(closed, { type: "waiting-photo", data: { round: 3, duration: 15_000 } }).noHoldsLeft).toBe(false);
   });
 
   it("a snapshot tells whether the round's holds are used up", () => {
     const scoresSnap = (holdsLeft: number) => snapshot({ phase: "scores", correctAnswer: "bob", holdsLeft });
-    expect(roundReducer(view(), { type: "game-state", snap: scoresSnap(0), serverUrl: "" }).holdsUsedUp).toBe(true);
-    expect(roundReducer(view({ holdsUsedUp: true }), { type: "game-state", snap: scoresSnap(2), serverUrl: "" }).holdsUsedUp).toBe(false);
+    expect(roundReducer(view(), { type: "game-state", snap: scoresSnap(0), serverUrl: "" }).noHoldsLeft).toBe(true);
+    expect(roundReducer(view({ noHoldsLeft: true }), { type: "game-state", snap: scoresSnap(2), serverUrl: "" }).noHoldsLeft).toBe(false);
   });
 
   it("resuming a pause taken after scores waits for the next round's photo", () => {

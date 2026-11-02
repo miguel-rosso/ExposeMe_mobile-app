@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ANSWER_TIME, GameEngine, HOLD_BUDGET_PER_ROUND, MAX_HOLDS_PER_ROUND } from "../managers/GameEngine";
+import { ANSWER_TIME, GameEngine, HOLD_BUDGET_PER_ROUND, MAX_HOLDS_PER_ROUND, PAUSE_MIN_DURATION } from "../managers/GameEngine";
 import { RoomManager } from "../managers/RoomManager";
 import { GameStateSnapshot, HoldEndData, Player, Room } from "../models/interfaces";
 import { CapturedEmit, createFakeIo } from "./helpers";
@@ -105,11 +105,19 @@ describe("holdsLeft (EXP-176)", () => {
     expect(engine.handleHold(room, owner.socketId)).toBe(false);
   });
 
-  it("a hold started at that point is released with the holds still counted (the scoreboard was frozen)", () => {
+  it("with exactly HOLD_MIN_REMAINING left the window is closed: the snapshot says 0 and no hold is accepted", () => {
     vi.advanceTimersByTime(SCORE_DISPLAY_TIME - HOLD_MIN_REMAINING);
+
+    rejoin(others[0]);
+    expect(lastSnapshot()).toMatchObject({ phase: "scores", holdsLeft: 0 });
+    expect(engine.handleHold(room, owner.socketId)).toBe(false);
+  });
+
+  it("a hold started just before that is released with the holds still counted (the scoreboard was frozen)", () => {
+    vi.advanceTimersByTime(SCORE_DISPLAY_TIME - HOLD_MIN_REMAINING - 1);
     holdFor(100);
 
-    expect(events("hold-resume").pop()!.args[0]).toMatchObject({ duration: HOLD_MIN_REMAINING });
+    expect(events("hold-resume").pop()!.args[0]).toMatchObject({ duration: HOLD_MIN_REMAINING + 1 });
     expect(holdEnds()).toEqual([{ holdsLeft: 2 }]);
     expect(engine.handleHold(room, owner.socketId)).toBe(true);
   });
@@ -150,5 +158,114 @@ describe("holdsLeft (EXP-176)", () => {
     engine.onPhotoReceived(room, PHOTO, room.currentPlayer!.username);
     rejoin(others[0]);
     expect(lastSnapshot()).toMatchObject({ phase: "answering", holdsLeft: MAX_HOLDS_PER_ROUND });
+  });
+});
+
+// EXP-354: the room is told when the running scoreboard gets down to HOLD_MIN_REMAINING (`hold-closed`), so the app
+// greys its hold button out for the scoreboard's last moments instead of showing a button whose press is ignored
+describe("hold-closed (EXP-354)", () => {
+  const holdCloses = () => events("hold-closed");
+  const resumedDuration = (event: string) => (events(event).pop()!.args[0] as { duration: number }).duration;
+  const disconnect = (players: Player[]) => {
+    for (const p of players) rm.markDisconnected(room.gameCode, p.username, p.socketId);
+    engine.onConnectionChange(room, players[0]);
+  };
+
+  it("goes to the room once, when HOLD_MIN_REMAINING of the running scoreboard is left; holds are refused from then", () => {
+    vi.advanceTimersByTime(SCORE_DISPLAY_TIME - HOLD_MIN_REMAINING - 1);
+    expect(holdCloses()).toHaveLength(0);
+
+    vi.advanceTimersByTime(1);
+    expect(holdCloses().map((e) => [e.target, e.args])).toEqual([[room.gameCode, []]]);
+    expect(engine.handleHold(room, owner.socketId)).toBe(false);
+
+    vi.advanceTimersByTime(HOLD_MIN_REMAINING);
+    expect(room.phase).toBe("waiting-photo");
+    expect(holdCloses()).toHaveLength(1);
+  });
+
+  it("a hold freezes it: none while held, then HOLD_MIN_REMAINING before the resumed scoreboard ends", () => {
+    vi.advanceTimersByTime(1_000);
+    expect(engine.handleHold(room, owner.socketId)).toBe(true);
+    vi.advanceTimersByTime(10_000);
+    expect(holdCloses()).toHaveLength(0);
+
+    expect(engine.handleRelease(room, owner.socketId)).toBe(true);
+    const left = resumedDuration("hold-resume");
+    expect(left).toBe(SCORE_DISPLAY_TIME - 1_000);
+    vi.advanceTimersByTime(left - HOLD_MIN_REMAINING - 1);
+    expect(holdCloses()).toHaveLength(0);
+    vi.advanceTimersByTime(1);
+    expect(holdCloses()).toHaveLength(1);
+  });
+
+  it("is not sent once a hold-end said no holds are left", () => {
+    for (let i = 0; i < MAX_HOLDS_PER_ROUND; i++) holdFor(100);
+    expect(holdEnds().pop()).toEqual({ holdsLeft: 0 });
+
+    vi.advanceTimersByTime(SCORE_DISPLAY_TIME);
+    expect(room.phase).toBe("waiting-photo");
+    expect(holdCloses()).toHaveLength(0);
+  });
+
+  it("a pause freezes it too; the resumed scoreboard closes its window again", () => {
+    vi.advanceTimersByTime(1_000);
+    disconnect(others);
+    expect(room.paused).toBe(true);
+    vi.advanceTimersByTime(SCORE_DISPLAY_TIME);
+    expect(holdCloses()).toHaveLength(0);
+
+    rejoin(others[0]);
+    expect(room.paused).toBe(false);
+    vi.advanceTimersByTime(resumedDuration("game-resumed") - HOLD_MIN_REMAINING);
+    expect(holdCloses()).toHaveLength(1);
+  });
+
+  it("goes once per scoreboard: one resumed after its window closed stays closed without another", () => {
+    vi.advanceTimersByTime(SCORE_DISPLAY_TIME - 200);
+    expect(holdCloses()).toHaveLength(1);
+    disconnect(others);
+    expect(room.paused).toBe(true);
+
+    vi.advanceTimersByTime(PAUSE_MIN_DURATION);
+    rejoin(others[0]);
+    expect(events("game-resumed").pop()!.args[0]).toMatchObject({ phase: "scores", duration: HOLD_MIN_REMAINING });
+    expect(lastSnapshot()).toMatchObject({ phase: "scores", holdsLeft: 0 });
+    vi.advanceTimersByTime(HOLD_MIN_REMAINING);
+    expect(room.phase).toBe("waiting-photo");
+    expect(holdCloses()).toHaveLength(1);
+  });
+
+  // The window timer runs a little late: a pause between the 1.5 s mark and that timer must not swallow hold-closed
+  it("a pause the moment the window closes, before its timer ran, still sends it (before game-paused)", () => {
+    vi.advanceTimersByTime(SCORE_DISPLAY_TIME - HOLD_MIN_REMAINING - 1);
+    vi.setSystemTime(Date.now() + 1); // the clock reaches the mark, the timer hasn't fired yet
+    expect(holdCloses()).toHaveLength(0);
+    disconnect(others);
+
+    expect(room.paused).toBe(true);
+    const order = emits.map((e) => e.event).filter((e) => e === "hold-closed" || e === "game-paused");
+    expect(order).toEqual(["hold-closed", "game-paused"]);
+    vi.advanceTimersByTime(PAUSE_MIN_DURATION);
+    rejoin(others[0]);
+    vi.advanceTimersByTime(HOLD_MIN_REMAINING);
+    expect(holdCloses()).toHaveLength(1);
+  });
+
+  it("a game that ends during the scoreboard sends none afterwards", () => {
+    vi.advanceTimersByTime(1_000);
+    for (const p of others) engine.removePlayer(room, p.username, "left");
+    expect(room.started).toBe(false);
+
+    vi.advanceTimersByTime(SCORE_DISPLAY_TIME);
+    expect(holdCloses()).toHaveLength(0);
+  });
+
+  it("only scoreboards send it", () => {
+    vi.advanceTimersByTime(SCORE_DISPLAY_TIME);
+    engine.onPhotoReceived(room, PHOTO, room.currentPlayer!.username);
+    vi.advanceTimersByTime(ANSWER_TIME + REVEAL_TIME - 1);
+    expect(room.phase).toBe("reveal");
+    expect(holdCloses()).toHaveLength(1); // round 1's scoreboard
   });
 });

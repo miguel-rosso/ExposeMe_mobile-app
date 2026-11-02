@@ -1,0 +1,114 @@
+# EXP-354: in the last 1.5 s of a scoreboard (HOLD_MIN_REMAINING) no hold can start any more, and the server says so
+# (hold-closed): the photo owner's hold button then says so ("No holds left" / "Ya no puedes mantenerla") and is
+# disabled, instead of looking active while a press is ignored. On a scoreboard of the device's own photo, without
+# tapping, the flow checks the button is enabled while the hold window is surely still open, then that it turns to
+# that text, disabled, before the scoreboard closes.
+# Which rounds are the device's is the server's random pick, so the flow waits for its scoreboards until one has been
+# checked, and fails if the game ends first. Bots never hold (no --hold), so nothing freezes the scoreboard; with 2 bots
+# the device owns about a third of the rounds:
+#   qa/lab/lab.sh play --flow hold-closed --bots 2 --rounds 10 --devices <label>
+# env: GAME_CODE, USERNAME, METRO_URL (url-encoded), LOBBY_WAIT_MS (optional; lab.sh play passes them)
+# Selectors are testIDs (Client/app/utils/testIds.ts). The button's text is filtered by noHoldsLeft in both languages
+# (Client/app/i18n, kept in sync by qa/lab/tests/maestro-selectors.test.sh); `enabled` is its disabled state.
+#
+# Timing: the look loop notes when the last look that found no button started (`hiddenFrom`): the scoreboard opened
+# after it and before the look that saw it ended (`seenAt`). Its hold window closes 3.5 s after it opened, so it is
+# surely open until `closingFrom` (hiddenFrom + 3.5 s), and the scoreboard (nobody holds) is surely over by `closesBy`
+# (seenAt + 5 s). The enabled check only starts while a screen read still ends before closingFrom and waits for it until
+# then at most; the greyed out check only follows it and waits until closesBy at most. A scoreboard reached too late
+# for the first check is counted (`late`) and the flow waits for the device's next one. Taps would cost a 3 s settle
+# on iOS (see hold-used-up.yaml), so the flow only reads the screen: it runs on iOS and Android. The steps between
+# `timed:` markers are budgeted by qa/lab/tests/maestro-timing.test.sh, which also checks the copy of the server's times
+# below against Server/managers/GameEngine.ts and the two bounds.
+appId: com.socketNull.ExposeMe
+---
+- runFlow: open-app.yaml
+- runFlow: join-room.yaml
+- runFlow: wait-game-start.yaml
+# The server's scoreboard length and the time a hold needs left on it (GameEngine.ts: SCORE_DISPLAY_TIME,
+# HOLD_MIN_REMAINING); how much longer an unchecked one may take to close (a pause); how long to wait for the device's
+# next scoreboard (several rounds and their photo waits) and for the game over once one was checked
+- evalScript: "${output.timing = { scoresMs: 5000, holdMinMs: 1500, closeSlackMs: 5000, scoreboardWaitMs: 300000, gameOverWaitMs: 600000 }}"
+# Own scoreboards found too late to check, one checked, the game over (or no scoreboard of the device's in time)
+- evalScript: "${output.closed = { late: 0, checked: false, over: false }}"
+- repeat:
+    while:
+      true: ${!output.closed.checked && !output.closed.over}
+    commands:
+      - evalScript: "${output.look = { shown: false, seenAt: 0, lookFrom: 0, hiddenFrom: 0, giveUpAt: Date.now() + output.timing.scoreboardWaitMs }}"
+      - evalScript: "${output.round = { known: false, closingFrom: 0, closesBy: 0, readMs: 0, open: false }}"
+      # The device's next scoreboard (its hold button), or the game over. Before each look the script notes the
+      # previous one as the last that found none. The bookkeeping inside is an assertTrue (always true), which unlike
+      # an evalScript doesn't count as acting on the device, so the looks stay single screen reads (see
+      # play-rounds.yaml for Maestro's condition waits)
+      - repeat:
+          while:
+            true: ${!output.look.shown && (output.look.hiddenFrom = output.look.lookFrom, output.look.lookFrom = Date.now()) < output.look.giveUpAt}
+          commands:
+            - runFlow:
+                when:
+                  visible:
+                    id: "hold-button|winner-modal|final-score-modal"
+                commands:
+                  - assertTrue: ${output.look.seenAt = Date.now()}
+                  - assertTrue: ${output.look.shown = true}
+      # Known timing: an earlier look found no button, so the scoreboard opened after it started (see Timing).
+      # readMs: how long the look that saw it took
+      - evalScript: ${output.round.known = output.look.shown && output.look.hiddenFrom > 0}
+      - evalScript: ${output.round.closingFrom = output.look.hiddenFrom + output.timing.scoresMs - output.timing.holdMinMs}
+      - evalScript: ${output.round.closesBy = output.look.seenAt + output.timing.scoresMs}
+      - evalScript: ${output.round.readMs = output.look.seenAt - output.look.lookFrom}
+      # ── timed: scores ──
+      # Optional: the look may have seen the game over instead
+      - runFlow:
+          when:
+            true: ${output.round.known && Date.now() + output.round.readMs < output.round.closingFrom}
+          commands:
+            - extendedWaitUntil:
+                visible:
+                  id: "hold-button"
+                  enabled: true
+                timeout: ${output.round.closingFrom - Date.now()}
+                label: "While more than 1.5 s of the scoreboard is left the hold button is enabled"
+            - assertTrue: ${output.round.open = true}
+      - runFlow:
+          when:
+            true: ${output.round.open}
+          commands:
+            - extendedWaitUntil:
+                visible:
+                  id: "hold-button"
+                  text: "No holds left|Ya no puedes mantenerla"
+                  enabled: false
+                timeout: ${output.round.closesBy - Date.now()}
+                label: "In the scoreboard's last 1.5 s the hold button, never pressed, says no holds are left and is disabled"
+            - assertTrue: ${output.closed.checked = true}
+      # ── end timed ──
+      - runFlow:
+          when:
+            visible:
+              id: "winner-modal|final-score-modal"
+          commands:
+            - assertTrue: ${output.closed.over = true}
+      # No scoreboard of the device's within the wait: the assert after the loop fails
+      - evalScript: ${output.closed.over = output.closed.over || !output.look.shown}
+      # A scoreboard of the device's that was not checked: wait for it to close, so the next look doesn't find it again
+      - runFlow:
+          when:
+            true: ${!output.closed.checked && !output.closed.over}
+          commands:
+            - assertTrue: ${++output.closed.late}
+            - extendedWaitUntil:
+                notVisible:
+                  id: "hold-button"
+                timeout: ${output.timing.scoresMs + output.timing.closeSlackMs}
+                label: "The device's scoreboard closed"
+- assertTrue:
+    condition: ${output.closed.checked}
+    label: "A scoreboard of the device's photo greyed its hold button out in its last 1.5 s before the game ended (late ones are skipped)"
+- extendedWaitUntil:
+    visible:
+      id: "winner-modal|final-score-modal"
+    timeout: ${output.timing.gameOverWaitMs}
+    label: "The game ended"
+- takeScreenshot: hold-closed-${USERNAME}

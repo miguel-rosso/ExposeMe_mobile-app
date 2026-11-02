@@ -400,9 +400,12 @@ got="$(skip_leak '{"round":2,"reason":"unavailable"}' 1)"
 # offline (bot3 dropped at round-start and is still away when the hold ends, so it gets neither), no-holds-left (bot3's
 # hold-end has no holdsLeft), too-many-left (bot3's says 3 after a hold), held-when-used-up (hold-end says 0, then the
 # server starts another hold), snapshot-no-holds-left / snapshot-too-many-left (the snapshot bot1 gets back after
-# dropping or rejoining has no holdsLeft, or says 3; it says 2 otherwise). Prints the consistency errors, one per line,
-# then "holds=N lag_max=MS" from the summary.
-hold() { # ending, lag ms, mutation (none|no-resume|offline|no-holds-left|too-many-left|held-when-used-up|snapshot-*)
+# dropping or rejoining has no holdsLeft, or says 3; it says 2 otherwise). EXP-354, after the hold the room gets
+# hold-closed (the scoreboard is down to 1.5 s) and that snapshot says 0: closed (nothing else), held-after-closed (the
+# server starts another hold), snapshot-after-closed (the snapshot still says 2), next-game (the room plays again and
+# round 1 of the new game is held: no longer the closed one). Prints the consistency errors, one per line, then
+# "holds=N lag_max=MS" from the summary.
+hold() { # ending, lag ms, mutation (none|no-resume|offline|no-holds-left|too-many-left|held-when-used-up|snapshot-*|*closed|next-game)
   node --input-type=module -e '
     const { analyseRoom } = await import(process.argv[1]);
     const [ending, lagArg, mutation] = process.argv.slice(2);
@@ -434,9 +437,17 @@ hold() { # ending, lag ms, mutation (none|no-resume|offline|no-holds-left|too-ma
       at(n, "hold-end", 1, END + lag + 1, ended && (n === "bot3" || mutation === "held-when-used-up") ? ended : { holdsLeft: 2 });
     }
     if (mutation === "held-when-used-up") all(inRoom, "hold-start", 1, END + lag + 100);
-    const snapshotHoldsLeft = { "snapshot-no-holds-left": {}, "snapshot-too-many-left": { holdsLeft: 3 } }[mutation] ?? { holdsLeft: 2 };
+    const closed = ["closed", "held-after-closed", "snapshot-after-closed", "next-game"].includes(mutation);
+    if (closed) all(inRoom, "hold-closed", 1, END + lag + 50);
+    if (mutation === "held-after-closed") all(inRoom, "hold-start", 1, END + lag + 100);
+    const snapshotHoldsLeft = { "snapshot-no-holds-left": {}, "snapshot-too-many-left": { holdsLeft: 3 } }[mutation]
+      ?? { holdsLeft: closed && mutation !== "snapshot-after-closed" ? 0 : 2 };
     if (ending === "dropped" || ending === "rejoined") at("bot1", "game-state", 1, END + 2000, { phase: "scores", paused: false, started: true, yourGuess: "", ...snapshotHoldsLeft });
     all(players.filter((n) => n !== "bot1" || ending !== "left"), "game-over", 1, END + lag + 5000, { finalScore: [] });
+    if (mutation === "next-game") {
+      all(inRoom, "game-started", 0, END + lag + 6000, { rounds: 1, players });
+      all(inRoom, "hold-start", 1, END + lag + 7000);
+    }
     const r = { code: "QAROOM", reason: "game-over", players, errors: [], uploads: [], rateLimited: 0, events };
     const summary = analyseRoom(r, { host: true, rounds: 1, playAgainLingerS: 0, lingerBot: 0, startNextGameS: 0 });
     console.log([...summary.consistency_errors, `holds=${summary.holds} lag_max=${summary.hold_release_ms.max}`].join("\n"));
@@ -461,6 +472,12 @@ hold_case "a hold-end with more holds left than the round has" "round 1: bot3 go
 hold_case "a hold the server starts after saying none are left" "round 1: bot2 got hold-start after hold-end said no holds were left" released 20 held-when-used-up
 hold_case "a scoreboard snapshot without holdsLeft" "round 1: bot1 got a scoreboard snapshot with holdsLeft undefined (expected 0 to 2)" dropped 20 snapshot-no-holds-left
 hold_case "a scoreboard snapshot with more holds left than the round has" "round 1: bot1 got a scoreboard snapshot with holdsLeft 3 (expected 0 to 2)" rejoined 20 snapshot-too-many-left
+# EXP-354: hold-closed says no more holds this round, like a hold-end with 0
+[ "$(hold dropped 20 closed)" = "holds=1 lag_max=21.0" ] && ok "hold-closed after the hold, snapshot says 0: no consistency error" || ko "hold-closed: no error" "$(hold dropped 20 closed)"
+hold_case "a hold the server starts after hold-closed" "round 1: bot2 got hold-start after hold-closed said no holds were left" released 20 held-after-closed
+hold_case "a scoreboard snapshot after hold-closed with holds left" "round 1: bot1 got a scoreboard snapshot with holdsLeft 2 (expected 0 to 0)" rejoined 20 snapshot-after-closed
+got="$(hold released 20 next-game)"
+[[ "$got" != *"said no holds were left"* ]] && ok "the next game's round 1 is not the closed one" || ko "hold-closed per game" "$got"
 
 # Holds the server ends first: a 2-round game of bot1 and bot2 whose photos are both bot1's; bot1 holds round 1 at 10 s
 # and the server ends it at 12 s (hold-end, recorded by bot1 as hold-ended-by-server); bot1 holds round 2 from 30 s and

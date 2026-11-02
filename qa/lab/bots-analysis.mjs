@@ -726,27 +726,34 @@ function holdReleases(r, ctx, holds) {
 /**
  * Every hold-end tells how many holds are left in the round (EXP-176): a whole number from 0 to MAX_HOLDS_PER_ROUND
  * minus the holds the player saw start in that round (it may have missed some while away, which only loosens the
- * bound), and once one says 0 the server starts no other hold in that round. A game-state snapshot of a scoreboard
- * tells the same (0 too once a hold-end said so; it may also say 0 for the scoreboard's last 1.5 s).
+ * bound), and once one says 0, or the scoreboard's hold-closed came (EXP-354: it is down to 1.5 s), the server starts
+ * no other hold in that round. A game-state snapshot of a scoreboard tells the same (0 too once either said so). Round
+ * numbers start again with each game.
  */
 function checkHoldsLeft(r) {
   const errors = [];
   for (const name of r.players) {
     const started = new Map(); // round -> hold-starts this player got
-    const usedUp = new Set(); // rounds a hold-end said 0 for
+    const noneLeft = new Map(); // round -> the event that said no holds were left (hold-end with 0, hold-closed)
     const outOfRange = (e, what) => {
       const left = e.payload?.holdsLeft;
-      const most = usedUp.has(e.round) ? 0 : Math.max(0, MAX_HOLDS_PER_ROUND - (started.get(e.round) ?? 0));
+      const most = noneLeft.has(e.round) ? 0 : Math.max(0, MAX_HOLDS_PER_ROUND - (started.get(e.round) ?? 0));
       const ok = Number.isInteger(left) && left >= 0 && left <= most;
       if (!ok) errors.push(`round ${e.round}: ${name} got ${what} with holdsLeft ${left} (expected 0 to ${most})`);
       return !ok;
     };
     for (const e of r.events.filter((x) => x.bot === name)) {
-      if (e.ev === "hold-start") {
-        if (usedUp.has(e.round)) errors.push(`round ${e.round}: ${name} got hold-start after hold-end said no holds were left`);
+      if (e.ev === "game-started") {
+        started.clear();
+        noneLeft.clear();
+      } else if (e.ev === "hold-start") {
+        const saidBy = noneLeft.get(e.round);
+        if (saidBy) errors.push(`round ${e.round}: ${name} got hold-start after ${saidBy} said no holds were left`);
         started.set(e.round, (started.get(e.round) ?? 0) + 1);
       } else if (e.ev === "hold-end") {
-        if (!outOfRange(e, "hold-end") && e.payload.holdsLeft === 0) usedUp.add(e.round);
+        if (!outOfRange(e, "hold-end") && e.payload.holdsLeft === 0) noneLeft.set(e.round, "hold-end");
+      } else if (e.ev === "hold-closed") {
+        noneLeft.set(e.round, "hold-closed");
       } else if (e.ev === "game-state" && e.payload?.started && e.payload.phase === "scores") {
         outOfRange(e, "a scoreboard snapshot");
       }

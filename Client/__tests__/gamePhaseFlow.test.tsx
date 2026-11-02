@@ -263,6 +263,23 @@ describe("GameScreen: server phases drawn with the received duration (EXP-063)",
     expect(emitted("hold-start")).toHaveLength(2);
   });
 
+  // EXP-354: the scoreboard's last 1.5 s are too short for a hold; the server says when they start (hold-closed)
+  it("once the server closes the scoreboard's holds, the button says so and a press sends nothing", () => {
+    act(() => mockSocket.fire("round-start", START));
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "bob", duration: 3_000, yourGuess: "" }));
+    act(() => mockSocket.fire("round-scores", { scores: SCORES, round: 1, totalRounds: 10, duration: 5_000 }));
+    const button = () => r.root.find((n) => n.props.testID === TEST_IDS.holdButton && typeof n.props.onPressIn === "function");
+    expect(button().props.disabled).toBe(false);
+
+    act(() => mockSocket.fire("hold-closed"));
+    expect(button().findByType(Text).props.children).toBe(en.noHoldsLeft);
+    expect(button().props.disabled).toBe(true);
+    act(() => button().props.onPressIn());
+    act(() => button().props.onPressOut());
+    expect(emitted("hold-start")).toHaveLength(0);
+    expect(emitted("hold-end")).toHaveLength(0);
+  });
+
   it("game-paused hides the bar behind the paused modal; game-resumed restarts it with the server's remaining time", () => {
     act(() => mockSocket.fire("round-start", START));
     act(() => mockSocket.fire("game-paused", { duration: 300_000, waitingFor: ["carol"], pause: 1, maxPauses: 3 }));

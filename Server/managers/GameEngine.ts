@@ -30,7 +30,8 @@ const PHASE_TOTAL: Record<RoundPhase, number> = {
 // total (a hold that outlasts what is left of the budget is force-released)
 export const MAX_HOLDS_PER_ROUND = 3;
 export const HOLD_BUDGET_PER_ROUND = 30_000;
-const HOLD_MIN_REMAINING = 1_500; // Stop allowing hold when less than this remains
+// A hold needs more than this left on the running scoreboard: once it gets down to it, the room is told (hold-closed)
+const HOLD_MIN_REMAINING = 1_500;
 // A frozen (held or paused) phase timer keeps at least this much, so its callback never fires the moment it re-arms
 const MIN_FROZEN_TIME_LEFT = 100;
 const MAX_CONSECUTIVE_SKIPS = 3; // End the game after this many photo timeouts in a row
@@ -101,6 +102,8 @@ interface HoldUsage {
  */
 interface GameRun {
   holdUsage?: HoldUsage;
+  /** Sends `hold-closed` when the running scoreboard gets down to HOLD_MIN_REMAINING (see armHoldWindow) */
+  holdWindowTimer?: NodeJS.Timeout;
   /**
    * Planted round whose photo wait is on screen (phase waiting-photo, no owner picked): its planter, photo and the
    * delay before its round-start. Nobody is told the round is planted.
@@ -418,19 +421,14 @@ export class GameEngine {
 
   /**
    * Holds the photo owner can still start in the round in play (`hold-end`, `game-state`, and what handleHold
-   * accepts): 0 once the count or the time budget is used up, or when less than HOLD_MIN_REMAINING of the running
-   * scoreboard is left. A hold freezes the scoreboard and needs at least that to start, so a release always leaves
-   * enough: only a snapshot sees that case (nothing is sent when the running scoreboard gets there). An active hold
-   * counts as started; its time is charged when it ends. In waiting-photo the round in play is still the last one
-   * (room.round only moves on at round-start).
+   * accepts): 0 once the count or the time budget is used up, or once the scoreboard's hold window is closed (no more
+   * than HOLD_MIN_REMAINING of it left, announced by `hold-closed`). A hold freezes the scoreboard and needs more than
+   * that to start, so a release always leaves enough for another one. An active hold counts as started; its time is
+   * charged when it ends. In waiting-photo the round in play is still the last one (room.round only moves on at
+   * round-start).
    */
   holdsLeft(room: Room): number {
-    const scoreboardRunningOut = room.phase === "scores" && !room.held && this.phaseTimeLeft(room) < HOLD_MIN_REMAINING;
-    if (scoreboardRunningOut) return 0;
-    const usage = this.run(room).holdUsage;
-    if (usage?.round !== room.round) return MAX_HOLDS_PER_ROUND;
-    if (HOLD_BUDGET_PER_ROUND - usage.usedMs < HOLD_MIN_REMAINING) return 0;
-    return Math.max(0, MAX_HOLDS_PER_ROUND - usage.count);
+    return this.holdWindowClosed(room) ? 0 : this.unusedHolds(room);
   }
 
   // ── Connection changes: pause / resume / resync ──────
@@ -1032,6 +1030,7 @@ export class GameEngine {
     }
     this.roomManager.clearAllTimers(room);
     this.cancelOwnerReturnWindow(room);
+    this.clearHoldWindow(room);
     // The rest of the run stays until the next game's first round: late QA acks of this game still find phaseEmits
     const run = this.run(room);
     run.plantedWait = undefined;
@@ -1063,7 +1062,9 @@ export class GameEngine {
 
   /** A new game's first round is scheduled: everything of the previous game's run is dropped. */
   private startGameRun(room: Room): void {
-    this.cancelOwnerReturnWindow(room); // no timer of the previous game may outlive its run
+    // No timer of the previous game may outlive its run
+    this.cancelOwnerReturnWindow(room);
+    this.clearHoldWindow(room);
     this.runs.set(room, newGameRun());
   }
 
@@ -1071,7 +1072,8 @@ export class GameEngine {
 
   /**
    * Starts the room's phase timer (replacing any): `callback` runs once `ms` have passed, unless the timer is cleared
-   * or frozen first. A frozen timer keeps its callback and remaining time until resumePhaseTimer re-arms it.
+   * or frozen first. A frozen timer keeps its callback and remaining time until resumePhaseTimer re-arms it. A running
+   * scoreboard's hold window is armed with it (see armHoldWindow).
    */
   private armPhaseTimer(room: Room, ms: number, callback: () => void): void {
     if (room._timer) clearTimeout(room._timer);
@@ -1083,6 +1085,7 @@ export class GameEngine {
       room._timerCallback = null;
       try { callback(); } catch (e) { console.error(`[${room.gameCode}] Timer error:`, e); }
     }, ms);
+    this.armHoldWindow(room);
   }
 
   /** Drops the phase timer and its callback (the phase ends early). */
@@ -1090,6 +1093,7 @@ export class GameEngine {
     if (room._timer) clearTimeout(room._timer);
     room._timer = null;
     room._timerCallback = null;
+    this.clearHoldWindow(room);
   }
 
   /** Time left on the phase timer (ms): what is left of a running one, the saved remaining time of a frozen one. */
@@ -1100,6 +1104,7 @@ export class GameEngine {
 
   /** Stops a running phase timer (hold, pause), keeping its callback and the time it had left. */
   private freezePhaseTimer(room: Room): void {
+    this.freezeHoldWindow(room); // a frozen scoreboard doesn't run out
     if (!room._timer) return;
     room._timerDuration = Math.max(MIN_FROZEN_TIME_LEFT, this.phaseTimeLeft(room));
     clearTimeout(room._timer);
@@ -1120,6 +1125,62 @@ export class GameEngine {
   }
 
   // ── Private: Hold ────────────────────────────────────
+
+  /** The scoreboard (running or paused, not held) has no more than HOLD_MIN_REMAINING left: too little for a hold. */
+  private holdWindowClosed(room: Room): boolean {
+    return room.phase === "scores" && !room.held && this.phaseTimeLeft(room) <= HOLD_MIN_REMAINING;
+  }
+
+  /** Holds the round's count and time budget still allow, whatever is left of the scoreboard. */
+  private unusedHolds(room: Room): number {
+    const usage = this.run(room).holdUsage;
+    if (usage?.round !== room.round) return MAX_HOLDS_PER_ROUND;
+    if (HOLD_BUDGET_PER_ROUND - usage.usedMs < HOLD_MIN_REMAINING) return 0;
+    return Math.max(0, MAX_HOLDS_PER_ROUND - usage.count);
+  }
+
+  /**
+   * A running scoreboard with holds left: `hold-closed` goes to the room when it gets down to HOLD_MIN_REMAINING, as
+   * holds stop being accepted (holdsLeft 0), so the app greys its hold button out instead of offering a press the
+   * server ignores. It follows the phase timer: armed with it (see armPhaseTimer), dropped when that is frozen (hold,
+   * pause), cleared or re-armed. So it goes once per scoreboard at most: not after a hold-end said 0, nor again when a
+   * scoreboard whose window already closed resumes.
+   */
+  private armHoldWindow(room: Room): void {
+    this.clearHoldWindow(room);
+    if (!this.scoreboardRunning(room) || this.holdsLeft(room) === 0) return;
+    const run = this.run(room);
+    run.holdWindowTimer = setTimeout(() => {
+      run.holdWindowTimer = undefined;
+      if (this.scoreboardRunning(room)) this.announceHoldWindowClosed(room);
+    }, this.phaseTimeLeft(room) - HOLD_MIN_REMAINING);
+  }
+
+  /** The game's scoreboard is on and its timer running (neither held nor paused). */
+  private scoreboardRunning(room: Room): boolean {
+    return room.started && room.phase === "scores" && !room.held && !room.paused;
+  }
+
+  private announceHoldWindowClosed(room: Room): void {
+    console.log(`[${room.gameCode}] HOLD window closed (${this.phaseTimeLeft(room)}ms of scores left)`);
+    this.io.to(room.gameCode).emit("hold-closed");
+  }
+
+  private clearHoldWindow(room: Room): void {
+    const run = this.run(room);
+    if (!run.holdWindowTimer) return;
+    clearTimeout(run.holdWindowTimer);
+    run.holdWindowTimer = undefined;
+  }
+
+  /**
+   * The scoreboard is about to freeze (a pause): a window timer still pending once the window has closed (it fires a
+   * little late) sends its hold-closed now, or the resumed scoreboard, already closed, would never get one.
+   */
+  private freezeHoldWindow(room: Room): void {
+    if (this.run(room).holdWindowTimer && this.holdWindowClosed(room)) this.announceHoldWindowClosed(room);
+    this.clearHoldWindow(room);
+  }
 
   /** This round's hold usage, started afresh in a new round. */
   private roundHoldUsage(room: Room): HoldUsage {

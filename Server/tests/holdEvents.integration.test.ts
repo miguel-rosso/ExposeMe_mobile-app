@@ -11,6 +11,10 @@ import { useTestServer } from "./socketHarness";
 
 const SCORES_TIMEOUT_MS = 15_000; // waiting-photo → answering (8.5 s) → reveal (3 s) → scores
 const QUIET_MS = 300;
+const SCORE_DISPLAY_MS = 5_000;
+const HOLD_MIN_REMAINING_MS = 1_500;
+// round-scores → hold-closed takes SCORE_DISPLAY_MS - HOLD_MIN_REMAINING_MS, plus delivery
+const HOLD_CLOSED_WITHIN_MS = SCORE_DISPLAY_MS - HOLD_MIN_REMAINING_MS + 1_000;
 
 const harness = useTestServer({ quietMs: QUIET_MS });
 const { once, silent, newClient, joinAs, startGame } = harness;
@@ -115,5 +119,21 @@ describe.concurrent("hold events on the wire (EXP-214)", () => {
     expect(await snapshot).toMatchObject({ phase: "scores", holdsLeft: 0 });
     socks[owner].emit("hold-start");
     expect(await silent(socks[owner], "hold-start")).toBe(true);
+  }, 30_000);
+
+  // EXP-354: the scoreboard's last 1.5 s are too short for a hold, and the app is told when they start
+  it("everyone gets one hold-closed 1.5 s before the scoreboard ends; a hold-start after it is refused", async () => {
+    const names = ["heidi", "ivan"];
+    const { socks, owner } = await inScores(names, "4");
+    const received = Object.fromEntries(names.map((n) => [n, record(socks[n])]));
+    const scoresAt = Date.now();
+
+    await Promise.all(names.map((n) => once(socks[n], "hold-closed", HOLD_CLOSED_WITHIN_MS)));
+    expect(Date.now() - scoresAt).toBeGreaterThanOrEqual(SCORE_DISPLAY_MS - HOLD_MIN_REMAINING_MS - QUIET_MS);
+    socks[owner].emit("hold-start");
+    expect(await silent(socks[owner], "hold-start")).toBe(true);
+
+    await Promise.all(names.map((n) => once(socks[n], "waiting-photo", HOLD_MIN_REMAINING_MS + QUIET_MS)));
+    for (const n of names) expect(received[n].filter((e) => e === "hold-closed"), n).toHaveLength(1);
   }, 30_000);
 });

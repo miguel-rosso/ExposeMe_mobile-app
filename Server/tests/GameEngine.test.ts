@@ -859,12 +859,13 @@ describe("hold", () => {
     expect(events("your-turn")).toHaveLength(2);
   });
 
-  it("resumes with at least 1.5s even if the hold started near the minimum", () => {
+  // A hold needs more than 1.5 s left (EXP-354: with exactly that left the hold window is closed)
+  it("resumes with more than 1.5s even if the hold started near the minimum", () => {
     toScores();
-    vi.advanceTimersByTime(SCORE_DISPLAY_TIME - 1_500);
+    vi.advanceTimersByTime(SCORE_DISPLAY_TIME - 1_501);
     expect(engine.handleHold(room, ownerSocket)).toBe(true);
     engine.handleRelease(room, ownerSocket);
-    expect(lastEvent("hold-resume")!.args[0]).toEqual({ phase: "scores", duration: 1_500, phaseTotal: SCORE_DISPLAY_TIME });
+    expect(lastEvent("hold-resume")!.args[0]).toEqual({ phase: "scores", duration: 1_501, phaseTotal: SCORE_DISPLAY_TIME });
   });
 
   // Hold limits per round (EXP-167)

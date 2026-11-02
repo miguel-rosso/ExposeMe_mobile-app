@@ -103,8 +103,8 @@ describe("E2E testIDs (EXP-008)", () => {
       roundsOptionId(0).replace("0", ".*"),
       // settings-instructions flow: the first step of the carousel
       settingsStepId(1),
-      // EXP-085 tie flow: the device user and a bot
-      ...["${USERNAME}", "bot1"].flatMap((u) => [winnerNameId(u), finalWinnerId(u), finalRankId(u)]),
+      // EXP-085 / EXP-348 tie flows: the device user and the two tied bots
+      ...["${USERNAME}", "bot1", "bot2"].flatMap((u) => [winnerNameId(u), finalWinnerId(u), finalRankId(u)]),
       // EXP-290 quit-after-game-over flow: the bot that quit at game over, in none of the next game's lists
       lobbyPlayerOfflineId("bot3"), playerOptionId("bot3"), scoreRankId("bot3"), finalRankId("bot3"),
       // System photo picker and crop screen used by plant-photo.yaml (not our components)

@@ -63,6 +63,7 @@ export const TEST_IDS = {
   // ── Settings instructions ──
   settingsInstructionsScreen: "settings-instructions-screen",
   settingsInstructionsOpenSettings: "settings-instructions-open-settings",
+  settingsInstructionsBack: "settings-instructions-back",
   // ── Modals ──
   alertModal: "alert-modal",
   alertModalConfirm: "alert-modal-confirm",

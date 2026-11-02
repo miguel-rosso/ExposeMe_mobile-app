@@ -36,6 +36,8 @@ import { isKickedByHost, KICKED_BY_HOST_MESSAGE } from "../utils/serverMessage";
 import { ROUND_OPTIONS } from "../utils/protocolLimits";
 import { dismissKeyboardOnBackPress } from "../utils/keyboardBackPress";
 import { GAME_SCREEN_PATH, GAME_SCREEN_ROUTE_NAME, RESYNC_GAME_SCREEN } from "../utils/gameScreenRoute";
+import { HOME_PATH } from "../utils/homeRoute";
+import { useGoHome } from "../hooks/useGoHome";
 import { useRouteBelow } from "../hooks/useRouteBelow";
 import { useBackHandler } from "@react-native-community/hooks";
 
@@ -225,15 +227,21 @@ const WaitingRoom = () => {
   // Unmounted (replaced, or closed by the room's screen): e.g. a Join still waiting for the gallery must do nothing
   useEffect(() => () => { modeRef.current = "left"; }, []);
 
+  /** Back to the home under this screen, which shows `notice` (the server's reason) if there is one. */
+  const goHomeFromRoom = useGoHome();
+  const goHome = (notice?: string) => {
+    modeRef.current = "left";
+    goHomeFromRoom(notice);
+  };
+
   /** Leave for home without joining. */
   const sendHome = () => {
     if (hasLeft()) return;
-    modeRef.current = "left";
     endSocket();
-    navigation.dismissTo("/");
+    goHome();
   };
 
-  /** This screen gives way to `href` (the game, home). */
+  /** This screen gives way to `href` (the game). */
   const replaceScreen = (href: Href) => {
     modeRef.current = "left";
     navigation.replace(href);
@@ -253,7 +261,7 @@ const WaitingRoom = () => {
    */
   const openLinkedLobbyOverHome = () => {
     modeRef.current = "left";
-    navigation.dismissTo("/");
+    navigation.dismissTo(HOME_PATH);
     navigation.push(WAITING_ROOM_PATH);
   };
 
@@ -274,6 +282,7 @@ const WaitingRoom = () => {
     const linkedCode = parseRoomCodeParam(deepLinkCode);
     const { step, mode } = linkStep({
       linkedCode,
+      malformedLink: deepLinkCode !== undefined && !linkedCode,
       roomCode: gameCodeRef.current,
       roomScreenBelow: routeBelow() === GAME_SCREEN_ROUTE_NAME,
       mode: modeRef.current,
@@ -347,7 +356,7 @@ const WaitingRoom = () => {
     const leaveWithMessage = (message?: string) => {
       if (isKickedByHost(message)) clearRejoinToken();
       endSocket();
-      replaceScreen({ pathname: "/", params: { message } });
+      goHome(message);
     };
 
     // This screen's own handlers. Only these are removed on unmount, so listeners that others attach to the shared
@@ -456,7 +465,7 @@ const WaitingRoom = () => {
   const handleLeaveGame = () => {
     if (hasLeft()) return;
     leaveRoom();
-    replaceScreen("/");
+    goHome();
   };
 
   /**

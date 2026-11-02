@@ -67,6 +67,7 @@ jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/en")
 jest.mock("../app/providers/GameContext", () => ({
   useGameContext: () => ({
     username: "ana", saveUsername: jest.fn(), gameCode: null, setGameCode: jest.fn(), socket: null, endSocket: jest.fn(),
+    takeHomeNotice: () => null,
   }),
 }));
 

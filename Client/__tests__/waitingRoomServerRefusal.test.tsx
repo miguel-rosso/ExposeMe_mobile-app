@@ -9,11 +9,12 @@ import { KICKED_BY_HOST_MESSAGE } from "../app/utils/serverMessage";
 // the lobby sends the player home with the server's reason; the home screen shows it translated.
 
 const mockSocket = new FakeSocket();
-const mockReplace = jest.fn();
+const mockDismissTo = jest.fn();
 const mockClearRejoinToken = jest.fn();
+const mockSetHomeNotice = jest.fn();
 
 jest.mock("expo-router", () => ({
-  useRouter: () => ({ replace: mockReplace }),
+  useRouter: () => ({ dismissTo: mockDismissTo }),
   useLocalSearchParams: () => ({}),
   ...require("../testUtils/screenNavigation").screenNavigationMock(),
 }));
@@ -23,6 +24,7 @@ jest.mock("../app/providers/GameContext", () => ({
     setPlayersProvider: jest.fn(), socket: mockSocket, username: "bob",
     setRoundsOfGame: jest.fn(), roundsOfGame: 10, setPlantedPhotoUri: jest.fn(),
     saveRejoinToken: jest.fn(), getRejoinToken: async () => "tok-123", clearRejoinToken: mockClearRejoinToken,
+    setHomeNotice: mockSetHomeNotice,
   }),
 }));
 jest.mock("../app/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: null }) }));
@@ -67,15 +69,17 @@ beforeEach(() => {
   mockSocket.removeAllListeners();
   mockSocket.emitted = [];
   mockSocket.active = true;
-  mockReplace.mockClear();
+  mockDismissTo.mockClear();
   mockClearRejoinToken.mockClear();
+  mockSetHomeNotice.mockClear();
 });
 
 describe("WaitingRoom: the server refuses us (EXP-180)", () => {
   it("goes home with the room-of-game message, translated there", async () => {
     const r = await mount();
     act(() => mockSocket.fire("room-of-game", { success: false, message: "Too many attempts" }));
-    expect(mockReplace).toHaveBeenCalledWith({ pathname: "/", params: { message: "Too many attempts" } });
+    expect(mockSetHomeNotice).toHaveBeenCalledWith("Too many attempts");
+    expect(mockDismissTo).toHaveBeenCalledWith("/");
     expect(mockClearRejoinToken).not.toHaveBeenCalled(); // e.g. rate-limited: the token may still rejoin later
     act(() => r.unmount());
   });
@@ -86,7 +90,8 @@ describe("WaitingRoom: the server refuses us (EXP-180)", () => {
     const r = await mount();
     act(() => mockSocket.fire("room-of-game", { success: false, message: KICKED_BY_HOST_MESSAGE }));
     expect(mockClearRejoinToken).toHaveBeenCalledTimes(1);
-    expect(mockReplace).toHaveBeenCalledWith({ pathname: "/", params: { message: KICKED_BY_HOST_MESSAGE } });
+    expect(mockSetHomeNotice).toHaveBeenCalledWith(KICKED_BY_HOST_MESSAGE);
+    expect(mockDismissTo).toHaveBeenCalledWith("/");
     act(() => r.unmount());
   });
 
@@ -94,14 +99,15 @@ describe("WaitingRoom: the server refuses us (EXP-180)", () => {
     const r = await mount();
     mockSocket.active = false;
     act(() => mockSocket.fire("connect_error", new Error("Too many connections")));
-    expect(mockReplace).toHaveBeenCalledWith({ pathname: "/", params: { message: "Too many connections" } });
+    expect(mockSetHomeNotice).toHaveBeenCalledWith("Too many connections");
+    expect(mockDismissTo).toHaveBeenCalledWith("/");
     act(() => r.unmount());
   });
 
   it("keeps waiting on a network error: socket.io is still retrying", async () => {
     const r = await mount();
     act(() => mockSocket.fire("connect_error", new Error("xhr poll error")));
-    expect(mockReplace).not.toHaveBeenCalled();
+    expect(mockDismissTo).not.toHaveBeenCalled();
     act(() => r.unmount());
   });
 });

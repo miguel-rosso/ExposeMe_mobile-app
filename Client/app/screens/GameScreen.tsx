@@ -54,6 +54,7 @@ import { safeBottomRow, safeTopRow } from "../utils/safeAreaRows";
 import { ANSWERS_BOTTOM, HOLD_BUTTON_BOTTOM } from "../utils/gameRows";
 import { PROGRESS_BAR_AREA, progressBarAreaBottom, progressBarRow } from "../utils/progressBarRow";
 import { GAME_SCREEN_PATH, GameScreenParams, opensOnGameInProgress } from "../utils/gameScreenRoute";
+import { useGoHome } from "../hooks/useGoHome";
 import { isKickedByHost, KICKED_BY_HOST_MESSAGE } from "../utils/serverMessage";
 
 const { SERVER_URL } = getEnvVars();
@@ -225,12 +226,14 @@ const GameScreen = () => {
   // language. Only once: the server closes the socket right after my own player-removed. Kicked (player-removed, or a
   // rejoin refused for it after missing that offline): my rejoin token is dead, so it is forgotten
   const leftGameRef = useRef(false);
+  // Back to the home under this screen, closing anything opened over it too
+  const goHome = useGoHome();
   const leaveGame = (message?: string) => {
     if (leftGameRef.current) return;
     leftGameRef.current = true;
     if (isKickedByHost(message)) clearRejoinToken();
     console.log("[GAME] Out of the game — returning to menu");
-    replaceThisScreen(message ? { pathname: "/", params: { message } } : "/");
+    goHome(message);
   };
 
   // ── Connection: stay in the game, rejoin on reconnect ─

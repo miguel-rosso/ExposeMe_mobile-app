@@ -10,6 +10,7 @@ import FinalScoreModal from "../app/components/modals/FinalScoreModal";
 // shared leave of GameContext, EXP-254).
 
 const mockReplace = jest.fn();
+const mockDismissTo = jest.fn();
 const mockEndSocket = jest.fn();
 const mockSetPlanted = jest.fn();
 const mockClearToken = jest.fn();
@@ -19,7 +20,7 @@ jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/en")
 jest.mock("lottie-react-native", () => "LottieView");
 jest.mock("@expo/vector-icons", () => ({ Ionicons: "Ionicons" }));
 jest.mock("expo-linear-gradient", () => ({ LinearGradient: "LinearGradient" }));
-jest.mock("expo-router", () => ({ useRouter: () => ({ replace: mockReplace }) }));
+jest.mock("expo-router", () => ({ useRouter: () => ({ replace: mockReplace, dismissTo: mockDismissTo }) }));
 jest.mock("../app/providers/GameContext", () => ({
   useGameContext: () => ({
     socket: mockSocket, endSocket: mockEndSocket, setRoundsOfGame: jest.fn(), setPlayersProvider: jest.fn(),
@@ -38,7 +39,7 @@ const press = (root: ReactTestInstance, id: string) =>
   act(() => root.find((n) => n.props.testID === id && typeof n.props.onPress === "function").props.onPress());
 
 beforeEach(() => {
-  [mockReplace, mockEndSocket, mockSetPlanted, mockClearToken, mockLeaveRoom, mockSocket.emit, mockSocket.disconnect].forEach((m) => m.mockClear());
+  [mockReplace, mockDismissTo, mockEndSocket, mockSetPlanted, mockClearToken, mockLeaveRoom, mockSocket.emit, mockSocket.disconnect].forEach((m) => m.mockClear());
 });
 
 describe("final screens keep the socket (EXP-172)", () => {
@@ -74,7 +75,7 @@ describe("final screens keep the socket (EXP-172)", () => {
     // Not closed here: closing in the same tick as the leave-room could lose it (EXP-254)
     expect(mockEndSocket).not.toHaveBeenCalled();
     expect(mockSocket.disconnect).not.toHaveBeenCalled();
-    expect(mockReplace).toHaveBeenCalledWith("/");
+    expect(mockDismissTo).toHaveBeenCalledWith("/");
     act(() => r.unmount());
   });
 });

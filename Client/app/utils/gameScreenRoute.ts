@@ -4,8 +4,12 @@
 // and must not paint the ready phase ("are you ready?") until it says which phase the game is in (EXP-289).
 
 export const GAME_SCREEN_PATH = "/screens/GameScreen";
-/** The game screen's route name in the root stack (its navigation state), e.g. under an invite link's waiting room */
-export const GAME_SCREEN_ROUTE_NAME = "screens/GameScreen";
+/**
+ * The game screen's route name in the root stack (its navigation state), e.g. under an invite link's waiting room. A
+ * root stack route is named after its file under app/, i.e. its path without the leading slash, as long as no
+ * _layout.tsx nests a navigator in app/screens (gameScreenRoute.test checks app/_layout.tsx declares it).
+ */
+export const GAME_SCREEN_ROUTE_NAME = GAME_SCREEN_PATH.slice(1);
 
 export type GameScreenParams = { resync?: string };
 

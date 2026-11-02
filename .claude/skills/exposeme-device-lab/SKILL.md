@@ -44,7 +44,7 @@ Extra inputs for a flow: `--maestro-env KEY=VALUE` (repeatable) passes another v
 qa/lab/lab.sh play --devices ios-a --bots 2 --rounds 3 --flow invite-link-after-game \
   --bot-args "--play-again-linger 60 --play-again-linger-bot 0" --second-room "--bots 3 --host --wait-players 5 --timeout 900"
 ```
-The kicked-player notice (EXP-139/EXP-045, `qa/maestro/kicked-notice.yaml`): one bot hosts, the device joins and the host bot removes it by its label (its username in the room) 5 s later; the device must land on the home screen with "The host removed you from the room." / "El anfitrión te ha sacado de la sala.", and the bots run ends right after the kick (reason `lobby-kick`):
+The kicked-player notice (EXP-139/EXP-045, `qa/maestro/kicked-notice.yaml`): one bot hosts, the device joins and the host bot removes it by its label (its username in the room) 5 s later; the device must land on the home screen with "The host removed you from the room." / "El anfitrión te ha sacado de la sala.", and the bots run ends right after the kick (reason `lobby-kick`). After joining again by hand, the flow exits with the close button: home's form must be back (join panel closed) and, on Android, Back must leave the app, with no second home under it (EXP-339, checked by `lab-play.test.sh`):
 ```bash
 qa/lab/lab.sh play --flow kicked-notice --bots 1 --devices ios-a --bot-args '--kick ios-a'
 ```

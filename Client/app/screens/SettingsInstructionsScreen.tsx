@@ -22,6 +22,7 @@ import IOSPermInstruction2 from "@/assets/images/IOSPermInstruction2.jpg";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useI18n } from "../i18n";
 import { TEST_IDS, settingsStepId } from "../utils/testIds";
+import { HOME_PATH } from "../utils/homeRoute";
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get("window");
 // Gap kept between the buttons and the bottom inset (same as the p-4 padding on the other edges)
@@ -116,7 +117,9 @@ const SettingsInstructionsScreen: React.FC = () => {
         <View style={tw`flex-row justify-between w-full max-w-[500px] self-center`}>
           <TouchableOpacity
             style={tw`bg-gray-700 p-4 rounded-xl flex-1 mr-3 border border-gray-600`}
-            onPress={() => router.replace("/")}
+            testID={TEST_IDS.settingsInstructionsBack}
+            // Pops back to the home that opened it (replace would stack a second home over it: EXP-339)
+            onPress={() => router.dismissTo(HOME_PATH)}
             activeOpacity={0.7}
           >
             <Text style={tw`text-gray-200 text-base font-medium text-center`}>{t.back}</Text>

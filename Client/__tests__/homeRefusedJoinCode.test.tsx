@@ -4,8 +4,9 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { TEST_IDS } from "../app/utils/testIds";
 
 // EXP-342: leaving the game flow forgets the room (GameContext's gameCode), but not the code typed in home's join
-// panel. A refused join (name taken, game not found, room full) sends the player back to a new home, whose join panel
-// still shows that code; Search makes it the room to join again. Real GameProvider, real home screen.
+// panel. A refused join (name taken, game not found, room full) sends the player back home, whose join panel still
+// shows that code, kept in GameContext (so even a home mounted afresh shows it; the way back pops to the same home,
+// EXP-339); Search makes it the room to join again. Real GameProvider, real home screen.
 
 jest.mock("@react-native-async-storage/async-storage", () =>
   require("@react-native-async-storage/async-storage/jest/async-storage-mock")
@@ -54,7 +55,7 @@ const press = async (root: ReactTestInstance, id: string) => {
 };
 
 let app: TestRenderer.ReactTestRenderer | null = null;
-/** Home as a new screen (navigation.replace("/") mounts a fresh one) inside the one app-wide GameProvider. */
+/** Home as a new screen (a fresh mount, `key` apart) inside the one app-wide GameProvider. */
 const showHome = async (key: number) => {
   const tree = <GameProvider><Index key={key} /><Probe /></GameProvider>;
   await act(async () => {

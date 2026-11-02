@@ -128,6 +128,21 @@ grep -q "maestro/kicked-notice.yaml" "$TMP/maestro.args" && grep -q -- "-e USERN
   && ok "the device runs kicked-notice as ios-a" || ko "the device runs kicked-notice as ios-a" "$(cat "$TMP/maestro.args")"
 grep -q -- "--flow kicked-notice --bots 1 --devices <label> --bot-args '--kick <label>'" "$HERE/../../maestro/kicked-notice.yaml" \
   && ok "kicked-notice.yaml documents that invocation" || ko "kicked-notice.yaml documents that invocation"
+# EXP-339: after joining again by hand, Exit (close button) pops back to the only home: its join panel closed, and on
+# Android, Back there leaves the app (no home left under it). The steps in that order after the last join-room.yaml.
+kicked_exit_steps="$(awk '
+  /^- runFlow: join-room.yaml$/ { n = 0; delete seen; joined = 1; next }
+  !joined { next }
+  /id: "close-button"/ { seen[++n] = "close" }
+  /id: "game-code-input"/ && !/\|/ { seen[++n] = "panel-closed" }
+  /platform: Android/ { seen[++n] = "android" }
+  /pressKey: Back/ { seen[++n] = "back" }
+  /id: "join-game-button\|game-code-input"/ { seen[++n] = "no-home" }
+  END { for (i = 1; i <= n; i++) printf "%s%s", seen[i], (i < n ? " " : "\n") }
+' "$MAESTRO_DIR/kicked-notice.yaml")"
+[ "$kicked_exit_steps" = "close panel-closed android back no-home" ] \
+  && ok "kicked-notice.yaml exits to the only home: panel closed, then Android Back leaves the app (EXP-339)" \
+  || ko "kicked-notice.yaml checks the home after Exit" "steps: $kicked_exit_steps"
 
 # ── Kicked after the game (EXP-346): on the final ranking, or with the app closed; the same bots run for both ──
 for flow in kicked-after-game kicked-while-offline; do

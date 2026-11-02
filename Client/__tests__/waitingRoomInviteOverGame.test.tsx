@@ -285,9 +285,10 @@ describe("The game screen navigates while the invite dialog asks over it (EXP-36
 
     await fire(socket, "player-removed", player("bob"));
 
-    expect(stackPaths()).toEqual([HOME, HOME]);
+    // The home under the game, not a second one over it (EXP-339)
+    expect(stackPaths()).toEqual([HOME]);
     expect(showsInviteDialog(r)).toBe(false);
-    expect(routerCalls.slice(-2)).toEqual([`dismissTo ${GAME}`, `replace ${HOME}`]);
+    expect(routerCalls.at(-1)).toBe(`dismissTo ${HOME}`);
   });
 
   // expo-router queues the link's push and the game screen's navigation together: the game screen still believes it
@@ -316,7 +317,7 @@ describe("The game screen navigates while the invite dialog asks over it (EXP-36
     });
     await flush();
 
-    expect(stackPaths()).toEqual([HOME, HOME]);
+    expect(stackPaths()).toEqual([HOME]);
     expect(gameListeners(socket)).toBe(0);
   });
 

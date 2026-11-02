@@ -86,10 +86,12 @@ const openWaitingRoom = async (params: { code?: string }) => {
   await act(async () => { app!.update(<GameProvider><WaitingRoom /><Probe /></GameProvider>); });
   await flush();
 };
-/** The waiting room replaced by another screen (home, the game screen). */
+/** The waiting room replaced by another screen (home, the game screen); the next one's navigation is checked alone. */
 const closeWaitingRoom = async () => {
   await act(async () => { app!.update(<GameProvider><Probe /></GameProvider>); });
   await flush();
+  mockDismissTo.mockClear();
+  mockReplace.mockClear();
 };
 
 const connectLatestSocket = async () => {
@@ -145,16 +147,20 @@ afterEach(() => {
 });
 
 describe("A room the player left is forgotten (EXP-342)", () => {
-  it("after Exit, a link without a room code goes home and joins nothing", async () => {
+  // EXP-367: a malformed code is no room code either
+  it.each([
+    ["without a room code", {}],
+    ["with a malformed code", { code: "nope" }],
+  ])("after Exit, a link %s goes home and joins nothing", async (_name, linkParams) => {
     await startApp();
     const left = await joinRoom();
     await pressExit();
-    expect(mockReplace).toHaveBeenCalledWith("/");
+    expect(mockDismissTo).toHaveBeenCalledWith("/");
     expect(ctx.gameCode).toBeNull();
     await closeWaitingRoom();
 
     const socketsBefore = mockSockets.length;
-    await openWaitingRoom({});
+    await openWaitingRoom(linkParams);
 
     expect(mockDismissTo).toHaveBeenCalledWith("/");
     expect(mockSockets).toHaveLength(socketsBefore); // no socket opened, so no join of the left room
@@ -166,7 +172,7 @@ describe("A room the player left is forgotten (EXP-342)", () => {
     const kickedFrom = await joinRoom();
     await act(async () => { kickedFrom.fire("player-removed", { username: USERNAME, isHost: false }); });
     await flush();
-    expect(mockReplace).toHaveBeenCalledWith(expect.objectContaining({ pathname: "/" }));
+    expect(mockDismissTo).toHaveBeenCalledWith("/");
     expect(ctx.gameCode).toBeNull();
     await closeWaitingRoom();
 
@@ -186,7 +192,7 @@ describe("A room the player left is forgotten (EXP-342)", () => {
     const refused = await connectLatestSocket();
     await act(async () => { refused.fire("room-of-game", { success: false, message: "Username already taken" }); });
     await flush();
-    expect(mockReplace).toHaveBeenCalledWith(expect.objectContaining({ pathname: "/" }));
+    expect(mockDismissTo).toHaveBeenCalledWith("/");
     expect(ctx.gameCode).toBeNull();
     expect(ctx.joinCodeDraft).toBe(LEFT_ROOM); // home's join panel shows it again
     await closeWaitingRoom();

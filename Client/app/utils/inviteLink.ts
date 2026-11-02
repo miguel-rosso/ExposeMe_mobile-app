@@ -14,14 +14,16 @@ export type WaitingRoomMode = "idle" | "lobby" | "overRoomScreen" | "left";
 
 /**
  * What the waiting room does with its link: `ask` (the invite dialog, DEC-046), `backToRoomScreen`, `startLobby`
- * (start or reuse the socket of the room it knows, closing any invite dialog), `newRoomOrHome` (no room code: a new
- * room if home's Create game asked for one, else home), or `none`.
+ * (start or reuse the socket of the room it knows, closing any invite dialog), `newRoomOrHome` (no room code, or a
+ * malformed link: a new room if home's Create game asked for one, else home), or `none`.
  */
 export type LinkStep = "none" | "ask" | "backToRoomScreen" | "startLobby" | "newRoomOrHome";
 
 export interface LinkInput {
   /** The link's valid room code, or null (no link, or a malformed code) */
   linkedCode: string | null;
+  /** Whether there is a link whose code is malformed (or empty): it names no room, not even the one the app knows */
+  malformedLink: boolean;
   /** The room the app knows (GameContext's gameCode), or null */
   roomCode: string | null;
   /**
@@ -37,9 +39,10 @@ export interface LinkInput {
  * player is in stays as it is until Join). A link to the room we are in rejoins it, unless that room's own screen is
  * under this one: then it goes back to it, as it does for a link without a valid code or without any (it never joins
  * from that screen's socket: EXP-363). A lobby (or its dialog over the room's screen) ignores a link without a valid
- * code (e.g. the one Cancel clears).
+ * code (e.g. the one Cancel clears). Just opened, a malformed link never rejoins the room the app knows (EXP-367): only
+ * the app's own ways in (Search room, Play again, the next game) open it without a link to rejoin that room.
  */
-export const linkStep = ({ linkedCode, roomCode, roomScreenBelow, mode }: LinkInput): { step: LinkStep; mode: WaitingRoomMode } => {
+export const linkStep = ({ linkedCode, malformedLink, roomCode, roomScreenBelow, mode }: LinkInput): { step: LinkStep; mode: WaitingRoomMode } => {
   if (mode === "left") return { step: "none", mode };
   const opensOverRoomScreen = mode === "idle" && roomScreenBelow;
   const nextMode = opensOverRoomScreen ? "overRoomScreen" : mode;
@@ -48,5 +51,5 @@ export const linkStep = ({ linkedCode, roomCode, roomScreenBelow, mode }: LinkIn
     return { step: linkedCode || opensOverRoomScreen ? "backToRoomScreen" : "none", mode: nextMode };
   }
   if (mode === "lobby") return { step: linkedCode ? "startLobby" : "none", mode };
-  return { step: roomCode ? "startLobby" : "newRoomOrHome", mode };
+  return { step: roomCode && !malformedLink ? "startLobby" : "newRoomOrHome", mode };
 };

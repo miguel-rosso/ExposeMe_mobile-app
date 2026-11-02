@@ -19,7 +19,7 @@ const mockCtx = {
   startSocket: jest.fn(), endSocket: jest.fn(), leaveRoom: jest.fn(), setGameCode: jest.fn(), setPlayersProvider: jest.fn(),
   setRoundsOfGame: jest.fn(), setPlantedPhotoUri: jest.fn(), plantPhoto: jest.fn(), saveRejoinToken: jest.fn(),
   getRejoinToken: jest.fn(async (..._a: unknown[]) => "tok-123" as string | null), clearRejoinToken: jest.fn(),
-  saveUsername: jest.fn(), setJoinCodeDraft: jest.fn(), takeNewRoomRequest: jest.fn(() => false),
+  saveUsername: jest.fn(), setJoinCodeDraft: jest.fn(), takeNewRoomRequest: jest.fn(() => false), setHomeNotice: jest.fn(),
 };
 const mockClose: { onPress?: () => void } = {};
 /** Last props of the remove-player confirmation (AlertModal) */
@@ -140,7 +140,8 @@ describe("WaitingRoom: joining (EXP-063)", () => {
     const r = await mount();
     act(() => mockSocket.fire("room-of-game", { success: false, message: "Room is full" }));
     expect(mockCtx.endSocket).toHaveBeenCalledTimes(1);
-    expect(mockReplace).toHaveBeenCalledWith({ pathname: "/", params: { message: "Room is full" } });
+    expect(mockCtx.setHomeNotice).toHaveBeenCalledWith("Room is full");
+    expect(mockDismissTo).toHaveBeenCalledWith("/");
     expect(mockCtx.setJoinCodeDraft).toHaveBeenCalledWith("K7MQ4X"); // home's join panel offers it again
     act(() => r.unmount());
   });
@@ -200,7 +201,7 @@ describe("WaitingRoom: player list and host controls (EXP-063)", () => {
     expect(hasId(r, lobbyPlayerId("carol"))).toBe(false);
     expect(hasId(r, lobbyPlayerId("alice"))).toBe(true);
     expect(mockCtx.endSocket).not.toHaveBeenCalled();
-    expect(mockReplace).not.toHaveBeenCalled();
+    expect(mockDismissTo).not.toHaveBeenCalled();
     act(() => r.unmount());
   });
 });
@@ -211,7 +212,8 @@ describe("WaitingRoom: ways out (EXP-063)", () => {
     act(() => mockSocket.fire("player-removed", player("alice")));
     expect(mockCtx.clearRejoinToken).toHaveBeenCalledTimes(1);
     expect(mockCtx.endSocket).toHaveBeenCalledTimes(1);
-    expect(mockReplace).toHaveBeenCalledWith({ pathname: "/", params: { message: KICKED_BY_HOST_MESSAGE } });
+    expect(mockCtx.setHomeNotice).toHaveBeenCalledWith(KICKED_BY_HOST_MESSAGE);
+    expect(mockDismissTo).toHaveBeenCalledWith("/");
     expect(mockCtx.leaveRoom).not.toHaveBeenCalled();
     expect(emitted("leave-room")).toHaveLength(0);
     act(() => r.unmount());
@@ -222,11 +224,11 @@ describe("WaitingRoom: ways out (EXP-063)", () => {
     act(() => mockClose.onPress!());
     expect(mockCtx.leaveRoom).toHaveBeenCalledTimes(1);
     expect(mockCtx.endSocket).not.toHaveBeenCalled(); // the leave closes the socket itself, once acked
-    expect(mockReplace).toHaveBeenCalledWith("/");
+    expect(mockDismissTo).toHaveBeenCalledWith("/");
     // A second tap before the screen goes does nothing more
     act(() => mockClose.onPress!());
     expect(mockCtx.leaveRoom).toHaveBeenCalledTimes(1);
-    expect(mockReplace).toHaveBeenCalledTimes(1);
+    expect(mockDismissTo).toHaveBeenCalledTimes(1);
     act(() => r.unmount());
   });
 
@@ -286,7 +288,7 @@ describe("WaitingRoom: Android back with the chat keyboard (EXP-064)", () => {
     expect(consumed).toBe(true);
     expect(dismiss).toHaveBeenCalledTimes(1);
     expect(emitted("leave-room")).toHaveLength(0);
-    expect(mockReplace).not.toHaveBeenCalled();
+    expect(mockDismissTo).not.toHaveBeenCalled();
     act(() => r.unmount());
   });
 
@@ -297,7 +299,7 @@ describe("WaitingRoom: Android back with the chat keyboard (EXP-064)", () => {
     expect(consumed).toBe(true);
     expect(dismiss).not.toHaveBeenCalled();
     expect(mockCtx.leaveRoom).toHaveBeenCalledTimes(1);
-    expect(mockReplace).toHaveBeenCalledWith("/");
+    expect(mockDismissTo).toHaveBeenCalledWith("/");
     act(() => r.unmount());
   });
 });
@@ -316,8 +318,8 @@ describe("WaitingRoom: Android back leaves the room like the close button (EXP-3
     expect(pressBack()).toBe(true);
     expect(mockCtx.leaveRoom).toHaveBeenCalledTimes(1);
     expect(mockCtx.endSocket).not.toHaveBeenCalled(); // the leave closes the socket itself, once acked
-    expect(mockReplace).toHaveBeenCalledTimes(1);
-    expect(mockReplace).toHaveBeenCalledWith("/");
+    expect(mockDismissTo).toHaveBeenCalledTimes(1);
+    expect(mockDismissTo).toHaveBeenCalledWith("/");
     act(() => r.unmount());
   });
 
@@ -327,7 +329,7 @@ describe("WaitingRoom: Android back leaves the room like the close button (EXP-3
     pressBack();
     act(() => mockClose.onPress!());
     expect(mockCtx.leaveRoom).toHaveBeenCalledTimes(1);
-    expect(mockReplace).toHaveBeenCalledTimes(1);
+    expect(mockDismissTo).toHaveBeenCalledTimes(1);
     act(() => r.unmount());
   });
 
@@ -342,12 +344,12 @@ describe("WaitingRoom: Android back leaves the room like the close button (EXP-3
     expect(mockAlert.visible).toBe(false);
     expect(mockCtx.leaveRoom).not.toHaveBeenCalled();
     expect(emitted("remove-player")).toHaveLength(0);
-    expect(mockReplace).not.toHaveBeenCalled();
+    expect(mockDismissTo).not.toHaveBeenCalled();
 
     // With the confirmation closed, the next back is Exit
     act(() => { pressBack(); });
     expect(mockCtx.leaveRoom).toHaveBeenCalledTimes(1);
-    expect(mockReplace).toHaveBeenCalledWith("/");
+    expect(mockDismissTo).toHaveBeenCalledWith("/");
     act(() => r.unmount());
   });
 
@@ -356,7 +358,7 @@ describe("WaitingRoom: Android back leaves the room like the close button (EXP-3
     act(() => mockClose.onPress!());
     expect(pressBack()).toBe(true);
     expect(mockCtx.leaveRoom).toHaveBeenCalledTimes(1);
-    expect(mockReplace).toHaveBeenCalledTimes(1);
+    expect(mockDismissTo).toHaveBeenCalledTimes(1);
     act(() => r.unmount());
   });
 });
@@ -377,8 +379,13 @@ describe("WaitingRoom: room code (EXP-198)", () => {
     act(() => r.unmount());
   });
 
-  it("ignores a malformed deep link code: with no room known it goes home, never creating a room (EXP-334)", async () => {
-    mockRoute.gameCode = null;
+  // EXP-334 pinned this with no room known only; with one known (EXP-367: the code typed or linked before) the link
+  // rejoined that room. A malformed code names no room: home in both cases.
+  it.each([
+    ["no room known", null],
+    ["a room known", "K7MQ4X"],
+  ])("ignores a malformed deep link code: with %s it goes home, never joining nor creating a room", async (_name, gameCode) => {
+    mockRoute.gameCode = gameCode;
     mockRoute.params = { code: "12345O" };
     const r = await mount();
     expect(mockCtx.setGameCode).not.toHaveBeenCalled();

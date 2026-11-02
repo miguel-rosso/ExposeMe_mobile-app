@@ -195,6 +195,10 @@ export interface GameContextProps {
   requestNewRoom: () => void;
   /** Whether a new room was asked for since the last call (the waiting room takes it once, on opening) */
   takeNewRoomRequest: () => boolean;
+  /** The server's reason for sending the player home (raw server text), for home to show once on its next focus */
+  setHomeNotice: (notice: string) => void;
+  /** The home notice set since the last call, or null (home takes it once, when focused) */
+  takeHomeNotice: () => string | null;
   playersProvider: Player[];
   roundsOfGame: number;
   setGameCode: (code: string | null) => void;

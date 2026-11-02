@@ -348,7 +348,8 @@ describe("Invite link confirmation (EXP-347)", () => {
     await act(async () => { socket.fire("room-of-game", { success: false, message: "Username already taken" }); });
     await flush();
 
-    expect(mockReplace).toHaveBeenCalledWith({ pathname: "/", params: { message: "Username already taken" } });
+    expect(mockDismissTo).toHaveBeenCalledWith("/");
+    expect(ctx.takeHomeNotice()).toBe("Username already taken");
     expect(ctx.socket).toBeNull();
     // Home's join panel offers the link's code again, to retry with another name
     expect(ctx.joinCodeDraft).toBe(LINKED_ROOM);

@@ -11,13 +11,14 @@ import WaitingRoom from "../app/screens/WaitingRoom";
 
 const mockSocket = new FakeSocket();
 const mockReplace = jest.fn();
+const mockDismissTo = jest.fn();
 const mockSetPlayersProvider = jest.fn();
 const mockSetRoundsOfGame = jest.fn();
 const mockSaveRejoinToken = jest.fn();
 const mockLeaveRoom = jest.fn();
 
 jest.mock("expo-router", () => ({
-  useRouter: () => ({ replace: mockReplace }),
+  useRouter: () => ({ replace: mockReplace, dismissTo: mockDismissTo }),
   useLocalSearchParams: () => ({}),
   ...require("../testUtils/screenNavigation").screenNavigationMock(),
 }));
@@ -93,6 +94,7 @@ beforeEach(() => {
   mockSocket.removeAllListeners();
   mockSocket.emitted = [];
   mockReplace.mockClear();
+  mockDismissTo.mockClear();
   mockSetPlayersProvider.mockClear();
   mockSetRoundsOfGame.mockClear();
 });
@@ -209,7 +211,7 @@ describe("WaitingRoom: gallery access guard (EXP-118)", () => {
 
     act(() => r.root.find((n) => n.props.testID === TEST_IDS.galleryBackButton && typeof n.props.onPress === "function").props.onPress());
     expect(mockLeaveRoom).toHaveBeenCalledTimes(1);
-    expect(mockReplace).toHaveBeenCalledWith("/");
+    expect(mockDismissTo).toHaveBeenCalledWith("/");
     act(() => r.unmount());
   });
 

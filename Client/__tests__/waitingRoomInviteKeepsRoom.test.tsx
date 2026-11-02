@@ -313,7 +313,7 @@ describe("The room takes the lobby away while Join waits for the gallery check (
     await finishJoin();
     await flush();
 
-    expect(mockRouter.replace).toHaveBeenCalledWith(expect.objectContaining({ pathname: "/" }));
+    expect(mockRouter.dismissTo).toHaveBeenCalledWith("/");
     expectJoinDidNothing(socket);
     expect(ctx.socket).toBeNull();
   });

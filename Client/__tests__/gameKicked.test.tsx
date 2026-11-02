@@ -15,20 +15,21 @@ jest.mock("@react-native-async-storage/async-storage", () =>
 );
 
 const mockSocket = new FakeSocket();
-const mockReplace = jest.fn();
+const mockDismissTo = jest.fn();
 const mockClearRejoinToken = jest.fn();
+const mockSetHomeNotice = jest.fn();
 const mockPlayers = ["alice", "bob"].map((username) => ({
   username, points: 0, isHost: username === "alice", connected: true, lastGuess: "", lastAnswerCorrect: false,
 }));
 jest.mock("expo-router", () => ({
-  useRouter: () => ({ replace: mockReplace, dismissTo: jest.fn() }), useLocalSearchParams: () => ({}), useFocusEffect: () => {},
+  useRouter: () => ({ replace: jest.fn(), dismissTo: mockDismissTo }), useLocalSearchParams: () => ({}), useFocusEffect: () => {},
 }));
 jest.mock("../app/providers/GameContext", () => ({
   useGameContext: () => ({
     username: "bob", gameCode: "123456", socket: mockSocket, endSocket: jest.fn(),
     playersProvider: mockPlayers, setPlayersProvider: jest.fn(), roundsOfGame: 10, plantedPhotoUri: null,
     plantedPhotoSent: false, plantPhoto: jest.fn(), getRejoinToken: async () => "tok-123", saveRejoinToken: jest.fn(),
-    clearRejoinToken: mockClearRejoinToken, setPlantedPhotoUri: jest.fn(),
+    clearRejoinToken: mockClearRejoinToken, setPlantedPhotoUri: jest.fn(), setHomeNotice: mockSetHomeNotice,
   }),
 }));
 jest.mock("../app/providers/PhotoContext", () => ({
@@ -50,15 +51,15 @@ beforeAll(() => { jest.spyOn(console, "log").mockImplementation(() => {}); });
 afterAll(() => jest.restoreAllMocks());
 
 const FINAL_SCORE = mockPlayers.map(({ username, points, isHost }) => ({ username, points, isHost, lastAnswerCorrect: false, lastGuess: "" }));
-const KICKED_HOME = { pathname: "/", params: { message: KICKED_BY_HOST_MESSAGE } };
 
 describe("GameScreen: the host removes me (EXP-337)", () => {
   let r: TestRenderer.ReactTestRenderer;
   beforeEach(async () => {
     jest.useFakeTimers();
     mockSocket.reset();
-    mockReplace.mockClear();
+    mockDismissTo.mockClear();
     mockClearRejoinToken.mockClear();
+    mockSetHomeNotice.mockClear();
     await act(async () => { r = TestRenderer.create(<GameScreen />); });
     act(() => mockSocket.fire("game-over", { finalScore: FINAL_SCORE })); // on the final screens, between games
   });
@@ -73,28 +74,31 @@ describe("GameScreen: the host removes me (EXP-337)", () => {
     act(() => mockSocket.fire("disconnect", "io server disconnect"));
 
     expect(mockClearRejoinToken).toHaveBeenCalledTimes(1);
-    expect(mockReplace).toHaveBeenCalledTimes(1);
-    expect(mockReplace).toHaveBeenCalledWith(KICKED_HOME);
+    expect(mockDismissTo).toHaveBeenCalledTimes(1);
+    expect(mockSetHomeNotice).toHaveBeenCalledWith(KICKED_BY_HOST_MESSAGE);
+    expect(mockDismissTo).toHaveBeenCalledWith("/");
   });
 
   it("someone else's player-removed keeps me here", () => {
     act(() => mockSocket.fire("player-removed", mockPlayers[0]));
 
     expect(mockClearRejoinToken).not.toHaveBeenCalled();
-    expect(mockReplace).not.toHaveBeenCalled();
+    expect(mockDismissTo).not.toHaveBeenCalled();
   });
 
   it("kicked while offline: the refused rejoin forgets my token and goes home telling why", () => {
     act(() => mockSocket.fire("room-of-game", { success: false, message: KICKED_BY_HOST_MESSAGE }));
 
     expect(mockClearRejoinToken).toHaveBeenCalledTimes(1);
-    expect(mockReplace).toHaveBeenCalledWith(KICKED_HOME);
+    expect(mockSetHomeNotice).toHaveBeenCalledWith(KICKED_BY_HOST_MESSAGE);
+    expect(mockDismissTo).toHaveBeenCalledWith("/");
   });
 
   it("another refusal goes home with its reason and keeps the token", () => {
     act(() => mockSocket.fire("room-of-game", { success: false, message: "Game not found" }));
 
     expect(mockClearRejoinToken).not.toHaveBeenCalled();
-    expect(mockReplace).toHaveBeenCalledWith({ pathname: "/", params: { message: "Game not found" } });
+    expect(mockSetHomeNotice).toHaveBeenCalledWith("Game not found");
+    expect(mockDismissTo).toHaveBeenCalledWith("/");
   });
 });

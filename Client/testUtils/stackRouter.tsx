@@ -49,11 +49,12 @@ export const stackRouter = {
     routerCalls.push("dismiss");
     setStack(stack.slice(0, -1));
   },
+  // Like react-navigation's POP_TO: the screen it pops to takes the href's params (none for a bare path)
   dismissTo: (href: Href) => {
     routerCalls.push(`dismissTo ${describeHref(href)}`);
-    const path = describeHref(href);
-    const index = stack.map((e) => e.path).lastIndexOf(path);
-    setStack(index >= 0 ? stack.slice(0, index + 1) : withTop(entryOf(href)));
+    const target = entryOf(href);
+    const index = stack.map((e) => e.path).lastIndexOf(target.path);
+    setStack(index >= 0 ? [...stack.slice(0, index), { ...stack[index], params: target.params }] : withTop(target));
   },
   setParams: (params: Params) => {
     routerCalls.push("setParams");

@@ -17,10 +17,9 @@ import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import InitialScreen from "@/app/screens/InitialScreen";
 import { useGameContext } from "@/app/providers/GameContext";
-import { useLocalSearchParams } from "expo-router";
 import { StatusBar } from "react-native";
 import * as Animatable from "react-native-animatable";
-import { useBackHandler } from "@react-native-community/hooks";
+import { useFocusedBackHandler } from "@/app/hooks/useFocusedBackHandler";
 import { useFocusEffect } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useBackgroundContext } from "./providers/BackgroundContext";
@@ -64,8 +63,6 @@ registerHomeAnimations();
 
 const Index = () => {
   const router = useRouter();
-  const params = useLocalSearchParams();
-  const message = params?.message;
   const [isLoading, setIsLoading] = useState(true);
   const [hasSeenInitialScreen, setHasSeenInitialScreen] = useState(false);
   const {
@@ -77,6 +74,7 @@ const Index = () => {
     socket,
     endSocket,
     requestNewRoom,
+    takeHomeNotice,
   } = useGameContext();
   const { backgroundImage } = useBackgroundContext();
   const [isJoiningGame, setIsJoiningGame] = useState(false);
@@ -119,7 +117,7 @@ const Index = () => {
     }
   };
 
-  // Initial data: whether the first-run screen was seen, and the server notice that sent us home
+  // Initial data: whether the first-run screen was seen
   useEffect(() => {
     const checkInitialScreen = async () => {
       const value = await AsyncStorage.getItem("hasSeenInitialScreen");
@@ -129,13 +127,17 @@ const Index = () => {
 
     // The saved name is loaded by GameProvider at app start
     checkInitialScreen();
-
-    // The server's reason for sending us home (room-of-game refusal, connection refused, kicked), in our language
-    const serverMessage = Array.isArray(message) ? message[0] : message;
-    if (serverMessage) {
-      Alert.alert(t.serverNoticeTitle, translateServerMessage(serverMessage, t), [{ text: t.ok }]);
-    }
   }, []);
+
+  // The server's reason for sending us home (room-of-game refusal, connection refused, kicked), in our language: the
+  // screens over home hand it over in memory (useGoHome) as they pop back to it, and it is shown once. Never read from
+  // the route's params, which any link could set.
+  useFocusEffect(
+    useCallback(() => {
+      const notice = takeHomeNotice();
+      if (notice) Alert.alert(t.serverNoticeTitle, translateServerMessage(notice, t), [{ text: t.ok }]);
+    }, [takeHomeNotice, t])
+  );
 
   // Home never keeps a game connection: close the one left over from the last room whenever home is focused
   useFocusEffect(
@@ -158,8 +160,9 @@ const Index = () => {
     }
   }, [isJoiningGame]);
 
-  // Android back: closes the keyboard, then the join panel
-  useBackHandler(() =>
+  // Android back: closes the keyboard, then the join panel. Only while home is focused: under the waiting room it
+  // would take the press meant for its Exit (EXP-339)
+  useFocusedBackHandler(() =>
     handleHomeBackPress({ keyboard: Keyboard, isJoiningGame, cancelJoin: handleCancelJoinGame })
   );
 
@@ -209,8 +212,20 @@ const Index = () => {
 
     // The typed code stays in the panel: a refused join comes back to home with it
     setGameCode(joinCodeDraft);
+    closeJoinPanelOnReturnRef.current = true;
     router.push("/screens/WaitingRoom");
   };
+
+  // The join panel is done once Search room opens the lobby: when the room gives way back to this same home (it pops to
+  // it, EXP-339), home's form comes back as it does when the panel closes; the typed code stays in the panel
+  const closeJoinPanelOnReturnRef = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (!closeJoinPanelOnReturnRef.current) return;
+      closeJoinPanelOnReturnRef.current = false;
+      handleCancelJoinGame();
+    }, [])
+  );
 
   // Leave for the photo explorer with an exit animation; the elements come back when home is focused again
   const navigateWithExit = useExitAnimationNavigation([

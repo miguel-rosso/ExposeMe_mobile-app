@@ -84,6 +84,10 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   };
 
   const startSocket = () => {
+    // A room's lobby starts: a home notice still pending (home never got focus, e.g. a kick and an invite link in the
+    // same navigation) is about the room left before, and must not show when the player leaves this one
+    homeNoticeRef.current = null;
+
     // If we already have a connected socket, reuse it
     if (socketRef.current?.connected) {
       setSocket(socketRef.current);
@@ -192,6 +196,22 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     return requested;
   };
 
+  // ── Home notice ──
+
+  // In memory only, like the new room request: the server's reason for sending the player home (a refused join,
+  // kicked), shown once by home. Never a route param, which any link (exposeme:///?message=…) could forge.
+  const homeNoticeRef = useRef<string | null>(null);
+
+  const setHomeNotice = (notice: string) => {
+    homeNoticeRef.current = notice;
+  };
+
+  const takeHomeNotice = (): string | null => {
+    const notice = homeNoticeRef.current;
+    homeNoticeRef.current = null;
+    return notice;
+  };
+
   // Handle app going to background/foreground
   useEffect(() => {
     const sub = AppState.addEventListener("change", (state) => {
@@ -296,6 +316,8 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
         usernameLoaded,
         requestNewRoom,
         takeNewRoomRequest,
+        setHomeNotice,
+        takeHomeNotice,
         playersProvider,
         roundsOfGame,
         startSocket,

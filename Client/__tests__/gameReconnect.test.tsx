@@ -36,6 +36,7 @@ const snapshot = (over: Partial<GameStateSnapshot> = {}): GameStateSnapshot => (
   duration: 4200,
   phaseTotal: 7700,
   held: false,
+  holdsLeft: 3,
   pause: null,
   scores: [{ username: "alice", points: 2, isHost: true, lastAnswerCorrect: false, lastGuess: "" }],
   players: [],

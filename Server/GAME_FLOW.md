@@ -504,7 +504,7 @@ fresh snapshot (and `your-turn` for an awaited photo), which the game screen ren
 that reached the lobby screen in between are covered by that snapshot.
 
 - **`game-state`** = `{ started, phase, round, totalRounds, photo, correctAnswer, yourGuess, duration, phaseTotal, held,
-  pause, scores, players, roundOptions }`, the same for every recipient except `yourGuess`: the recipient's own recorded answer,
+  holdsLeft, pause, scores, players, roundOptions }`, the same for every recipient except `yourGuess`: the recipient's own recorded answer,
   only in `reveal`/`scores` (as in their `round-reveal`; `""` = no guess), else `null`. `duration` is the remaining
   time of the current phase (frozen while paused/held), `phaseTotal` its full duration (see "Phase totals in resync payloads"). `photo` is only set in `answering`/`reveal`/`scores` (the owner's name is never in it before
   the reveal: `correctAnswer` carries it from `reveal` on);
@@ -512,6 +512,9 @@ that reached the lobby screen in between are covered by that snapshot.
   `duration` what is left of the photo wait, so the client renders the same waiting screen as for `waiting-photo`;
   `correctAnswer` only in `reveal`/`scores`. `pause` is `{ duration, waitingFor, pause, maxPauses }` (same as `game-paused`) while paused, else `null`.
   `started: false` means the game ended while the player was away (`scores` are the final scores).
+  `holdsLeft` counts as the last `hold-end` of the round in play did (3 before any hold; an active hold counts as
+  used; see "Hold"), and is also 0 in `scores` once less than 1.5 s of the scoreboard is left. In `waiting-photo` it
+  still refers to the last round played (the app ignores it there: a new round has all its holds).
   Until `round-scores` (phases `waiting-photo`/`answering`/`reveal`), `scores` and `players` hide this round's
   answers: `lastGuess: ""`, `lastAnswerCorrect: false` and `points` without the point a correct answer earned.
   `scores` is ordered by those shown points, highest first, ties in room order (as `round-scores`), so the order
@@ -586,6 +589,12 @@ As with the start events, the bar ends `duration` after the payload arrived on t
   A hold is force-released (`hold-resume` + `hold-end`) when it reaches what is left of the budget; once the
   budget or the count is used up, `hold-start` is ignored until the next round. A pause ends an active hold and
   charges its time too.
+- Every `hold-end` tells the room how many holds are left this round (`holdsLeft`, also in `game-state`): 0 once
+  the 3 holds are used (a hold counts from its `hold-start`) or less than 1.5 s of the budget is left, so the app
+  disables its hold button instead of guessing (EXP-176). The server accepts a `hold-start` exactly when `holdsLeft`
+  would be above 0; a press the app sends anyway is ignored, and its release too (nothing is held). A hold freezes
+  the scoreboard and needs 1.5 s of it to start, so a release always leaves enough for another one; nothing is sent
+  when the running scoreboard drops below 1.5 s, so the button still looks active then (a press is ignored).
 - `hold-start` is also rate-limited per socket (burst 3, refilled 1 every 2 s; excess dropped); `hold-end` is
   ignored from a socket that holds nothing, and only a real release counts against its limit (burst 10, refilled
   1/s, see "Per-socket event limits"); releases never outnumber accepted holds, so a release always gets through
@@ -608,7 +617,7 @@ All game events are **atomic** — each contains everything the client needs.
 | `round-reveal` | reveal | `{ correctAnswer, duration, yourGuess }` | Show correct answer. One per player: `yourGuess` is the recipient's own recorded answer (`""` = none), which the app colours |
 | `round-scores` | scores | `{ scores, round, totalRounds, duration }` | Show scoreboard (`scores`: `{ username, points, isHost, lastAnswerCorrect, lastGuess }[]`, highest first, ties in room order) |
 | `hold-start` | scores | - | Pause everything visually |
-| `hold-end` | scores | - | The hold is over (released, force-released or ended by a pause); `hold-resume` carries the time |
+| `hold-end` | scores | `{ holdsLeft }` | The hold is over (released, force-released or ended by a pause); `hold-resume` carries the time. `holdsLeft`: holds the photo owner can still start this round (0: used up, see "Hold") |
 | `hold-resume` | scores | `{ phase, duration, phaseTotal }` | Resume with remaining time (`phaseTotal`: the phase's full duration) |
 | `round-skipped` | - | `{ round, reason?: "timeout" \| "unavailable" }` | No photo for this round; the next `waiting-photo` follows. `reason` only in the awaited owner's own copy (the room gets `{ round }`) |
 | `game-paused` | any | `{ duration, waitingFor, pause, maxPauses }` | Fewer than 2 connected: freeze, show countdown and "pause N of M" |

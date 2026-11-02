@@ -53,7 +53,7 @@ afterAll(() => jest.restoreAllMocks());
 
 const snapshot = (over: Partial<GameStateSnapshot> = {}): GameStateSnapshot => ({
   started: true, phase: "answering", round: 3, totalRounds: 10, photo: "/temp/1-a.jpg", correctAnswer: null, yourGuess: null,
-  duration: 4_000, phaseTotal: 8_000, held: false, pause: null, scores: [], players: mockPlayers, roundOptions: [], ...over,
+  duration: 4_000, phaseTotal: 8_000, held: false, holdsLeft: 3, pause: null, scores: [], players: mockPlayers, roundOptions: [], ...over,
 });
 const ROUND_START = { photo: "/temp/1-a.jpg", round: 3, duration: 8_000 };
 const PAUSE = { duration: 300_000, waitingFor: ["alice"], pause: 1, maxPauses: 3 };

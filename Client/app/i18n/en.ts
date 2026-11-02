@@ -74,6 +74,7 @@ export default {
   loadingGame: "Loading game…",
   areYouReady: "ARE YOU READY?",
   holdPhoto: "Hold photo",
+  noHoldsLeft: "No holds left",
   reconnecting: "Reconnecting…",
   gamePaused: "Game paused",
   waitingPlayersReturn: "Waiting for players to come back…",

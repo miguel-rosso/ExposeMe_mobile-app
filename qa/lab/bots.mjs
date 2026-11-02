@@ -119,13 +119,19 @@
 //   node qa/lab/bots.mjs --bots 4 --host --rounds 3 --kick bot4
 //            --hold P       like the app's hold button (EXP-303): on the scoreboard of a round whose revealed answer is its
 //                           own name, a bot presses hold (hold-start) with probability P and lets go (hold-end) after a
-//                           random time within the server's hold budget. With --chaos C it goes away instead of letting go
+//                           random time within the server's hold budget; like the app, it presses again (probability P)
+//                           while the server's hold-end says holds are left (holdsLeft > 0, EXP-176), and never once
+//                           it says 0. With --chaos C it goes away instead of letting go
 //                           with probability C: half the time it drops (back 1.5-3.5 s later), half the time it rejoins on a
 //                           new socket while holding, like the app reconnecting before the server noticed its old
 //                           connection was lost (EXP-299). Every player still in the room must get hold-end and
 //                           hold-resume within 1 s of the holder letting go, leaving, dropping or rejoining, and of the
-//                           server ending the hold itself (hold-resume is not due when a pause ended it) ("consistency");
-//                           summary: holds, hold_release_ms.
+//                           server ending the hold itself (hold-resume is not due when a pause ended it), every hold-end
+//                           must carry holdsLeft (at most 3 minus the round's holds so far), and the server must accept
+//                           no hold in a round after saying none are left ("consistency"); summary: holds,
+//                           hold_release_ms.
+//                           play-rounds.yaml's simulator (qa/lab/tests/maestro-sim.mjs) models a single hold per round,
+//                           not these presses again (EXP-355 will extend it).
 //   node qa/lab/bots.mjs --bots 3 --host --rounds 3 --hold 1
 //   node qa/lab/bots.mjs --bots 3 --host --rounds 10 --hold 0.5 --chaos 0.3
 //   Checks and metrics of each room: qa/lab/bots-analysis.mjs (tested on recorded events by qa/lab/tests/bots-analysis.test.sh).
@@ -199,8 +205,8 @@ Headless ExposeMe players (see the header of qa/lab/bots.mjs for every scenario)
   --play-again-linger S [--play-again-linger-bot K] [--start-next-game D]
   --quit-after-game-over     the last bot quits at game-over; the next game must drop it (needs --host, 3+ bots)
   --hold P                   the round's owner bot holds the scoreboard with probability P (0 to 1) and lets go within
-                             the server's hold budget; with --chaos C, instead of letting go it drops or rejoins on a
-                             new socket while holding, with probability C
+                             the server's hold budget, and again while holds are left; with --chaos C, instead of
+                             letting go it drops or rejoins on a new socket while holding, with probability C
   --help, -h                 print this help and exit (no network)
 
 Exit codes: 0 pass, 1 fail, 2 bad arguments.`;
@@ -315,7 +321,8 @@ function probabilityOption(name) {
 const HOLD = probabilityOption("hold");
 // Hold time per round, as in Server/managers/GameEngine.ts (GAME_FLOW.md "Hold"; bots-cli.test.sh checks the copy)
 const HOLD_BUDGET_PER_ROUND = 30_000;
-// A hold lasts this long (min, max): a tap at least, and let go before the budget runs out (not force-released)
+// A hold lasts this long (min, max): a tap at least, and let go before the budget runs out (a later hold of the same
+// round may still reach what is left of it and be force-released)
 const HOLD_LENGTH_MS = [500, HOLD_BUDGET_PER_ROUND - 2_000];
 // Pressed this long after round-scores (min, max): the scores phase lasts 5 s and a hold needs 1.5 s of it left
 const HOLD_PRESS_DELAY_MS = [200, 1_500];
@@ -902,6 +909,7 @@ function runRoom(roomIdx, fixedCode) {
           phase: d.phase, paused: !!d.pause, pause: d.pause?.pause, maxPauses: d.pause?.maxPauses, started: d.started,
           duration: d.duration, // a missed waiting-photo's remaining wait (bots-analysis isTimeoutSkip)
           yourGuess: d.yourGuess ?? null,
+          holdsLeft: d.holdsLeft ?? null, // null if missing, so bots-analysis checkHoldsLeft reports it
         });
         // Offline when game-over was sent (EXP-092): the rejoin snapshot of our game says it is no longer started
         if (!d.started && bot.inGame) { rec("game-over-missed", bot.round); onGameOver(); return; }
@@ -947,11 +955,15 @@ function runRoom(roomIdx, fixedCode) {
         setTimeout(() => endHold(hold), randomBetween(HOLD_LENGTH_MS));
       });
       // Over for everyone: released, force-released (budget, a holder who went away) or ended by a pause
-      socket.on("hold-end", () => {
-        rec("hold-end", bot.round);
+      socket.on("hold-end", (d) => {
+        const holdsLeft = d?.holdsLeft ?? null; // null if missing, so the check reports it
+        rec("hold-end", bot.round, { holdsLeft });
         // Our hold, still running on our side: the server ended it before we let go, which ends it for the checks too
         if (bot.hold?.accepted) rec("hold-ended-by-server", bot.hold.round);
         bot.hold = null;
+        // Our scoreboard: like the app's button, press again while the server says holds are left (EXP-176)
+        const ours = bot.ownedRound === bot.round && bot.phase === "scores" && !bot.lingering;
+        if (HOLD && ours && holdsLeft > 0 && Math.random() < HOLD) pressHold(bot.round);
       });
       socket.on("hold-resume", (d) => rec("hold-resume", bot.round, d));
       // Let go, or (--chaos) go away while holding: drop, or rejoin on a new socket

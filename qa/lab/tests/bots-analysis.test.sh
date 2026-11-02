@@ -8,7 +8,8 @@
 #   their answer_phase_overrun_ms reads ~500 ms early (reveals came sooner than today's server sends them).
 # - players out of the room (EXP-139): leave (--leave-round) and lobby kick (--kick) checks on small synthetic games, and the
 #   photo owner leaving during their round (--leave-owner, EXP-301 / DEC-038): still the answer, voters score.
-# - holds of the scoreboard (--hold, EXP-303): everyone let go within 1 s of the holder releasing or going away.
+# - holds of the scoreboard (--hold, EXP-303): everyone let go within 1 s of the holder releasing or going away, and
+#   every hold-end tells the holds left (EXP-176).
 # Run: qa/lab/tests/bots-analysis.test.sh
 # A change meant to alter the summary: UPDATE_FIXTURES=1 qa/lab/tests/bots-analysis.test.sh rewrites every fixture's
 # `expected` with the current output; review the diff (only the intended fields may change) before committing it.
@@ -362,10 +363,13 @@ got="$(skip_leak '{"round":2,"reason":"unavailable"}' 1)"
 # ── --hold: everyone is let go within 1 s of the holder releasing or going away (EXP-303) ──
 # A 1-round game of bot1, bot2, bot3: bot1, the round's owner, holds the scoreboard at 10 s and its hold ends at 15 s
 # the way `ending` says (released | dropped | rejoined | left); the others get hold-resume + hold-end LAG ms later (the
-# holder too on a release). Mutations: no-resume (bot3 never gets hold-resume), offline (bot3 dropped at round-start
-# and is still away when the hold ends, so it gets neither). Prints the consistency errors, one per line, then
-# "holds=N lag_max=MS" from the summary.
-hold() { # ending, lag ms, mutation (none|no-resume|offline)
+# holder too on a release), hold-end saying 2 holds are left. Mutations: no-resume (bot3 never gets hold-resume),
+# offline (bot3 dropped at round-start and is still away when the hold ends, so it gets neither), no-holds-left (bot3's
+# hold-end has no holdsLeft), too-many-left (bot3's says 3 after a hold), held-when-used-up (hold-end says 0, then the
+# server starts another hold), snapshot-no-holds-left / snapshot-too-many-left (the snapshot bot1 gets back after
+# dropping or rejoining has no holdsLeft, or says 3; it says 2 otherwise). Prints the consistency errors, one per line,
+# then "holds=N lag_max=MS" from the summary.
+hold() { # ending, lag ms, mutation (none|no-resume|offline|no-holds-left|too-many-left|held-when-used-up|snapshot-*)
   node --input-type=module -e '
     const { analyseRoom } = await import(process.argv[1]);
     const [ending, lagArg, mutation] = process.argv.slice(2);
@@ -393,9 +397,12 @@ hold() { # ending, lag ms, mutation (none|no-resume|offline)
     const receivers = inRoom.filter((n) => n !== "bot1" || ending === "released");
     for (const n of receivers) {
       if (!(mutation === "no-resume" && n === "bot3")) at(n, "hold-resume", 1, END + lag, { phase: "scores", duration: 4000, phaseTotal: 5000 });
-      at(n, "hold-end", 1, END + lag + 1);
+      const ended = { "no-holds-left": {}, "too-many-left": { holdsLeft: 3 }, "held-when-used-up": { holdsLeft: 0 } }[mutation];
+      at(n, "hold-end", 1, END + lag + 1, ended && (n === "bot3" || mutation === "held-when-used-up") ? ended : { holdsLeft: 2 });
     }
-    if (ending === "dropped" || ending === "rejoined") at("bot1", "game-state", 1, END + 2000, { phase: "scores", paused: false, started: true, yourGuess: "" });
+    if (mutation === "held-when-used-up") all(inRoom, "hold-start", 1, END + lag + 100);
+    const snapshotHoldsLeft = { "snapshot-no-holds-left": {}, "snapshot-too-many-left": { holdsLeft: 3 } }[mutation] ?? { holdsLeft: 2 };
+    if (ending === "dropped" || ending === "rejoined") at("bot1", "game-state", 1, END + 2000, { phase: "scores", paused: false, started: true, yourGuess: "", ...snapshotHoldsLeft });
     all(players.filter((n) => n !== "bot1" || ending !== "left"), "game-over", 1, END + lag + 5000, { finalScore: [] });
     const r = { code: "QAROOM", reason: "game-over", players, errors: [], uploads: [], rateLimited: 0, events };
     const summary = analyseRoom(r, { host: true, rounds: 1, playAgainLingerS: 0, lingerBot: 0, startNextGameS: 0 });
@@ -415,6 +422,12 @@ hold_case "hold released but hold-end 1.5 s later" "round 1: bot2 got hold-end 1
 hold_case "holder rejoins on a new socket and the room stays frozen (EXP-299)" "round 1: bot2 got hold-end 25001 ms after bot1 rejoined on a new socket while holding (max 1000 ms)" rejoined 25000 none
 hold_case "a player never gets hold-resume" "round 1: bot3 never got hold-resume after bot1 dropped while holding" dropped 20 no-resume
 [ "$(hold released 20 offline)" = "holds=1 lag_max=21.0" ] && ok "a player away when the hold ends is not expected to get it" || ko "offline player excluded" "$(hold released 20 offline)"
+# EXP-176: hold-end says how many holds are left, and the server keeps to it
+hold_case "a hold-end without holdsLeft" "round 1: bot3 got hold-end with holdsLeft undefined (expected 0 to 2)" released 20 no-holds-left
+hold_case "a hold-end with more holds left than the round has" "round 1: bot3 got hold-end with holdsLeft 3 (expected 0 to 2)" released 20 too-many-left
+hold_case "a hold the server starts after saying none are left" "round 1: bot2 got hold-start after hold-end said no holds were left" released 20 held-when-used-up
+hold_case "a scoreboard snapshot without holdsLeft" "round 1: bot1 got a scoreboard snapshot with holdsLeft undefined (expected 0 to 2)" dropped 20 snapshot-no-holds-left
+hold_case "a scoreboard snapshot with more holds left than the round has" "round 1: bot1 got a scoreboard snapshot with holdsLeft 3 (expected 0 to 2)" rejoined 20 snapshot-too-many-left
 
 # Holds the server ends first: a 2-round game of bot1 and bot2 whose photos are both bot1's; bot1 holds round 1 at 10 s
 # and the server ends it at 12 s (hold-end, recorded by bot1 as hold-ended-by-server); bot1 holds round 2 from 30 s and
@@ -449,20 +462,20 @@ server_ended_hold() { # round1
     holdAt("bot1", 1, 10000);
     if (round1 === "paused") {
       at("bot2", "chaos-disconnect", 1, 11990);
-      at("bot1", "hold-end", 1, 12000);
+      at("bot1", "hold-end", 1, 12000, { holdsLeft: 2 });
       at("bot1", "hold-ended-by-server", 1, 12000);
       at("bot1", "game-paused", 1, 12005, { waitingFor: ["bot2"], duration: 300000, pause: 1, maxPauses: 3 });
-      at("bot2", "game-state", 1, 14000, { phase: "scores", paused: false, started: true });
+      at("bot2", "game-state", 1, 14000, { phase: "scores", paused: false, started: true, holdsLeft: 2 });
       at("bot1", "game-resumed", 1, 14100, { phase: "scores" });
     } else {
-      all(players, "hold-end", 1, 12000);
+      all(players, "hold-end", 1, 12000, { holdsLeft: 0 });
       at("bot1", "hold-ended-by-server", 1, 12000);
     }
     playUntilScores(2, "bot1", 20000);
     holdAt("bot1", 2, 30000);
     at("bot1", "hold-release-sent", 2, 55000);
     all(players, "hold-resume", 2, 55020, { phase: "scores", duration: 4000, phaseTotal: 5000 });
-    all(players, "hold-end", 2, 55021);
+    all(players, "hold-end", 2, 55021, { holdsLeft: 2 });
     all(players, "game-over", 2, 60000, { finalScore: [] });
     const r = { code: "QAROOM", reason: "game-over", players, errors: [], uploads: [], rateLimited: 0, events };
     const summary = analyseRoom(r, { host: true, rounds: 2, playAgainLingerS: 0, lingerBot: 0, startNextGameS: 0 });

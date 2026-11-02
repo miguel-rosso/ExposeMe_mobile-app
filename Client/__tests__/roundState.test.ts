@@ -25,7 +25,8 @@ describe("round-start (EXP-001)", () => {
     const prev = view({ phaseKey: 4, correctAnswer: "alice", scores: [], mySelection: "bob" });
     expect(start(prev)).toEqual({
       photo: "http://srv/temp/a.jpg", round: 3, phase: "answering", phaseDuration: 10000, phaseTotal: 10000, phaseKey: 5,
-      correctAnswer: "", scores: null, mySelection: "", gameHeld: false, pressing: false, leavers: [], totalRounds: 0,
+      correctAnswer: "", scores: null, mySelection: "", gameHeld: false, pressing: false, holdsUsedUp: false, leavers: [],
+      totalRounds: 0,
     });
   });
 
@@ -90,6 +91,7 @@ const snapshot = (over: Partial<GameStateSnapshot> = {}): GameStateSnapshot => (
   duration: 4200,
   phaseTotal: 8000,
   held: false,
+  holdsLeft: 3,
   pause: null,
   scores: [{ username: "alice", points: 2, isHost: true, lastAnswerCorrect: false, lastGuess: "" }],
   players: [],
@@ -234,7 +236,7 @@ describe("reveal, scores, hold and pause", () => {
     expect(roundReducer(held, { type: "hold-resume", data: { phase: "scores", duration: 2_000, phaseTotal: 5_000 } })).toMatchObject({
       phase: "scores", phaseDuration: 2_000, phaseTotal: 5_000, phaseKey: 8, gameHeld: false,
     });
-    expect(roundReducer(held, { type: "hold-end" })).toMatchObject({ gameHeld: false });
+    expect(roundReducer(held, { type: "hold-end", data: { holdsLeft: 2 } })).toMatchObject({ gameHeld: false });
     expect(roundReducer(held, { type: "game-paused" })).toMatchObject({ gameHeld: false, pressing: false });
   });
 
@@ -243,9 +245,29 @@ describe("reveal, scores, hold and pause", () => {
     const pressedAgain = view({ ...answering, phase: "scores", gameHeld: true, pressing: true });
     const answered: RoundAction[] = [
       { type: "hold-resume", data: { phase: "scores", duration: 2_000, phaseTotal: 5_000 } },
-      { type: "hold-end" },
+      { type: "hold-end", data: { holdsLeft: 2 } },
     ];
     expect(answered.reduce(roundReducer, pressedAgain).pressing).toBe(true);
+  });
+
+  // EXP-176: the server says when the round's holds are used up; the app doesn't count them itself
+  it("hold-end with no holds left greys the button out until the next round", () => {
+    const scores = view({ ...answering, phase: "scores", gameHeld: true });
+    expect(roundReducer(scores, { type: "hold-end", data: { holdsLeft: 1 } }).holdsUsedUp).toBe(false);
+    const usedUp = roundReducer(scores, { type: "hold-end", data: { holdsLeft: 0 } });
+    expect(usedUp).toMatchObject({ gameHeld: false, holdsUsedUp: true });
+    // A pause or a resume doesn't give them back; the next round does
+    expect(roundReducer(usedUp, { type: "game-paused" }).holdsUsedUp).toBe(true);
+    expect(roundReducer(usedUp, { type: "hold-resume", data: { phase: "scores", duration: 1_500, phaseTotal: 5_000 } }).holdsUsedUp).toBe(true);
+    expect(roundReducer(usedUp, { type: "waiting-photo", data: { round: 3, duration: 15_000 } }).holdsUsedUp).toBe(false);
+    const next = roundReducer(usedUp, { type: "round-start", data: { photo: "/temp/b.jpg", round: 3, duration: 7_700 }, serverUrl: "" });
+    expect(next.holdsUsedUp).toBe(false);
+  });
+
+  it("a snapshot tells whether the round's holds are used up", () => {
+    const scoresSnap = (holdsLeft: number) => snapshot({ phase: "scores", correctAnswer: "bob", holdsLeft });
+    expect(roundReducer(view(), { type: "game-state", snap: scoresSnap(0), serverUrl: "" }).holdsUsedUp).toBe(true);
+    expect(roundReducer(view({ holdsUsedUp: true }), { type: "game-state", snap: scoresSnap(2), serverUrl: "" }).holdsUsedUp).toBe(false);
   });
 
   it("resuming a pause taken after scores waits for the next round's photo", () => {

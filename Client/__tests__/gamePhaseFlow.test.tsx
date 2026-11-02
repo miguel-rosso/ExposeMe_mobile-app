@@ -1,7 +1,9 @@
 import React from "react";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
+import { Text } from "react-native";
 import { FakeSocket } from "../testUtils/fakeSocket";
 import { TEST_IDS, playerOptionId } from "../app/utils/testIds";
+import en from "../app/i18n/en";
 // Loaded with the file (jest.mock calls below are hoisted above it): a cold transform must not hit the test timeout
 import GameScreen from "../app/screens/GameScreen";
 
@@ -155,7 +157,7 @@ describe("GameScreen: server phases drawn with the received duration (EXP-063)",
     act(() => mockSocket.fire("hold-start"));
     const [marker] = byId(r.root, TEST_IDS.gameHeld);
     expect(marker.props.pointerEvents).toBe("none");
-    act(() => mockSocket.fire("hold-end"));
+    act(() => mockSocket.fire("hold-end", { holdsLeft: 2 }));
     expect(has(r.root, TEST_IDS.gameHeld)).toBe(false);
   });
 
@@ -164,7 +166,7 @@ describe("GameScreen: server phases drawn with the received duration (EXP-063)",
     act(() => mockSocket.fire("round-scores", { scores: SCORES, round: 1, totalRounds: 10, duration: 5_000 }));
     act(() => mockSocket.fire("hold-start"));
     expect(has(r.root, "score-modal-probe")).toBe(false);
-    act(() => mockSocket.fire("hold-end"));
+    act(() => mockSocket.fire("hold-end", { holdsLeft: 2 }));
     expect(scoreModal(r.root).visible).toBe(true);
   });
 
@@ -203,7 +205,7 @@ describe("GameScreen: server phases drawn with the received duration (EXP-063)",
     expect(emitted("hold-start")).toHaveLength(2);
 
     act(() => mockSocket.fire("hold-resume", { phase: "scores", duration: 3_000, phaseTotal: 5_000 })); // first release
-    act(() => mockSocket.fire("hold-end"));
+    act(() => mockSocket.fire("hold-end", { holdsLeft: 2 }));
     act(() => mockSocket.fire("hold-start")); // the second press, accepted
     expect(has(r.root, "score-modal-probe")).toBe(false); // held again: the photo shows
     act(() => button().props.onPressOut());
@@ -220,9 +222,43 @@ describe("GameScreen: server phases drawn with the received duration (EXP-063)",
     act(() => button().props.onPressIn());
     act(() => mockSocket.fire("hold-start"));
     act(() => mockSocket.fire("hold-resume", { phase: "scores", duration: 1_500, phaseTotal: 5_000 }));
-    act(() => mockSocket.fire("hold-end"));
+    act(() => mockSocket.fire("hold-end", { holdsLeft: 2 }));
     expect(scoreModal(r.root).visible).toBe(true);
     act(() => button().props.onPressOut());
+    act(() => button().props.onPressIn());
+    expect(emitted("hold-start")).toHaveLength(2);
+  });
+
+  // EXP-176: the server says when the round's holds are used up (holdsLeft 0): the button is greyed out and a press
+  // sends nothing, while a press already down when they ran out still sends its release; the next round has them back
+  it("once the server says no holds are left, the button says so and a press sends nothing", () => {
+    act(() => mockSocket.fire("round-start", START));
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "bob", duration: 3_000, yourGuess: "" }));
+    act(() => mockSocket.fire("round-scores", { scores: SCORES, round: 1, totalRounds: 10, duration: 5_000 }));
+    const button = () => r.root.find((n) => n.props.testID === TEST_IDS.holdButton && typeof n.props.onPressIn === "function");
+    const label = () => button().findByType(Text).props.children;
+    expect(label()).toBe(en.holdPhoto);
+
+    // The last hold, force-released at the end of the budget while my finger is still down
+    act(() => button().props.onPressIn());
+    act(() => mockSocket.fire("hold-start"));
+    act(() => mockSocket.fire("hold-resume", { phase: "scores", duration: 1_500, phaseTotal: 5_000 }));
+    act(() => mockSocket.fire("hold-end", { holdsLeft: 0 }));
+    expect(label()).toBe(en.noHoldsLeft);
+    expect(button().props.disabled).toBe(true);
+    act(() => button().props.onPressOut());
+    expect(emitted("hold-end")).toHaveLength(1);
+
+    act(() => button().props.onPressIn());
+    act(() => button().props.onPressOut());
+    expect(emitted("hold-start")).toHaveLength(1);
+    expect(emitted("hold-end")).toHaveLength(1);
+
+    act(() => mockSocket.fire("round-start", { ...START, photo: "/temp/y.jpg", round: 2 }));
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "bob", duration: 3_000, yourGuess: "" }));
+    act(() => mockSocket.fire("round-scores", { scores: SCORES, round: 2, totalRounds: 10, duration: 5_000 }));
+    expect(label()).toBe(en.holdPhoto);
+    expect(button().props.disabled).toBe(false);
     act(() => button().props.onPressIn());
     expect(emitted("hold-start")).toHaveLength(2);
   });

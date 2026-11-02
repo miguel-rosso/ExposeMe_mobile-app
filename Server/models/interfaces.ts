@@ -198,6 +198,15 @@ export interface PhaseResumeData {
 }
 
 /**
+ * `hold-end`: the hold is over (released, force-released or ended by a pause); `holdsLeft` holds the photo owner can
+ * still start this round's scores, 0 once the count or the time budget is used up or too little of the scoreboard is
+ * left for one (see GameEngine.holdsLeft).
+ */
+export interface HoldEndData {
+  holdsLeft: number;
+}
+
+/**
  * The room-wide part of `game-state`, the same for every recipient.
  * `duration` is the remaining time of the current phase (frozen while paused or held), `phaseTotal` its full
  * countdown as its start event sent it, so the client's bar resumes at the right point.
@@ -214,6 +223,8 @@ export interface RoomStateSnapshot {
   duration: number;
   phaseTotal: number;
   held: boolean;
+  /** Holds the photo owner can still start in the round in play (as in `hold-end`; in waiting-photo, the last round) */
+  holdsLeft: number;
   /** The pause in progress (same as the last `game-paused`), or null when not paused */
   pause: PauseInfo | null;
   scores: ScoreRound[];

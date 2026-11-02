@@ -220,6 +220,7 @@ for good in "--hold 0" "--hold 1" "--hold 0.3 --chaos 0.2"; do
 done
 [[ "$(node "$BOTS" --help)" == *"--hold P"* ]] && ok "--help lists --hold" || ko "--help lists --hold"
 mirrors managers/GameEngine.ts "$BOTS" HOLD_BUDGET_PER_ROUND HOLD_BUDGET_PER_ROUND
+mirrors managers/GameEngine.ts "$ANALYSIS" MAX_HOLDS_PER_ROUND MAX_HOLDS_PER_ROUND
 
 # ── A valid run says which server it uses before connecting ──
 SERVER_URL="$URL" node "$BOTS" --bots 1 --host --timeout 1 >/dev/null 2>"$TMP/err"

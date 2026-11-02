@@ -1,6 +1,6 @@
 import { Server } from "socket.io";
 import {
-  GameStateSnapshot, PauseInfo, PhaseResumeData, Player, PlayerConnectionData, PublicPlayer, Room, RoomStateSnapshot, RoundPhase, RoundRevealData,
+  GameStateSnapshot, HoldEndData, PauseInfo, PhaseResumeData, Player, PlayerConnectionData, PublicPlayer, Room, RoomStateSnapshot, RoundPhase, RoundRevealData,
   RoundSkipReason, RoundSkippedData, RoundStartData, ScoreRound, WaitingPhotoData, YourTurnData,
 } from "../models/interfaces";
 import { DISCONNECT_GRACE, RoomManager } from "./RoomManager";
@@ -374,15 +374,10 @@ export class GameEngine {
     if (room.held || room.paused) return false;
     if (room.phase !== "scores") return false;
 
-    // Don't allow hold if not enough time remaining
-    if (this.phaseTimeLeft(room) < HOLD_MIN_REMAINING) return false;
-
-    // Hold limits of this round
-    const run = this.run(room);
-    if (run.holdUsage?.round !== room.round) run.holdUsage = { round: room.round, count: 0, usedMs: 0, since: null };
-    const usage = run.holdUsage;
+    // Hold limits of this round and time left on the scoreboard: the same rule the room is told (holdsLeft)
+    if (this.holdsLeft(room) === 0) return false;
+    const usage = this.roundHoldUsage(room);
     const budgetLeft = HOLD_BUDGET_PER_ROUND - usage.usedMs;
-    if (usage.count >= MAX_HOLDS_PER_ROUND || budgetLeft < HOLD_MIN_REMAINING) return false;
     usage.count++;
     usage.since = Date.now();
 
@@ -419,6 +414,23 @@ export class GameEngine {
     if (!room.held) return;
     console.log(`[${room.gameCode}] HOLD force-released`);
     this.releaseHold(room);
+  }
+
+  /**
+   * Holds the photo owner can still start in the round in play (`hold-end`, `game-state`, and what handleHold
+   * accepts): 0 once the count or the time budget is used up, or when less than HOLD_MIN_REMAINING of the running
+   * scoreboard is left. A hold freezes the scoreboard and needs at least that to start, so a release always leaves
+   * enough: only a snapshot sees that case (nothing is sent when the running scoreboard gets there). An active hold
+   * counts as started; its time is charged when it ends. In waiting-photo the round in play is still the last one
+   * (room.round only moves on at round-start).
+   */
+  holdsLeft(room: Room): number {
+    const scoreboardRunningOut = room.phase === "scores" && !room.held && this.phaseTimeLeft(room) < HOLD_MIN_REMAINING;
+    if (scoreboardRunningOut) return 0;
+    const usage = this.run(room).holdUsage;
+    if (usage?.round !== room.round) return MAX_HOLDS_PER_ROUND;
+    if (HOLD_BUDGET_PER_ROUND - usage.usedMs < HOLD_MIN_REMAINING) return 0;
+    return Math.max(0, MAX_HOLDS_PER_ROUND - usage.count);
   }
 
   // ── Connection changes: pause / resume / resync ──────
@@ -542,6 +554,7 @@ export class GameEngine {
       duration,
       phaseTotal,
       held: room.held,
+      holdsLeft: this.holdsLeft(room),
       pause: room.paused ? this.pauseInfo(room) : null,
       scores,
       players,
@@ -570,7 +583,7 @@ export class GameEngine {
     if (room.held) {
       // The hold already froze the phase timer; the pause replaces it
       this.endHold(room);
-      this.io.to(room.gameCode).emit("hold-end");
+      this.emitHoldEnd(room);
     } else {
       this.freezePhaseTimer(room);
     }
@@ -1108,6 +1121,19 @@ export class GameEngine {
 
   // ── Private: Hold ────────────────────────────────────
 
+  /** This round's hold usage, started afresh in a new round. */
+  private roundHoldUsage(room: Room): HoldUsage {
+    const run = this.run(room);
+    if (run.holdUsage?.round !== room.round) run.holdUsage = { round: room.round, count: 0, usedMs: 0, since: null };
+    return run.holdUsage;
+  }
+
+  /** The hold is over for everyone, with what is left of the round's holds (call it once the hold is charged). */
+  private emitHoldEnd(room: Room): void {
+    const ended: HoldEndData = { holdsLeft: this.holdsLeft(room) };
+    this.io.to(room.gameCode).emit("hold-end", ended);
+  }
+
   /** The active hold ends (released, or replaced by a pause): its time counts against the round's hold budget. */
   private endHold(room: Room): void {
     const usage = this.run(room).holdUsage;
@@ -1121,7 +1147,8 @@ export class GameEngine {
 
   /**
    * The hold is released (by the owner, or forced): `hold-resume` to the room with what is left of the phase (at
-   * least HOLD_MIN_REMAINING, for a smooth transition), the phase timer re-armed with it, then `hold-end`.
+   * least HOLD_MIN_REMAINING, for a smooth transition), the phase timer re-armed with it, then `hold-end` with
+   * the holds left (see holdsLeft).
    */
   private releaseHold(room: Room): void {
     this.endHold(room);
@@ -1131,7 +1158,7 @@ export class GameEngine {
     const resumed: PhaseResumeData = { phase: room.phase, ...this.phaseTiming(room, remaining) };
     this.io.to(room.gameCode).emit("hold-resume", resumed);
     this.resumePhaseTimer(room, remaining);
-    this.io.to(room.gameCode).emit("hold-end");
+    this.emitHoldEnd(room);
   }
 
   // ── Private: Helpers ─────────────────────────────────

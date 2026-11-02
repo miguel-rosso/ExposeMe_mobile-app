@@ -3,9 +3,11 @@
 # Android emulator every step that reads the screen takes 1-4 s, while the options are up for 8.5 s (answering) + 3 s
 # (reveal) and the scoreboard for 5 s, so the steps between `# ── timed: <phase> ──` and `# ── end timed ──` must be few
 # and cheap: no settle waits, no conditional reads (a `runFlow` whose `when` is only a `true:` script reads nothing),
-# no text search (a testID filtered by an env variable, like `text: "${USERNAME}"`, is no UI string and is allowed).
+# no text search (a testID filtered by an env variable, like `text: "${USERNAME}"`, is no UI string, and one filtered by
+# an app string in every language, `"<en>|<es>"` of one Client/app/i18n key, works in either: both are allowed).
 # Then play-rounds.yaml's scoreboard deadline is checked against GameEngine.ts, and the flow is played on a fake game
-# with slow screen reads (maestro-sim.mjs, scenario `rounds`). No devices, servers or network.
+# with slow screen reads (maestro-sim.mjs, scenario `rounds`); hold-used-up.yaml's copy of the hold times too. No
+# devices, servers or network.
 # Run: qa/lab/tests/maestro-timing.test.sh
 set -uo pipefail
 
@@ -28,10 +30,24 @@ MAX_SETTLE_MS=500
 SLOW_STEP_MS=4000
 
 # ── Checker ──
+# i18n_pairs APP_DIR -> one "<en>|<es>" line per i18n key with a one-line string in both languages
+i18n_pairs() {
+  node -e '
+    const fs = require("fs");
+    const load = (f) => new Function(fs.readFileSync(f, "utf8").replace(/^export default/m, "return").replace(/\}\s*as const;\s*$/, "}"))();
+    const [en, es] = process.argv.slice(1).map(load);
+    const oneLine = (v) => typeof v === "string" && !v.includes("\n");
+    for (const key of Object.keys(en)) if (oneLine(en[key]) && oneLine(es[key])) console.log(`${en[key]}|${es[key]}`);
+  ' "$1/i18n/en.ts" "$1/i18n/es.ts"
+}
+# The translated filters the checker allows (I18N_PAIRS: a file of i18n_pairs lines; the fixtures' first, then the app's)
+I18N_PAIRS="$TMP/i18n-pairs"
+
 # timed_blocks FLOW -> one line per timed block: "BLOCK <phase> <line> <steps> <first command or ->", "ERR <line>:
 # <message>" for each rule a step breaks and "WARN <line>: <message>" for optional steps
 timed_blocks() {
-  awk -v max_settle="$MAX_SETTLE_MS" '
+  awk -v max_settle="$MAX_SETTLE_MS" -v pairs="$I18N_PAIRS" '
+    BEGIN { while ((getline pair < pairs) > 0) translated[pair] = 1 }
     function err_at(line, msg) { print "ERR " line ": " msg }
     function err(msg) { err_at(NR, msg) }
     function warn(msg) { print "WARN " NR ": " msg }
@@ -85,8 +101,10 @@ timed_blocks() {
     /^[ \t]*id:/ { id_line = NR; id_indent = match($0, /[^ \t]/) }
     /^[ \t]*text:/ {
       env_filter = $0 ~ /^[ \t]*text:[ \t]*"\$\{[A-Z_]+\}"[ \t]*$/
-      if (!(env_filter && id_line == NR - 1 && id_indent == match($0, /[^ \t]/)))
-        err("text selector inside a timed phase (use a testID, filtered at most by an env variable)")
+      text = $0; sub(/^[ \t]*text:[ \t]*/, "", text); sub(/[ \t]+$/, "", text)
+      if (text ~ /^".*"$/) text = substr(text, 2, length(text) - 2)
+      if (!((env_filter || text in translated) && id_line == NR - 1 && id_indent == match($0, /[^ \t]/)))
+        err("text selector inside a timed phase (use a testID, filtered at most by an env variable or an app string in every language)")
     }
     /^[ \t]*when:/ { when_line = NR; when_indent = match($0, /[^ \t]/) }
     /^[ \t]*waitToSettleTimeoutMs:/ { settle = $2 }
@@ -116,6 +134,13 @@ engine_ms() { # CONSTANT -> its value in ms, from GameEngine.ts (e.g. "export co
 }
 
 # ── The checker catches the slow patterns (fixture flows) ──
+# Fixture app strings: one key in both languages, one in English only and one on two lines
+mkdir -p "$TMP/app/i18n"
+printf 'export default {\n  noHoldsLeft: "No holds left",\n  english: "Only English",\n  twoLines: "A\\nB",\n} as const;\n' >"$TMP/app/i18n/en.ts"
+printf 'export default {\n  noHoldsLeft: "Ya no puedes mantenerla",\n  twoLines: "C\\nD",\n} as const;\n' >"$TMP/app/i18n/es.ts"
+i18n_pairs "$TMP/app" >"$I18N_PAIRS"
+[ "$(cat "$I18N_PAIRS")" = "No holds left|Ya no puedes mantenerla" ] \
+  && ok "checker reads the app strings both languages have on one line" || ko "checker reads i18n pairs" "$(cat "$I18N_PAIRS")"
 cat >"$TMP/slow.yaml" <<'EOF'
 - repeat:
     commands:
@@ -222,6 +247,21 @@ cat >"$TMP/env-text.yaml" <<'EOF'
       id: "score-answer-name"
       text: "It was your photo!"
     timeout: 1000
+- extendedWaitUntil:
+    visible:
+      id: "hold-button"
+      text: "No holds left|Ya no puedes mantenerla"
+      enabled: false
+    timeout: 1000
+- extendedWaitUntil:
+    visible:
+      text: "No holds left|Ya no puedes mantenerla"
+    timeout: 1000
+- extendedWaitUntil:
+    visible:
+      id: "hold-button"
+      text: "No holds left|Ya no puedes"
+    timeout: 1000
 # ── end timed ──
 EOF
 timed_blocks "$TMP/env-text.yaml" >"$TMP/env-text.out"
@@ -231,8 +271,18 @@ grep -q "^ERR 9: text selector" "$TMP/env-text.out" && ok "checker flags an env 
   || ko "checker flags an env variable text without a testID" "$(cat "$TMP/env-text.out")"
 grep -q "^ERR 14: text selector" "$TMP/env-text.out" && ok "checker flags a UI string filter on a testID" \
   || ko "checker flags a UI string filter on a testID" "$(cat "$TMP/env-text.out")"
+! grep -q "^ERR 19:" "$TMP/env-text.out" && ok "checker allows a testID filtered by an app string in every language" \
+  || ko "checker allows a testID filtered by an app string in every language" "$(cat "$TMP/env-text.out")"
+grep -q "^ERR 24: text selector" "$TMP/env-text.out" && grep -q "^ERR 29: text selector" "$TMP/env-text.out" \
+  && [ "$(grep -c '^ERR' "$TMP/env-text.out")" = 4 ] \
+  && ok "checker flags an app string without a testID, and a filter that is not one key in every language" \
+  || ko "checker flags translated filters without a testID or off the app strings" "$(cat "$TMP/env-text.out")"
 
 # ── Every flow's timed blocks fit their budget ──
+i18n_pairs "$CLIENT_APP" >"$I18N_PAIRS"
+grep -qxF "$(sed -nE 's/^  noHoldsLeft: "(.*)",$/\1/p' "$CLIENT_APP/i18n/en.ts")|$(sed -nE 's/^  noHoldsLeft: "(.*)",$/\1/p' "$CLIENT_APP/i18n/es.ts")" "$I18N_PAIRS" \
+  && ok "app strings read from Client/app/i18n ($(wc -l <"$I18N_PAIRS" | tr -d ' ') in both languages)" \
+  || ko "app strings read from Client/app/i18n" "$(head -3 "$I18N_PAIRS")"
 for flow in "$MAESTRO_DIR"/*.yaml; do check_flow "$flow"; done
 
 # ── The round flows mark their timed phases ──
@@ -299,6 +349,23 @@ else
     && ok "each of the $score_steps scoreboard steps starts only before the scoreboard may close" \
     || ko "every scoreboard step guarded by closesAfter" "guards=$guards steps=${score_steps:-}"
 fi
+
+# ── hold-used-up.yaml's hold times fit the server's (EXP-176) ──
+# Its taps use up the round's holds (MAX_HOLDS_PER_ROUND) within the scoreboard's time that still lets a hold start
+# (SCORE_DISPLAY_TIME minus HOLD_MIN_REMAINING), and a scoreboard it did not check is waited out for the hold budget
+HOLD_FLOW="$MAESTRO_DIR/hold-used-up.yaml"
+hold_timing="$(sed -nE 's/^- evalScript: "\$\{output\.timing = \{ (.*) \}\}"$/\1/p' "$HOLD_FLOW")"
+hold_ms() { tr ',' '\n' <<<"$hold_timing" | sed -nE "s/^ *$1: ([0-9]+) *$/\1/p"; } # KEY -> its value in the flow
+hold_min="$(engine_ms HOLD_MIN_REMAINING)" max_holds="$(engine_ms MAX_HOLDS_PER_ROUND)" hold_budget="$(engine_ms HOLD_BUDGET_PER_ROUND)"
+hold_taps="$(awk '/^[ \t]*- tapOn:/ { tap = 1; next } tap && /^[ \t]*repeat:/ { print $2; exit } /^[ \t]*- / { tap = 0 }' "$HOLD_FLOW")"
+[ -n "$hold_min" ] && [ -n "$max_holds" ] && [ -n "$hold_budget" ] && [ -n "$scores" ] \
+  && [ "$(hold_ms scoresMs)" = "$scores" ] && [ "$(hold_ms holdMinMs)" = "$hold_min" ] \
+  && [ "$(hold_ms holdBudgetMs)" = "$hold_budget" ] && [ "$hold_taps" = "$max_holds" ] \
+  && ok "hold-used-up.yaml taps $hold_taps times and copies GameEngine.ts's hold times ($scores/$hold_min/$hold_budget ms)" \
+  || ko "hold-used-up.yaml's hold times match GameEngine.ts" \
+    "engine: scores=$scores min=$hold_min holds=$max_holds budget=$hold_budget; flow: taps=$hold_taps $hold_timing"
+[ "$(blocks_of hold-used-up.yaml scores)" = 1 ] \
+  && ok "hold-used-up.yaml budgets its steps on the device's scoreboard" || ko "hold-used-up.yaml has a scores block"
 
 # ── play-rounds.yaml on a fake game with slow screen reads (EXP-312, EXP-322, EXP-326) ──
 # With reads that see the screen as they start, as they end and anywhere along them: every guess lands while answering

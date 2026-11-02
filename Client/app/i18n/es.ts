@@ -74,6 +74,7 @@ export default {
   loadingGame: "Cargando partida…",
   areYouReady: "¿ESTÁS LISTO?",
   holdPhoto: "Mantener Foto",
+  noHoldsLeft: "Ya no puedes mantenerla",
   reconnecting: "Reconectando…",
   gamePaused: "Partida en pausa",
   waitingPlayersReturn: "Esperando a que vuelvan los jugadores…",

@@ -2,7 +2,8 @@
 # The boot flows find the app by testID, never by its translated text (EXP-048): open-app.yaml and its
 # dev-client-boot.yaml subflow may only use text for the Expo dev-client UI and system alerts, or to check the
 # language of an element already matched by id. A text selector that matches any app string (Client/app/i18n) breaks
-# in other languages and can hit the app instead of the dev menu. Static: no devices, servers or network.
+# in other languages and can hit the app instead of the dev menu. hold-used-up.yaml filters the hold button by its
+# noHoldsLeft text: in both languages, as the app has it (EXP-176). Static: no devices, servers or network.
 # Run: qa/lab/tests/maestro-selectors.test.sh
 set -uo pipefail
 
@@ -39,15 +40,24 @@ text_selectors() {
   ' "$1" | sort -n
 }
 
-# app_strings OUT -> every en/es string of the app, NUL-separated
-app_strings() {
+# i18n_js APP JS [ARGS...] -> runs JS (node) with `en` and `es`, the objects APP/i18n/{en,es}.ts export, and `args`
+i18n_js() {
+  local app=$1 js=$2; shift 2
   node -e '
     const fs = require("fs");
     const load = (f) => new Function(fs.readFileSync(f, "utf8").replace(/^export default/m, "return").replace(/\}\s*as const;\s*$/, "}"))();
-    const values = process.argv.slice(1).flatMap((f) => Object.values(load(f))).filter((v) => typeof v === "string");
-    process.stdout.write(values.join("\0"));
-  ' "$2/i18n/en.ts" "$2/i18n/es.ts" >"$1"
+    const [en, es] = process.argv.slice(1, 3).map(load);
+    const args = process.argv.slice(3);
+  '"$js" "$app/i18n/en.ts" "$app/i18n/es.ts" "$@"
 }
+
+# app_strings OUT APP -> every en/es string of the app, NUL-separated
+app_strings() {
+  i18n_js "$2" 'process.stdout.write([en, es].flatMap(Object.values).filter((v) => typeof v === "string").join("\0"));' >"$1"
+}
+
+# i18n_value KEY -> "<en>|<es>" of that key of the app
+i18n_value() { i18n_js "$CLIENT_APP" 'process.stdout.write(`${en[args[0]]}|${es[args[0]]}`);' "$1"; }
 
 # app_text_hits SELECTORS STRINGS -> "<line>\t<pattern>\t<app string>" for each selector that matches an app string
 # (Maestro matches the whole text, case-insensitively with . matching line breaks, also with line breaks read as spaces)
@@ -137,6 +147,18 @@ for param in 'url=${METRO_URL}' disableOnboarding=1 disableAutoLaunch=1 __expo_d
   grep -qxF "$param" <<<"$link_params" && ok "dev-client-boot.yaml: the dev-client link carries $param" \
     || ko "dev-client-boot.yaml: openLink carries $param" "$(tr '\n' '&' <<<"$link_params")"
 done
+
+# ── hold-used-up.yaml checks the hold button's text in both languages (EXP-176) ──
+HOLD_FLOW="$MAESTRO_DIR/hold-used-up.yaml"
+missing="$(unknown_ids "$HOLD_FLOW" "$CLIENT_APP")"
+[ -z "$missing" ] && ok "hold-used-up.yaml: every id is in testIds.ts" || ko "hold-used-up.yaml: ids missing from testIds.ts" "$(tr '\n' ' ' <<<"$missing")"
+no_holds_left="$(i18n_value noHoldsLeft)"
+hold_texts="$(sed -nE 's/^[[:space:]]*text: "(.*)"$/\1/p' "$HOLD_FLOW" | sort -u)"
+# The only text filter, on the line after the hold button's id (the same selector)
+[ -n "$hold_texts" ] && [ "$hold_texts" = "$no_holds_left" ] \
+  && grep -B1 -F "text: \"$no_holds_left\"" "$HOLD_FLOW" | grep -qF 'id: "hold-button"' \
+  && ok "hold-used-up.yaml: the hold button's text filter is noHoldsLeft in en and es ($no_holds_left)" \
+  || ko "hold-used-up.yaml: text filter is the hold button's noHoldsLeft in en|es" "app: $no_holds_left; flow: $(tr '\n' ';' <<<"$hold_texts")"
 
 # ── Flow simulator ──
 # maestro-sim.mjs runs a flow's own YAML and JS against a fake device with Maestro 2.11's semantics (see its header)

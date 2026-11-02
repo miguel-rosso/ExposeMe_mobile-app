@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Socket as ClientSocket } from "socket.io-client";
+import { MAX_HOLDS_PER_ROUND } from "../managers/GameEngine";
+import type { GameStateSnapshot } from "../models/interfaces";
 import { registerTurnUpload } from "./helpers";
 import { useTestServer } from "./socketHarness";
 
@@ -22,6 +24,13 @@ function record(socket: ClientSocket): string[] {
   return received;
 }
 
+/** Payloads of every `event` that `socket` receives from now on, in order. */
+function recordPayloads(socket: ClientSocket, event: string): unknown[] {
+  const payloads: unknown[] = [];
+  socket.on(event, (data: unknown) => payloads.push(data));
+  return payloads;
+}
+
 /** A game of `names` in the first round's scores phase (nobody holding yet). */
 async function inScores(names: string[], photoChar: string) {
   const socks: Record<string, ClientSocket> = {};
@@ -41,7 +50,7 @@ async function inScores(names: string[], photoChar: string) {
   const scores = names.map((n) => once(socks[n], "round-scores", SCORES_TIMEOUT_MS));
   socks[owner].emit("photo-sent", { photo });
   await Promise.all(scores);
-  return { socks, owner, others: names.filter((n) => n !== owner) };
+  return { gameCode, socks, owner, others: names.filter((n) => n !== owner) };
 }
 
 // One room each, run side by side: reaching the scores phase takes ~12 s of real game time
@@ -81,5 +90,30 @@ describe.concurrent("hold events on the wire (EXP-214)", () => {
     await paused;
     await quiet();
     expect(received).toEqual(["hold-end", "game-paused"]);
+  }, 30_000);
+
+  // EXP-176: the app greys its hold button out from what the server says, instead of counting holds itself
+  it("each release sends everyone exactly one hold-end with the holds left, down to 0; game-state says the same", async () => {
+    const names = ["frank", "grace"];
+    const { gameCode, socks, owner } = await inScores(names, "3");
+    const holdEnds = Object.fromEntries(names.map((n) => [n, recordPayloads(socks[n], "hold-end")]));
+
+    for (let hold = 0; hold < MAX_HOLDS_PER_ROUND; hold++) {
+      const holding = once(socks[owner], "hold-start");
+      socks[owner].emit("hold-start");
+      await holding;
+      const released = names.map((n) => once(socks[n], "hold-end"));
+      socks[owner].emit("hold-end");
+      await Promise.all(released);
+    }
+    await quiet();
+    for (const n of names) expect(holdEnds[n], n).toEqual([{ holdsLeft: 2 }, { holdsLeft: 1 }, { holdsLeft: 0 }]);
+
+    // The owner's screen asks again (same socket, same room): the snapshot says none are left, and none is accepted
+    const snapshot = once<GameStateSnapshot>(socks[owner], "game-state");
+    socks[owner].emit("join-create-game", { gameCode, username: owner });
+    expect(await snapshot).toMatchObject({ phase: "scores", holdsLeft: 0 });
+    socks[owner].emit("hold-start");
+    expect(await silent(socks[owner], "hold-start")).toBe(true);
   }, 30_000);
 });

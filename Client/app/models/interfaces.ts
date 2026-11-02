@@ -128,6 +128,11 @@ export interface HoldResumeData extends ResyncTiming {
   phase: ServerPhase | null;
 }
 
+/** `hold-end`: the hold is over; `holdsLeft` holds the photo owner can still start this round (0: used up) */
+export interface HoldEndData {
+  holdsLeft: number;
+}
+
 /**
  * `your-turn` (only to me): send the photo for `round`. `attempt` identifies this photo request (new per owner pick,
  * also when the round number repeats after a skip); `photo-unavailable` echoes both.
@@ -161,6 +166,8 @@ export interface GameStateSnapshot extends ResyncTiming {
   /** My own answer as the server recorded it (`""` = no guess), only from the reveal on, like my `round-reveal` */
   yourGuess: string | null;
   held: boolean;
+  /** Holds the photo owner can still start in the round in play (as in `hold-end`) */
+  holdsLeft: number;
   pause: GamePausedData | null;
   scores: ScoreRound[];
   players: Player[];

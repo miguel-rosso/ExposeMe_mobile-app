@@ -435,7 +435,7 @@ io.on("connection", (socket: Socket) => {
       // tightly), so a release always gets through, and a flood from a socket that holds nothing stops here
       const s = session(socket);
       if (!s || !isHolding(s.room, socket.id) || !gameEvents.take("hold-end")) return;
-      gameEngine.handleRelease(s.room, s.player.socketId); // hold-resume, then hold-end to the room
+      gameEngine.handleRelease(s.room, s.player.socketId); // hold-resume, then hold-end (with holdsLeft) to the room
     } catch (e) { console.error("hold-end error:", e); }
   });
 

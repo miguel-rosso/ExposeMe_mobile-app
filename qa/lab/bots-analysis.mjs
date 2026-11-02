@@ -32,6 +32,8 @@ const ANSWER_GRACE_MS = 800;
 // A holder who lets go or goes away (leaves, drops, rejoins on a new socket) releases the hold at once (GAME_FLOW.md
 // "Hold"): every player still in the room gets hold-end and hold-resume within this
 const HOLD_RELEASE_MAX_MS = 1_000;
+// Holds per round, as in Server/managers/GameEngine.ts (GAME_FLOW.md "Hold"; bots-cli.test.sh checks the copy)
+const MAX_HOLDS_PER_ROUND = 3;
 
 // Phase events every player receives (keyed by round), and the events that ended a bot's stay in the room
 const SYNCED_EVENTS = ["round-start", "round-reveal", "round-scores", "game-over", "game-started"];
@@ -719,6 +721,38 @@ function holdReleases(r, ctx, holds) {
   return { errors, lags };
 }
 
+/**
+ * Every hold-end tells how many holds are left in the round (EXP-176): a whole number from 0 to MAX_HOLDS_PER_ROUND
+ * minus the holds the player saw start in that round (it may have missed some while away, which only loosens the
+ * bound), and once one says 0 the server starts no other hold in that round. A game-state snapshot of a scoreboard
+ * tells the same (0 too once a hold-end said so; it may also say 0 for the scoreboard's last 1.5 s).
+ */
+function checkHoldsLeft(r) {
+  const errors = [];
+  for (const name of r.players) {
+    const started = new Map(); // round -> hold-starts this player got
+    const usedUp = new Set(); // rounds a hold-end said 0 for
+    const outOfRange = (e, what) => {
+      const left = e.payload?.holdsLeft;
+      const most = usedUp.has(e.round) ? 0 : Math.max(0, MAX_HOLDS_PER_ROUND - (started.get(e.round) ?? 0));
+      const ok = Number.isInteger(left) && left >= 0 && left <= most;
+      if (!ok) errors.push(`round ${e.round}: ${name} got ${what} with holdsLeft ${left} (expected 0 to ${most})`);
+      return !ok;
+    };
+    for (const e of r.events.filter((x) => x.bot === name)) {
+      if (e.ev === "hold-start") {
+        if (usedUp.has(e.round)) errors.push(`round ${e.round}: ${name} got hold-start after hold-end said no holds were left`);
+        started.set(e.round, (started.get(e.round) ?? 0) + 1);
+      } else if (e.ev === "hold-end") {
+        if (!outOfRange(e, "hold-end") && e.payload.holdsLeft === 0) usedUp.add(e.round);
+      } else if (e.ev === "game-state" && e.payload?.started && e.payload.phase === "scores") {
+        outOfRange(e, "a scoreboard snapshot");
+      }
+    }
+  }
+  return errors;
+}
+
 /** Round numbers run 1, 2, 3… with no gap. */
 const checkRoundNumbering = (ctx) => ctx.roundsSeen.flatMap((n, i) => (n !== i + 1 ? [`round numbering gap: expected ${i + 1}, got ${n}`] : []));
 
@@ -774,6 +808,7 @@ export function analyseRoom(r, opts) {
     ...checkGoneAtNextGame(r, opts),
     ...checkRoomExits(r, ctx),
     ...holdChecks.errors,
+    ...checkHoldsLeft(r),
     ...checkRoundNumbering(ctx),
   ];
   return {

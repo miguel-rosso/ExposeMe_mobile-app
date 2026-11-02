@@ -7,7 +7,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import tw from "twrnc";
 import { useGameContext } from "../providers/GameContext";
 import {
-  GamePausedData, GameResumedData, GameStateSnapshot, HoldResumeData, Player, RoundRevealData,
+  GamePausedData, GameResumedData, GameStateSnapshot, HoldEndData, HoldResumeData, Player, RoundRevealData,
   RoundScoresData, RoundSkippedData, RoundStartData, ScoreRound, WaitingPhotoData, YourTurnData,
 } from "../models/interfaces";
 import { usePhotoContext } from "../providers/PhotoContext";
@@ -110,7 +110,8 @@ const GameScreen = () => {
     if (currentPhoto && photoHeadersRef.current) prefetchImage(currentPhoto, photoHeadersRef.current);
   };
   const {
-    photo, round, phase, phaseDuration, phaseKey, correctAnswer, scores, mySelection, gameHeld, pressing, leavers,
+    photo, round, phase, phaseDuration, phaseKey, correctAnswer, scores, mySelection, gameHeld, pressing, holdsUsedUp,
+    leavers,
   } = roundView;
   // The server's count once it sent one (a game started while I was away may have another), else the lobby's setting
   const totalRounds = roundView.totalRounds || roundsOfGame;
@@ -196,9 +197,11 @@ const GameScreen = () => {
   }, []));
 
   // ── Hold handlers ────────────────────────────────────
-  // Offline, a press is not sent: the rejoin's snapshot releases it (game-state clears `pressing`)
+  // Offline, a press is not sent: the rejoin's snapshot releases it (game-state clears `pressing`). Once the server says
+  // the round's holds are used up the button is disabled and a press sends nothing (it would be ignored); a press
+  // already down still sends its release
   const onHoldPress = () => {
-    if (!holdButtonMounted || !socket || pressing) return;
+    if (!holdButtonMounted || !socket || pressing || holdsUsedUp) return;
     dispatchRound({ type: "pressing", pressing: true });
     emitWhileConnected(socket, "hold-start");
   };
@@ -347,9 +350,9 @@ const GameScreen = () => {
       },
 
       // Hold ended (from server force-release or another client)
-      "hold-end": () => {
-        console.log("[GAME] hold-end");
-        dispatchRound({ type: "hold-end" });
+      "hold-end": (data: HoldEndData) => {
+        console.log(`[GAME] hold-end: ${data.holdsLeft} left`);
+        dispatchRound({ type: "hold-end", data });
       },
 
       // Hold resume: phase continues with remaining time
@@ -629,7 +632,7 @@ const GameScreen = () => {
               </View>
             )}
 
-            {/* Hold button — mounted during scores for photo owner, invisible while pressing */}
+            {/* Hold button — mounted during scores for photo owner, invisible while pressing, greyed out once used up */}
             {holdButtonMounted && (
               <View
                 style={[
@@ -637,14 +640,17 @@ const GameScreen = () => {
                   safeBottomRow(insets, HOLD_BUTTON_BOTTOM),
                 ]}
               >
+                {/* `disabled` only refuses new presses: one already down when the holds run out still gets its
+                    onPressOut (React Native's Pressability), so its release is sent */}
                 <TouchableOpacity
                   testID={TEST_IDS.holdButton}
-                  style={tw`bg-blue-600 p-4 rounded-xl w-[90%] max-w-[500px] border-2 border-blue-400 shadow-lg items-center`}
+                  style={tw`${holdsUsedUp ? "bg-gray-600 border-gray-400" : "bg-blue-600 border-blue-400"} p-4 rounded-xl w-[90%] max-w-[500px] border-2 shadow-lg items-center`}
                   onPressIn={onHoldPress}
                   onPressOut={onHoldRelease}
                   activeOpacity={0.8}
+                  disabled={holdsUsedUp}
                 >
-                  <Text style={tw`text-white text-lg font-bold`}>{t.holdPhoto}</Text>
+                  <Text style={tw`text-white text-lg font-bold`}>{holdsUsedUp ? t.noHoldsLeft : t.holdPhoto}</Text>
                 </TouchableOpacity>
               </View>
             )}

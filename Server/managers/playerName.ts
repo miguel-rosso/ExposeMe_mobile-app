@@ -306,11 +306,12 @@ export const INDIC_LOOKALIKES: ReadonlyMap<string, string> = new Map([
 
 // Letters, signs and digits of the Indic scripts and Sinhala, the blocks INDIC_LOOKALIKES reads
 const INDIC_CHAR = /[\u0900-\u0DFF]/gu;
-// The Tamil vowel sign AI after its letter and that letter's marks: drawn before them, and like the letter NNNA
-// (INDIC_CONFUSABLES), so "கை" looks like "னக" (EXP-365)
-const TAMIL_AI_AFTER_LETTER = /(\p{L}\p{M}*?)\u0BC8/gu;
+// The Tamil vowel sign AI after its letter, or after the KSSA ligature (KA + virama + SSA, EXP-372), and their marks:
+// drawn before them, and like the letter NNNA (INDIC_CONFUSABLES), so "கை" looks like "னக" (EXP-365) and "க்ஷை" like
+// "னக்ஷ"
+const TAMIL_AI_AFTER_LETTER = /((?:\u0B95\u0BCD\u0BB7|\p{L})\p{M}*?)\u0BC8/gu;
 
-/** Decomposed Indic `text` with each Tamil vowel sign AI where it is drawn, before its letter. */
+/** Decomposed Indic `text` with each Tamil vowel sign AI where it is drawn, before its letter or ligature. */
 const tamilAiWhereDrawn = (text: string) => text.replace(TAMIL_AI_AFTER_LETTER, "\u0BC8$1");
 
 /**
@@ -321,6 +322,26 @@ const tamilAiWhereDrawn = (text: string) => text.replace(TAMIL_AI_AFTER_LETTER, 
  */
 const readIndicLookalikes = (text: string) =>
   replaceChars(tamilAiWhereDrawn(text.replace(INDIC_CHAR, (char) => char.normalize("NFD"))), INDIC_LOOKALIKES);
+
+// Malayalam chillus typed as before Unicode 5.1, consonant + virama + zero-width joiner, which fonts draw as the
+// atomic chillu (EXP-372: "Anvar" with NA + virama + joiner like "Anvar" with chillu N), each consonant with its chillu
+const LEGACY_CHILLU = /([\u0D15\u0D23\u0D28\u0D30\u0D32\u0D33])\u0D4D\u200D/gu;
+const ATOMIC_CHILLU_OF: Readonly<Record<string, string>> = {
+  "\u0D23": "\u0D7A", "\u0D28": "\u0D7B", "\u0D30": "\u0D7C", "\u0D32": "\u0D7D", "\u0D33": "\u0D7E", "\u0D15": "\u0D7F",
+};
+// The Malayalam digits nine and four, drawn exactly like chillu N and chillu RR (Noto Sans and Sangam). UTS #39 spells
+// them NA and RA + virama (INDIC_CONFUSABLES), which meets the legacy chillu once the keys drop the virama and joiner
+const DIGIT_DRAWN_AS_CHILLU: ReadonlyMap<string, string> = new Map([["\u0D6F", "\u0D7B"], ["\u0D6A", "\u0D7C"]]);
+
+/**
+ * Visual key only: Malayalam chillus typed with a joiner, and the digits drawn like a chillu, read as the atomic chillu
+ * (EXP-372). The letter visual key keeps reading them as the bare consonant, like a virama without a joiner ("Anvar"
+ * with NA + virama), so a name meets both spellings through one of its keys.
+ */
+const readChillusAsDrawn = (text: string) => replaceChars(
+  text.replace(LEGACY_CHILLU, (_legacy, consonant: string) => ATOMIC_CHILLU_OF[consonant]),
+  DIGIT_DRAWN_AS_CHILLU,
+);
 
 // Code points Unicode 15.1 reserves for emoji, which names may use (see UNASSIGNED_IN_TABLES): a phone whose fonts lack
 // the emoji, or any phone for those still unassigned, draws them all as the same empty box ("Ana 🫩" like "Ana 🫆").
@@ -592,9 +613,11 @@ export function nameKey(name: string): string {
  * the kana. Marks drawn like an Indic vowel sign read as that sign (EXP-343: "सँम" like "सॅम"), Indic characters
  * drawn like a letter and a vowel sign as those (EXP-356: "హరి" like "వారి", "चॉदनी" like "चाँदनी"), and every emoji
  * newer than Unicode 15.1 as the same empty box, as phones without it draw it ("Ana 🫩" like "Ana 🫆").
+ * Malayalam chillus typed with a joiner, and the digits drawn like a chillu, read as the atomic chillu first (EXP-372,
+ * readChillusAsDrawn).
  */
 export function visualKey(name: string): string {
-  const voicingMarksClosed = composeHangul(readDrawnAlike(name))
+  const voicingMarksClosed = composeHangul(readDrawnAlike(readChillusAsDrawn(name)))
     .replace(SPACE_BEFORE_SPACING_VOICING_MARK, "");
   const symbols = foldSymbols(separateVoicing(voicingMarksClosed, SYMBOL_VOICING_STAND_INS));
   const skeletal = foldSymbols(splitVoicedKana(skeleton(symbols, SYMBOL_VOICING_STAND_INS)));

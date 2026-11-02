@@ -279,7 +279,12 @@ After last round: game-over
   `൹` as `നു`, Sinhala `ඍ` as `සෘ`; signs such as Malayalam UU and vocalic R as U, Tamil `ா` as `ஈ` and `ௗ` as `ள`
   (so `ௌ` as `ெள`: `கௌரி` next to `கெளரி`); digits such as Tamil `௧` as `க` (`௧ண்ணன்` next to `கண்ணன்`), `௫` as
   `ரு`, Malayalam `൬` as `ന്ന` (`പ്രസ൬` next to `പ്രസന്ന`). The Tamil sign AI, drawn before its letter and like `ன`,
-  is read there (EXP-365: `கை` next to `னக`, apart from `கன`). Left out: spellings UTS #39 writes with a character of
+  is read there (EXP-365: `கை` next to `னக`, apart from `கன`), also before the KSSA ligature
+  (EXP-372: `க்ஷை` next to `னக்ஷ`). In the visual key, Malayalam chillus typed as before Unicode
+  5.1, consonant + virama + ZWJ, read as the atomic chillu fonts draw, and so do the digits nine `൯` and four
+  `൪`, drawn exactly like chillu N and chillu RR (EXP-372: `അന്` + ZWJ + `വർ`, `അൻവർ` and
+  `അ൯വർ` together); the letter visual key keeps reading them as the bare consonant, like a virama without ZWJ.
+  Left out: spellings UTS #39 writes with a character of
   another script or a Latin-style mark (Telugu `భ` as `బ` + dot below), and letters it writes with a virama, which the
   keys drop, so the letter would meet the bare consonant (Malayalam chillu `ൽ` as `ല്`: `കമൽ` stays apart from
   `കമല`). The Devanagari and Gujarati candra O read as AA + candra E (`ॉ` as `ाॅ`, `ऑ` as `आॅ`, `ૉ` as `ાૅ`, `ઑ`

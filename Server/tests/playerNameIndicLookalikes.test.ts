@@ -247,3 +247,71 @@ describe("Tamil vowel sign AI read where it is drawn (EXP-365)", () => {
     expectDistinct(a, b);
   });
 });
+
+// EXP-372: the Tamil sign AI is drawn before the whole KSSA ligature (KA + virama + SSA), not before its SSA.
+describe("Tamil vowel sign AI on the KSSA ligature (EXP-372)", () => {
+  it("reads KSSAI like NNNA + KSSA", () => {
+    expectSimilar("\u0B95\u0BCD\u0BB7\u0BC8", "\u0BA9\u0B95\u0BCD\u0BB7");
+  });
+
+  it("keeps KSSAI apart from KA + virama + NNNA + SSA", () => {
+    expectDistinct("\u0B95\u0BCD\u0BB7\u0BC8", "\u0B95\u0BCD\u0BA9\u0BB7");
+  });
+
+  // A joiner or non-joiner after the virama breaks the ligature: KA is drawn with its visible virama, then AI + SSA
+  it.each([
+    ["joiner", "\u0B95\u0BCD\u200D\u0BB7\u0BC8"],
+    ["non-joiner", "\u0B95\u0BCD\u200C\u0BB7\u0BC8"],
+  ])("reads KA + virama + %s + SSA + AI like KA + virama + NNNA + SSA", (_label, name) => {
+    expectSimilar(name, "\u0B95\u0BCD\u0BA9\u0BB7");
+  });
+});
+
+// EXP-372: Tamil AI signs a lookalike could hide behind a joiner, a second sign or a base that isn't a Tamil letter.
+describe("Tamil vowel sign AI on an odd base (EXP-372)", () => {
+  it.each([
+    ["KA + joiner + AI", "\u0B95\u200D\u0BC8"],
+    ["KA + non-joiner + AI", "\u0B95\u200C\u0BC8"],
+    ["KA + AI + AI", "\u0B95\u0BC8\u0BC8"],
+    ["Tamil digit one + AI", "\u0BE7\u0BC8"],
+    ["Latin a + AI", "a\u0BC8"],
+    ["KA + space + AI", "\u0B95 \u0BC8"],
+    ["KA + space + AI + MA", "\u0B95 \u0BC8\u0BAE"],
+  ])("%s is refused", (_label, name) => {
+    expect(isValidUsername(name)).toBe(false);
+  });
+});
+
+// EXP-372: Malayalam chillus may still be typed the pre-Unicode 5.1 way, consonant + virama + zero-width joiner, which
+// fonts draw as the atomic chillu.
+describe("Malayalam chillus typed with a joiner (EXP-372)", () => {
+  it.each([
+    ["Anvar, chillu N", "\u0D05\u0D7B\u0D35\u0D7C", "\u0D05\u0D28\u0D4D\u200D\u0D35\u0D7C"],
+    ["Kanmani, chillu NN", "\u0D15\u0D7A\u0D2E\u0D23\u0D3F", "\u0D15\u0D23\u0D4D\u200D\u0D2E\u0D23\u0D3F"],
+    ["Arjun, chillu RR", "\u0D05\u0D7C\u0D1C\u0D41\u0D7B", "\u0D05\u0D30\u0D4D\u200D\u0D1C\u0D41\u0D7B"],
+    ["Salman, chillu L", "\u0D38\u0D7D\u0D2E\u0D3E\u0D7B", "\u0D38\u0D32\u0D4D\u200D\u0D2E\u0D3E\u0D7B"],
+    ["chillu LL before a letter", "\u0D2A\u0D7E\u0D2A", "\u0D2A\u0D33\u0D4D\u200D\u0D2A"],
+    ["Vakpati, chillu K", "\u0D35\u0D3E\u0D7F\u0D2A\u0D24\u0D3F", "\u0D35\u0D3E\u0D15\u0D4D\u200D\u0D2A\u0D24\u0D3F"],
+  ])("%s, atomic and with a joiner, look too alike", (_label, atomic, withJoiner) => {
+    expectSimilar(atomic, withJoiner);
+  });
+
+  // The digits nine and four are drawn exactly like chillu N and chillu RR
+  it.each([
+    ["Anvar with a joiner / digit nine", "\u0D05\u0D28\u0D4D\u200D\u0D35\u0D7C", "\u0D05\u0D6F\u0D35\u0D7C"],
+    ["Arjun with a joiner / digit four", "\u0D05\u0D30\u0D4D\u200D\u0D1C\u0D41\u0D7B", "\u0D05\u0D6A\u0D1C\u0D41\u0D7B"],
+    ["Anvar with chillu N / digit nine", "\u0D05\u0D7B\u0D35\u0D7C", "\u0D05\u0D6F\u0D35\u0D7C"],
+    ["Arjun with chillu RR / digit four", "\u0D05\u0D7C\u0D1C\u0D41\u0D7B", "\u0D05\u0D6A\u0D1C\u0D41\u0D7B"],
+  ])("%s look too alike", (_label, a, b) => {
+    expectSimilar(a, b);
+  });
+
+  it.each([
+    ["Kamal / Kamala", "\u0D15\u0D2E\u0D7D", "\u0D15\u0D2E\u0D32"],
+    ["Anvar / NA + VA", "\u0D05\u0D7B\u0D35\u0D7C", "\u0D05\u0D28\u0D35\u0D7C"],
+    // A non-joiner keeps the virama visible instead of drawing a chillu
+    ["Anvar / NA + virama + non-joiner", "\u0D05\u0D7B\u0D35\u0D7C", "\u0D05\u0D28\u0D4D\u200C\u0D35\u0D7C"],
+  ])("%s stay different names", (_label, a, b) => {
+    expectDistinct(a, b);
+  });
+});

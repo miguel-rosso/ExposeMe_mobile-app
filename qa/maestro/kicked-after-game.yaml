@@ -1,0 +1,41 @@
+# EXP-337 / EXP-346: the host removes the device while it is still on the final ranking of a game (between games the
+# server takes remove-player). The game screen goes home with the notice in the device's language ("The host removed
+# you from the room." / "El anfitrión te ha sacado de la sala."), never a raw server text, and forgets its rejoin
+# token: joining the same room again by hand (same code and name) is a new player in the lobby, not a second
+# "removed" notice (the server refuses the old token after a kick). For a device that was offline at the kick, see
+# kicked-while-offline.yaml; for a kick in the lobby, kicked-notice.yaml.
+# The device plays a short game with two bots and stays on the final ranking; the bots stay on their final screens too
+# and the host bot removes the device by its label (its username) 120 s after game over, once play-rounds.yaml is done
+# even at its slowest (qa/lab/tests/maestro-timing.test.sh checks that and the wait for the kick). The bots run ends
+# right after the kick; the room stays.
+#   qa/lab/lab.sh play --flow kicked-after-game --bots 2 --rounds 3 --devices <label> \
+#     --bot-args "--kick <label> --kick-after-game 120"
+# env: GAME_CODE, USERNAME, METRO_URL (url-encoded)
+# Selectors are testIDs (Client/app/utils/testIds.ts) except the system alert, matched in both UI languages.
+appId: com.socketNull.ExposeMe
+---
+- runFlow: open-app.yaml
+- runFlow: join-room.yaml
+- runFlow: play-rounds.yaml
+# On the final ranking until the host's kick: back home with the system alert, translated
+- extendedWaitUntil:
+    visible: "(The host removed you from the room|El anfitrión te ha sacado de la sala).*"
+    timeout: 150000
+    label: "The host's kick after the game reaches the final ranking"
+- assertNotVisible: "Removed by host"
+# EXP-221: title and button in the UI language too, not the system "Alert"
+- assertVisible: "Notice|Aviso"
+- assertNotVisible: "Alert"
+- takeScreenshot: kicked-after-game-${USERNAME}
+- tapOn: "OK|Aceptar"
+- extendedWaitUntil:
+    visible:
+      id: "join-game-button"
+    timeout: 10000
+# The game screen is gone, not left under home
+- assertNotVisible:
+    id: "final-score-modal|winner-modal"
+# Back by hand: the lobby again as a new player, not a second "removed" notice (a kept token would be refused with it)
+- runFlow: join-room.yaml
+- assertNotVisible: "(The host removed you from the room|El anfitrión te ha sacado de la sala).*"
+- takeScreenshot: kicked-after-game-rejoined-${USERNAME}

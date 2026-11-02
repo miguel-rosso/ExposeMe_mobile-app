@@ -158,6 +158,26 @@ for good in "--leave-round 2" "--leave-round 2 --leave-owner" "--kick bot3" "--k
   [[ "$rc" != 2 ]] && ok "$good is accepted" || ko "$good is accepted" "$(cat "$TMP/err")"
 done
 [[ "$(node "$BOTS" --help)" == *"--leave-round R [--leave-owner]"* && "$(node "$BOTS" --help)" == *"--kick NAME "* ]] && ok "--help lists --leave-round, --leave-owner and --kick" || ko "--help lists --leave-round, --leave-owner and --kick"
+# --kick-after-game D (EXP-346): the kick waits for the game to end, so it needs --kick and no second game
+run 2 "--kick-after-game without --kick exits 2" --bots 3 --host --rounds 3 --kick-after-game 30 --timeout 1
+[[ "$err" == *"--kick-after-game needs --kick NAME"* ]] && ok "--kick-after-game without --kick is named" || ko "--kick-after-game without --kick is named" "$err"
+for bad in 0 -5 abc "" Infinity; do
+  run 2 "--kick-after-game \"$bad\" exits 2" --bots 3 --host --rounds 3 --kick bot3 --kick-after-game "$bad" --timeout 1
+  [[ "$err" == *"--kick-after-game \"$bad\" is not a number of seconds above 0"* ]] && ok "--kick-after-game \"$bad\" is named" || ko "--kick-after-game \"$bad\" is named" "$err"
+done
+for clash in "--play-again-linger 5" "--quit-after-game-over"; do
+  # shellcheck disable=SC2086
+  run 2 "--kick-after-game with $clash exits 2" --bots 3 --host --rounds 3 --kick bot3 --kick-after-game 30 $clash --timeout 1
+  [[ "$err" == *"--kick-after-game can't be combined with --play-again-linger or --quit-after-game-over"* ]] \
+    && ok "--kick-after-game with $clash is named" || ko "--kick-after-game with $clash is named" "$err"
+done
+# The kick comes from whoever is host after the game, so a host that dropped in the lobby (--lobby-host-drop) is fine
+for good in "--kick bot3 --kick-after-game 2" "--kick ios-a --kick-after-game 120" "--kick bot3 --kick-after-game 2 --lobby-host-drop"; do
+  # shellcheck disable=SC2086
+  SERVER_URL="$URL" node "$BOTS" --bots 3 --host --rounds 3 $good --timeout 1 >/dev/null 2>"$TMP/err"; rc=$?
+  [[ "$rc" != 2 ]] && ok "$good is accepted" || ko "$good is accepted" "$(cat "$TMP/err")"
+done
+[[ "$(node "$BOTS" --help)" == *"--kick-after-game D"* ]] && ok "--help lists --kick-after-game" || ko "--help lists --kick-after-game"
 
 # ── Loopback servers only: QA traffic never leaves the machine (EXP-220) ──
 # Reserved/unresolvable hosts only, so a broken guard can't reach a real server (--timeout 1 as well)

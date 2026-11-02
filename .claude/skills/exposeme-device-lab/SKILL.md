@@ -48,6 +48,11 @@ The kicked-player notice (EXP-139/EXP-045, `qa/maestro/kicked-notice.yaml`): one
 ```bash
 qa/lab/lab.sh play --flow kicked-notice --bots 1 --devices ios-a --bot-args '--kick ios-a'
 ```
+Kicked after the game (EXP-337/EXP-346): the device plays a 3-round game and the host bot removes it 120 s after game over (`--kick-after-game 120`; the bots stay on their final screens and end right after the kick, the room stays). `kicked-after-game` waits on the final ranking for the translated notice; `kicked-while-offline` kills the app on the final ranking, so it misses the kick, then reopens it and joins again by hand: its stored rejoin token is refused and it gets the same notice. Both then join by hand once more and must land in the lobby as a new player (the token was forgotten):
+```bash
+qa/lab/lab.sh play --flow kicked-after-game --bots 2 --rounds 3 --devices ios-a --bot-args '--kick ios-a --kick-after-game 120'
+qa/lab/lab.sh play --flow kicked-while-offline --bots 2 --rounds 3 --devices ios-a --bot-args '--kick ios-a --kick-after-game 120'
+```
 
 `--rounds` takes 10/15/20, or 3 for short QA runs (~1 min): 3 is QA-only, accepted only because `lab.sh server` starts the server with `ALLOW_QA_ROUNDS=1` (a server started another way, or production, ignores it and the bots report a `game-started with 10 rounds, asked for 3` consistency error). The app never offers 3 rounds.
 

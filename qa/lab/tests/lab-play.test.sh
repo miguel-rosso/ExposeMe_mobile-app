@@ -2,7 +2,8 @@
 # `lab.sh play` argument parsing and Maestro env plumbing (EXP-212), with stub node/maestro and a fake devices.json:
 # no devices, servers or network. Covers --second-room (2nd bots room -> NEW_CODE), --maestro-env KEY=VALUE and
 # --server/--port (EXP-220: bots and render telemetry on a worktree's own lab server), and the kicked-notice
-# invocation (EXP-139: --bot-args '--kick <device label>'), and the one retry of a device whose dev client got stuck
+# invocation (EXP-139: --bot-args '--kick <device label>') and the kicked-after-game / kicked-while-offline ones
+# (EXP-346: '--kick <device label> --kick-after-game 120'), and the one retry of a device whose dev client got stuck
 # downloading the JS bundle (EXP-256) or whose dev-client-boot.yaml loaded check failed: its bundle wait ran out
 # (EXP-297) or it gave up at once on "There was a problem loading the project" (EXP-304); the scoreboards each device
 # checked in play-rounds.yaml and the Maestro version warning (EXP-312).
@@ -127,6 +128,20 @@ grep -q "maestro/kicked-notice.yaml" "$TMP/maestro.args" && grep -q -- "-e USERN
   && ok "the device runs kicked-notice as ios-a" || ko "the device runs kicked-notice as ios-a" "$(cat "$TMP/maestro.args")"
 grep -q -- "--flow kicked-notice --bots 1 --devices <label> --bot-args '--kick <label>'" "$HERE/../../maestro/kicked-notice.yaml" \
   && ok "kicked-notice.yaml documents that invocation" || ko "kicked-notice.yaml documents that invocation"
+
+# ── Kicked after the game (EXP-346): on the final ranking, or with the app closed; the same bots run for both ──
+for flow in kicked-after-game kicked-while-offline; do
+  play "r-$flow" --bots 2 --rounds 3 --devices ios-a --flow "$flow" --bot-args "--kick ios-a --kick-after-game 120"
+  rc=$?
+  [ $rc = 0 ] && completed "r-$flow" && ok "$flow play passes" || ko "$flow play passes" "rc=$rc $(cat "$TMP/play.out")"
+  grep -q -- "--bots 2 --host --rounds 3 --wait-players 3 --kick ios-a --kick-after-game 120" "$TMP/node.args" \
+    && ok "$flow: the bots get --kick <device label> --kick-after-game 120" || ko "$flow: the bots get the kick after the game" "$(cat "$TMP/node.args")"
+  grep -q "maestro/$flow.yaml" "$TMP/maestro.args" && grep -q -- "-e USERNAME=ios-a" "$TMP/maestro.args" \
+    && ok "the device runs $flow as ios-a" || ko "the device runs $flow as ios-a" "$(cat "$TMP/maestro.args")"
+  doc="$(sed -nE 's/^#[[:space:]]+(.*)$/\1/p' "$MAESTRO_DIR/$flow.yaml" | tr '\n' ' ')"
+  [[ "$doc" == *"qa/lab/lab.sh play --flow $flow --bots 2 --rounds 3 --devices <label> \\ --bot-args \"--kick <label> --kick-after-game 120\""* ]] \
+    && ok "$flow.yaml documents that invocation" || ko "$flow.yaml documents that invocation"
+done
 
 # Second room never publishes a code: fail loudly, nothing left running, no device run
 STUB_NO_CODE=3 LAB_ROOM_CODE_TIMEOUT=1 play r3 --bots 2 --devices ios-a --second-room "--bots 3 --host --wait-players 99"
@@ -308,6 +323,11 @@ first_open_wait_ms="$(grep -oE 'timeout: [0-9]+' "$MAESTRO_DIR/dev-client-boot.y
   || ko "lobby budget" "stuck=$STUCK_ATTEMPT_S open=$first_open_wait_ms lobby=$LOBBY_WAIT_MS"
 for f in play-rounds many-players no-result-game waiting-photo tie-game hold-used-up; do
   grep -q -- "- runFlow: wait-game-start.yaml" "$MAESTRO_DIR/$f.yaml" && ok "$f.yaml waits in the lobby with the budget" || ko "$f.yaml uses wait-game-start.yaml"
+done
+# Flows whose game starts inside play-rounds.yaml (its lobby wait, checked above), right after joining
+for f in kicked-after-game kicked-while-offline; do
+  grep -A1 -x -- "- runFlow: join-room.yaml" "$MAESTRO_DIR/$f.yaml" | grep -qx -- "- runFlow: play-rounds.yaml" \
+    && ok "$f.yaml waits in the lobby with the budget (play-rounds.yaml)" || ko "$f.yaml plays its game through play-rounds.yaml after joining"
 done
 
 # ── play-rounds.yaml's checked scoreboards and the Maestro it was verified on (EXP-312) ──

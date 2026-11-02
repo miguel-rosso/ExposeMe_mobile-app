@@ -3,7 +3,9 @@
 # dev-client-boot.yaml subflow may only use text for the Expo dev-client UI and system alerts, or to check the
 # language of an element already matched by id. A text selector that matches any app string (Client/app/i18n) breaks
 # in other languages and can hit the app instead of the dev menu. hold-used-up.yaml filters the hold button by its
-# noHoldsLeft text: in both languages, as the app has it (EXP-176). Static: no devices, servers or network.
+# noHoldsLeft text: in both languages, as the app has it (EXP-176). The kick flows read the host's removal notice, a
+# system alert, by its text: message, title and button as the app has them in both languages (EXP-346).
+# Static: no devices, servers or network.
 # Run: qa/lab/tests/maestro-selectors.test.sh
 set -uo pipefail
 
@@ -112,8 +114,19 @@ unknown_ids() {
     }
   ' "$TMP/ids" "$TMP/known-ids" "$TMP/known-helpers"
 }
-# Flows besides the boot ones whose ids are all checked against testIds.ts (EXP-176, EXP-348)
-ID_CHECKED_FLOWS="tie-game.yaml hold-used-up.yaml"
+# Flows besides the boot ones whose ids are all checked against testIds.ts (EXP-176, EXP-348, EXP-346)
+ID_CHECKED_FLOWS="tie-game.yaml hold-used-up.yaml kicked-after-game.yaml kicked-while-offline.yaml join-room.yaml search-room.yaml"
+# Flows that read the host's removal notice, a system alert matched by its text (EXP-139, EXP-346)
+KICK_NOTICE_FLOWS="kicked-notice.yaml kicked-after-game.yaml kicked-while-offline.yaml"
+
+# matches_i18n PATTERN KEY -> whether the Maestro text PATTERN matches the app's KEY string in both en and es (whole
+# text, case-insensitively, like Maestro)
+matches_i18n() {
+  i18n_js "$CLIENT_APP" '
+    const re = new RegExp(`^(?:${args[0]})$`, "is");
+    process.exit([en, es].every((lang) => typeof lang[args[1]] === "string" && re.test(lang[args[1]])) ? 0 : 1);
+  ' "$1" "$2"
+}
 
 # ── The checker catches app text (fixture flow) ──
 mkdir -p "$TMP/app/i18n" "$TMP/app/utils"
@@ -180,6 +193,50 @@ done
 for flow in $ID_CHECKED_FLOWS; do
   missing="$(unknown_ids "$MAESTRO_DIR/$flow" "$CLIENT_APP")"
   [ -z "$missing" ] && ok "$flow: every id is in testIds.ts" || ko "$flow: ids missing from testIds.ts" "$(tr '\n' ' ' <<<"$missing")"
+done
+# The removal notice is the app's translated alert: its message, title and button are matched in both languages, so a
+# change of wording fails here rather than as a device run waiting for a text that never shows
+# Texts in the kick flows besides the removal alert: the raw server refusal and the system's default alert title
+# (both asserted absent), and the iOS confirmation of a custom-scheme link
+KICK_FLOW_OTHER_TEXTS='Removed by host
+Alert
+Open in Expose Me\\?|¿Abrir en Expose Me\\?
+Open|Abrir'
+# kick_notice_strays FLOW -> each text selector that is none of KICK_FLOW_OTHER_TEXTS nor the alert's title or button,
+# so a removal notice one, and does not match kickedByHost in en and es (an assertNotVisible of it would pass vacuously)
+kick_notice_strays() {
+  text_selectors "$1" | cut -f2 | while IFS= read -r pattern; do
+    grep -qxF -- "$pattern" <<<"$KICK_FLOW_OTHER_TEXTS" && continue
+    matches_i18n "$pattern" serverNoticeTitle || matches_i18n "$pattern" ok || matches_i18n "$pattern" kickedByHost || echo "$pattern"
+  done
+}
+cat >"$TMP/kick-flow.yaml" <<'EOF'
+- extendedWaitUntil:
+    visible: "(The host removed you from the room|El anfitrión te ha sacado de la sala).*"
+- assertNotVisible: "Removed by host"
+- assertVisible: "Notice|Aviso"
+- assertNotVisible: "Alert"
+- tapOn: "OK|Aceptar"
+- assertNotVisible: "(The host kicked you out|El anfitrión te ha echado).*"
+- assertNotVisible: "The host removed you from the room.*"
+EOF
+[ "$(kick_notice_strays "$TMP/kick-flow.yaml" | tr '\n' ';')" = "(The host kicked you out|El anfitrión te ha echado).*;The host removed you from the room.*;" ] \
+  && ok "checker flags notice selectors of other wording or in one language, and only them" \
+  || ko "checker flags stray notice selectors" "$(kick_notice_strays "$TMP/kick-flow.yaml" | tr '\n' ';')"
+matches_i18n "The host removed you from the room.*" kickedByHost \
+  && ko "checker takes a notice selector in English only" || ok "checker flags a notice selector in English only"
+matches_i18n "(The host kicked you out|El anfitrión te ha echado).*" kickedByHost \
+  && ko "checker takes a notice selector of other wording" || ok "checker flags a notice selector of other wording"
+for flow in $KICK_NOTICE_FLOWS; do
+  text_selectors "$MAESTRO_DIR/$flow" | cut -f2 >"$TMP/kick-selectors"
+  for key in kickedByHost serverNoticeTitle ok; do
+    found=""
+    while IFS= read -r pattern; do matches_i18n "$pattern" "$key" && { found=$pattern; break; }; done <"$TMP/kick-selectors"
+    [ -n "$found" ] && ok "$flow: reads the alert's $key in en and es ($found)" || ko "$flow: no text selector matches $key in en and es"
+  done
+  stale="$(kick_notice_strays "$MAESTRO_DIR/$flow")"
+  [ -z "$stale" ] && ok "$flow: every removal notice selector matches kickedByHost in en and es" \
+    || ko "$flow: removal notice selectors miss kickedByHost" "$stale"
 done
 # The bundle wait polls the app's testIDs in a loop bounded by a JS deadline: lab-play.test.sh checks lab.sh's
 # STUCK_ATTEMPT_S against the longest `timeout: <ms>` of dev-client-boot.yaml, so that must be the loop's

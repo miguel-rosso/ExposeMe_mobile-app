@@ -6,8 +6,8 @@
 # no text search (a testID filtered by an env variable, like `text: "${USERNAME}"`, is no UI string, and one filtered by
 # an app string in every language, `"<en>|<es>"` of one Client/app/i18n key, works in either: both are allowed).
 # Then play-rounds.yaml's scoreboard deadline is checked against GameEngine.ts, and the flow is played on a fake game
-# with slow screen reads (maestro-sim.mjs, scenario `rounds`); hold-used-up.yaml's copy of the hold times too. No
-# devices, servers or network.
+# with slow screen reads (maestro-sim.mjs, scenario `rounds`); hold-used-up.yaml's copy of the hold times too, and the
+# kick-after-game flows' waits against the bots' kick delay (EXP-346). No devices, servers or network.
 # Run: qa/lab/tests/maestro-timing.test.sh
 set -uo pipefail
 
@@ -366,6 +366,54 @@ hold_taps="$(awk '/^[ \t]*- tapOn:/ { tap = 1; next } tap && /^[ \t]*repeat:/ { 
     "engine: scores=$scores min=$hold_min holds=$max_holds budget=$hold_budget; flow: taps=$hold_taps $hold_timing"
 [ "$(blocks_of hold-used-up.yaml scores)" = 1 ] \
   && ok "hold-used-up.yaml budgets its steps on the device's scoreboard" || ko "hold-used-up.yaml has a scores block"
+
+# ── The kick after the game comes when the flows expect it (EXP-346) ──
+# The host bot removes the device D s after game over (--kick-after-game D, as each flow documents its run). By then the
+# device must be done with play-rounds.yaml, at its slowest: the round loop's closing pass (the game over can come just
+# after its look for the options: then its optional tap on an option that is gone, the round screenshot and the
+# game-over look that ends the loop), then every step after the loop as a slow read on top of its full timeout. A kick
+# inside them sends it home mid-flow. Each flow then waits for the kick at least D s from after game over: on the final
+# ranking for the notice (kicked-after-game.yaml), or with the app closed so that it misses the kick
+# (kicked-while-offline.yaml).
+# An optional step whose element is not there: Maestro looks for it this long before going on
+OPTIONAL_MISS_MS=7000
+# The closing pass after the game over: the optional tap's miss and three slow reads (options look, screenshot, game-over look)
+CLOSING_PASS_MS=$((OPTIONAL_MISS_MS + 3 * SLOW_STEP_MS))
+# rounds_tail FLOW -> "<timeouts ms> <steps>" of the steps after the flow's last top-level repeat (nested ones too): their
+# timeouts summed, and how many touch the device (all but evalScript / assertTrue)
+rounds_tail() {
+  awk '/^- repeat:/ { loop = 1; after = 0; sum = 0; steps = 0; next } loop && /^- / { loop = 0; after = 1 }
+    after && /^[ \t]*- [A-Za-z]+/ && !/^[ \t]*- (evalScript|assertTrue)(:|$)/ { steps++ }
+    after && /^[ \t]+timeout: [0-9]+/ { sum += $2 } END { print sum + 0, steps + 0 }' "$1"
+}
+# step_timeout FLOW LABEL -> the timeout (ms) of the top-level step labelled LABEL, empty if there is none
+step_timeout() {
+  awk -v label="label: \"$2\"" '
+    /^- / && hit && !done { print t; done = 1 } /^- / { t = ""; hit = 0 }
+    /^[ \t]+timeout: [0-9]+/ { t = $2 }
+    { line = $0; sub(/^[ \t]+/, "", line) } line == label { hit = 1 }
+    END { if (hit && !done) print t }' "$1"
+}
+printf -- '- repeat:\n    commands:\n      - extendedWaitUntil:\n          timeout: 1000\n- extendedWaitUntil:\n    timeout: 5000\n- assertTrue: ${true}\n- runFlow:\n    commands:\n      - extendedWaitUntil:\n          timeout: 7000\n          label: "x"\n      - evalScript: ${1}\n- tapOn: "a"\n' >"$TMP/tail.yaml"
+[ "$(rounds_tail "$TMP/tail.yaml")" = "12000 4" ] && [ "$(step_timeout "$TMP/tail.yaml" x)" = 7000 ] && [ -z "$(step_timeout "$TMP/tail.yaml" y)" ] \
+  && ok "checker sums the waits and counts the device steps after the round loop, and reads a labelled step's timeout" \
+  || ko "checker reads the tail and labelled waits" "tail=$(rounds_tail "$TMP/tail.yaml") x=$(step_timeout "$TMP/tail.yaml" x)"
+read -r tail_timeouts tail_steps < <(rounds_tail "$ROUNDS")
+rounds_tail=$((CLOSING_PASS_MS + tail_timeouts + tail_steps * SLOW_STEP_MS))
+kick_wait_label() { case $1 in
+  kicked-after-game.yaml) echo "The host's kick after the game reaches the final ranking";;
+  kicked-while-offline.yaml) echo "The app stays closed until the host's kick after the game";; esac; }
+for flow in kicked-after-game.yaml kicked-while-offline.yaml; do
+  kick_s="$(grep -oE -- '--kick-after-game [0-9]+' "$MAESTRO_DIR/$flow" | head -1 | grep -oE '[0-9]+$')"
+  wait_ms="$(step_timeout "$MAESTRO_DIR/$flow" "$(kick_wait_label "$flow")")"
+  grep -q -- "^- runFlow: play-rounds.yaml$" "$MAESTRO_DIR/$flow" && [ -n "$kick_s" ] && [ "$tail_steps" -gt 0 ] \
+    && [ $((kick_s * 1000)) -ge "$rounds_tail" ] \
+    && ok "$flow: the kick (${kick_s} s after game over) comes after play-rounds.yaml is done ($rounds_tail ms: closing pass $CLOSING_PASS_MS + waits $tail_timeouts + $tail_steps slow reads)" \
+    || ko "$flow: the kick comes after play-rounds.yaml is done" "kick=${kick_s:-none} s, play-rounds after game over=$rounds_tail ms"
+  [ -n "$wait_ms" ] && [ -n "$kick_s" ] && [ "$wait_ms" -ge $((kick_s * 1000)) ] \
+    && ok "$flow: waits $wait_ms ms for the kick ${kick_s} s after game over" \
+    || ko "$flow: waits for the kick after game over" "wait=${wait_ms:-none} ms, kick=${kick_s:-none} s"
+done
 
 # ── play-rounds.yaml on a fake game with slow screen reads (EXP-312, EXP-322, EXP-326) ──
 # With reads that see the screen as they start, as they end and anywhere along them: every guess lands while answering

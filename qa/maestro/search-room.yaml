@@ -1,0 +1,43 @@
+# From the home screen, ask to join room ${GAME_CODE} as ${USERNAME}: type the name and the code, then tap Search.
+# Where that lands is the caller's to check: join-room.yaml waits for the lobby, kicked-while-offline.yaml for the
+# server's refusal back on home.
+# Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
+appId: com.socketNull.ExposeMe
+---
+# Clear a previously saved name before typing
+- tapOn:
+    id: "username-clear-button"
+    optional: true
+- tapOn:
+    id: "username-input"
+- inputText: ${USERNAME}
+# With two iOS simulators driven in parallel the typed name is sometimes lost (field still empty, so the
+# join button does nothing): type it again once if the field does not hold the name
+- runFlow:
+    when:
+      notVisible:
+        id: "username-input"
+        text: "${USERNAME}"
+    commands:
+      - tapOn:
+          id: "username-input"
+      - inputText: ${USERNAME}
+# Submit instead of hideKeyboard: on Android hideKeyboard sends Back, which (SDK 58) also closes the app
+# on the home screen; on iOS 26 hideKeyboard leaves the keyboard covering the join button.
+- pressKey: Enter
+- tapOn:
+    id: "join-game-button"
+- runFlow: type-room-code.yaml
+# Like the name above, the typed code is sometimes lost with several simulators driven in parallel (EXP-256: the
+# search then does nothing and the device never joins): if the field does not hold the code, type it once more
+- runFlow:
+    when:
+      notVisible:
+        id: "game-code-input"
+        text: "${GAME_CODE}"
+    file: type-room-code.yaml
+- assertVisible:
+    id: "game-code-input"
+    text: "${GAME_CODE}"
+- tapOn:
+    id: "search-room-button"

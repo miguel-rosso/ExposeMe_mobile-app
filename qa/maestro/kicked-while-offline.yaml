@@ -1,0 +1,57 @@
+# EXP-337 / EXP-346: the host removes the device while its app is closed, so it never gets its own player-removed.
+# Coming back, it joins the same room by hand (same code and name) with the rejoin token it stored: the server refuses
+# that join, and the device is back home with the removal notice in its language ("The host removed you from the
+# room." / "El anfitrión te ha sacado de la sala."), never the raw server text, and forgets the token: the next join by
+# hand is a new player in the lobby, not the same refusal again. For a device still on the final ranking at the kick,
+# see kicked-after-game.yaml.
+# The device plays a short game with two bots and its app is killed on the final ranking (no leave-room: still a
+# player of the room, just disconnected). The bots stay on their final screens and the host bot removes the device by
+# its label (its username) 120 s after game over, while the app is still closed: play-rounds.yaml is done even at its
+# slowest by then, and the flow keeps the app closed at least that long (qa/lab/tests/maestro-timing.test.sh checks
+# both against the kick). The bots run ends right after the
+# kick; the room stays.
+#   qa/lab/lab.sh play --flow kicked-while-offline --bots 2 --rounds 3 --devices <label> \
+#     --bot-args "--kick <label> --kick-after-game 120"
+# env: GAME_CODE, USERNAME, METRO_URL (url-encoded)
+# Selectors are testIDs (Client/app/utils/testIds.ts) except the system alert, matched in both UI languages.
+appId: com.socketNull.ExposeMe
+---
+- runFlow: open-app.yaml
+- runFlow: join-room.yaml
+- runFlow: play-rounds.yaml
+# Offline at once, before the kick: the app is killed on the final ranking (the server just sees its socket close)
+- stopApp
+# Keep it closed past the kick: its home never shows while the app is not running, so this waits the whole timeout
+- extendedWaitUntil:
+    visible:
+      id: "join-game-button"
+    timeout: 125000
+    optional: true
+    label: "The app stays closed until the host's kick after the game"
+- assertNotVisible:
+    id: "join-game-button"
+# Cold start through the dev client link, without clearing the app's state (the stored name and rejoin token stay)
+- runFlow: dev-client-boot.yaml
+- extendedWaitUntil:
+    visible:
+      id: "join-game-button"
+    timeout: 60000
+# Back in the room by hand: refused for the kick it missed, home with the system alert, translated
+- runFlow: search-room.yaml
+- extendedWaitUntil:
+    visible: "(The host removed you from the room|El anfitrión te ha sacado de la sala).*"
+    timeout: 30000
+- assertNotVisible: "Removed by host"
+# EXP-221: title and button in the UI language too, not the system "Alert"
+- assertVisible: "Notice|Aviso"
+- assertNotVisible: "Alert"
+- takeScreenshot: kicked-while-offline-${USERNAME}
+- tapOn: "OK|Aceptar"
+- extendedWaitUntil:
+    visible:
+      id: "join-game-button"
+    timeout: 10000
+# Again by hand: the lobby as a new player, not the same refusal (the refused token was forgotten)
+- runFlow: join-room.yaml
+- assertNotVisible: "(The host removed you from the room|El anfitrión te ha sacado de la sala).*"
+- takeScreenshot: kicked-while-offline-rejoined-${USERNAME}

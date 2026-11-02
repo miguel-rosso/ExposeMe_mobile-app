@@ -615,7 +615,9 @@ function checkRoomExits(r, ctx) {
   if (!exits.length) return [];
   const out = [];
   const gameRounds = r.events.find((e) => e.ev === "game-started")?.payload?.rounds ?? 0;
-  const stayers = r.players.filter((n) => !ctx.exitedAt.has(n) && !ctx.wentOffline.has(n));
+  // A host that dropped in the lobby for good (--lobby-host-drop) is offline from then on, so it is told nothing
+  const droppedHost = r.events.find((e) => e.ev === "lobby-host-drop")?.bot;
+  const stayers = r.players.filter((n) => !ctx.exitedAt.has(n) && !ctx.wentOffline.has(n) && n !== droppedHost);
   for (const x of exits) {
     for (const n of stayers) {
       const told = r.events.find((e) => e.bot === n && e.ev === x.notice && e.payload?.username === x.who && e.t >= x.t);

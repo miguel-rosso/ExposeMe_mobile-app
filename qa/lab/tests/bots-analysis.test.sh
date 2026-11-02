@@ -6,7 +6,8 @@
 #   errors in the same order. lab.sh, bots-cli.test.sh and the dashboard read that JSON. The fixtures were recorded
 #   with an 8 s answer timer (300 ms grace); EXP-306 made it 8.5 s (800 ms grace) with the same 7.7 s `duration`, so
 #   their answer_phase_overrun_ms reads ~500 ms early (reveals came sooner than today's server sends them).
-# - players out of the room (EXP-139): leave (--leave-round) and lobby kick (--kick) checks on small synthetic games, and the
+# - players out of the room (EXP-139): leave (--leave-round), lobby kick (--kick) and kick after the game
+#   (--kick-after-game, EXP-346) checks on small synthetic games, and the
 #   photo owner leaving during their round (--leave-owner, EXP-301 / DEC-038): still the answer, voters score.
 # - holds of the scoreboard (--hold, EXP-303): everyone let go within 1 s of the holder releasing or going away, and
 #   every hold-end tells the holds left (EXP-176).
@@ -47,10 +48,11 @@ done
 
 # ── Leave / kick (EXP-139) ──
 # A synthetic 3-round game of bot1 (host), bot2, bot3 where one player leaves at round 2, or the host removes one in
-# the lobby (a bot, or a device "ios-a" the bots only see the notice of; never mid-game, EXP-316); the
+# the lobby (a bot, or a device "ios-a" the bots only see the notice of; never mid-game, EXP-316) or, in
+# "after-game-kick" (--kick-after-game, EXP-346), at game over after bot3 played every round; the
 # mutation breaks it. In "owner-left" bot3 leaves while its own photo is round 2's, and bot2 votes for it after it left. Prints the consistency errors, one per line, and who has missed events (a player out of the
 # room misses the rest of the game on purpose, so a clean game prints nothing).
-exits() { # scenario (left|owner-left|lobby-kick|lobby-kick-device), mutation (none|...)
+exits() { # scenario (left|owner-left|lobby-kick|lobby-kick-device|after-game-kick), mutation (none|...)
   node --input-type=module -e '
     const { analyseRoom } = await import(process.argv[1]);
     const [scenario, mutation] = process.argv.slice(2);
@@ -61,19 +63,35 @@ exits() { # scenario (left|owner-left|lobby-kick|lobby-kick-device), mutation (n
     const all = (names, ev, round, payload) => names.forEach((n) => at(n, ev, round, typeof payload === "function" ? payload(n) : payload));
     const out = scenario === "lobby-kick-device" ? "ios-a" : "bot3";
     const lobbyKick = scenario.startsWith("lobby-kick");
-    const inGame = lobbyKick ? players.filter((n) => n !== out) : players;
+    const afterGameKick = scenario.startsWith("after-game-kick");
+    // "after-game-kick-host-drop": bot1 (the host) drops in the lobby for good, bot2 hosts the game and kicks after it
+    const hostDropped = scenario === "after-game-kick-host-drop";
+    const kicker = hostDropped ? "bot2" : "bot1";
+    const live = players.filter((n) => !(hostDropped && n === "bot1"));
+    if (hostDropped) {
+      // The handover after the 15 s grace, as the server sends it (checkLobbyHostDrop)
+      at("bot1", "lobby-host-drop", 0);
+      t += 16000;
+      all(live, "player-connection", 0, { username: "bot1", connected: false });
+      all(live, "new-host", 0, { username: "bot2" });
+    }
+    const inGame = lobbyKick ? players.filter((n) => n !== out) : live;
     const bots = (names) => names.filter((n) => players.includes(n));
     const leaves = scenario === "left" || scenario === "owner-left";
     const ownerLeftIn = (round) => scenario === "owner-left" && round === 2;
     const points = new Map();
-    if (lobbyKick) {
-      at("bot1", "kick-sent", 0, { username: out });
-      if (mutation !== "no-notice") all(players, "player-removed", 0, { username: out });
+    // The host removes `out`; bots.mjs records it at the last round the host played (0 in the lobby before the game)
+    const kickOut = (round) => {
+      at(kicker, "kick-sent", round, { username: out });
+      if (mutation !== "no-notice") all(live, "player-removed", round, { username: out });
       if (out === "bot3" && mutation !== "still-connected") {
-        at("bot3", "kicked-out", 0, { reason: "io server disconnect" });
+        at("bot3", "kicked-out", round, { reason: "io server disconnect" });
         // EXP-337: back with its old token, refused with "Removed by host"
-        if (mutation !== "no-kick-rejoin-refusal") at("bot3", "kick-rejoin-refused", 0, { message: "Removed by host" });
+        if (mutation !== "no-kick-rejoin-refusal") at("bot3", "kick-rejoin-refused", round, { message: "Removed by host" });
       }
+    };
+    if (lobbyKick) {
+      kickOut(0);
       if (mutation === "events-after-kick") at("bot3", "game-started", 0, { rounds: 3, players: ["bot1", "bot2", "bot3"] });
     }
     all(bots(inGame), "game-started", 0, { rounds: 3, players: mutation === "in-game-started" ? [...inGame, out] : inGame });
@@ -87,8 +105,9 @@ exits() { # scenario (left|owner-left|lobby-kick|lobby-kick-device), mutation (n
         room = ["bot1", "bot2"];
         if (mutation !== "no-notice") all(room, "player-left", 2, { username: "bot3" });
       }
+      // Kicked after the game: it played every round, and round 2 had its photo
       const answer = mutation === "answer-after-exit" && round === 3 ? out
-        : ownerLeftIn(round) && mutation !== "owner-not-answer" ? "bot3" : "bot1";
+        : (ownerLeftIn(round) && mutation !== "owner-not-answer") || (afterGameKick && round === 2) ? "bot3" : "bot1";
       const votesOwner = ownerLeftIn(round) && mutation !== "nobody-voted-owner";
       const guessOf = (u) => (u === "bot1" ? "" : mutation === "guess-after-exit" && round === 3 ? out : votesOwner ? "bot3" : "bot1");
       all(room, "guess-sent", round, (n) => ({ guess: guessOf(n) }));
@@ -101,6 +120,7 @@ exits() { # scenario (left|owner-left|lobby-kick|lobby-kick-device), mutation (n
       all(room, "round-scores", round, { round, scores: rows.map((u) => ({ username: u, points: points.get(u) ?? 0, lastGuess: guessOf(u), lastAnswerCorrect: guessOf(u) === answer })) });
     }
     all(room, "game-over", 3, { finalScore: [] });
+    if (afterGameKick) kickOut(mutation === "kick-tagged-lobby" ? 0 : 3);
     // A phase event the leaver really missed while still in the room (before its exit) is still reported
     const missedBeforeExit = (e) => mutation === "missed-before-exit" && e.bot === "bot3" && e.ev === "round-reveal" && e.round === 1;
     const r = { code: "QAROOM", reason: "game-over", players, errors: [], uploads: [], rateLimited: 0, events: events.filter((e) => !missedBeforeExit(e)) };
@@ -136,6 +156,19 @@ expect_error "kick: the kicked bot's rejoin with its old token is never refused 
   "bot3: no \"Removed by host\" refusal for its rejoin with the old token after being kicked"
 expect_error "lobby kick: the kicked bot is in game-started" lobby-kick in-game-started "bot1: bot3 was removed but is in game-started"
 expect_error "lobby kick: the kicked bot gets game-started" lobby-kick events-after-kick "bot3: got game-started after being kicked"
+expect_clean "a bot kicked after the game: the rounds it played are not after its exit" after-game-kick
+# The host dropped in the lobby (--lobby-host-drop): the new host kicks, and the dropped one is not expected to be told
+# (it is offline; it misses the whole game on purpose, the only missed events)
+got="$(exits after-game-kick-host-drop none)"
+[[ "$got" =~ ^"missed events: bot1 ["[^]]*"]"$ ]] && ok "kick after the game by the new host: the host that dropped in the lobby is not expected to be told" \
+  || ko "kick after the game by the new host" "$got"
+expect_error "kick after the game by the new host: a stayer never told" after-game-kick-host-drop no-notice "bot2: never got player-removed for bot3"
+expect_error "kick after the game: a stayer never told (player-removed)" after-game-kick no-notice "bot2: never got player-removed for bot3"
+expect_error "kick after the game: the kicked bot's rejoin with its old token is never refused" after-game-kick no-kick-rejoin-refusal \
+  "bot3: no \"Removed by host\" refusal for its rejoin with the old token after being kicked"
+# Why bots.mjs records a kick at the host's last round: tagged round 0, the game the player was in reads as after it
+expect_error "kick after the game tagged round 0: a round it played reads as after the kick" after-game-kick kick-tagged-lobby \
+  "round 2: the answer is bot3, who was removed in round 0"
 expect_error "leave: an event missed before the exit is still a missed event" left missed-before-exit "missed events: bot3"
 got="$(exits left missed-before-exit)"
 [[ "$got" == "missed events: bot3 [round-reveal#1]" ]] && ok "leave: only that one is reported (none of the rounds after the exit)" || ko "leave: only that one is reported" "$got"

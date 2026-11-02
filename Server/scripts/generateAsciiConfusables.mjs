@@ -39,13 +39,24 @@
 // prototypes that lose marks in the skeleton or that have cased letters (visualKey folds case after the table, which
 // would join "∑" and "∫"), cased letters whose other case reads differently, characters newer than the generating
 // Node's Unicode, and symbols of a clearly different size (SIZE_PROTOTYPES).
+//
+// INDIC_CONFUSABLES (EXP-364), for playerName's visual keys only: characters of the Indic scripts and Sinhala
+// (U+0900-0DFF) drawn like another spelling of their own script ("௧" as "க", "റ" as "ര", "൬" as "ന്ന", "హ" as
+// "వా"), Kannada and Telugu counted as one script (UTS #39 draws most of their letters alike: "ಅ" as "అ"). Left out:
+// characters the tables above read, composed characters (playerName decomposes Indic text first, so their parts are
+// read), prototypes holding a character of another script, a mark of none or one newer than the generating Node (no
+// name spells them: Telugu "భ" as "బ" + a Latin dot below, Devanagari "आ" as "अ" + a Nandinagari sign), and letters
+// whose prototype holds a virama: the name keys drop it, so the letter would read as bare consonants it is not drawn
+// like (Malayalam chillu L as LA + virama would put "കമൽ" next to "കമല"). Other characters keep it: digits and
+// symbols, which real names don't hold ("൬" as "ന്ന").
 import { readFileSync } from "fs";
 
 const ASCII_PROTOTYPE = /^[A-Za-z0-9]{1,3}$/;
 const COMBINING_MARKS = /\p{Mn}/gu;
 const NONSPACING_MARK = /\p{Mn}/u;
-// confusables.txt lines: "source ;\tprototype ;\tMA\t#[*] ( source → prototype ) SOURCE NAME → PROTOTYPE NAME"
-const ENTRY = /^([0-9A-F]+) ;\t([0-9A-F ]+) ;\tMA\t#\*? \( .+ \) (.+?) \u2192 /;
+// confusables.txt lines: "source ;\tprototype ;\tMA\t#[*] ( source → prototype ) SOURCE NAME → PROTOTYPE NAMES\t#...",
+// the prototype names separated by ", "
+const ENTRY = /^([0-9A-F]+) ;\t([0-9A-F ]+) ;\tMA\t#\*? \( .+ \) (.+?) \u2192 ([^\t]*)/;
 
 // Latin small capitals (U+1D00-1D22 and the IPA ones) are their own prototype in confusables.txt: read them as the letter
 const SMALL_CAPITALS = {
@@ -90,13 +101,13 @@ if (!sourcePath) {
 const text = readFileSync(sourcePath, "utf8");
 const version = text.match(/^# Version: (.+)$/m)?.[1] ?? "unknown";
 
-/** The MA entries of confusables.txt: source character, raw prototype and the source's name. */
+/** The MA entries of confusables.txt: source character, raw prototype, the source's name and the prototype's names. */
 const confusables = text.split("\n").flatMap((line) => {
   const match = line.match(ENTRY);
   if (!match) return [];
   const source = String.fromCodePoint(parseInt(match[1], 16));
   const prototype = String.fromCodePoint(...match[2].trim().split(" ").map((hex) => parseInt(hex, 16)));
-  return [{ source, prototype, name: match[3] }];
+  return [{ source, prototype, name: match[3], prototypeNames: match[4].split(", ") }];
 });
 
 // ── ASCII_CONFUSABLES ───────────────────────────────
@@ -220,6 +231,42 @@ for (const [source, [prototype]] of symbols) {
   }
 }
 
+// ── INDIC_CONFUSABLES ───────────────────────────────
+
+// The Indic scripts and Sinhala have a block of 128 code points each, from U+0900 (Devanagari) to U+0DFF (Sinhala)
+const INDIC_CHAR = /^[\u0900-\u0DFF]$/u;
+const INDIC_BLOCK_SIZE = 0x80;
+const TELUGU_BLOCK = 0x0c00 / INDIC_BLOCK_SIZE;
+const KANNADA_BLOCK = 0x0c80 / INDIC_BLOCK_SIZE;
+// The viramas of these scripts, as confusables.txt names them ("MALAYALAM SIGN VIRAMA", "SINHALA SIGN AL-LAKUNA")
+const VIRAMA_NAME = / SIGN (?:VIRAMA|AL-LAKUNA)$/;
+
+/** The script of an Indic character: its block, Kannada counted as Telugu. */
+const indicScriptOf = (char) => {
+  const block = Math.floor(char.codePointAt(0) / INDIC_BLOCK_SIZE);
+  return block === KANNADA_BLOCK ? TELUGU_BLOCK : block;
+};
+
+/** Whether `source` reads in the Indic table as `prototype`, named `prototypeNames` (see the header). */
+const keepsIndic = (source, prototype, prototypeNames) => INDIC_CHAR.test(source)
+  && source.normalize("NFD") === source && !entries.has(source) && !symbols.has(source)
+  && !UNASSIGNED.test(source + prototype)
+  && Array.from(prototype).every((char) => INDIC_CHAR.test(char) && indicScriptOf(char) === indicScriptOf(source))
+  && !(LETTER.test(source) && prototypeNames.some((name) => VIRAMA_NAME.test(name)));
+
+const indic = new Map();
+for (const { source, prototype, name, prototypeNames } of confusables) {
+  if (!indic.has(source) && keepsIndic(source, prototype, prototypeNames)) indic.set(source, [prototype, name]);
+}
+
+// playerName reads the table once, on decomposed text: a prototype must already be decomposed and read as itself
+for (const [source, [prototype]] of indic) {
+  if (prototype.normalize("NFD") !== prototype || Array.from(prototype).some((char) => indic.has(char))) {
+    console.error(`Indic prototype of ${escape(source)} is not its own key: ${Array.from(prototype, escape).join("")}`);
+    process.exit(1);
+  }
+}
+
 // ── Unassigned ranges ───────────────────────────────
 
 const LAST_CODE_POINT = 0x10ffff;
@@ -294,6 +341,10 @@ const out = [
   "// Character \u2192 the symbols or kana it is drawn like, as the name skeleton reads them (bullets, dashes, quotes,",
   "// kana and the kanji drawn like them, ideographs drawn alike...).",
   ...mapLines("SYMBOL_CONFUSABLES", symbols),
+  "",
+  "// Indic character \u2192 the spelling of its script it is drawn like, decomposed (Kannada read as Telugu): for",
+  "// the visual keys, which read it on decomposed Indic text (playerName.readIndicLookalikes).",
+  ...mapLines("INDIC_CONFUSABLES", indic),
   "",
   `// Code points unassigned in Unicode ${process.versions.unicode}, the version of the tables above, but those reserved`,
   "// for emoji (Extended_Pictographic), as [first, last] ranges: names may only use characters the tables know, or",

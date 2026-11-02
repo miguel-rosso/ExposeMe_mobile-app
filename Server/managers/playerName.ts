@@ -1,5 +1,5 @@
 import {
-  ASCII_CONFUSABLES, EXTENDED_PICTOGRAPHIC_RANGES, SYMBOL_CONFUSABLES, UNASSIGNED_EMOJI_RANGES,
+  ASCII_CONFUSABLES, EXTENDED_PICTOGRAPHIC_RANGES, INDIC_CONFUSABLES, SYMBOL_CONFUSABLES, UNASSIGNED_EMOJI_RANGES,
   UNASSIGNED_NON_EMOJI_RANGES,
 } from "./asciiConfusables";
 import { displayOrder } from "./displayOrder";
@@ -262,61 +262,65 @@ const LOOKS_LIKE_L = /[Il|1]/g;
 // before it, as the other spellings of a voicing mark after a space do (EXP-320)
 const SPACE_BEFORE_SPACING_VOICING_MARK = /\u0020(?=[\u309B\u309C])/gu;
 const VISUAL_LOOKALIKES: ReadonlyArray<[RegExp, string]> = [[/rn/g, "m"], [/vv/g, "w"], [/cl/g, "d"], [/0/g, "o"]];
-// Visual keys only: marks drawn like a vowel sign the keys keep, read as that sign (measured in Kohinoor and the Sangam
-// fonts on iOS and Noto Sans on Android, drawn alike by UTS #39, or by their shape): the Devanagari and Gujarati
-// candrabindu like their candra E but for a dot, the Devanagari short E and short O like E and O, the Oriya overline
-// like the hook of sign I over the letter, the Malayalam UU and vocalic R like U, the Sinhala candrabindu like the
-// al-lakuna of the long E and long O (Android: KA + kombuva + candrabindu like KA + long E, EXP-357), and the long
-// vocalic signs (RR, LL), which only Sanskrit spells and fonts draw as the short ones with one more curl, like those
-const VOWEL_SIGN_LOOKALIKES: ReadonlyMap<string, string> = new Map([
-  ["\u0901", "\u0945"], ["\u0A81", "\u0AC5"], ["\u0946", "\u0947"], ["\u094A", "\u094B"], ["\u0B55", "\u0B3F"],
-  ["\u0D42", "\u0D41"], ["\u0D43", "\u0D41"], ["\u0D81", "\u0DCA"],
-  // Vocalic RR as vocalic R (Malayalam's as U, like its R)
-  ["\u0944", "\u0943"], ["\u09C4", "\u09C3"], ["\u0AC4", "\u0AC3"], ["\u0B44", "\u0B43"], ["\u0D44", "\u0D41"],
-  // Vocalic LL as vocalic L
-  ["\u0963", "\u0962"], ["\u09E3", "\u09E2"], ["\u0AE3", "\u0AE2"], ["\u0B63", "\u0B62"], ["\u0C63", "\u0C62"],
-  ["\u0CE3", "\u0CE2"], ["\u0D63", "\u0D62"],
-]);
-// Visual keys only: Indic characters drawn like a letter of their script and a vowel sign, or a sign drawn like a
-// letter, read as those (EXP-356, drawn alike by UTS #39)
-const LETTER_AND_SIGN_LOOKALIKES: ReadonlyMap<string, string> = new Map([
-  // Telugu HA like VA + AA, MA like VA + U ("హరి" next to "వారి")
-  ["\u0C39", "\u0C35\u0C3E"], ["\u0C2E", "\u0C35\u0C41"],
-  // Malayalam NGA, vocalic L and the date mark like NA + U
-  ["\u0D19", "\u0D28\u0D41"], ["\u0D0C", "\u0D28\u0D41"], ["\u0D79", "\u0D28\u0D41"],
-  // Sinhala IRUYANNA like SA + GAETTA-PILLA
-  ["\u0D8D", "\u0DC3\u0DD8"],
-  // Tamil sign AA and RA like the letter II, the AU length mark like LLA, so (read decomposed) the O and OO signs like
-  // E and EE + II, the AU sign like E + LLA ("கௌரி" next to "கெளரி") and the letter AU like O + LLA ("ஔவை" next to
-  // "ஒளவை"), and digits and signs like a letter + vowel sign (digit five like "ரு")
-  ["\u0BBE", "\u0B88"], ["\u0BB0", "\u0B88"], ["\u0BD7", "\u0BB3"],
-  ["\u0BEB", "\u0B88\u0BC1"], ["\u0BEC", "\u0B9A\u0BC1"], ["\u0BF2", "\u0B9A\u0BC2"], ["\u0BFA", "\u0BA8\u0BC0"],
-  ["\u0BF4", "\u0BAE\u0BC0"],
-  // Devanagari and Gujarati candra O (sign and letter) like AA + candra E, and the candra E and candra A letters like
-  // E or A + candra E (EXP-362): a candrabindu, read as candra E, differs by a dot ("चाँदनी" next to "चॉदनी")
-  ["\u0949", "\u093E\u0945"], ["\u0911", "\u0906\u0945"], ["\u090D", "\u090F\u0945"], ["\u0972", "\u0905\u0945"],
-  ["\u0AC9", "\u0ABE\u0AC5"], ["\u0A91", "\u0A86\u0AC5"], ["\u0A8D", "\u0A85\u0AC5"],
-]);
-// Both tables at once: no character of one is in the other, nor in what the other reads. Exported for tests
-export const INDIC_LOOKALIKES: ReadonlyMap<string, string> = new Map([
-  ...VOWEL_SIGN_LOOKALIKES, ...LETTER_AND_SIGN_LOOKALIKES,
-]);
-
-// Letters, signs and digits of the Indic scripts and Sinhala, the blocks INDIC_LOOKALIKES reads
-const INDIC_CHAR = /[\u0900-\u0DFF]/gu;
 
 /** `text` with each character found in `table` replaced by its entry. */
 const replaceChars = (text: string, table: ReadonlyMap<string, string>) =>
   Array.from(text, (char) => table.get(char) ?? char).join("");
 
+// Visual keys only: marks drawn like a vowel sign the keys keep, read as that sign (measured in Kohinoor and the Sangam
+// fonts on iOS and Noto Sans on Android, or by their shape): the Devanagari and Gujarati candrabindu like their candra
+// E but for a dot, the Devanagari short E and short O like E and O, the Oriya overline like the hook of sign I over the
+// letter, the Sinhala candrabindu like the al-lakuna of the long E and long O (Android: KA + kombuva + candrabindu like
+// KA + long E, EXP-357), and the long vocalic signs (RR, LL), which only Sanskrit spells and fonts draw as the short
+// ones with one more curl, like those
+const VOWEL_SIGN_LOOKALIKES: ReadonlyMap<string, string> = new Map([
+  ["\u0901", "\u0945"], ["\u0A81", "\u0AC5"], ["\u0946", "\u0947"], ["\u094A", "\u094B"], ["\u0B55", "\u0B3F"],
+  ["\u0D81", "\u0DCA"],
+  // Vocalic RR as vocalic R (Malayalam's as U, like its vocalic R in INDIC_CONFUSABLES)
+  ["\u0944", "\u0943"], ["\u09C4", "\u09C3"], ["\u0AC4", "\u0AC3"], ["\u0B44", "\u0B43"], ["\u0D44", "\u0D41"],
+  // Vocalic LL as vocalic L
+  ["\u0963", "\u0962"], ["\u09E3", "\u09E2"], ["\u0AE3", "\u0AE2"], ["\u0B63", "\u0B62"], ["\u0C63", "\u0C62"],
+  ["\u0CE3", "\u0CE2"], ["\u0D63", "\u0D62"],
+]);
+// Visual keys only: the Devanagari and Gujarati candra O (sign and letter) like AA + candra E, and the Devanagari
+// candra E and candra A letters like E or A + candra E (EXP-362): a candrabindu, read as candra E, differs by a dot
+// ("चाँदनी" next to "चॉदनी"). UTS #39 spells them with a Latin breve or a Nandinagari sign, which no name holds; the
+// Gujarati letters are in INDIC_CONFUSABLES ("ઑ" as "અાૅ", "આ" as "અા")
+const CANDRA_LOOKALIKES: ReadonlyMap<string, string> = new Map([
+  ["\u0949", "\u093E\u0945"], ["\u0911", "\u0906\u0945"], ["\u090D", "\u090F\u0945"], ["\u0972", "\u0905\u0945"],
+  ["\u0AC9", "\u0ABE\u0AC5"],
+]);
+const MEASURED_INDIC_LOOKALIKES: ReadonlyMap<string, string> = new Map([
+  ...VOWEL_SIGN_LOOKALIKES, ...CANDRA_LOOKALIKES,
+]);
+// Visual keys only (EXP-356, EXP-364): Indic characters drawn like another spelling of their script, generated from
+// UTS #39 (INDIC_CONFUSABLES: Tamil "௧" as "க" and "ௗ" as "ள", Telugu "హ" as "వా", Malayalam "൬" as "ന്ന",
+// Kannada "ಅ" as Telugu "అ"), and the measured ones above. The generated spellings are read through the measured
+// tables ("ऎ" as "ए" + short E sign, read as E sign), so no spelling holds a character the table reads, and no measured
+// entry replaces a generated one. Exported for tests
+export const INDIC_LOOKALIKES: ReadonlyMap<string, string> = new Map([
+  ...Array.from(INDIC_CONFUSABLES, ([char, spelling]): [string, string] =>
+    [char, replaceChars(spelling, MEASURED_INDIC_LOOKALIKES)]),
+  ...MEASURED_INDIC_LOOKALIKES,
+]);
+
+// Letters, signs and digits of the Indic scripts and Sinhala, the blocks INDIC_LOOKALIKES reads
+const INDIC_CHAR = /[\u0900-\u0DFF]/gu;
+// The Tamil vowel sign AI after its letter and that letter's marks: drawn before them, and like the letter NNNA
+// (INDIC_CONFUSABLES), so "கை" looks like "னக" (EXP-365)
+const TAMIL_AI_AFTER_LETTER = /(\p{L}\p{M}*?)\u0BC8/gu;
+
+/** Decomposed Indic `text` with each Tamil vowel sign AI where it is drawn, before its letter. */
+const tamilAiWhereDrawn = (text: string) => text.replace(TAMIL_AI_AFTER_LETTER, "\u0BC8$1");
+
 /**
- * Indic marks drawn like a vowel sign replaced by it, and characters drawn like a letter and a vowel sign by those
- * (INDIC_LOOKALIKES: candrabindu as candra E, Telugu HA as VA + AA). Indic characters are decomposed first (NFD), so
- * one that holds a character the table reads (the Tamil O and AU signs, the letter AU) reads like its parts, however
- * it was typed.
+ * Indic characters drawn like another spelling of their script replaced by it (INDIC_LOOKALIKES: candrabindu as
+ * candra E, Telugu HA as VA + AA, Tamil digit one as KA), the Tamil sign AI first moved before its letter. Indic
+ * characters are decomposed first (NFD), so one that holds a character the table reads (the Tamil O and AU signs, the
+ * letter AU) reads like its parts, however it was typed.
  */
 const readIndicLookalikes = (text: string) =>
-  replaceChars(text.replace(INDIC_CHAR, (char) => char.normalize("NFD")), INDIC_LOOKALIKES);
+  replaceChars(tamilAiWhereDrawn(text.replace(INDIC_CHAR, (char) => char.normalize("NFD"))), INDIC_LOOKALIKES);
 
 // Code points Unicode 15.1 reserves for emoji, which names may use (see UNASSIGNED_IN_TABLES): a phone whose fonts lack
 // the emoji, or any phone for those still unassigned, draws them all as the same empty box ("Ana 🫩" like "Ana 🫆").

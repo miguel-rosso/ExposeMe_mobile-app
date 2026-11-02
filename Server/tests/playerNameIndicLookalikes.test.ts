@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { INDIC_CONFUSABLES } from "../managers/asciiConfusables";
 import {
   INDIC_LOOKALIKES, isValidUsername, letterVisualKey, nameClash, nameKeys, visualKey,
 } from "../managers/playerName";
@@ -163,5 +164,86 @@ describe("Indic lookalikes and canonical equivalence", () => {
       return visualKey(char) !== visualKey(decomposed) || letterVisualKey(char) !== letterVisualKey(decomposed);
     });
     expect(differing).toEqual([]);
+  });
+});
+
+// EXP-364: the table generated from UTS #39 reads the Indic letters, digits and signs drawn like another spelling of
+// their script (Kannada and Telugu as one).
+describe("Indic characters drawn like another spelling of their script (EXP-364)", () => {
+  it.each([
+    ["Tamil Kannan / digit one for KA", "\u0B95\u0BA3\u0BCD\u0BA3\u0BA9\u0BCD", "\u0BE7\u0BA3\u0BCD\u0BA3\u0BA9\u0BCD"],
+    ["Tamil Arun / digit eight for A", "\u0B85\u0BB0\u0BC1\u0BA3\u0BCD", "\u0BEE\u0BB0\u0BC1\u0BA3\u0BCD"],
+    ["Tamil Uma / digit two for U", "\u0B89\u0BAE\u0BBE", "\u0BE8\u0BAE\u0BBE"],
+    ["Tamil Charan / digit four for CA", "\u0B9A\u0BB0\u0BA3\u0BCD", "\u0BEA\u0BB0\u0BA3\u0BCD"],
+    ["Tamil Ezhil / digit seven for E", "\u0B8E\u0BB4\u0BBF\u0BB2\u0BCD", "\u0BED\u0BB4\u0BBF\u0BB2\u0BCD"],
+    ["Tamil Yamuna / number ten for YA", "\u0BAF\u0BAE\u0BC1\u0BA9\u0BBE", "\u0BF0\u0BAE\u0BC1\u0BA9\u0BBE"],
+    ["Tamil Janani / AI for JA", "\u0B9C\u0BA9\u0BA9\u0BBF", "\u0B90\u0BA9\u0BA9\u0BBF"],
+    ["Tamil SA / SHA", "\u0BB8\u0BB0\u0BA3\u0BCD", "\u0BB6\u0BB0\u0BA3\u0BCD"],
+    ["Tamil Urmila / U + LLA for UU", "\u0B8A\u0BB0\u0BCD\u0BAE\u0BBF\u0BB3\u0BBE",
+      "\u0B89\u0BB3\u0BB0\u0BCD\u0BAE\u0BBF\u0BB3\u0BBE"],
+    ["Malayalam Rani / RRA for RA", "\u0D30\u0D3E\u0D23\u0D3F", "\u0D31\u0D3E\u0D23\u0D3F"],
+    ["Malayalam NYA / vocalic LL", "\u0D15\u0D1E", "\u0D15\u0D61"],
+    ["Malayalam Prasanna / digit six for NNA", "\u0D2A\u0D4D\u0D30\u0D38\u0D28\u0D4D\u0D28",
+      "\u0D2A\u0D4D\u0D30\u0D38\u0D6C"],
+    ["Sinhala Eranga / PHA for E", "\u0D91\u0DBB\u0D82\u0D9C", "\u0DB5\u0DBB\u0D82\u0D9C"],
+    ["Sinhala O / AMBA BA", "\u0D94\u0DB6", "\u0DB9\u0DB6"],
+    ["Sinhala Bandara / KHA for BA", "\u0DB6\u0DAB\u0DCA\u0DA9\u0DCF\u0DBB", "\u0D9B\u0DAB\u0DCA\u0DA9\u0DCF\u0DBB"],
+    ["Sinhala Chamari / VA for CA", "\u0DA0\u0DB8\u0DBB\u0DD2", "\u0DC0\u0DB8\u0DBB\u0DD2"],
+    ["Sinhala Hasini / BHA for HA", "\u0DC4\u0DC3\u0DD2\u0DB1\u0DD2", "\u0DB7\u0DC3\u0DD2\u0DB1\u0DD2"],
+    ["Assamese and Bengali Raj", "\u09F0\u09BE\u099C", "\u09B0\u09BE\u099C"],
+    ["Kannada and Telugu Anil", "\u0C85\u0CA8\u0CBF\u0CB2\u0CCD", "\u0C05\u0C28\u0C3F\u0C32\u0C4D"],
+    ["Kannada and Telugu Jaya", "\u0C9C\u0CAF", "\u0C1C\u0C2F"],
+    ["Kannada and Telugu OO", "\u0C93", "\u0C13"],
+  ])("%s look too alike", (_label, a, b) => {
+    expectSimilar(a, b);
+  });
+
+  // The keys drop viramas and Latin-style dots, so letters UTS #39 draws with one would read as the bare letters
+  it.each([
+    ["Malayalam Kamal / Kamala (chillu L)", "\u0D15\u0D2E\u0D7D", "\u0D15\u0D2E\u0D32"],
+    ["Malayalam Nandan / Nandana (chillu N)", "\u0D28\u0D28\u0D4D\u0D26\u0D7B", "\u0D28\u0D28\u0D4D\u0D26\u0D28"],
+    ["Telugu Bhanu / Banu", "\u0C2D\u0C3E\u0C28\u0C41", "\u0C2C\u0C3E\u0C28\u0C41"],
+    ["Devanagari Isha / RA + I", "\u0908\u0936\u093E", "\u0930\u0907\u0936\u093E"],
+    ["Sinhala EE / E", "\u0D92\u0D9A", "\u0D91\u0D9A"],
+  ])("%s stay different names", (_label, a, b) => {
+    expectDistinct(a, b);
+  });
+
+  it("keeps each generated entry within one script, Kannada counted as Telugu", () => {
+    const scriptOf = (char: string) => {
+      const block = Math.floor(char.codePointAt(0)! / 0x80);
+      return block === 0x0c80 / 0x80 ? 0x0c00 / 0x80 : block;
+    };
+    const mixed = [...INDIC_CONFUSABLES].filter(([char, spelling]) =>
+      Array.from(spelling).some((part) => scriptOf(part) !== scriptOf(char)));
+    expect(mixed).toEqual([]);
+  });
+
+  it("reads no spelling of the table again, and lets no measured entry replace a generated one", () => {
+    const readAgain = [...INDIC_LOOKALIKES].filter(([, spelling]) =>
+      Array.from(spelling).some((part) => INDIC_LOOKALIKES.has(part)));
+    expect(readAgain).toEqual([]);
+    const replaced = [...INDIC_CONFUSABLES].filter(([char, spelling]) =>
+      INDIC_LOOKALIKES.get(char) !== Array.from(spelling, (part) => INDIC_LOOKALIKES.get(part) ?? part).join(""));
+    expect(replaced).toEqual([]);
+  });
+});
+
+// EXP-365: the Tamil vowel sign AI is drawn before its letter, and UTS #39 draws it like the letter NNNA.
+describe("Tamil vowel sign AI read where it is drawn (EXP-365)", () => {
+  it.each([
+    ["KAI / NNNA + KA", "\u0B95\u0BC8", "\u0BA9\u0B95"],
+    ["Maithili / NNNA + MA", "\u0BAE\u0BC8\u0BA4\u0BBF\u0BB2\u0BBF", "\u0BA9\u0BAE\u0BA4\u0BBF\u0BB2\u0BBF"],
+    ["Vaigai / NNNA + VA, NNNA + KA", "\u0BB5\u0BC8\u0B95\u0BC8", "\u0BA9\u0BB5\u0BA9\u0B95"],
+    ["KAI with an anusvara / NNNA + KA + anusvara", "\u0B95\u0B82\u0BC8", "\u0BA9\u0B95\u0B82"],
+  ])("%s look too alike", (_label, a, b) => {
+    expectSimilar(a, b);
+  });
+
+  it.each([
+    ["KAI / KA + NNNA", "\u0B95\u0BC8", "\u0B95\u0BA9"],
+    ["Vaigai / VA + NNNA + KA + NNNA", "\u0BB5\u0BC8\u0B95\u0BC8", "\u0BB5\u0BA9\u0B95\u0BA9"],
+  ])("%s stay different names", (_label, a, b) => {
+    expectDistinct(a, b);
   });
 });

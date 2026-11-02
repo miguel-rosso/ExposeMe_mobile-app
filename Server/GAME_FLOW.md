@@ -270,16 +270,22 @@ After last round: game-over
   `0` as `o`. Marks drawn like an Indic vowel sign the keys keep read as that sign first (measured in Kohinoor and the
   Sangam fonts on iOS and Noto Sans on Android, alike in UTS #39, or by their shape): the Devanagari and Gujarati
   candrabindu as their candra E (`सँम` next to `सॅम`), the Devanagari short E and short O as E and O, the Oriya
-  overline as sign I (`କ୕` next to `କି`), the Malayalam UU and vocalic R as U, and the long
-  vocalic signs RR and LL, only spelled in Sanskrit, as R and L (`कॄष्ण` next to `कृष्ण`). Characters UTS #39 draws
-  like a letter of their script and a vowel sign, or a sign drawn like a letter, read as those (EXP-356, EXP-362):
-  Telugu `హ` as `వా` and `మ` as `వు` (`హరి` next to `వారి`), Malayalam `ങ`, `ഌ` and `൹` as `നു`, Sinhala `ඍ` as
-  `සෘ`, Tamil `ா` and `ர` as `ஈ` and `ௗ` as `ள` (so `ௌ` as `ெள`: `கௌரி` next to `கெளரி`), the Tamil digits and
-  signs `௫`, `௬`, `௲`, `௺`, `௴` as `ரு`, `சு`, `சூ`, `நீ`, `மீ`, and the Devanagari and Gujarati candra O as AA +
-  candra E (`ॉ` as `ाॅ`, `ऑ` as `आॅ`, `ૉ` as `ાૅ`, `ઑ` as `આૅ`: `चॉदनी` next to `चाँदनी`), with the candra E and
-  candra A letters as E or A + candra E (`ऍ` as `एॅ`, `ॲ` as `अॅ`, `ઍ` as `અૅ`). So real Tamil names such as `கரன்`
-  (Karan) and `கான்` (Khan), or Telugu `రామ` (Rama) and `రావు` (Rao), count as `similar`, the same criterion as
-  `Clara` and `Dara`. The code points Unicode
+  overline as sign I (`କ୕` next to `କି`), the Malayalam vocalic RR as U, and the long
+  vocalic signs RR and LL, only spelled in Sanskrit, as R and L (`कॄष्ण` next to `कृष्ण`). Indic characters that
+  UTS #39 draws like another spelling of their script read as it (EXP-356, EXP-364; `INDIC_CONFUSABLES`, a third
+  table generated into `managers/asciiConfusables.ts`, with Kannada and Telugu as one script): letters such as Tamil
+  `ஜ` as `ஐ` and `ஊ` as `உள`, Malayalam `റ` as `ര`, Sinhala `ව` as `ච`, Assamese `ৰ` as Bengali `র`, Kannada `ಅ`
+  and `ಜ` as Telugu `అ` and `జ`, Telugu `హ` as `వా` and `మ` as `వు` (`హరి` next to `వారి`), Malayalam `ങ`, `ഌ` and
+  `൹` as `നു`, Sinhala `ඍ` as `සෘ`; signs such as Malayalam UU and vocalic R as U, Tamil `ா` as `ஈ` and `ௗ` as `ள`
+  (so `ௌ` as `ெள`: `கௌரி` next to `கெளரி`); digits such as Tamil `௧` as `க` (`௧ண்ணன்` next to `கண்ணன்`), `௫` as
+  `ரு`, Malayalam `൬` as `ന്ന` (`പ്രസ൬` next to `പ്രസന്ന`). The Tamil sign AI, drawn before its letter and like `ன`,
+  is read there (EXP-365: `கை` next to `னக`, apart from `கன`). Left out: spellings UTS #39 writes with a character of
+  another script or a Latin-style mark (Telugu `భ` as `బ` + dot below), and letters it writes with a virama, which the
+  keys drop, so the letter would meet the bare consonant (Malayalam chillu `ൽ` as `ല്`: `കമൽ` stays apart from
+  `കമല`). The Devanagari and Gujarati candra O read as AA + candra E (`ॉ` as `ाॅ`, `ऑ` as `आॅ`, `ૉ` as `ાૅ`, `ઑ`
+  as `અાૅ`: `चॉदनी` next to `चाँदनी`), with the candra E and candra A letters as E or A + candra E (`ऍ` as `एॅ`, `ॲ`
+  as `अॅ`, `ઍ` as `અૅ`). So real Tamil names such as `கரன்` (Karan) and `கான்` (Khan), or Telugu `రామ` (Rama) and
+  `రావు` (Rao), count as `similar`, the same criterion as `Clara` and `Dara`. The code points Unicode
   15.1 reserves for emoji (`UNASSIGNED_EMOJI_RANGES`, a fixed list, the same on every Node) all read as one empty box:
   a phone whose fonts lack a newer emoji, or any phone for one still unassigned, draws it so (`Ana 🫩` next to
   `Ana 🫆` and to `Ana` + U+1FC00, but apart from `Ana 😀`). The symbol table

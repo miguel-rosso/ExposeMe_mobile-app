@@ -2079,6 +2079,112 @@ export const SYMBOL_CONFUSABLES: ReadonlyMap<string, string> = new Map<string, s
   ["\u{21FE8}", "\u276C"], // CJK UNIFIED IDEOGRAPH-21FE8
 ]);
 
+// Indic character → the spelling of its script it is drawn like, decomposed (Kannada read as Telugu): for
+// the visual keys, which read it on decomposed Indic text (playerName.readIndicLookalikes).
+export const INDIC_CONFUSABLES: ReadonlyMap<string, string> = new Map<string, string>([
+  ["\u0904", "\u0905\u0946"], // DEVANAGARI LETTER SHORT A
+  ["\u090E", "\u090F\u0946"], // DEVANAGARI LETTER SHORT E
+  ["\u0973", "\u0905\u093A"], // DEVANAGARI LETTER OE
+  ["\u0975", "\u0905\u094F"], // DEVANAGARI LETTER AW
+  ["\u0986", "\u0985\u09BE"], // BENGALI LETTER AA
+  ["\u09E0", "\u098B\u09C3"], // BENGALI LETTER VOCALIC RR
+  ["\u09E1", "\u098B\u09C3"], // BENGALI LETTER VOCALIC LL
+  ["\u09F0", "\u09B0"], // BENGALI LETTER RA WITH MIDDLE DIAGONAL
+  ["\u0A06", "\u0A05\u0A3E"], // GURMUKHI LETTER AA
+  ["\u0A14", "\u0A05\u0A4C"], // GURMUKHI LETTER AU
+  ["\u0A86", "\u0A85\u0ABE"], // GUJARATI LETTER AA
+  ["\u0A8D", "\u0A85\u0AC5"], // GUJARATI VOWEL CANDRA E
+  ["\u0A8F", "\u0A85\u0AC7"], // GUJARATI LETTER E
+  ["\u0A90", "\u0A85\u0AC8"], // GUJARATI LETTER AI
+  ["\u0A91", "\u0A85\u0ABE\u0AC5"], // GUJARATI VOWEL CANDRA O
+  ["\u0A93", "\u0A85\u0ABE\u0AC7"], // GUJARATI LETTER O
+  ["\u0A94", "\u0A85\u0ABE\u0AC8"], // GUJARATI LETTER AU
+  ["\u0B06", "\u0B05\u0B3E"], // ORIYA LETTER AA
+  ["\u0B8A", "\u0B89\u0BB3"], // TAMIL LETTER UU
+  ["\u0B9C", "\u0B90"], // TAMIL LETTER JA
+  ["\u0BB0", "\u0B88"], // TAMIL LETTER RA
+  ["\u0BB8", "\u0BB6"], // TAMIL LETTER SA
+  ["\u0BBE", "\u0B88"], // TAMIL VOWEL SIGN AA
+  ["\u0BC8", "\u0BA9"], // TAMIL VOWEL SIGN AI
+  ["\u0BD7", "\u0BB3"], // TAMIL AU LENGTH MARK
+  ["\u0BE7", "\u0B95"], // TAMIL DIGIT ONE
+  ["\u0BE8", "\u0B89"], // TAMIL DIGIT TWO
+  ["\u0BEA", "\u0B9A"], // TAMIL DIGIT FOUR
+  ["\u0BEB", "\u0B88\u0BC1"], // TAMIL DIGIT FIVE
+  ["\u0BEC", "\u0B9A\u0BC1"], // TAMIL DIGIT SIX
+  ["\u0BED", "\u0B8E"], // TAMIL DIGIT SEVEN
+  ["\u0BEE", "\u0B85"], // TAMIL DIGIT EIGHT
+  ["\u0BF0", "\u0BAF"], // TAMIL NUMBER TEN
+  ["\u0BF2", "\u0B9A\u0BC2"], // TAMIL NUMBER ONE THOUSAND
+  ["\u0BF4", "\u0BAE\u0BC0"], // TAMIL MONTH SIGN
+  ["\u0BFA", "\u0BA8\u0BC0"], // TAMIL NUMBER SIGN
+  ["\u0C13", "\u0C12\u0C55"], // TELUGU LETTER OO
+  ["\u0C14", "\u0C12\u0C4C"], // TELUGU LETTER AU
+  ["\u0C2E", "\u0C35\u0C41"], // TELUGU LETTER MA
+  ["\u0C39", "\u0C35\u0C3E"], // TELUGU LETTER HA
+  ["\u0C42", "\u0C41\u0C3E"], // TELUGU VOWEL SIGN UU
+  ["\u0C44", "\u0C43\u0C3E"], // TELUGU VOWEL SIGN VOCALIC RR
+  ["\u0C60", "\u0C0B\u0C3E"], // TELUGU LETTER VOCALIC RR
+  ["\u0C61", "\u0C0C\u0C3E"], // TELUGU LETTER VOCALIC LL
+  ["\u0C85", "\u0C05"], // KANNADA LETTER A
+  ["\u0C86", "\u0C06"], // KANNADA LETTER AA
+  ["\u0C87", "\u0C07"], // KANNADA LETTER I
+  ["\u0C90", "\u0C10"], // KANNADA LETTER AI
+  ["\u0C92", "\u0C12"], // KANNADA LETTER O
+  ["\u0C93", "\u0C12\u0C55"], // KANNADA LETTER OO
+  ["\u0C94", "\u0C12\u0C4C"], // KANNADA LETTER AU
+  ["\u0C97", "\u0C17"], // KANNADA LETTER GA
+  ["\u0C9C", "\u0C1C"], // KANNADA LETTER JA
+  ["\u0C9D", "\u0C1D"], // KANNADA LETTER JHA
+  ["\u0C9E", "\u0C1E"], // KANNADA LETTER NYA
+  ["\u0C9F", "\u0C1F"], // KANNADA LETTER TTA
+  ["\u0CA3", "\u0C23"], // KANNADA LETTER NNA
+  ["\u0CA6", "\u0C26"], // KANNADA LETTER DA
+  ["\u0CA8", "\u0C28"], // KANNADA LETTER NA
+  ["\u0CAF", "\u0C2F"], // KANNADA LETTER YA
+  ["\u0CB0", "\u0C30"], // KANNADA LETTER RA
+  ["\u0CB1", "\u0C31"], // KANNADA LETTER RRA
+  ["\u0CB2", "\u0C32"], // KANNADA LETTER LA
+  ["\u0CB3", "\u0C33"], // KANNADA LETTER LLA
+  ["\u0CBF", "\u0C3F"], // KANNADA VOWEL SIGN I
+  ["\u0CC1", "\u0C41"], // KANNADA VOWEL SIGN U
+  ["\u0CC3", "\u0C43"], // KANNADA VOWEL SIGN VOCALIC R
+  ["\u0CE1", "\u0C8C\u0CBE"], // KANNADA LETTER VOCALIC LL
+  ["\u0CE7", "\u0C67"], // KANNADA DIGIT ONE
+  ["\u0CE8", "\u0C68"], // KANNADA DIGIT TWO
+  ["\u0CEF", "\u0C6F"], // KANNADA DIGIT NINE
+  ["\u0D08", "\u0D07\u0D57"], // MALAYALAM LETTER II
+  ["\u0D0C", "\u0D28\u0D41"], // MALAYALAM LETTER VOCALIC L
+  ["\u0D13", "\u0D12\u0D3E"], // MALAYALAM LETTER OO
+  ["\u0D14", "\u0D12\u0D57"], // MALAYALAM LETTER AU
+  ["\u0D19", "\u0D28\u0D41"], // MALAYALAM LETTER NGA
+  ["\u0D31", "\u0D30"], // MALAYALAM LETTER RRA
+  ["\u0D42", "\u0D41"], // MALAYALAM VOWEL SIGN UU
+  ["\u0D43", "\u0D41"], // MALAYALAM VOWEL SIGN VOCALIC R
+  ["\u0D5A", "\u0D28\u0D4D\u0D2E"], // MALAYALAM FRACTION THREE EIGHTIETHS
+  ["\u0D61", "\u0D1E"], // MALAYALAM LETTER VOCALIC LL
+  ["\u0D6A", "\u0D30\u0D4D"], // MALAYALAM DIGIT FOUR
+  ["\u0D6B", "\u0D26\u0D4D\u0D30"], // MALAYALAM DIGIT FIVE
+  ["\u0D6C", "\u0D28\u0D4D\u0D28"], // MALAYALAM DIGIT SIX
+  ["\u0D6E", "\u0D35\u0D4D\u0D30"], // MALAYALAM DIGIT EIGHT
+  ["\u0D6F", "\u0D28\u0D4D"], // MALAYALAM DIGIT NINE
+  ["\u0D76", "\u0D39\u0D4D\u0D2E"], // MALAYALAM FRACTION ONE SIXTEENTH
+  ["\u0D79", "\u0D28\u0D41"], // MALAYALAM DATE MARK
+  ["\u0D8D", "\u0DC3\u0DD8"], // SINHALA LETTER IRUYANNA
+  ["\u0D93", "\u0D91\u0DD9"], // SINHALA LETTER AIYANNA
+  ["\u0DB5", "\u0D91"], // SINHALA LETTER MAHAAPRAANA PAYANNA
+  ["\u0DB6", "\u0D9B"], // SINHALA LETTER ALPAPRAANA BAYANNA
+  ["\u0DB9", "\u0D94"], // SINHALA LETTER AMBA BAYANNA
+  ["\u0DC0", "\u0DA0"], // SINHALA LETTER VAYANNA
+  ["\u0DC4", "\u0DB7"], // SINHALA LETTER HAYANNA
+  ["\u0DDB", "\u0DD9\u0DD9"], // SINHALA VOWEL SIGN KOMBU DEKA
+  ["\u0DE9", "\u0DE8\u0DCF"], // SINHALA LITH DIGIT THREE
+  ["\u0DEA", "\u0DA2"], // SINHALA LITH DIGIT FOUR
+  ["\u0DEB", "\u0DAF"], // SINHALA LITH DIGIT FIVE
+  ["\u0DEF", "\u0DE8\u0DD3"], // SINHALA LITH DIGIT NINE
+  ["\u0DF2", "\u0DD8\u0DD8"], // SINHALA VOWEL SIGN DIGA GAETTA-PILLA
+]);
+
 // Code points unassigned in Unicode 15.1, the version of the tables above, but those reserved
 // for emoji (Extended_Pictographic), as [first, last] ranges: names may only use characters the tables know, or
 // emoji, which they leave out (playerName.isValidUsername).

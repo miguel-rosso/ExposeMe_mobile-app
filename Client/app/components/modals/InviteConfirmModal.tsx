@@ -14,7 +14,7 @@ interface InviteConfirmModalProps {
   initialName: string;
   /** Join: called with the typed name normalized (never blank); Join stays disabled until it settles */
   onJoin: (name: string) => Promise<void>;
-  /** Don't join: back home */
+  /** Don't join: back to the room the player is in, or home when there is none */
   onCancel: () => void;
 }
 

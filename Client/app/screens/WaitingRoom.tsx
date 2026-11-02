@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from "react";
 import { View, Text, FlatList, StatusBar, TouchableOpacity, Alert, Keyboard, Share, Image, TextStyle } from "react-native";
 import tw from "twrnc";
 import { useGameContext } from "@/app/providers/GameContext";
-import { useRouter, useLocalSearchParams } from "expo-router";
+import { useRouter, useLocalSearchParams, type Href } from "expo-router";
 import type { Socket } from "socket.io-client";
 import { RoomOfGameResponse, Player, GameStateSnapshot, PlayerConnectionData } from "@/app/models/interfaces";
 import { useBackgroundContext } from "@/app/providers/BackgroundContext";
@@ -29,12 +29,16 @@ import { TEST_IDS, lobbyPlayerId, lobbyPlayerOfflineId, roundsOptionId } from ".
 import { isHostIn, withConnection, withHost, withoutPlayer } from "../utils/roomPlayers";
 import { attachHandlers, SocketHandlers } from "../utils/socketHandlers";
 import { parseRoomCodeParam } from "../utils/roomCode";
+import { linkStep, WaitingRoomMode } from "../utils/inviteLink";
 import { normalizeUsername } from "../utils/username";
 import { isKickedByHost, KICKED_BY_HOST_MESSAGE } from "../utils/serverMessage";
 import { ROUND_OPTIONS } from "../utils/protocolLimits";
 import { dismissKeyboardOnBackPress } from "../utils/keyboardBackPress";
 import { GAME_SCREEN_PATH, RESYNC_GAME_SCREEN } from "../utils/gameScreenRoute";
 import { useBackHandler } from "@react-native-community/hooks";
+
+/** This screen's route */
+const WAITING_ROOM_PATH = "/screens/WaitingRoom";
 
 /** How much the lobby background photo is blurred */
 const BACKDROP_BLUR_RADIUS = 10;
@@ -170,9 +174,13 @@ const WaitingRoom = () => {
   const bindingRef = useRef<{ gameCode: string; rejoinToken?: string } | null>(null);
   // Set when we enter a game that was already running (rejoin via "Join" after closing the app)
   const resyncOnLeaveRef = useRef(false);
-  // Socket an invite link made this lobby drop: still open until the server acks a leave, and the join effect of
-  // this same commit still sees it as the context's socket, so it must not join from it
+  // Socket an invite link's Join made this lobby drop: still open until the server acks a leave, and the join effect
+  // of this same commit still sees it as the context's socket, so it must not join from it
   const leftSocketRef = useRef<Socket | null>(null);
+  // Where this screen stands (see WaitingRoomMode): set by its link, its own room's start and every way out. Read by
+  // effects of the same commit that set it.
+  const modeRef = useRef<WaitingRoomMode>("idle");
+  const hasLeft = () => modeRef.current === "left";
 
   // Forget everything this lobby showed for the previous room (an invite link can switch rooms in place)
   const resetLobbyState = () => {
@@ -186,10 +194,10 @@ const WaitingRoom = () => {
   };
 
   /**
-   * Drop whatever room the socket is in (or joining) before an invite link's room: a room it is bound to (e.g. the
-   * last game's) is left for good, like Exit; a join still unanswered (e.g. Create game) is cut off with the socket.
-   * A code without a socket (e.g. typed on Home) binds nothing, and its stored rejoin token may well belong to the
-   * linked room, so it is kept.
+   * Drop whatever room the socket is in (or joining) before joining an invite link's room: a room it is bound to (this
+   * lobby's, the game's under this screen, or the last game's) is left for good, like Exit; a join still unanswered
+   * (e.g. Create game) is cut off with the socket. A code without a socket (e.g. typed on Home) binds nothing, and its
+   * stored rejoin token may well belong to the linked room, so it is kept.
    */
   const releaseCurrentRoom = () => {
     if (!socket) return;
@@ -211,47 +219,74 @@ const WaitingRoom = () => {
     setInviteGalleryChecked(false);
   };
 
-  // Set once this screen leaves for home (Exit, or sent home unjoined): nothing may join or leave from it any more
-  const sentHomeRef = useRef(false);
+  // Unmounted (replaced, or closed by the room's screen): e.g. a Join still waiting for the gallery must do nothing
+  useEffect(() => () => { modeRef.current = "left"; }, []);
 
   /** Leave for home without joining. */
   const sendHome = () => {
-    if (sentHomeRef.current) return;
-    sentHomeRef.current = true;
+    if (hasLeft()) return;
+    modeRef.current = "left";
     endSocket();
     navigation.dismissTo("/");
   };
 
-  /**
-   * An invite link to another room: show the invite dialog. The room this lobby is in (or the last game's, still bound)
-   * is released right away, before asking, so Cancel goes home (DEC-047 pending: the only place that decides this).
-   */
-  const askToJoin = (code: string) => {
-    releaseCurrentRoom();
-    resetLobbyState();
-    setInvite(code);
+  /** This screen gives way to `href` (the game, home). */
+  const replaceScreen = (href: Href) => {
+    modeRef.current = "left";
+    navigation.replace(href);
   };
 
-  // On mount, and whenever an invite deep link (re)opens this screen: a link to a room other than ours drops the
-  // current room and asks the player to confirm (Join, with their name) before anything joins the linked one. A link
-  // to the room we are in rejoins it as before, and a malformed code is ignored. With no room code at all, the join
-  // would ask the server for a new room (it creates one for a null/empty code): only home's Create game may do that,
-  // anything else (e.g. a link without a valid code) goes home. Then start (or reuse) the socket.
+  /** Back to the screen under this one (e.g. the game), as it was: the socket and its room are that screen's. */
+  const backToRoomScreen = () => {
+    if (hasLeft()) return;
+    modeRef.current = "left";
+    navigation.back();
+  };
+
+  /**
+   * Join over the room's screen (e.g. the game): that screen and this one give way to a new lobby, opened over home
+   * like home's Search room (the linked room's code is already set). The room's screen is gone before the linked room's
+   * socket exists, so it never drives it (re-joins, im-ready, turn photos: EXP-359).
+   */
+  const openLinkedLobbyOverHome = () => {
+    modeRef.current = "left";
+    navigation.dismissTo("/");
+    navigation.push(WAITING_ROOM_PATH);
+  };
+
+  /** Into the lobby of the room the app knows (no invite dialog left open): start (or reuse) its socket. */
+  const startLobby = () => {
+    setInvite(null);
+    modeRef.current = "lobby";
+    startSocket();
+  };
+
+  // On mount, and whenever an invite deep link (re)opens this screen (linkStep decides). A link to a room other than
+  // ours asks the player to confirm (Join, with their name) before anything joins the linked one, and the room they
+  // are in stays as it is until then (DEC-047). With no room code at all, the join would ask the server for a new room
+  // (it creates one for a null/empty code): only home's Create game may do that, anything else (e.g. a link without a
+  // valid code) goes home.
   useEffect(() => {
     const linkedCode = parseRoomCodeParam(deepLinkCode);
-    if (linkedCode && linkedCode !== gameCodeRef.current) {
+    const { step, mode } = linkStep({ linkedCode, roomCode: gameCodeRef.current, holdsSocket: !!socket, mode: modeRef.current });
+    modeRef.current = mode;
+    if (step === "ask") {
       console.log("Deep link code:", linkedCode);
-      askToJoin(linkedCode);
-      return;
+      setInvite(linkedCode);
+    } else if (step === "backToRoomScreen") {
+      backToRoomScreen();
+    } else if (step === "startLobby") {
+      startLobby();
+    } else if (step === "newRoomOrHome") {
+      if (takeNewRoomRequest()) startLobby();
+      else sendHome();
     }
-    if (!linkedCode && !gameCodeRef.current && !takeNewRoomRequest()) {
-      sendHome();
-      return;
-    }
-    startSocket();
   }, [deepLinkCode]);
 
-  /** Join (invite dialog): the linked room, with the name confirmed there, saved for later launches too. */
+  /**
+   * Join (invite dialog): leave the room the player is in, if any, and join the linked room with the name confirmed
+   * there, saved for later launches too.
+   */
   const joinInvitedRoom = async (name: string) => {
     const code = invitedCodeRef.current;
     if (!code) return;
@@ -259,23 +294,36 @@ const WaitingRoom = () => {
     setInviteGalleryChecked(true);
     const access = await galleryGuard.check({ ask: true });
     // Another link replaced the dialog, or the screen left, while the gallery answered
-    if (access?.status !== "ok" || invitedCodeRef.current !== code || sentHomeRef.current) return;
+    if (access?.status !== "ok" || invitedCodeRef.current !== code || hasLeft()) return;
     setInvite(null);
+    releaseCurrentRoom();
     saveUsername(name);
     gameCodeRef.current = code;
     setGameCode(code);
-    startSocket();
+    if (modeRef.current === "overRoomScreen") {
+      openLinkedLobbyOverHome();
+      return;
+    }
+    resetLobbyState();
+    startLobby();
   };
 
-  /** Cancel (invite dialog, back): don't join the linked room, back home. */
+  /**
+   * Cancel (invite dialog, X, back): don't join the linked room, and go back to the room the player is in, unchanged
+   * (DEC-047): this lobby (its link is cleared, so the same link can ask again), or the room's screen under this one
+   * (e.g. the game). With no room, home.
+   */
   const declineInvite = () => {
     setInvite(null);
-    sendHome();
+    if (modeRef.current === "lobby") navigation.setParams({ code: undefined });
+    else if (modeRef.current === "overRoomScreen") backToRoomScreen();
+    else sendHome();
   };
 
-  // Single effect: setup listeners, join room, handle reconnect
+  // Single effect: setup listeners, join room, handle reconnect. Only for this screen's own lobby: never before it
+  // started one (e.g. its invite dialog asks over the game screen, whose socket stays that screen's) nor once left.
   useEffect(() => {
-    if (!socket || !username || socket === leftSocketRef.current || sentHomeRef.current) return;
+    if (!socket || !username || socket === leftSocketRef.current || modeRef.current !== "lobby") return;
 
     const doJoin = async () => {
       const code = gameCodeRef.current;
@@ -290,7 +338,7 @@ const WaitingRoom = () => {
     const leaveWithMessage = (message?: string) => {
       if (isKickedByHost(message)) clearRejoinToken();
       endSocket();
-      navigation.replace({ pathname: "/", params: { message } });
+      replaceScreen({ pathname: "/", params: { message } });
     };
 
     // This screen's own handlers. Only these are removed on unmount, so listeners that others attach to the shared
@@ -345,7 +393,7 @@ const WaitingRoom = () => {
 
       "game-started": (players: Player[]) => {
         setPlayersProvider(players);
-        navigation.replace(GAME_SCREEN_PATH);
+        replaceScreen(GAME_SCREEN_PATH);
       },
 
       // Every rejoin is followed by a snapshot; a started game means we came back to a game in progress
@@ -360,7 +408,7 @@ const WaitingRoom = () => {
         resyncOnLeaveRef.current = true;
         setPlayersProvider(snap.players);
         setRoundsOfGame(snap.totalRounds);
-        navigation.replace(RESYNC_GAME_SCREEN);
+        replaceScreen(RESYNC_GAME_SCREEN);
       },
 
       "player-removed": (removed: Player) => {
@@ -402,16 +450,15 @@ const WaitingRoom = () => {
 
   /** Exit: leave the room for good (leave-room, so the server frees the name and hands the host role over) and go home. */
   const handleLeaveGame = () => {
-    if (sentHomeRef.current) return;
-    sentHomeRef.current = true;
+    if (hasLeft()) return;
     leaveRoom();
-    navigation.replace("/");
+    replaceScreen("/");
   };
 
   /**
    * The close button (X), Android back and the gallery notice's Back. While the invite dialog asks they are its
-   * Cancel: no room was joined, so nothing is left (a leave would forget the stored rejoin token, e.g. of a game in
-   * progress in the linked room).
+   * Cancel: back to the room the player is in, or home leaving nothing when there is none (a leave would forget the
+   * stored rejoin token, e.g. of a game in progress in the linked room).
    */
   const handleClose = () => (invitedCodeRef.current ? declineInvite() : handleLeaveGame());
 

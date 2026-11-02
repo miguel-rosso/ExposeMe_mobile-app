@@ -6,8 +6,8 @@ import { pressInviteJoin, showsInviteDialog } from "../testUtils/inviteConfirm";
 
 // EXP-206: an invite link to another room must win over the room code left from a previous game: leave the old
 // room (GameContext's leave: leave-room, forget its rejoin token, drop the socket) and join the linked one once the
-// player confirms it (EXP-347: the invite dialog's Join). A link to the room we are already in, and no link at all,
-// behave as before.
+// player confirms it (EXP-347: the invite dialog's Join; EXP-358: nothing is left before it). A link to the room we
+// are already in, and no link at all, behave as before.
 
 // ── Fake socket ──────────────────────────────────────────
 
@@ -61,9 +61,15 @@ const mockStore = {
 };
 let mockDeepLinkCode: string | undefined;
 const mockReplace = jest.fn();
+const mockRouterCalls: string[] = [];
 
 jest.mock("expo-router", () => ({
-  useRouter: () => ({ replace: mockReplace }),
+  useRouter: () => ({
+    replace: mockReplace,
+    back: () => mockRouterCalls.push("back"),
+    dismissTo: (href: string) => mockRouterCalls.push(`dismissTo ${href}`),
+    push: (href: string) => mockRouterCalls.push(`push ${href}`),
+  }),
   useLocalSearchParams: () => (mockDeepLinkCode === undefined ? {} : { code: mockDeepLinkCode }),
 }));
 jest.mock("../app/providers/GameContext", () => {
@@ -186,33 +192,36 @@ beforeEach(() => {
   mockLog.length = 0;
   mockDeepLinkCode = undefined;
   mockReplace.mockClear();
+  mockRouterCalls.length = 0;
 });
 
+// A link opened on the final screens pushes this screen over the game screen, which keeps the room's socket: the
+// whole flow with the real game screen under it is in waitingRoomInviteOverGame.test.tsx (EXP-358)
 describe("WaitingRoom: invite link after a previous game (EXP-206)", () => {
-  it("leaves the old room, forgets its token and joins the linked room on a new socket", async () => {
+  it("on Join leaves the old room, forgets its token and opens the linked room's lobby over home", async () => {
     const oldSocket = afterPreviousGame();
     mockDeepLinkCode = LINKED_ROOM.toLowerCase(); // any case, like the shared link
     const r = await mount();
 
-    expect(mockLog).toEqual(["old:leave-room", "leaveRoom"]);
+    expect(mockLog).toEqual([]); // the old room is only left on Join (EXP-358)
     expect(showsInviteDialog(r)).toBe(true);
     await pressInviteJoin(r);
-    expect(mockLog).toEqual(["old:leave-room", "leaveRoom", "startSocket"]);
+    expect(mockLog).toEqual(["old:leave-room", "leaveRoom"]);
     expect(joins(oldSocket)).toEqual([]);
     expect(mockStore.state.gameCode).toBe(LINKED_ROOM);
     expect(mockStore.state.token).toBeNull();
-
-    const newSocket = await connectNewSocket();
-    expect(joins(newSocket)).toEqual([{ gameCode: LINKED_ROOM, username: "bob" }]);
+    // The game screen goes too: the new lobby starts the linked room's socket, like home's Search room
+    expect(mockRouterCalls).toEqual(["dismissTo /", "push /screens/WaitingRoom"]);
   });
 
-  it("re-joins the same room on the same socket when the link points to the room we are in", async () => {
+  it("goes back to the room's screen when the link points to the room we are in, re-joining nothing", async () => {
     const socket = afterPreviousGame();
     mockDeepLinkCode = OLD_ROOM;
     await mount();
 
-    expect(mockLog).toEqual(["old:join-create-game"]);
-    expect(joins(socket)).toEqual([{ gameCode: OLD_ROOM, username: "bob", rejoinToken: "tok-old" }]);
+    expect(mockLog).toEqual([]);
+    expect(joins(socket)).toEqual([]);
+    expect(mockRouterCalls).toEqual(["back"]);
     expect(mockStore.state.token).toEqual(OLD_TOKEN);
   });
 
@@ -262,11 +271,13 @@ describe("WaitingRoom: invite link after a previous game (EXP-206)", () => {
     await act(async () => { r.update(<WaitingRoom />); });
     await flush();
 
-    expect(mockLog).toEqual(["old:leave-room", "leaveRoom"]);
-    expect(chatShown(r)).toEqual([]);
-    expect(hasTestId(r, "lobby-player-alice")).toBe(false);
+    // Still in the old room while the dialog asks (EXP-358): its lobby stays behind it
+    expect(mockLog).toEqual([]);
+    expect(hasTestId(r, "lobby-player-alice")).toBe(true);
     await pressInviteJoin(r);
     expect(mockLog).toEqual(["old:leave-room", "leaveRoom", "startSocket"]);
+    expect(chatShown(r)).toEqual([]);
+    expect(hasTestId(r, "lobby-player-alice")).toBe(false);
 
     const newSocket = await connectNewSocket();
     expect(joins(newSocket)).toEqual([{ gameCode: LINKED_ROOM, username: "bob" }]);

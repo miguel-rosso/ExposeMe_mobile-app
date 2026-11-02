@@ -1,0 +1,67 @@
+# EXP-358 (DEC-047), EXP-360: an invite link opened during a game asks over it and keeps the game until Join. The
+# device joins room A and its game starts; then it opens the invite deep link of room B: Cancel returns to A's game,
+# still connected (the game went on meanwhile), and the same link then asks again; Join leaves A for good and lands
+# in B's lobby, with no game screen left behind it.
+# Room A has 2 bots and room B 3 (bot names repeat across bots.mjs processes, but each room is separate on the
+# server): lobby-player-bot3 only exists in B. A's bots go on playing without the device once it leaves.
+# Run from the repo root against the lab server (never production), one device at a time:
+#   qa/lab/lab.sh play --devices <label> --bots 2 --rounds 10 --flow invite-link-mid-game \
+#     --second-room "--bots 3 --host --wait-players 5 --timeout 900"
+# Room A is the main play room (2 bots + the device: starts once it joins, 10 rounds so the game outlasts the flow).
+# Room B is the --second-room: 3 bots that only wait in the lobby (5 players never arrive, so it never starts);
+# lab.sh passes its code as NEW_CODE and stops those bots when the run ends (their result does not count).
+# env: GAME_CODE (room A), NEW_CODE (room B), USERNAME, METRO_URL (url-encoded)
+# Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
+appId: com.socketNull.ExposeMe
+---
+- runFlow: open-app.yaml
+- runFlow: join-room.yaml
+- runFlow: wait-game-start.yaml
+# In A's game: any of its phases
+- extendedWaitUntil:
+    visible:
+      id: "game-waiting-ready|game-waiting-photo|answer-options|score-modal|game-held|round-skipped-notice"
+    timeout: 30000
+- takeScreenshot: invite-mid-game-before-${USERNAME}
+# Asked over the game: B's code, the saved name filled in
+- runFlow: open-invite-link.yaml
+- takeScreenshot: invite-mid-game-confirm-${USERNAME}
+# Cancel: back to A's game, still in it and connected
+- tapOn:
+    id: "invite-cancel-button"
+- extendedWaitUntil:
+    notVisible:
+      id: "invite-confirm-modal"
+    timeout: 5000
+- extendedWaitUntil:
+    visible:
+      id: "game-waiting-photo|answer-options|score-modal|game-held|round-skipped-notice"
+    timeout: 30000
+- assertNotVisible:
+    id: "lobby-game-code"
+- assertNotVisible:
+    id: "reconnecting-banner"
+- takeScreenshot: invite-mid-game-cancelled-${USERNAME}
+# The same link asks again; Join leaves A's game for B's lobby
+- runFlow: open-invite-link.yaml
+- tapOn:
+    id: "invite-join-button"
+- extendedWaitUntil:
+    visible:
+      id: "lobby-game-code"
+      text: "${NEW_CODE}"
+    timeout: 30000
+- extendedWaitUntil:
+    visible:
+      id: "lobby-player-bot3"
+    timeout: 20000
+- assertVisible:
+    id: "lobby-player-${USERNAME}"
+- assertNotVisible:
+    id: "lobby-player-offline-.*"
+# B's host is bot1: the device is a guest here, and nothing of A's game is on screen
+- assertVisible:
+    id: "lobby-waiting"
+- assertNotVisible:
+    id: "answer-options|score-modal|game-waiting-photo"
+- takeScreenshot: invite-mid-game-new-lobby-${USERNAME}

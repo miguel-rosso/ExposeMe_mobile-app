@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useMemo, useRef } from "react"
 import {
   View, Text, TouchableOpacity, StatusBar, BackHandler, LayoutChangeEvent, useWindowDimensions, ActivityIndicator,
 } from "react-native";
-import { useFocusEffect, useLocalSearchParams } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, type Href } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import tw from "twrnc";
 import { useGameContext } from "../providers/GameContext";
@@ -53,7 +53,7 @@ import { attachHandlers, SocketHandlers } from "../utils/socketHandlers";
 import { safeBottomRow, safeTopRow } from "../utils/safeAreaRows";
 import { ANSWERS_BOTTOM, HOLD_BUTTON_BOTTOM } from "../utils/gameRows";
 import { PROGRESS_BAR_AREA, progressBarAreaBottom, progressBarRow } from "../utils/progressBarRow";
-import { GameScreenParams, opensOnGameInProgress } from "../utils/gameScreenRoute";
+import { GAME_SCREEN_PATH, GameScreenParams, opensOnGameInProgress } from "../utils/gameScreenRoute";
 import { isKickedByHost, KICKED_BY_HOST_MESSAGE } from "../utils/serverMessage";
 
 const { SERVER_URL } = getEnvVars();
@@ -196,6 +196,14 @@ const GameScreen = () => {
     return () => sub.remove();
   }, []));
 
+  // ── Leaving this screen ──────────────────────────────
+  // router.replace acts on the top screen: anything opened over this one (an invite link's dialog, EXP-360, even one
+  // whose push is queued in the same tick) is dismissed first, so that it is always this screen that is replaced
+  const replaceThisScreen = (href: Href) => {
+    router.dismissTo(GAME_SCREEN_PATH);
+    router.replace(href);
+  };
+
   // ── Hold handlers ────────────────────────────────────
   // Offline, a press is not sent: the rejoin's snapshot releases it (game-state clears `pressing`). Once the server says
   // the round's holds are used up the button is disabled and a press sends nothing (it would be ignored); a press
@@ -222,7 +230,7 @@ const GameScreen = () => {
     leftGameRef.current = true;
     if (isKickedByHost(message)) clearRejoinToken();
     console.log("[GAME] Out of the game — returning to menu");
-    router.replace(message ? { pathname: "/", params: { message } } : "/");
+    replaceThisScreen(message ? { pathname: "/", params: { message } } : "/");
   };
 
   // ── Connection: stay in the game, rejoin on reconnect ─
@@ -247,7 +255,7 @@ const GameScreen = () => {
     console.log("[GAME] next game started — joining it");
     detachGameHandlers.current?.();
     setPlantedPhotoUri(null); // planted for the game that ended
-    router.replace("/screens/WaitingRoom");
+    replaceThisScreen("/screens/WaitingRoom");
   };
 
   const showGameOver = (finalScore: ScoreRound[]) => {

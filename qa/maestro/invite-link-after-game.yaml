@@ -2,7 +2,8 @@
 # taps "Play again" (back in A's lobby, socket still bound to A), then opens the invite deep link of room B: it must
 # leave A and land in B's lobby (B's code, B's players), not rejoin A. Before the fix the lobby ignored the link
 # while GameContext still held A's code. EXP-347 (DEC-046): B is only joined after Join in the invite dialog, which
-# shows B's code and the saved name.
+# shows B's code and the saved name. EXP-358 (DEC-047): A is only left on that Join; Cancel first returns to A's lobby
+# unchanged, and the same link then asks again.
 # Room A has 2 bots and room B 3 (bot names repeat across bots.mjs processes, but each room is separate on the
 # server): lobby-player-bot3 only exists in B. A's bots record the device's player-left when it switches rooms.
 # Run from the repo root against the lab server (never production), one device at a time:
@@ -30,24 +31,29 @@ appId: com.socketNull.ExposeMe
 - assertNotVisible:
     id: "lobby-player-bot3"
 - takeScreenshot: invite-old-lobby-${USERNAME}
-# The invite link the server's /join/<code> page redirects to (Server/routes/uploadRoutes.ts)
-- openLink: "exposeme://screens/WaitingRoom?code=${NEW_CODE}"
-# iOS 26+/Xcode 27 simulators confirm custom-scheme links with a system alert
-- runFlow:
-    when:
-      platform: iOS
-      visible: "Open in Expose Me\\?|¿Abrir en Expose Me\\?"
-    commands:
-      - tapOn: "Open|Abrir"
 # Asked first: B's code, the saved name filled in
+- runFlow: open-invite-link.yaml
+# EXP-358 (DEC-047): Cancel returns to room A's lobby unchanged (the device never left it)
+- tapOn:
+    id: "invite-cancel-button"
 - extendedWaitUntil:
-    visible:
-      id: "invite-room-code"
-      text: "${NEW_CODE}"
-    timeout: 30000
+    notVisible:
+      id: "invite-confirm-modal"
+    timeout: 5000
 - assertVisible:
-    id: "invite-name-input"
-    text: "${USERNAME}"
+    id: "lobby-game-code"
+    text: "${GAME_CODE}"
+- assertVisible:
+    id: "lobby-player-${USERNAME}"
+- assertVisible:
+    id: "lobby-player-bot1"
+- assertNotVisible:
+    id: "lobby-player-offline-.*"
+- assertNotVisible:
+    id: "lobby-player-bot3"
+- takeScreenshot: invite-cancelled-${USERNAME}
+# The same link asks again (Cancel cleared it)
+- runFlow: open-invite-link.yaml
 - takeScreenshot: invite-confirm-${USERNAME}
 - tapOn:
     id: "invite-join-button"

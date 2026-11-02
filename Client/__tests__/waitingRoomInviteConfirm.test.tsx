@@ -46,8 +46,9 @@ const mockCheckGalleryAccess = jest.fn(async (_opts: { ask: boolean }) => mockGa
 let mockLinkParams: { code?: string } = {};
 const mockDismissTo = jest.fn();
 const mockReplace = jest.fn();
+const mockBackNavigation = jest.fn();
 jest.mock("expo-router", () => ({
-  useRouter: () => ({ replace: mockReplace, dismissTo: mockDismissTo }),
+  useRouter: () => ({ replace: mockReplace, dismissTo: mockDismissTo, back: mockBackNavigation }),
   useLocalSearchParams: () => mockLinkParams,
 }));
 jest.mock("../app/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: null }) }));
@@ -130,6 +131,7 @@ beforeEach(async () => {
   mockSockets.length = 0;
   mockDismissTo.mockClear();
   mockReplace.mockClear();
+  mockBackNavigation.mockClear();
   mockCheckGalleryAccess.mockClear();
   mockGalleryAccess = GALLERY_OK;
   mockLinkParams = {};
@@ -348,7 +350,7 @@ describe("Invite link confirmation (EXP-347)", () => {
     expect(ctx.joinCodeDraft).toBe(LINKED_ROOM);
   });
 
-  it("a link to another room from inside a lobby leaves that room, then asks before joining the linked one", async () => {
+  it("a link to another room from inside a lobby asks, and leaves that room only on Join (EXP-358)", async () => {
     await startApp("bob");
     await openWaitingRoom({ code: OTHER_ROOM });
     await pressInviteJoin(app!);
@@ -357,11 +359,12 @@ describe("Invite link confirmation (EXP-347)", () => {
     await flush();
 
     const r = await openInviteLink();
-    expect(first.emittedPayloads("leave-room")).toHaveLength(1);
+    expect(first.emittedPayloads("leave-room")).toEqual([]);
     expect(showsInviteDialog(r)).toBe(true);
     expect(mockSockets).toHaveLength(1);
 
     await pressInviteJoin(r);
+    expect(first.emittedPayloads("leave-room")).toHaveLength(1);
     const socket = await connectLatestSocket();
     expect(socket).not.toBe(first);
     expect(socket.emittedPayloads("join-create-game")).toEqual([{ gameCode: LINKED_ROOM, username: "bob" }]);
@@ -410,7 +413,7 @@ describe("Joins that never ask (EXP-347)", () => {
     expect(socket.emittedPayloads("join-create-game")).toHaveLength(3);
   });
 
-  it("a link to the room this lobby is already in", async () => {
+  it("a link to the room we are in, opened over its game screen: back to it, re-joining nothing (EXP-358)", async () => {
     await startApp("bob");
     await openInviteLink();
     await pressInviteJoin(app!);
@@ -418,11 +421,12 @@ describe("Joins that never ask (EXP-347)", () => {
     await act(async () => { socket.fire("room-of-game", roomOfGame(LINKED_ROOM, "bob")); });
     await flush();
 
+    // The game screen took over (it keeps the socket), then the link opens the waiting room over it
     await act(async () => { app!.update(<GameProvider><Probe /></GameProvider>); });
+    const joins = socket.emittedPayloads("join-create-game").length;
     const r = await openInviteLink();
     expect(showsInviteDialog(r)).toBe(false);
-    expect(socket.emittedPayloads("join-create-game").at(-1)).toEqual(
-      { gameCode: LINKED_ROOM, username: "bob", rejoinToken: `tok-${LINKED_ROOM}` }
-    );
+    expect(mockBackNavigation).toHaveBeenCalledTimes(1);
+    expect(socket.emittedPayloads("join-create-game")).toHaveLength(joins);
   });
 });

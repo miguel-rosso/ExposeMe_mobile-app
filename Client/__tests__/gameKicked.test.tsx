@@ -21,7 +21,7 @@ const mockPlayers = ["alice", "bob"].map((username) => ({
   username, points: 0, isHost: username === "alice", connected: true, lastGuess: "", lastAnswerCorrect: false,
 }));
 jest.mock("expo-router", () => ({
-  useRouter: () => ({ replace: mockReplace }), useLocalSearchParams: () => ({}), useFocusEffect: () => {},
+  useRouter: () => ({ replace: mockReplace, dismissTo: jest.fn() }), useLocalSearchParams: () => ({}), useFocusEffect: () => {},
 }));
 jest.mock("../app/providers/GameContext", () => ({
   useGameContext: () => ({

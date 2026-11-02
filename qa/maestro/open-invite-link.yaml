@@ -1,0 +1,21 @@
+# Open the invite deep link of room ${NEW_CODE} and wait for the invite dialog asking for it, the saved name filled in
+# (used by invite-link-after-game.yaml and invite-link-mid-game.yaml).
+appId: com.socketNull.ExposeMe
+---
+# The invite link the server's /join/<code> page redirects to (Server/routes/uploadRoutes.ts)
+- openLink: "exposeme://screens/WaitingRoom?code=${NEW_CODE}"
+# iOS 26+/Xcode 27 simulators confirm custom-scheme links with a system alert
+- runFlow:
+    when:
+      platform: iOS
+      visible: "Open in Expose Me\\?|¿Abrir en Expose Me\\?"
+    commands:
+      - tapOn: "Open|Abrir"
+- extendedWaitUntil:
+    visible:
+      id: "invite-room-code"
+      text: "${NEW_CODE}"
+    timeout: 30000
+- assertVisible:
+    id: "invite-name-input"
+    text: "${USERNAME}"

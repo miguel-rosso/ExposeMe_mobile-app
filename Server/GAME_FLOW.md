@@ -315,7 +315,8 @@ After last round: game-over
   Events from sockets that never joined, or that were replaced by a rejoin on another socket, are ignored
   (a replaced socket's `leave-room` only detaches that socket; the live player stays). After `leave-room`
   the username is free again, so joining with it needs no token.
-- **Leaving** (Exit in the lobby or on the final screens, or an invite link to another room): the app sends
+- **Leaving** (Exit in the lobby or on the final screens, or Join on an invite link to another room; Cancel keeps the
+  room, DEC-047): the app sends
   `leave-room` with an ack callback and closes the socket **only once the server acks it** (it acks after removing
   the player), or after 1 s without an answer (`LEAVE_ACK_TIMEOUT_MS`, offline) so leaving never hangs; the app moves
   on at once. Closing in the same tick as the emit can lose the leave: socket.io dispatches an event on the next tick

@@ -149,7 +149,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     detachSocket()?.disconnect();
   };
 
-  // Exit (and an invite link to another room): the server removes us and hands the host role over, and the rejoin
+  // Exit (and Join on an invite link to another room): the server removes us and hands the host role over, and the rejoin
   // token for this room is forgotten. The app moves on at once; the old socket closes once the server confirms.
   const leaveRoom = () => {
     console.log("Leaving room");

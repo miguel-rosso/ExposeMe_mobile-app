@@ -1,11 +1,9 @@
 import fs from "fs";
-import { AddressInfo } from "net";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { io as connect, Socket as ClientSocket } from "socket.io-client";
+import type { Socket as ClientSocket } from "socket.io-client";
 import sharp from "sharp";
-import { io, server } from "../app";
-import { roomManager } from "../routes/socketRoutes";
 import { UPLOAD_PLAYER_RATE_MAX, UPLOAD_ROOM_RATE_MAX } from "../middlewares/rateLimit";
+import { useTestServer } from "./socketHarness";
 
 // EXP-155: the per-room POST /upload budget. The limits are read when rateLimit.ts loads, so this file sets small
 // ones before any import (vi.hoisted); vitest gives each test file its own module registry.
@@ -20,52 +18,34 @@ const UPLOAD_DIR = vi.hoisted(() => {
   return dir;
 });
 
-let url: string;
-let jpeg: Buffer;
-const clients: ClientSocket[] = [];
+const EVENT_TIMEOUT_MS = 8_000;
 
-function once<T = unknown>(socket: ClientSocket, event: string, timeoutMs = 8_000): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`timeout waiting for "${event}"`)), timeoutMs);
-    socket.once(event, (data: T) => { clearTimeout(t); resolve(data); });
-  });
-}
+const harness = useTestServer({ eventTimeoutMs: EVENT_TIMEOUT_MS });
+const { once, newClient, joinAs } = harness;
+let jpeg: Buffer;
 
 /** Joins `gameCode` (null: creates a room) as `username`, on a new socket or on `socket` (switching its name). */
 async function join(gameCode: string | null, username: string, socket?: ClientSocket) {
-  if (!socket) {
-    socket = connect(url, { transports: ["websocket"], forceNew: true, reconnection: false });
-    clients.push(socket);
-    await once(socket, "connect");
-  }
-  const res = once<{ room: { gameCode: string }; rejoinToken: string }>(socket, "room-of-game");
-  socket.emit("join-create-game", { gameCode, username });
-  const { room, rejoinToken } = await res;
+  socket ??= await newClient();
+  const { room, rejoinToken } = await joinAs(socket, gameCode, username);
   return {
     socket,
-    gameCode: room.gameCode,
-    headers: { Authorization: `Bearer ${rejoinToken}`, "X-Game-Code": room.gameCode },
+    gameCode: room!.gameCode,
+    headers: { Authorization: `Bearer ${rejoinToken!}`, "X-Game-Code": room!.gameCode },
   };
 }
 
 function upload(headers: Record<string, string>) {
   const form = new FormData();
   form.append("image", new Blob([new Uint8Array(jpeg)], { type: "image/jpeg" }), "p.jpg");
-  return fetch(`${url}/upload`, { method: "POST", body: form, headers });
+  return fetch(`${harness.url}/upload`, { method: "POST", body: form, headers });
 }
 
 beforeAll(async () => {
-  vi.spyOn(console, "log").mockImplementation(() => {});
   jpeg = await sharp({ create: { width: 4, height: 4, channels: 3, background: "#3a3" } }).jpeg().toBuffer();
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
 
-afterAll(async () => {
-  clients.forEach((c) => c.disconnect());
-  await new Promise<void>((resolve) => io.close(() => resolve()));
-  roomManager.clear();
-  vi.restoreAllMocks();
+afterAll(() => {
   fs.rmSync(UPLOAD_DIR, { recursive: true, force: true });
   delete process.env.UPLOAD_ROOM_RATE_MAX;
   delete process.env.UPLOAD_PLAYER_RATE_MAX;

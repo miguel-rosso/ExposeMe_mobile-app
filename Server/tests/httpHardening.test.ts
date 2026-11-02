@@ -1,9 +1,8 @@
 import fs from "fs";
-import { AddressInfo } from "net";
 import type { Request, Response } from "express";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { io, server } from "../app";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { errorHandler } from "../middlewares/errorHandler";
+import { useTestServer } from "./socketHarness";
 
 // HTTP hardening: security headers on every response, JSON 404 for unknown routes, strict status handling
 // in the final error handler.
@@ -15,15 +14,9 @@ const UPLOAD_DIR = vi.hoisted(() => {
   return dir;
 });
 
-let url: string;
+const harness = useTestServer();
 
-beforeAll(async () => {
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-});
-
-afterAll(async () => {
-  await new Promise<void>((resolve) => io.close(() => resolve()));
+afterAll(() => {
   fs.rmSync(UPLOAD_DIR, { recursive: true, force: true });
 });
 
@@ -44,22 +37,22 @@ describe("security headers", () => {
   };
 
   it.each(["/", "/health", "/nope", "/temp/whatever"])("%s carries the API headers with a deny-all CSP", async (p) => {
-    const res = await fetch(`${url}${p}`);
+    const res = await fetch(`${harness.url}${p}`);
     const csp = expectBaseHeaders(res);
     expect(csp).not.toMatch(/script-src|style-src/);
   });
 
   it("errors from the final handler carry them too", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
-    const res = await fetch(`${url}/temp/%`);
+    const res = await fetch(`${harness.url}/temp/%`);
     expect(res.status).toBe(400);
     expectBaseHeaders(res);
     vi.restoreAllMocks();
   });
 
   it("the /join invite page only allows its own inline script (per-response nonce) and inline style", async () => {
-    const res1 = await fetch(`${url}/join/K7MQ4X`);
-    const res2 = await fetch(`${url}/join/K7MQ4X`);
+    const res1 = await fetch(`${harness.url}/join/K7MQ4X`);
+    const res2 = await fetch(`${harness.url}/join/K7MQ4X`);
     expect(res1.status).toBe(200);
     const csp = expectBaseHeaders(res1);
     const nonce = /script-src 'nonce-([A-Za-z0-9+/=_-]+)'/.exec(csp)?.[1];
@@ -81,13 +74,13 @@ describe("CORS", () => {
   const origin = "https://evil.example";
 
   it.each(["/", "/health", "/upload", "/temp/whatever", "/join/K7MQ4X"])("GET %s sends no Access-Control headers", async (p) => {
-    const res = await fetch(`${url}${p}`, { headers: { Origin: origin } });
+    const res = await fetch(`${harness.url}${p}`, { headers: { Origin: origin } });
     expect(res.headers.get("access-control-allow-origin")).toBeNull();
     expect(res.headers.get("access-control-allow-credentials")).toBeNull();
   });
 
   it("a preflight for POST /upload is not granted", async () => {
-    const res = await fetch(`${url}/upload`, {
+    const res = await fetch(`${harness.url}/upload`, {
       method: "OPTIONS",
       headers: { Origin: origin, "Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "authorization,x-game-code" },
     });
@@ -98,11 +91,11 @@ describe("CORS", () => {
 
   it("the socket.io polling transport sends no Access-Control headers either", async () => {
     // A foreign Origin is refused outright (EXP-244, see socketOrigin.test.ts), still without CORS headers
-    const res = await fetch(`${url}/socket.io/?EIO=4&transport=polling`, { headers: { Origin: origin } });
+    const res = await fetch(`${harness.url}/socket.io/?EIO=4&transport=polling`, { headers: { Origin: origin } });
     expect(res.status).toBe(400);
     expect(res.headers.get("access-control-allow-origin")).toBeNull();
     // The handshake itself still works for non-browser clients (no Origin)
-    const native = await fetch(`${url}/socket.io/?EIO=4&transport=polling`);
+    const native = await fetch(`${harness.url}/socket.io/?EIO=4&transport=polling`);
     expect(native.status).toBe(200);
     expect(native.headers.get("access-control-allow-origin")).toBeNull();
   });
@@ -116,7 +109,7 @@ describe("unknown routes", () => {
     ["GET", "/zz-probe-path-1234/%3Cscript%3E"],
     ["DELETE", "/upload"],
   ])("%s %s → 404 JSON {error:'Not found'} without echoing the path", async (method, p) => {
-    const res = await fetch(`${url}${p}`, { method });
+    const res = await fetch(`${harness.url}${p}`, { method });
     expect(res.status).toBe(404);
     expect(res.headers.get("content-type")).toMatch(/application\/json/);
     const text = await res.text();

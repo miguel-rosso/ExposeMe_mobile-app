@@ -1,11 +1,10 @@
-import { AddressInfo } from "net";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
-import { io as connect, Socket as ClientSocket } from "socket.io-client";
-import { io, server } from "../app";
+import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
+import type { Socket as ClientSocket } from "socket.io-client";
 import { roomManager } from "../routes/socketRoutes";
 import { GameEngine } from "../managers/GameEngine";
 import { GAME_EVENT_LIMITS, type LimitedGameEvent } from "../managers/socketGuards";
 import { registerTurnUpload, registerUpload } from "./helpers";
+import { useTestServer } from "./socketHarness";
 
 // EXP-062: lobby/game events are rate-limited per socket (GAME_EVENT_LIMITS). A flood of each event reaches its
 // handler's work at most `burst` times; the rest is dropped silently. The real handlers' targets are stubbed so every
@@ -19,22 +18,8 @@ const FLOOD_FACTOR = 3;
 const DEFAULT_ROUNDS = 10; // RoomManager.createRoom
 const OTHER_ROUNDS = 15;
 
-let url: string;
-let clients: ClientSocket[] = [];
-
-function once<T = unknown>(socket: ClientSocket, event: string, timeoutMs = 4_000): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`timeout waiting for "${event}"`)), timeoutMs);
-    socket.once(event, (data: T) => { clearTimeout(t); resolve(data); });
-  });
-}
-
-async function newClient(): Promise<ClientSocket> {
-  const c = connect(url, { transports: ["websocket"], forceNew: true, reconnection: false });
-  clients.push(c);
-  await once(c, "connect");
-  return c;
-}
+// Every test plays in a lobby of its own, so each one's rooms and sockets are dropped after it
+const { newClient, joinAs } = useTestServer({ resetBetweenTests: true });
 
 /**
  * Joins `sock` as `username` into `gameCode` (null creates a room); resolves with the room code. Re-sent for the
@@ -42,11 +27,9 @@ async function newClient(): Promise<ClientSocket> {
  * handled in order, everything it sent before has been handled when the answer arrives.
  */
 async function join(sock: ClientSocket, username: string, gameCode: string | null = null): Promise<string> {
-  const answer = once<{ success: boolean; room: { gameCode: string } }>(sock, "room-of-game");
-  sock.emit("join-create-game", { gameCode, username });
-  const { success, room } = await answer;
+  const { success, room } = await joinAs(sock, gameCode, username);
   expect(success).toBe(true);
-  return room.gameCode;
+  return room!.gameCode;
 }
 
 /** A lobby with a host and a guest, each on its own socket (fresh per-socket limits). */
@@ -73,27 +56,14 @@ async function expectFloodCapped(
   expect(target).toHaveBeenCalledTimes(burst);
 }
 
-beforeAll(async () => {
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-});
-
 beforeEach(() => {
   vi.spyOn(console, "log").mockImplementation(() => {});
   vi.useFakeTimers({ toFake: ["Date"] });
 });
 
 afterEach(() => {
-  clients.forEach((c) => c.disconnect());
-  clients = [];
-  roomManager.clear();
   vi.useRealTimers();
   vi.restoreAllMocks();
-});
-
-afterAll(async () => {
-  await new Promise<void>((resolve) => io.close(() => resolve()));
-  roomManager.clear();
 });
 
 describe("per-socket game event limits (EXP-062)", () => {

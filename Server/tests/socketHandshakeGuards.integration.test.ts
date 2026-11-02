@@ -1,7 +1,6 @@
 import http from "http";
-import { AddressInfo } from "net";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { io as connect, Socket as ClientSocket } from "socket.io-client";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { io as connect } from "socket.io-client";
 
 // EXP-251: with ALLOWED_HOSTS set, socket.io requests whose Host is another name (e.g. a domain rebound to the
 // server's IP, which also sends a matching Origin) are refused; and each IP may open at most SOCKET_HANDSHAKE_RATE_MAX
@@ -14,26 +13,15 @@ vi.hoisted(() => {
   process.env.TRUST_PROXY = "1";
 });
 
-import { io, server } from "../app";
-import "../routes/socketRoutes";
 import { ALLOWED_HOSTS, SOCKET_HANDSHAKE_RATE_MAX } from "../middlewares/socketOrigin";
+import { useTestServer } from "./socketHarness";
 
-let port: number;
-const clients: ClientSocket[] = [];
-
-beforeAll(async () => {
-  vi.spyOn(console, "log").mockImplementation(() => {});
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  port = (server.address() as AddressInfo).port;
-});
+// The clients here pick their own Host and transports, so they are opened by hand and handed to the harness to close
+const harness = useTestServer();
+const { clients } = harness;
 
 afterEach(() => {
-  clients.splice(0).forEach((c) => c.disconnect());
-});
-
-afterAll(async () => {
-  await new Promise<void>((resolve) => io.close(() => resolve()));
-  vi.restoreAllMocks();
+  harness.disconnectClients();
 });
 
 /**
@@ -46,7 +34,7 @@ function pollingRequest(
 ): Promise<{ status: number; body: string }> {
   const path = `/socket.io/?EIO=4&transport=polling${sid ? `&sid=${sid}` : ""}${extraQuery}`;
   return new Promise((resolve, reject) => {
-    const req = http.request({ host: "127.0.0.1", port, path, headers, method: sid ? "POST" : "GET" }, (res) => {
+    const req = http.request({ host: "127.0.0.1", port: harness.port, path, headers, method: sid ? "POST" : "GET" }, (res) => {
       let body = "";
       res.setEncoding("utf8");
       res.on("data", (chunk) => (body += chunk));
@@ -61,7 +49,7 @@ const sidOf = (body: string): string => JSON.parse(body.slice(1)).sid;
 
 /** socket.io client handshake over WebSocket to `host`; "connected" or "refused". */
 function handshake(host: string, ip: string): Promise<"connected" | "refused"> {
-  const client = connect(`http://${host}:${port}`, {
+  const client = connect(`http://${host}:${harness.port}`, {
     transports: ["websocket"],
     forceNew: true,
     reconnection: false,
@@ -86,8 +74,8 @@ describe("ALLOWED_HOSTS", () => {
 
   it("DNS rebinding: Host and Origin both naming another domain → 400, no session", async () => {
     const res = await pollingRequest({
-      host: `rebind.evil.example:${port}`,
-      origin: `http://rebind.evil.example:${port}`,
+      host: `rebind.evil.example:${harness.port}`,
+      origin: `http://rebind.evil.example:${harness.port}`,
       "x-forwarded-for": "198.51.100.12",
     });
     expect(res.status).toBe(400);
@@ -98,7 +86,7 @@ describe("ALLOWED_HOSTS", () => {
 describe("new engine.io sessions per IP", () => {
   it("SOCKET_HANDSHAKE_RATE_MAX handshakes per IP per minute, then 400; open sessions and other IPs unaffected", async () => {
     expect(SOCKET_HANDSHAKE_RATE_MAX).toBe(3);
-    const from = (ip: string) => ({ host: `localhost:${port}`, "x-forwarded-for": ip });
+    const from = (ip: string) => ({ host: `localhost:${harness.port}`, "x-forwarded-for": ip });
     const opened = [];
     for (let i = 0; i < SOCKET_HANDSHAKE_RATE_MAX; i++) {
       const res = await pollingRequest(from("198.51.100.20"));
@@ -116,7 +104,7 @@ describe("new engine.io sessions per IP", () => {
   // engine.io opens a new session for an empty sid (last one wins), so those count as handshakes too
   it.each([["&sid="], ["&sid"], ["&sid=abc&sid="]])("handshakes with %s count; over the limit → 400", async (extraQuery) => {
     const ip = `198.51.100.${40 + extraQuery.length}`;
-    const headers = { host: `localhost:${port}`, "x-forwarded-for": ip };
+    const headers = { host: `localhost:${harness.port}`, "x-forwarded-for": ip };
     for (let i = 0; i < SOCKET_HANDSHAKE_RATE_MAX; i++) {
       const res = await pollingRequest(headers, { extraQuery });
       expect(res.status).toBe(200);
@@ -130,7 +118,7 @@ describe("new engine.io sessions per IP", () => {
   it("the app's default path (polling handshake, then WebSocket upgrade) counts one handshake per client", async () => {
     const ip = "198.51.100.60";
     const upgradedClient = () => {
-      const client = connect(`http://localhost:${port}`, { forceNew: true, reconnection: false, extraHeaders: { "x-forwarded-for": ip } });
+      const client = connect(`http://localhost:${harness.port}`, { forceNew: true, reconnection: false, extraHeaders: { "x-forwarded-for": ip } });
       clients.push(client);
       return new Promise<string>((resolve) => {
         client.once("connect_error", () => resolve("refused"));
@@ -143,7 +131,7 @@ describe("new engine.io sessions per IP", () => {
 
   it("refused requests (Host not allowed) don't use up the IP's handshakes", async () => {
     for (let i = 0; i < SOCKET_HANDSHAKE_RATE_MAX + 2; i++) {
-      expect((await pollingRequest({ host: `127.0.0.1:${port}`, "x-forwarded-for": "198.51.100.30" })).status).toBe(400);
+      expect((await pollingRequest({ host: `127.0.0.1:${harness.port}`, "x-forwarded-for": "198.51.100.30" })).status).toBe(400);
     }
     expect(await handshake("localhost", "198.51.100.30")).toBe("connected");
   });

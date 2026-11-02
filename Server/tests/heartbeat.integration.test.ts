@@ -1,41 +1,24 @@
-import { AddressInfo } from "net";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { io as connect, Socket as ClientSocket } from "socket.io-client";
+import { afterAll, describe, expect, it, vi } from "vitest";
+import type { Socket as ClientSocket } from "socket.io-client";
+import * as app from "../app";
+import { roomManager } from "../routes/socketRoutes";
+import { useTestServer } from "./socketHarness";
 
 // A phone that silently loses network (no TCP close) must be detected by the heartbeat and marked
 // disconnected within PING_INTERVAL + PING_TIMEOUT, so it is no longer picked as the photo owner.
 
-const INTERVAL = 200;
-const TIMEOUT = 300;
+// Short ping values, stubbed before ../app (which reads them when it loads) is imported
+const { INTERVAL, TIMEOUT } = vi.hoisted(() => {
+  const ping = { INTERVAL: 200, TIMEOUT: 300 };
+  vi.stubEnv("SOCKET_PING_INTERVAL_MS", String(ping.INTERVAL));
+  vi.stubEnv("SOCKET_PING_TIMEOUT_MS", String(ping.TIMEOUT));
+  return ping;
+});
 const SLACK = 400;
 
 type AppModule = typeof import("../app");
-type RoutesModule = typeof import("../routes/socketRoutes");
 
-let app: AppModule;
-let routes: RoutesModule;
-let url: string;
-const clients: ClientSocket[] = [];
-
-function once<T = unknown>(socket: ClientSocket, event: string, timeoutMs = 4_000): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`timeout waiting for "${event}"`)), timeoutMs);
-    socket.once(event, (data: T) => { clearTimeout(t); resolve(data); });
-  });
-}
-
-async function newClient(): Promise<ClientSocket> {
-  const c = connect(url, { transports: ["websocket"], forceNew: true, reconnection: false });
-  clients.push(c);
-  await once(c, "connect");
-  return c;
-}
-
-async function joinAs(sock: ClientSocket, gameCode: string | null, username: string) {
-  const res = once<{ success: boolean; room?: { gameCode: string } }>(sock, "room-of-game");
-  sock.emit("join-create-game", { gameCode, username });
-  return res;
-}
+const { newClient, joinAs } = useTestServer();
 
 /** Stop answering server pings while keeping the TCP connection open (like a phone that lost signal). */
 function goSilent(sock: ClientSocket): void {
@@ -48,25 +31,11 @@ function goSilent(sock: ClientSocket): void {
 }
 
 function isConnected(gameCode: string, username: string): boolean | undefined {
-  return routes.roomManager.getRoom(gameCode)?.players.find((p) => p.username === username)?.connected;
+  return roomManager.getRoom(gameCode)?.players.find((p) => p.username === username)?.connected;
 }
 
-beforeAll(async () => {
-  vi.spyOn(console, "log").mockImplementation(() => {});
-  vi.stubEnv("SOCKET_PING_INTERVAL_MS", String(INTERVAL));
-  vi.stubEnv("SOCKET_PING_TIMEOUT_MS", String(TIMEOUT));
-  app = await import("../app");
-  routes = await import("../routes/socketRoutes");
-  await new Promise<void>((resolve) => app.server.listen(0, "127.0.0.1", resolve));
-  url = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;
-});
-
-afterAll(async () => {
-  clients.forEach((c) => c.disconnect());
-  await new Promise<void>((resolve) => app.io.close(() => resolve()));
-  routes.roomManager.clear();
+afterAll(() => {
   vi.unstubAllEnvs();
-  vi.restoreAllMocks();
 });
 
 describe("socket heartbeat", () => {

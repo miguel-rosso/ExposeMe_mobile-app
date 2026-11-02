@@ -1,8 +1,7 @@
 import fs from "fs";
 import path from "path";
-import { AddressInfo } from "net";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { io as connect, Socket as ClientSocket } from "socket.io-client";
+import type { Socket as ClientSocket } from "socket.io-client";
 import sharp from "sharp";
 
 // EXP-130: an upload that arrives once it can no longer be used (a turn upload retried after background that only
@@ -21,29 +20,15 @@ const UPLOAD_DIR = vi.hoisted(() => {
   return dir;
 });
 
-import { io, server } from "../app";
 import { roomManager } from "../routes/socketRoutes";
 import { UPLOAD_PLANT_CLAIM_MS } from "../middlewares/uploadStore";
+import { useTestServer } from "./socketHarness";
 
 interface Member { name: string; socket: ClientSocket; token: string; gameCode: string }
 
-let url: string;
+const harness = useTestServer();
+const { once, newClient, joinAs } = harness;
 let jpeg: Buffer;
-const clients: ClientSocket[] = [];
-
-function once<T = unknown>(socket: ClientSocket, event: string, timeoutMs = 4_000): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`timeout waiting for "${event}"`)), timeoutMs);
-    socket.once(event, (data: T) => { clearTimeout(t); resolve(data); });
-  });
-}
-
-async function newClient(): Promise<ClientSocket> {
-  const c = connect(url, { transports: ["websocket"], forceNew: true, reconnection: false });
-  clients.push(c);
-  await once(c, "connect");
-  return c;
-}
 
 /** Creates a room with `names` (first is host); returns each member with its rejoin token. */
 async function createRoom(...names: string[]): Promise<Member[]> {
@@ -51,12 +36,10 @@ async function createRoom(...names: string[]): Promise<Member[]> {
   let gameCode: string | null = null;
   for (const name of names) {
     const socket = await newClient();
-    const res = once<{ success: boolean; room: { gameCode: string }; rejoinToken: string }>(socket, "room-of-game");
-    socket.emit("join-create-game", { gameCode, username: name });
-    const r = await res;
+    const r = await joinAs(socket, gameCode, name);
     expect(r.success).toBe(true);
-    gameCode = r.room.gameCode;
-    members.push({ name, socket, token: r.rejoinToken, gameCode });
+    gameCode = r.room!.gameCode;
+    members.push({ name, socket, token: r.rejoinToken!, gameCode });
   }
   return members;
 }
@@ -66,12 +49,12 @@ const authHeaders = (m: Member) => ({ Authorization: `Bearer ${m.token}`, "X-Gam
 async function uploadAs(m: Member): Promise<string> {
   const form = new FormData();
   form.append("image", new Blob([new Uint8Array(jpeg)], { type: "image/jpeg" }), "p.jpg");
-  const res = await fetch(`${url}/upload`, { method: "POST", body: form, headers: authHeaders(m) });
+  const res = await fetch(`${harness.url}/upload`, { method: "POST", body: form, headers: authHeaders(m) });
   expect(res.status).toBe(200);
   return ((await res.json()) as { url: string }).url;
 }
 
-const getAs = (m: Member, photo: string) => fetch(`${url}${photo}`, { headers: authHeaders(m) });
+const getAs = (m: Member, photo: string) => fetch(`${harness.url}${photo}`, { headers: authHeaders(m) });
 const onDisk = (photo: string) => fs.existsSync(path.join(UPLOAD_DIR, path.basename(photo)));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** Long enough for an unclaimed upload's claim window to run out. */
@@ -97,9 +80,7 @@ async function plant(m: Member, photo: string) {
  */
 async function ownerAfterGameOver(...names: string[]): Promise<Member> {
   const members = await createRoom(...names);
-  const started = members.map((m) => once(m.socket, "game-started"));
-  members[0].socket.emit("start-game");
-  await Promise.all(started);
+  await harness.startGame(members[0].socket, members.map((m) => m.socket));
   const turn = new Promise<Member>((resolve) => members.forEach((m) => m.socket.once("your-turn", () => resolve(m))));
   members.forEach((m) => m.socket.emit("im-ready"));
   const owner = await turn;
@@ -110,17 +91,10 @@ async function ownerAfterGameOver(...names: string[]): Promise<Member> {
 }
 
 beforeAll(async () => {
-  vi.spyOn(console, "log").mockImplementation(() => {});
   jpeg = await sharp({ create: { width: 8, height: 8, channels: 3, background: "#3a3" } }).jpeg().toBuffer();
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
 
-afterAll(async () => {
-  clients.forEach((c) => c.disconnect());
-  await new Promise<void>((resolve) => io.close(() => resolve()));
-  roomManager.clear();
-  vi.restoreAllMocks();
+afterAll(() => {
   fs.rmSync(UPLOAD_DIR, { recursive: true, force: true });
 });
 

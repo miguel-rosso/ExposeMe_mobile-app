@@ -1,12 +1,10 @@
 import fs from "fs";
-import { AddressInfo } from "net";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { io as connect, Socket as ClientSocket } from "socket.io-client";
+import type { Socket as ClientSocket } from "socket.io-client";
 import sharp from "sharp";
-import { io, server } from "../app";
-import { roomManager } from "../routes/socketRoutes";
 import { UPLOAD_LOBBY_PER_IP_MAX, UPLOAD_PLANT_CLAIM_MS, UPLOAD_STORED_MAX, uploadStore } from "../middlewares/uploadStore";
 import { limit } from "../controllers/sanitizeImage";
+import { useTestServer } from "./socketHarness";
 
 // EXP-195: the per-room cap (100 photos) doesn't bound the disk when many rooms fill up. Lobby photos (lobby picks and
 // planted photos) are shed first: none is stored while the server holds UPLOAD_STORED_MAX photos (503, scope
@@ -28,34 +26,23 @@ const UPLOAD_DIR = vi.hoisted(() => {
 
 interface Member { name: string; socket: ClientSocket; token: string; gameCode: string; ip: string }
 
-let url: string;
+const harness = useTestServer();
+const { newClient, joinAs } = harness;
 let jpeg: Buffer;
-const clients: ClientSocket[] = [];
 const roomCodes = new Set<string>();
 const CLAIM_S = UPLOAD_PLANT_CLAIM_MS / 1000;
-
-function once<T = unknown>(socket: ClientSocket, event: string, timeoutMs = 4_000): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`timeout waiting for "${event}"`)), timeoutMs);
-    socket.once(event, (data: T) => { clearTimeout(t); resolve(data); });
-  });
-}
 
 /** A new room with one member per [name, ip]; the first creates it. */
 async function createRoom(...people: Array<[name: string, ip: string]>): Promise<Member[]> {
   const members: Member[] = [];
   let gameCode: string | null = null;
   for (const [name, ip] of people) {
-    const socket = connect(url, { transports: ["websocket"], forceNew: true, reconnection: false });
-    clients.push(socket);
-    await once(socket, "connect");
-    const res = once<{ success: boolean; room: { gameCode: string }; rejoinToken: string }>(socket, "room-of-game");
-    socket.emit("join-create-game", { gameCode, username: name });
-    const r = await res;
+    const socket = await newClient();
+    const r = await joinAs(socket, gameCode, name);
     expect(r.success).toBe(true);
-    gameCode = r.room.gameCode;
+    gameCode = r.room!.gameCode;
     roomCodes.add(gameCode);
-    members.push({ name, socket, token: r.rejoinToken, gameCode, ip });
+    members.push({ name, socket, token: r.rejoinToken!, gameCode, ip });
   }
   return members;
 }
@@ -63,7 +50,7 @@ async function createRoom(...people: Array<[name: string, ip: string]>): Promise
 function upload(m: Member) {
   const form = new FormData();
   form.append("image", new Blob([new Uint8Array(jpeg)], { type: "image/jpeg" }), "p.jpg");
-  return fetch(`${url}/upload`, {
+  return fetch(`${harness.url}/upload`, {
     method: "POST",
     body: form,
     headers: { Authorization: `Bearer ${m.token}`, "X-Game-Code": m.gameCode, "X-Forwarded-For": m.ip },
@@ -99,9 +86,7 @@ async function until(cond: () => boolean, ms = 2_000) {
 
 /** Starts the game and leaves the ready phase; resolves the member that got your-turn (round 1's awaited owner). */
 async function startAndGetOwner(members: Member[]): Promise<Member> {
-  const started = members.map((m) => once(m.socket, "game-started"));
-  members[0].socket.emit("start-game");
-  await Promise.all(started);
+  await harness.startGame(members[0].socket, members.map((m) => m.socket));
   const turn = new Promise<Member>((resolve) => members.forEach((m) => m.socket.once("your-turn", () => resolve(m))));
   members.forEach((m) => m.socket.emit("im-ready"));
   return turn;
@@ -117,10 +102,7 @@ async function fillWithLobbyPhotos() {
 }
 
 beforeAll(async () => {
-  vi.spyOn(console, "log").mockImplementation(() => {});
   jpeg = await sharp({ create: { width: 8, height: 8, channels: 3, background: "#a33" } }).jpeg().toBuffer();
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
 
 afterEach(async () => {
@@ -128,11 +110,7 @@ afterEach(async () => {
   await until(() => filesOnDisk() === 0);
 });
 
-afterAll(async () => {
-  clients.forEach((c) => c.disconnect());
-  await new Promise<void>((resolve) => io.close(() => resolve()));
-  roomManager.clear();
-  vi.restoreAllMocks();
+afterAll(() => {
   fs.rmSync(UPLOAD_DIR, { recursive: true, force: true });
 });
 

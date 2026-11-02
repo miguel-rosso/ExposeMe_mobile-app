@@ -1,8 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "http";
-import { AddressInfo } from "net";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { io as connect, Socket as ClientSocket } from "socket.io-client";
-import { io, server } from "../app";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { io as connect } from "socket.io-client";
 import {
   createHandshakeLimit,
   createSocketOriginGuard,
@@ -13,6 +11,7 @@ import {
   parseAllowedHosts,
   SOCKET_HANDSHAKE_RATE_MAX,
 } from "../middlewares/socketOrigin";
+import { useTestServer } from "./socketHarness";
 
 // Socket requests (EXP-244): CORS doesn't cover WebSockets or JSONP, so the server itself refuses socket.io
 // requests (handshakes and requests of an open session) whose Origin is another website, and JSONP polling.
@@ -156,27 +155,19 @@ describe("createHandshakeLimit", () => {
 });
 
 // ── Real handshakes ──
-let port: number;
-const clients: ClientSocket[] = [];
-
-beforeAll(async () => {
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  port = (server.address() as AddressInfo).port;
-});
+// The clients here pick their own transports and Origin, so they are opened by hand and handed to the harness to close
+const harness = useTestServer();
+const { clients } = harness;
 
 afterEach(() => {
-  clients.splice(0).forEach((c) => c.disconnect());
-});
-
-afterAll(async () => {
-  await new Promise<void>((resolve) => io.close(() => resolve()));
+  harness.disconnectClients();
 });
 
 type Transport = "websocket" | "polling";
 
 /** Resolves "connected" or "refused" for one handshake with the given Origin header (none when undefined). */
 function handshake(transport: Transport, origin?: string): Promise<"connected" | "refused"> {
-  const client = connect(`http://127.0.0.1:${port}`, {
+  const client = connect(harness.url, {
     transports: [transport],
     forceNew: true,
     reconnection: false,
@@ -195,7 +186,7 @@ describe.each<Transport>(["websocket", "polling"])("%s handshake", (transport) =
   });
 
   it("with the server's own host as Origin → connected", async () => {
-    expect(await handshake(transport, `http://127.0.0.1:${port}`)).toBe("connected");
+    expect(await handshake(transport, harness.url)).toBe("connected");
   });
 
   it("from another website's Origin → refused", async () => {
@@ -206,7 +197,7 @@ describe.each<Transport>(["websocket", "polling"])("%s handshake", (transport) =
 // The default client path: long-polling handshake without Origin, then upgrade to WebSocket (React Native's
 // WebSocket adds a same-host Origin on the upgrade)
 it("polling handshake without Origin, then WebSocket upgrade → connected over websocket", async () => {
-  const client = connect(`http://127.0.0.1:${port}`, { forceNew: true, reconnection: false });
+  const client = connect(harness.url, { forceNew: true, reconnection: false });
   clients.push(client);
   const upgraded = new Promise<string>((resolve) => client.io.engine.once("upgrade", (t: { name: string }) => resolve(t.name)));
   await new Promise<void>((resolve) => client.once("connect", () => resolve()));
@@ -215,7 +206,7 @@ it("polling handshake without Origin, then WebSocket upgrade → connected over 
 
 // ── Raw engine.io polling requests ──
 const EVIL_ORIGIN = "https://evil.example";
-const pollingUrl = (query = "") => `http://127.0.0.1:${port}/socket.io/?EIO=4&transport=polling${query}`;
+const pollingUrl = (query = "") => `${harness.url}/socket.io/?EIO=4&transport=polling${query}`;
 
 /** Opens a polling session the way a non-browser client does (no Origin) and returns its sid. */
 async function openPollingSession(): Promise<string> {

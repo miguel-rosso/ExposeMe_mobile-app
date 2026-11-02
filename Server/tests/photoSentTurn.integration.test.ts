@@ -1,10 +1,9 @@
 import fs from "fs";
-import { AddressInfo } from "net";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { io as connect, Socket as ClientSocket } from "socket.io-client";
+import type { Socket as ClientSocket } from "socket.io-client";
 import sharp from "sharp";
-import { io, server } from "../app";
 import { roomManager } from "../routes/socketRoutes";
+import { useTestServer } from "./socketHarness";
 
 // EXP-111: photo-sent only takes the photo uploaded for the turn being awaited, like photo-unavailable is bound to
 // the current request. An own upload from an earlier round (already shown) or a planted photo (lobby pick or
@@ -26,33 +25,10 @@ const NEXT_TURN_TIMEOUT_MS = 22_000;
 interface Member { name: string; socket: ClientSocket; token: string; gameCode: string }
 interface YourTurn { round: number; attempt: number }
 
-let url: string;
+const harness = useTestServer({ quietMs: QUIET_MS });
+const { once, silent, newClient, joinAs } = harness;
 let jpeg: Buffer;
-const clients: ClientSocket[] = [];
 let randomSpy: { mockRestore(): void } | undefined;
-
-function once<T = unknown>(socket: ClientSocket, event: string, timeoutMs = 4_000): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`timeout waiting for "${event}"`)), timeoutMs);
-    socket.once(event, (data: T) => { clearTimeout(t); resolve(data); });
-  });
-}
-
-/** Resolves true if `event` is NOT received within `ms`. */
-function silent(socket: ClientSocket, event: string, ms = QUIET_MS): Promise<boolean> {
-  return new Promise((resolve) => {
-    const handler = () => { clearTimeout(t); resolve(false); };
-    const t = setTimeout(() => { socket.off(event, handler); resolve(true); }, ms);
-    socket.once(event, handler);
-  });
-}
-
-async function newClient(): Promise<ClientSocket> {
-  const c = connect(url, { transports: ["websocket"], forceNew: true, reconnection: false });
-  clients.push(c);
-  await once(c, "connect");
-  return c;
-}
 
 /** Creates a room with `names` (first is host); returns each member with its rejoin token. */
 async function createRoom(...names: string[]): Promise<Member[]> {
@@ -60,12 +36,10 @@ async function createRoom(...names: string[]): Promise<Member[]> {
   let gameCode: string | null = null;
   for (const name of names) {
     const socket = await newClient();
-    const res = once<{ success: boolean; room: { gameCode: string }; rejoinToken: string }>(socket, "room-of-game");
-    socket.emit("join-create-game", { gameCode, username: name });
-    const r = await res;
+    const r = await joinAs(socket, gameCode, name);
     expect(r.success).toBe(true);
-    gameCode = r.room.gameCode;
-    members.push({ name, socket, token: r.rejoinToken, gameCode });
+    gameCode = r.room!.gameCode;
+    members.push({ name, socket, token: r.rejoinToken!, gameCode });
   }
   return members;
 }
@@ -73,7 +47,7 @@ async function createRoom(...names: string[]): Promise<Member[]> {
 async function uploadAs(m: Member): Promise<string> {
   const form = new FormData();
   form.append("image", new Blob([new Uint8Array(jpeg)], { type: "image/jpeg" }), "p.jpg");
-  const res = await fetch(`${url}/upload`, {
+  const res = await fetch(`${harness.url}/upload`, {
     method: "POST",
     body: form,
     headers: { Authorization: `Bearer ${m.token}`, "X-Game-Code": m.gameCode },
@@ -88,9 +62,7 @@ async function uploadAs(m: Member): Promise<string> {
  */
 async function startWithHostAsOwner(members: Member[]): Promise<YourTurn> {
   randomSpy = vi.spyOn(Math, "random").mockReturnValue(0);
-  const started = members.map((m) => once(m.socket, "game-started"));
-  members[0].socket.emit("start-game");
-  await Promise.all(started);
+  await harness.startGame(members[0].socket, members.map((m) => m.socket));
   const turn = once<YourTurn>(members[0].socket, "your-turn");
   members.forEach((m) => m.socket.emit("im-ready"));
   return turn;
@@ -111,10 +83,7 @@ async function expectAccepted(sender: Member, watcher: Member, photo: string, ro
 }
 
 beforeAll(async () => {
-  vi.spyOn(console, "log").mockImplementation(() => {});
   jpeg = await sharp({ create: { width: 8, height: 8, channels: 3, background: "#3a3" } }).jpeg().toBuffer();
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
 
 afterEach(() => {
@@ -122,11 +91,7 @@ afterEach(() => {
   randomSpy = undefined;
 });
 
-afterAll(async () => {
-  clients.forEach((c) => c.disconnect());
-  await new Promise<void>((resolve) => io.close(() => resolve()));
-  roomManager.clear();
-  vi.restoreAllMocks();
+afterAll(() => {
   fs.rmSync(UPLOAD_DIR, { recursive: true, force: true });
 });
 

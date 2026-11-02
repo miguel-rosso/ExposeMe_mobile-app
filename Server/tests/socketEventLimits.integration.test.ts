@@ -1,9 +1,7 @@
-import { AddressInfo } from "net";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { io as connect, Socket as ClientSocket } from "socket.io-client";
-import { io, server } from "../app";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { chatMessages, joinAttempts, roomManager } from "../routes/socketRoutes";
 import { GameEngine } from "../managers/GameEngine";
+import { useTestServer } from "./socketHarness";
 
 // EXP-216: the per-socket limits of join-create-game (5 in any 10 s), chat-message (one every 250 ms) and
 // submit-answer (burst 10, refilled 5/s), pinned with explicit numbers so they stay the same whatever mechanism
@@ -12,39 +10,16 @@ import { GameEngine } from "../managers/GameEngine";
 
 const T0 = new Date("2026-01-01T00:00:00Z").getTime();
 
-let url: string;
-let clients: ClientSocket[] = [];
-
-function once<T = unknown>(socket: ClientSocket, event: string, timeoutMs = 4_000): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`timeout waiting for "${event}"`)), timeoutMs);
-    socket.once(event, (data: T) => { clearTimeout(t); resolve(data); });
-  });
-}
-
-async function newClient(): Promise<ClientSocket> {
-  const c = connect(url, { transports: ["websocket"], forceNew: true, reconnection: false });
-  clients.push(c);
-  await once(c, "connect");
-  return c;
-}
-
-type JoinAnswer = { success: boolean; message?: string; room?: { gameCode: string } };
-
-/** Sends join-create-game and resolves with the server's answer. */
-async function join(sock: ClientSocket, username: string, gameCode: string | null = null): Promise<JoinAnswer> {
-  const answer = once<JoinAnswer>(sock, "room-of-game");
-  sock.emit("join-create-game", { gameCode, username });
-  return answer;
-}
+// Every test plays in a lobby of its own (or in none), so each one's rooms and sockets are dropped after it
+const { once, newClient, joinAs } = useTestServer({ resetBetweenTests: true });
 
 /** A lobby with a host and a guest, each on its own socket (one join spent on each). */
 async function lobby() {
   const host = await newClient();
   const guest = await newClient();
-  const { room } = await join(host, "host");
+  const { room } = await joinAs(host, null, "host");
   const gameCode = room!.gameCode;
-  expect((await join(guest, "guest", gameCode)).success).toBe(true);
+  expect((await joinAs(guest, gameCode, "guest")).success).toBe(true);
   return { host, guest, gameCode };
 }
 
@@ -59,11 +34,6 @@ async function untilFrozen(check: () => boolean, timeoutMs = 2_000): Promise<voi
   }
 }
 
-beforeAll(async () => {
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-});
-
 beforeEach(() => {
   vi.spyOn(console, "log").mockImplementation(() => {});
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -71,41 +41,33 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  clients.forEach((c) => c.disconnect());
-  clients = [];
-  roomManager.clear();
   vi.useRealTimers();
   vi.restoreAllMocks();
-});
-
-afterAll(async () => {
-  await new Promise<void>((resolve) => io.close(() => resolve()));
-  roomManager.clear();
 });
 
 describe("join-create-game: at most 5 per socket in any 10 s", () => {
   it("answers the 6th 'Too many attempts' until the oldest attempt is 10 s old", async () => {
     const sock = await newClient();
-    const { room } = await join(sock, "host");
+    const { room } = await joinAs(sock, null, "host");
     // Re-sending the join it already has is a no-op answered success, and still an attempt
     for (let i = 0; i < 4; i++) {
       at(i + 1);
-      expect((await join(sock, "host", room!.gameCode)).success).toBe(true);
+      expect((await joinAs(sock, room!.gameCode, "host")).success).toBe(true);
     }
     at(9_999);
-    expect(await join(sock, "host", room!.gameCode)).toEqual({ success: false, message: "Too many attempts" });
+    expect(await joinAs(sock, room!.gameCode, "host")).toEqual({ success: false, message: "Too many attempts" });
     at(10_000); // the first attempt (at 0) left the window; a refused one never counted
-    expect((await join(sock, "host", room!.gameCode)).success).toBe(true);
-    expect(await join(sock, "host", room!.gameCode)).toEqual({ success: false, message: "Too many attempts" });
+    expect((await joinAs(sock, room!.gameCode, "host")).success).toBe(true);
+    expect(await joinAs(sock, room!.gameCode, "host")).toEqual({ success: false, message: "Too many attempts" });
   });
 
   it("counts per socket: another socket on the same IP still gets through", async () => {
     const a = await newClient();
-    const { room } = await join(a, "host");
-    for (let i = 0; i < 4; i++) await join(a, "host", room!.gameCode);
-    expect((await join(a, "host", room!.gameCode)).message).toBe("Too many attempts");
+    const { room } = await joinAs(a, null, "host");
+    for (let i = 0; i < 4; i++) await joinAs(a, room!.gameCode, "host");
+    expect((await joinAs(a, room!.gameCode, "host")).message).toBe("Too many attempts");
     const b = await newClient();
-    expect((await join(b, "guest", room!.gameCode)).success).toBe(true);
+    expect((await joinAs(b, room!.gameCode, "guest")).success).toBe(true);
   });
 });
 
@@ -115,7 +77,7 @@ describe("chat-message: one per socket every 250 ms", () => {
     const received: string[] = [];
     guest.on("chat-message", ({ message }: { message: string }) => received.push(message));
     /** The join it already has: answered once every earlier event of the host has been handled. */
-    const handled = async () => expect((await join(host, "host", gameCode)).success).toBe(true);
+    const handled = async () => expect((await joinAs(host, gameCode, "host")).success).toBe(true);
     /** Sends `message` and waits until the guest gets it (relayed in order with the host's earlier messages). */
     const relayed = async (message: string) => {
       const got = once(guest, "chat-message");
@@ -165,7 +127,7 @@ describe("per-socket limit state dies with the socket (EXP-159)", () => {
   it("join and chat limits are dropped on disconnect, even when the socket's room no longer exists", async () => {
     const { host, guest, gameCode } = await lobby();
     // The host spends its join attempts (1 create + 4 re-sends) and its chat message
-    for (let i = 0; i < 4; i++) expect((await join(host, "host", gameCode)).success).toBe(true);
+    for (let i = 0; i < 4; i++) expect((await joinAs(host, gameCode, "host")).success).toBe(true);
     const relayed = once(guest, "chat-message");
     host.emit("chat-message", { message: "bye" });
     await relayed;
@@ -187,7 +149,7 @@ describe("submit-answer: burst 10 per socket, refilled 5/s", () => {
     const { guest, gameCode } = await lobby();
     const record = vi.spyOn(GameEngine.prototype, "recordAnswer").mockImplementation(() => {});
     /** The join it already has: answered once every earlier event of the socket has been handled. */
-    const barrier = async () => expect((await join(guest, "guest", gameCode)).success).toBe(true);
+    const barrier = async () => expect((await joinAs(guest, gameCode, "guest")).success).toBe(true);
 
     for (let i = 0; i < 30; i++) guest.emit("submit-answer", { guess: "host" });
     await barrier();

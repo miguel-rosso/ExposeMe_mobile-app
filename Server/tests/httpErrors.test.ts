@@ -1,10 +1,9 @@
 import fs from "fs";
-import { AddressInfo } from "net";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import sharp from "sharp";
-import { io, server } from "../app";
 import { setUploadRooms } from "../middlewares/uploadAccess";
 import type { Player, Room } from "../models/interfaces";
+import { useTestServer } from "./socketHarness";
 
 // Final HTTP error handling: whatever goes wrong (bad URL encoding, body parse errors, a failing disk write)
 // the client gets a short JSON error, never Express' default HTML page with a stack trace and server paths.
@@ -16,19 +15,13 @@ const UPLOAD_DIR = vi.hoisted(() => {
   return dir;
 });
 
-let url: string;
-
-beforeAll(async () => {
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-});
+const harness = useTestServer();
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
-afterAll(async () => {
-  await new Promise<void>((resolve) => io.close(() => resolve()));
+afterAll(() => {
   fs.rmSync(UPLOAD_DIR, { recursive: true, force: true });
 });
 
@@ -46,12 +39,12 @@ async function expectSafeJson(res: Response, status: number) {
 describe("final error handler", () => {
   it.each(["/temp/%E0%A4%A", "/join/%ZZ", "/temp/%"])("malformed percent-encoding %s → 400 JSON, no trace", async (p) => {
     vi.spyOn(console, "error").mockImplementation(() => {});
-    await expectSafeJson(await fetch(`${url}${p}`), 400);
+    await expectSafeJson(await fetch(`${harness.url}${p}`), 400);
   });
 
   it("malformed JSON body → 400 JSON, no trace", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
-    const res = await fetch(`${url}/upload`, {
+    const res = await fetch(`${harness.url}/upload`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: "{not json",
@@ -61,7 +54,7 @@ describe("final error handler", () => {
 
   it("oversized JSON body → 413 JSON", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
-    const res = await fetch(`${url}/upload`, {
+    const res = await fetch(`${harness.url}/upload`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ x: "a".repeat(200_000) }),
@@ -81,7 +74,7 @@ describe("final error handler", () => {
     const player = { username: "ann", rejoinToken: "tok" } as Player;
     const room = { gameCode: "123456", phase: null, players: [player], currentPlayer: null } as unknown as Room;
     setUploadRooms({ getRoom: () => room, authenticate: () => ({ room, player }) });
-    const res = await fetch(`${url}/upload`, { method: "POST", body: form, headers: { Authorization: "Bearer tok", "X-Game-Code": "123456" } });
+    const res = await fetch(`${harness.url}/upload`, { method: "POST", body: form, headers: { Authorization: "Bearer tok", "X-Game-Code": "123456" } });
     setUploadRooms(null);
 
     const body = await expectSafeJson(res, 500);
@@ -91,7 +84,7 @@ describe("final error handler", () => {
   });
 
   it("unknown routes still answer 404", async () => {
-    const res = await fetch(`${url}/nope`);
+    const res = await fetch(`${harness.url}/nope`);
     expect(res.status).toBe(404);
   });
 });

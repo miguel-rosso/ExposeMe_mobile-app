@@ -1,7 +1,7 @@
 import {
   PLANT_UPLOAD_RETRY, PhotoConversionError, TURN_UPLOAD_RETRY, UploadAbandonedError, UploadHttpError, parseRetryAfterMs,
   turnUploadRetry, uploadWithRetry,
-} from "../app/utils/uploadRetry";
+} from "../src/utils/uploadRetry";
 
 // EXP-232: the turn photo's retried upload, extracted from GameScreen. EXP-269: only network errors and a busy
 // server (408/429/503) are retried, after the server's Retry-After (floored at the backoff), with jitter, bounded per

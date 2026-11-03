@@ -3,7 +3,7 @@ import TestRenderer, { act } from "react-test-renderer";
 import { FakeSocket } from "../testUtils/fakeSocket";
 // Loaded with the file (jest.mock calls below are hoisted above it), not inside a test
 import WaitingRoom from "../app/screens/WaitingRoom";
-import { KICKED_BY_HOST_MESSAGE } from "../app/utils/serverMessage";
+import { KICKED_BY_HOST_MESSAGE } from "../src/utils/serverMessage";
 
 // EXP-180 / EXP-036: when the server refuses the join (room-of-game) or the connection itself (connect_error),
 // the lobby sends the player home with the server's reason; the home screen shows it translated.
@@ -18,7 +18,7 @@ jest.mock("expo-router", () => ({
   useLocalSearchParams: () => ({}),
   ...require("../testUtils/screenNavigation").screenNavigationMock(),
 }));
-jest.mock("../app/providers/GameContext", () => ({
+jest.mock("../src/providers/GameContext", () => ({
   useGameContext: () => ({
     startSocket: jest.fn(), endSocket: jest.fn(), gameCode: "ABC123", setGameCode: jest.fn(), setJoinCodeDraft: jest.fn(),
     setPlayersProvider: jest.fn(), socket: mockSocket, username: "bob",
@@ -27,16 +27,16 @@ jest.mock("../app/providers/GameContext", () => ({
     setHomeNotice: mockSetHomeNotice, markRoomExit: jest.fn(),
   }),
 }));
-jest.mock("../app/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: null }) }));
+jest.mock("../src/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: null }) }));
 const mockCheckGalleryAccess = jest.fn(async (_: { ask: boolean }) => ({ status: "ok", limited: false, canAskAgain: true }));
-jest.mock("../app/providers/PhotoContext", () => ({
+jest.mock("../src/providers/PhotoContext", () => ({
   usePhotoContext: () => ({
     requestGalleryPermission: jest.fn(),
     checkGalleryAccess: (o: { ask: boolean }) => mockCheckGalleryAccess(o),
     selectMorePhotos: jest.fn(async () => {}),
   }),
 }));
-jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/en").default }) }));
+jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: require("../src/i18n/en").default }) }));
 jest.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 jest.mock("react-native-vector-icons/FontAwesome", () => "Icon");
 jest.mock("@expo/vector-icons", () => ({ Ionicons: "Ionicons" }));
@@ -44,11 +44,11 @@ jest.mock("react-native-animatable", () => ({ View: "AnimatableView", initialize
 jest.mock("expo-clipboard", () => ({ setStringAsync: jest.fn() }));
 jest.mock("expo-image-picker", () => ({ launchImageLibraryAsync: jest.fn() }));
 jest.mock("expo-linear-gradient", () => ({ LinearGradient: "LinearGradient" }));
-jest.mock("@/app/components/CloseButton", () => () => null);
-jest.mock("@/app/components/AnimatedDot", () => () => null);
-jest.mock("@/app/components/modals/AlertModal", () => () => null);
-jest.mock("@/app/components/IngameComunication/ChatMessage", () => () => null);
-jest.mock("@/app/components/SuccessAlert", () => () => null);
+jest.mock("@/src/components/CloseButton", () => () => null);
+jest.mock("@/src/components/AnimatedDot", () => () => null);
+jest.mock("@/src/components/modals/AlertModal", () => () => null);
+jest.mock("@/src/components/IngameComunication/ChatMessage", () => () => null);
+jest.mock("@/src/components/SuccessAlert", () => () => null);
 
 beforeAll(() => { jest.spyOn(console, "log").mockImplementation(() => {}); });
 afterAll(() => { jest.restoreAllMocks(); });

@@ -1,7 +1,7 @@
 import React from "react";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
-import { TEST_IDS } from "../app/utils/testIds";
-import { normalizeUsername } from "../app/utils/username";
+import { TEST_IDS } from "../src/utils/testIds";
+import { normalizeUsername } from "../src/utils/username";
 
 // EXP-263: the home screen saves and sends the name without stray spaces (iOS autocorrect adds a trailing one), so
 // others never see «Ana  María ». Typing stays free: the name is normalized on Create / Join, not on every keystroke.
@@ -28,17 +28,17 @@ jest.mock("expo-splash-screen", () => ({ preventAutoHideAsync: jest.fn(), hideAs
 jest.mock("@expo/vector-icons", () => ({ Ionicons: () => null }));
 jest.mock("@react-native-community/hooks", () => ({ useBackHandler: () => {} }));
 jest.mock("@/app/screens/InitialScreen", () => () => null);
-jest.mock("../app/components/LanguageToggle", () => () => null);
-jest.mock("../app/components/LimitedAccessBanner", () => () => null);
-jest.mock("../app/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: 1 }) }));
-jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/en").default }) }));
+jest.mock("../src/components/LanguageToggle", () => () => null);
+jest.mock("../src/components/LimitedAccessBanner", () => () => null);
+jest.mock("../src/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: 1 }) }));
+jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: require("../src/i18n/en").default }) }));
 const mockGalleryCheck = jest.fn(async () => ({ status: "ok" }));
-jest.mock("@/app/hooks/useGalleryAccessGuard", () => ({
+jest.mock("@/src/hooks/useGalleryAccessGuard", () => ({
   useGalleryAccessGuard: () => ({ check: () => mockGalleryCheck() }),
 }));
-jest.mock("@/app/components/modals/GalleryAccessModal", () => () => null);
+jest.mock("@/src/components/modals/GalleryAccessModal", () => () => null);
 // A stateful game context, like the real provider's username / gameCode / join code draft state
-jest.mock("../app/providers/GameContext", () => {
+jest.mock("../src/providers/GameContext", () => {
   const { useState } = require("react");
   return {
     useGameContext: () => {

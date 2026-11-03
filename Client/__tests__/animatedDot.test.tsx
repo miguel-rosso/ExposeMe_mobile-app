@@ -1,7 +1,7 @@
 import React from "react";
 import TestRenderer, { act } from "react-test-renderer";
 import { Animated } from "react-native";
-import AnimatedDot, { DOT_CYCLE_MS, DOT_LIFT, hopThereAndBack } from "../app/components/AnimatedDot";
+import AnimatedDot, { DOT_CYCLE_MS, DOT_LIFT, hopThereAndBack } from "../src/components/AnimatedDot";
 
 // EXP-396: the lobby's "waiting…" dots hop forever: the loop runs on the native driver, so the JS thread does nothing
 // per frame (react-native-animatable drove every frame, and every iteration, from JS).

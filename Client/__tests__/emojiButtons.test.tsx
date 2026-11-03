@@ -1,14 +1,14 @@
 import React from "react";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import { Text } from "react-native";
-import EmojisButton from "../app/components/IngameComunication/EmojisButtons";
-import { REACTION_EMOJIS } from "../app/utils/reactions";
-import { emojiButtonId } from "../app/utils/testIds";
+import EmojisButton from "../src/components/IngameComunication/EmojisButtons";
+import { REACTION_EMOJIS } from "../src/utils/reactions";
+import { emojiButtonId } from "../src/utils/testIds";
 
 // EXP-204: every button of the in-game emoji bar has a stable ASCII testID, so Maestro flows can send reactions
 
 const mockSocket = { connected: true, emit: jest.fn() };
-jest.mock("../app/providers/GameContext", () => ({ useGameContext: () => ({ socket: mockSocket }) }));
+jest.mock("../src/providers/GameContext", () => ({ useGameContext: () => ({ socket: mockSocket }) }));
 
 const button = (root: ReactTestInstance, index: number) =>
   root.findAll((n) => n.props.testID === emojiButtonId(index) && typeof n.props.onPress === "function")[0];

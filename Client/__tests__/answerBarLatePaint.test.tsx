@@ -4,7 +4,7 @@ import { FakeSocket } from "../testUtils/fakeSocket";
 // Loaded with the file (jest.mock calls below are hoisted above it): a cold transform must not hit the test timeout
 import GameScreen from "../app/screens/GameScreen";
 import { honourNativeAnimationDurations } from "../testUtils/nativeAnimations";
-import { playerOptionId } from "../app/utils/testIds";
+import { playerOptionId } from "../src/utils/testIds";
 
 // EXP-300: the answer bar started when the answering phase was painted, not when round-start arrived. Androids paint it
 // 0.3-2.5 s late, so the bar (the only cut-off for taps) ended after the server had frozen the answers: a late pick was
@@ -22,35 +22,35 @@ const mockPlayers = ["alice", "bob", "carol"].map((username) => ({
 jest.mock("expo-router", () => ({
   useRouter: () => ({ replace: jest.fn() }), useLocalSearchParams: () => ({}), useFocusEffect: () => {},
 }));
-jest.mock("../app/providers/GameContext", () => ({
+jest.mock("../src/providers/GameContext", () => ({
   useGameContext: () => ({
     username: "bob", gameCode: "123456", socket: mockSocket, endSocket: jest.fn(),
     playersProvider: mockPlayers, setPlayersProvider: jest.fn(), roundsOfGame: 10, plantedPhotoUri: null,
     plantedPhotoSent: false, plantPhoto: jest.fn(), getRejoinToken: async () => "tok-123", saveRejoinToken: jest.fn(),
   }),
 }));
-jest.mock("../app/providers/PhotoContext", () => ({
+jest.mock("../src/providers/PhotoContext", () => ({
   usePhotoContext: () => ({ pickGamePhoto: jest.fn(), setPhotoUri: jest.fn(), resetUsedPhotos: jest.fn() }),
 }));
-jest.mock("@/app/hooks/useGalleryAccessGuard", () => ({
+jest.mock("@/src/hooks/useGalleryAccessGuard", () => ({
   useGalleryAccessGuard: () => ({ blocked: null, check: jest.fn(), selectMore: jest.fn() }),
 }));
-jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/en").default }) }));
+jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: require("../src/i18n/en").default }) }));
 // A slow phone: rendering a new round photo takes MOUNT_LAG_MS of device time, so the phase (and its bar, rendered
 // after the photo) is painted that long after its event's handler ran
 const MOUNT_LAG_MS = 700;
 const mockRenderedPhotos = new Set<string>();
-jest.mock("@/app/components/PhotoComponent", () => (p: { photoUrl: string }) => {
+jest.mock("@/src/components/PhotoComponent", () => (p: { photoUrl: string }) => {
   if (!mockRenderedPhotos.has(p.photoUrl)) {
     mockRenderedPhotos.add(p.photoUrl);
     jest.setSystemTime(Date.now() + MOUNT_LAG_MS);
   }
   return null;
 });
-jest.mock("@/app/components/modals/ScoreModal", () => () => null);
-jest.mock("@/app/components/modals/FinalScoreModal", () => () => null);
-jest.mock("@/app/components/modals/WinnerModal", () => () => null);
-jest.mock("@/app/components/IngameComunication/EmojisButtons", () => () => null);
+jest.mock("@/src/components/modals/ScoreModal", () => () => null);
+jest.mock("@/src/components/modals/FinalScoreModal", () => () => null);
+jest.mock("@/src/components/modals/WinnerModal", () => () => null);
+jest.mock("@/src/components/IngameComunication/EmojisButtons", () => () => null);
 
 beforeAll(() => {
   jest.spyOn(console, "log").mockImplementation(() => {});

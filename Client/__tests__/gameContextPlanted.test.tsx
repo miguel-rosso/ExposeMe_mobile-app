@@ -14,11 +14,11 @@ const mockIo = jest.fn(() => mockSocket);
 jest.mock("socket.io-client", () => ({ io: () => mockIo() }));
 const UPLOADED = "/temp/" + "c".repeat(32) + ".jpg";
 const mockUpload = jest.fn(async (..._args: unknown[]) => UPLOADED);
-jest.mock("../app/utils/uploadPhoto", () => ({ uploadPhoto: (...args: unknown[]) => mockUpload(...args) }));
+jest.mock("../src/utils/uploadPhoto", () => ({ uploadPhoto: (...args: unknown[]) => mockUpload(...args) }));
 
-import { GameProvider, useGameContext } from "../app/providers/GameContext";
-import { PLANT_UPLOAD_RETRY, UploadHttpError } from "../app/utils/uploadRetry";
-import { PLANT_ACK_TIMEOUT_MS, PlantPhotoAck } from "../app/utils/plantPhotoAck";
+import { GameProvider, useGameContext } from "../src/providers/GameContext";
+import { PLANT_UPLOAD_RETRY, UploadHttpError } from "../src/utils/uploadRetry";
+import { PLANT_ACK_TIMEOUT_MS, PlantPhotoAck } from "../src/utils/plantPhotoAck";
 
 let ctx!: ReturnType<typeof useGameContext>;
 const Probe = () => { ctx = useGameContext(); return null; };

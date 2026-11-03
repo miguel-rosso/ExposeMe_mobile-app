@@ -1,7 +1,7 @@
 import React from "react";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import { AppState, BackHandler } from "react-native";
-import { TEST_IDS } from "../app/utils/testIds";
+import { TEST_IDS } from "../src/utils/testIds";
 import OwnPhotos from "../app/screens/OwnPhotos";
 
 // EXP-118: the photo explorer without photo access / photos explains it (instead of a black screen) and loads a
@@ -15,16 +15,16 @@ const mockCheckGalleryAccess = jest.fn();
 jest.mock("expo-router", () => ({
   useRouter: () => ({ replace: mockReplace, back: mockBack, canGoBack: () => mockCanGoBack }),
 }));
-jest.mock("@/app/providers/PhotoContext", () => ({
+jest.mock("@/src/providers/PhotoContext", () => ({
   usePhotoContext: () => ({
     photoUri: null, setPhotoUri: jest.fn(), getRandomPhoto: mockGetRandomPhoto,
     requestGalleryPermission: jest.fn(async () => false),
     checkGalleryAccess: (o: { ask: boolean }) => mockCheckGalleryAccess(o), selectMorePhotos: jest.fn(async () => {}),
   }),
 }));
-jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/en").default }) }));
-jest.mock("@/app/components/PhotoComponent", () => () => null);
-jest.mock("@/app/components/CloseButton", () => {
+jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: require("../src/i18n/en").default }) }));
+jest.mock("@/src/components/PhotoComponent", () => () => null);
+jest.mock("@/src/components/CloseButton", () => {
   const { TouchableOpacity } = require("react-native");
   return ({ onPress }: { onPress: () => void }) => <TouchableOpacity testID="close-button" onPress={onPress} />;
 });

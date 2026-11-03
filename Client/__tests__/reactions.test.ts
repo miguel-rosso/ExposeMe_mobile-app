@@ -1,7 +1,7 @@
 import {
   appendAllCapped, appendCapped, isAllowedReaction, REACTION_EMOJIS, reactionsOn, roomReactionOf, SCREENSHOT_EMOJI,
   withoutReaction,
-} from "../app/utils/reactions";
+} from "../src/utils/reactions";
 
 // EXP-166 / EXP-170: which reactions the client accepts and how lists are capped.
 // EXP-393: a burst is appended at once, reactions are kept per photo, and removing one no longer shown keeps the list.

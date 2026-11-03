@@ -1,7 +1,7 @@
 import { randomInt } from "crypto";
 
 // Room codes: 6 characters from an uppercase alphanumeric alphabet without look-alikes (no 0/O, 1/I/L), so they
-// read and type unambiguously: 31^6 ≈ 8.9e8 codes. The app (Client/app/utils/roomCode.ts) uses the same alphabet.
+// read and type unambiguously: 31^6 ≈ 8.9e8 codes. The app (Client/src/utils/roomCode.ts) uses the same alphabet.
 
 export const ROOM_CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
 export const ROOM_CODE_LENGTH = 6;

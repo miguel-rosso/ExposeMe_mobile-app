@@ -12,8 +12,8 @@
 # and short (WARNED in Maestro's report when it missed it, see its label). The hard check that the game opens after the
 # tap is play-rounds.yaml's own wait for it.
 # env: USERNAME, METRO_URL (url-encoded), CODE_SINK_URL
-# Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language; the confirmation and the
-# Start button's text are read in both languages (checked against Client/app/i18n by maestro-selectors.test.sh).
+# Selectors are testIDs (Client/src/utils/testIds.ts), so the flow works in any UI language; the confirmation and the
+# Start button's text are read in both languages (checked against Client/src/i18n by maestro-selectors.test.sh).
 appId: com.socketNull.ExposeMe
 ---
 - runFlow: host-lobby.yaml

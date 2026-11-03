@@ -9,7 +9,7 @@
 # Run with ONE bot (the host, so the room exists and starts once the device joins) and ONE device:
 #   qa/lab/lab.sh play --flow invite-link-no-name --bots 1 --devices <label>
 # env: GAME_CODE, USERNAME, METRO_URL (url-encoded)
-# Selectors are testIDs (Client/app/utils/testIds.ts), except the iOS link alert, matched in both UI languages.
+# Selectors are testIDs (Client/src/utils/testIds.ts), except the iOS link alert, matched in both UI languages.
 appId: com.socketNull.ExposeMe
 ---
 - runFlow: open-app.yaml

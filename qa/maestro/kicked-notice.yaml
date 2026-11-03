@@ -9,7 +9,7 @@
 # 5 s after it joined, then the bots run ends (reason "lobby-kick", nobody left to play with):
 #   qa/lab/lab.sh play --flow kicked-notice --bots 1 --devices <label> --bot-args '--kick <label>'
 # env: GAME_CODE, USERNAME, METRO_URL (url-encoded)
-# Selectors are testIDs (Client/app/utils/testIds.ts) except the system alert, matched in both UI languages.
+# Selectors are testIDs (Client/src/utils/testIds.ts) except the system alert, matched in both UI languages.
 # lab: one device (the host bot kicks the one device named in --kick)
 appId: com.socketNull.ExposeMe
 ---

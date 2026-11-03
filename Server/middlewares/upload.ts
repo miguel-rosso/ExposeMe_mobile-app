@@ -22,7 +22,7 @@ if (!fs.existsSync(uploadDir)) {
 }
 
 /**
- * The app re-encodes every photo as a JPEG of at most 1600 px (q0.8, ~300-600 KB; Client/app/utils/uploadPhoto.ts),
+ * The app re-encodes every photo as a JPEG of at most 1600 px (q0.8, ~300-600 KB; Client/src/utils/uploadPhoto.ts),
  * so 5 MB leaves ample headroom while bounding what each in-flight upload can buffer (middlewares/uploadInFlight).
  */
 export const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB

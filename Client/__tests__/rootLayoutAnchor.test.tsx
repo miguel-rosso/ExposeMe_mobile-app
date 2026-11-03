@@ -12,16 +12,16 @@ import { ROOT_CHAIN } from "expo-router/build/react-navigation/routers/stateKeys
 // (build/getRoutes, build/global-state/createSeededNavigationState); if an upgrade moves them, the import fails
 // loudly rather than the check passing silently. Switch to renderRouter if that library is ever added.
 
-jest.mock("../app/utils/devToolsButton", () => ({ hideDevToolsButton: jest.fn().mockResolvedValue(undefined) }));
+jest.mock("../src/utils/devToolsButton", () => ({ hideDevToolsButton: jest.fn().mockResolvedValue(undefined) }));
 jest.mock("expo-font", () => ({ useFonts: () => [false] }));
 jest.mock("expo-splash-screen", () => ({ preventAutoHideAsync: jest.fn(), hideAsync: jest.fn() }));
 jest.mock("expo-screen-orientation", () => ({ lockAsync: jest.fn(), OrientationLock: { PORTRAIT_UP: 1 } }));
 jest.mock("expo-device", () => ({ DeviceType: { PHONE: 1 }, getDeviceTypeAsync: jest.fn().mockResolvedValue(1) }));
 jest.mock("react-native-reanimated", () => ({}));
-jest.mock("@/app/providers/PhotoContext", () => ({ PhotoProvider: () => null }));
-jest.mock("../app/providers/GameContext", () => ({ GameProvider: () => null }));
-jest.mock("../app/providers/BackgroundContext", () => ({ BackgroundProvider: () => null }));
-jest.mock("../app/i18n", () => ({ I18nProvider: () => null }));
+jest.mock("@/src/providers/PhotoContext", () => ({ PhotoProvider: () => null }));
+jest.mock("../src/providers/GameContext", () => ({ GameProvider: () => null }));
+jest.mock("../src/providers/BackgroundContext", () => ({ BackgroundProvider: () => null }));
+jest.mock("../src/i18n", () => ({ I18nProvider: () => null }));
 
 import RootLayout, { unstable_settings } from "../app/_layout";
 

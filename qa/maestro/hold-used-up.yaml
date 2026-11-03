@@ -7,8 +7,8 @@
 # the rounds:
 #   qa/lab/lab.sh play --flow hold-used-up --bots 2 --rounds 10 --devices <android label>   (not iOS: see Timing)
 # env: GAME_CODE, USERNAME, METRO_URL (url-encoded), LOBBY_WAIT_MS (optional; lab.sh play passes them)
-# Selectors are testIDs (Client/app/utils/testIds.ts). The button's text is filtered by noHoldsLeft in both languages
-# (Client/app/i18n, kept in sync by qa/lab/tests/maestro-selectors.test.sh): the hold button is one accessibility
+# Selectors are testIDs (Client/src/utils/testIds.ts). The button's text is filtered by noHoldsLeft in both languages
+# (Client/src/i18n, kept in sync by qa/lab/tests/maestro-selectors.test.sh): the hold button is one accessibility
 # element whose label is its text (iOS label, Android content description), and `enabled: false` is its disabled state.
 #
 # Timing: a hold needs more than 1.5 s of the 5 s scoreboard left (HOLD_MIN_REMAINING) and a quick one freezes it

@@ -2,8 +2,8 @@ import React from "react";
 import { Platform } from "react-native";
 import TestRenderer, { act } from "react-test-renderer";
 import type { Socket } from "socket.io-client";
-import { MarkPhaseHandled, useQaRenderAck } from "../app/hooks/useQaRenderAck";
-import type { ServerPhase } from "../app/models/interfaces";
+import { MarkPhaseHandled, useQaRenderAck } from "../src/hooks/useQaRenderAck";
+import type { ServerPhase } from "../src/models/interfaces";
 
 // EXP-012: QA builds (development bundle + EXPO_PUBLIC_QA=1) send qa-ack once per rendered phase start; other builds
 // never send it. Each ack carries the device's platform (EXP-395: the lab reports the photo's time to screen per platform).

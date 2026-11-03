@@ -8,8 +8,8 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MAESTRO_DIR="${MAESTRO_DIR:-$HERE/../../maestro}"
-I18N="$HERE/../../../Client/app/i18n"
-TEST_IDS="$HERE/../../../Client/app/utils/testIds.ts"
+I18N="$HERE/../../../Client/src/i18n"
+TEST_IDS="$HERE/../../../Client/src/utils/testIds.ts"
 BOTS="$HERE/../bots.mjs"
 ROUNDS="$MAESTRO_DIR/play-rounds.yaml"
 GHOST_FLOW="$MAESTRO_DIR/quit-after-game-over.yaml"
@@ -30,7 +30,7 @@ own_name_check() {
     /^[ \t]*- / { in_not = 0; card = 0 }
   ' "$1"
 }
-# i18n_string LOCALE KEY -> the app string (Client/app/i18n/<locale>.ts, `key: "value",`)
+# i18n_string LOCALE KEY -> the app string (Client/src/i18n/<locale>.ts, `key: "value",`)
 i18n_string() { sed -nE "s/^[ \t]*$2: \"(.*)\",?$/\1/p" "$I18N/$1.ts"; }
 # maestro_matches REGEX TEXT -> exit 0 if Maestro's text filter matches TEXT: Kotlin Regex.matches (the whole text)
 # with IGNORE_CASE and DOT_MATCHES_ALL (the texts here have no line breaks, so MULTILINE changes nothing)
@@ -67,7 +67,7 @@ grep -q 'const QUITTER = N_BOTS - 1;' "$BOTS" && grep -q 'bot${i + 1}`' "$BOTS" 
   && ok "bots.mjs: the quitter is the last bot" || ko "bots.mjs: the quitter is the last bot"
 grep -q -- '--flow quit-after-game-over --bots 3 ' "$GHOST_FLOW" && grep -q -- '--bot-args "--quit-after-game-over"' "$GHOST_FLOW" \
   && ok "quit-after-game-over.yaml documents its run with 3 bots" || ko "quit-after-game-over.yaml documents its run with 3 bots"
-# Every selector it uses for the ghost is a testID the app renders (Client/app/utils/testIds.ts)
+# Every selector it uses for the ghost is a testID the app renders (Client/src/utils/testIds.ts)
 for prefix in player-option score-rank final-rank lobby-player-offline; do
   grep -q "\`$prefix-\${username}\`" "$TEST_IDS" && ok "testIds.ts has $prefix-<username>" || ko "testIds.ts has $prefix-<username>"
 done

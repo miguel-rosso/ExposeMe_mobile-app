@@ -8,7 +8,7 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVER_SRC="${SERVER_SRC:-$HERE/../../../Server}"
 CLIENT_SRC="${CLIENT_SRC:-$HERE/../../../Client}"
-LIMITS="app/utils/protocolLimits.ts"
+LIMITS="src/utils/protocolLimits.ts"
 pass=0 fail=0
 ok() { pass=$((pass + 1)); echo "ok   - $1"; }
 ko() { fail=$((fail + 1)); echo "FAIL - $1${2:+ ($2)}"; }
@@ -31,12 +31,12 @@ within() {
 # ── Copies of the server's values ──
 mirrors "$LIMITS" ROUND_OPTIONS managers/RoomManager.ts ROUND_OPTIONS
 mirrors "$LIMITS" MAX_CHAT_LENGTH routes/socketRoutes.ts MAX_CHAT_LENGTH
-mirrors app/utils/roomCode.ts ROOM_CODE_ALPHABET managers/roomCode.ts ROOM_CODE_ALPHABET
-mirrors app/utils/roomCode.ts ROOM_CODE_LENGTH managers/roomCode.ts ROOM_CODE_LENGTH
+mirrors src/utils/roomCode.ts ROOM_CODE_ALPHABET managers/roomCode.ts ROOM_CODE_ALPHABET
+mirrors src/utils/roomCode.ts ROOM_CODE_LENGTH managers/roomCode.ts ROOM_CODE_LENGTH
 
 # Emoji reactions: the picker's emojis plus the screenshot one are exactly what the server relays (ALLOWED_EMOJIS)
 quoted() { grep -o '"[^"]*"' | LC_ALL=C sort | tr '\n' ' '; }
-app_emojis="$( { initializer "$CLIENT_SRC/app/utils/reactions.ts" REACTION_EMOJIS; initializer "$CLIENT_SRC/app/utils/reactions.ts" SCREENSHOT_EMOJI; } | quoted)"
+app_emojis="$( { initializer "$CLIENT_SRC/src/utils/reactions.ts" REACTION_EMOJIS; initializer "$CLIENT_SRC/src/utils/reactions.ts" SCREENSHOT_EMOJI; } | quoted)"
 server_emojis="$(initializer "$SERVER_SRC/managers/socketGuards.ts" ALLOWED_EMOJIS | quoted)"
 [[ -n "$server_emojis" && "$app_emojis" == "$server_emojis" ]] && ok "REACTION_EMOJIS + SCREENSHOT_EMOJI match the server's ALLOWED_EMOJIS" \
   || ko "REACTION_EMOJIS + SCREENSHOT_EMOJI match the server's ALLOWED_EMOJIS" "app=[$app_emojis] server=[$server_emojis]"
@@ -54,9 +54,9 @@ within "CHAT_COOLDOWN_MS is at least the server's CHAT_MESSAGE_LIMIT window" \
 
 # ── The app uses the named limits, not literals ──
 grep -q 'maxLength={MAX_USERNAME_INPUT_LENGTH}' "$CLIENT_SRC/app/index.tsx" && ok "home name input uses MAX_USERNAME_INPUT_LENGTH" || ko "home name input uses MAX_USERNAME_INPUT_LENGTH"
-grep -q 'maxLength={MAX_CHAT_LENGTH}' "$CLIENT_SRC/app/components/LobbyChat.tsx" && ok "lobby chat input uses MAX_CHAT_LENGTH" || ko "lobby chat input uses MAX_CHAT_LENGTH"
+grep -q 'maxLength={MAX_CHAT_LENGTH}' "$CLIENT_SRC/src/components/LobbyChat.tsx" && ok "lobby chat input uses MAX_CHAT_LENGTH" || ko "lobby chat input uses MAX_CHAT_LENGTH"
 grep -q 'ROUND_OPTIONS.map(' "$CLIENT_SRC/app/screens/WaitingRoom.tsx" && ok "lobby rounds picker uses ROUND_OPTIONS" || ko "lobby rounds picker uses ROUND_OPTIONS"
-grep -q '< CHAT_COOLDOWN_MS' "$CLIENT_SRC/app/hooks/useLobbyChat.ts" && ok "lobby chat cooldown uses CHAT_COOLDOWN_MS" || ko "lobby chat cooldown uses CHAT_COOLDOWN_MS"
+grep -q '< CHAT_COOLDOWN_MS' "$CLIENT_SRC/src/hooks/useLobbyChat.ts" && ok "lobby chat cooldown uses CHAT_COOLDOWN_MS" || ko "lobby chat cooldown uses CHAT_COOLDOWN_MS"
 
 echo "# $pass passed, $fail failed"
 [ "$fail" = 0 ]

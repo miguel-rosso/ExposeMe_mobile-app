@@ -6,11 +6,11 @@ import { DeviceType, getDeviceTypeAsync } from "expo-device";
 import { useEffect } from "react";
 import { StatusBar } from "react-native";
 import "react-native-reanimated";
-import { PhotoProvider } from "@/app/providers/PhotoContext";
-import { GameProvider } from "./providers/GameContext";
-import { BackgroundProvider } from "./providers/BackgroundContext";
-import { I18nProvider } from "./i18n";
-import { hideDevToolsButton } from "./utils/devToolsButton";
+import { PhotoProvider } from "@/src/providers/PhotoContext";
+import { GameProvider } from "../src/providers/GameContext";
+import { BackgroundProvider } from "../src/providers/BackgroundContext";
+import { I18nProvider } from "../src/i18n";
+import { hideDevToolsButton } from "../src/utils/devToolsButton";
 
 SplashScreen.preventAutoHideAsync();
 hideDevToolsButton();

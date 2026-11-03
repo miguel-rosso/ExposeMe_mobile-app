@@ -5,12 +5,12 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 // Loaded with the file (jest.mock calls below are hoisted above it), not inside a test
 import WaitingRoom from "../app/screens/WaitingRoom";
 import GameScreen from "../app/screens/GameScreen";
-import { GameProvider, useGameContext } from "../app/providers/GameContext";
+import { GameProvider, useGameContext } from "../src/providers/GameContext";
 import type { FakeSocket } from "../testUtils/fakeSocket";
 import { openDeepLink, resetStack, routerCalls, StackScreens, stackPaths, stackRouter } from "../testUtils/stackRouter";
 import { pressInviteCancel, pressInviteJoin, showsInviteDialog } from "../testUtils/inviteConfirm";
-import { TEST_IDS } from "../app/utils/testIds";
-import en from "../app/i18n/en";
+import { TEST_IDS } from "../src/utils/testIds";
+import en from "../src/i18n/en";
 
 // EXP-358 / EXP-360 / EXP-359: an invite link opened during a game pushes the waiting room over the game screen, which
 // stays mounted underneath (a native stack). While the invite dialog asks, the game is the player's: Cancel goes back
@@ -41,8 +41,8 @@ jest.mock("expo-router", () => require("../testUtils/stackRouter").expoRouterMoc
 const GALLERY_OK = { status: "ok", limited: false, canAskAgain: true };
 const mockCheckGalleryAccess = jest.fn(async (_opts: { ask: boolean }) => GALLERY_OK);
 const mockPickGamePhoto = jest.fn();
-jest.mock("../app/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: null }) }));
-jest.mock("../app/providers/PhotoContext", () => ({
+jest.mock("../src/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: null }) }));
+jest.mock("../src/providers/PhotoContext", () => ({
   usePhotoContext: () => ({
     requestGalleryPermission: jest.fn(),
     checkGalleryAccess: mockCheckGalleryAccess,
@@ -51,8 +51,8 @@ jest.mock("../app/providers/PhotoContext", () => ({
     setPhotoUri: jest.fn(),
   }),
 }));
-jest.mock("@/app/utils/uploadPhoto", () => ({ uploadPhoto: jest.fn() }));
-jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/en").default }) }));
+jest.mock("@/src/utils/uploadPhoto", () => ({ uploadPhoto: jest.fn() }));
+jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: require("../src/i18n/en").default }) }));
 jest.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 jest.mock("react-native-vector-icons/FontAwesome", () => "Icon");
 jest.mock("@expo/vector-icons", () => ({ Ionicons: "Ionicons" }));
@@ -60,17 +60,17 @@ jest.mock("react-native-animatable", () => ({ View: "AnimatableView", initialize
 jest.mock("expo-clipboard", () => ({ setStringAsync: jest.fn() }));
 jest.mock("expo-image-picker", () => ({ launchImageLibraryAsync: jest.fn() }));
 jest.mock("expo-linear-gradient", () => ({ LinearGradient: "LinearGradient" }));
-jest.mock("@/app/components/AnimatedDot", () => () => null);
-jest.mock("@/app/components/modals/AlertModal", () => () => null);
-jest.mock("@/app/components/IngameComunication/ChatMessage", () => "ChatMessage");
-jest.mock("@/app/components/SuccessAlert", () => () => null);
-jest.mock("@/app/components/PhotoComponent", () => () => null);
-jest.mock("@/app/components/modals/ScoreModal", () => () => null);
-jest.mock("@/app/components/modals/FinalScoreModal", () => () => null);
-jest.mock("@/app/components/modals/WinnerModal", () => () => null);
-jest.mock("@/app/components/IngameComunication/EmojiReaction", () => () => null);
-jest.mock("@/app/components/IngameComunication/EmojisButtons", () => () => null);
-jest.mock("@/app/components/ProgressBar", () => () => null);
+jest.mock("@/src/components/AnimatedDot", () => () => null);
+jest.mock("@/src/components/modals/AlertModal", () => () => null);
+jest.mock("@/src/components/IngameComunication/ChatMessage", () => "ChatMessage");
+jest.mock("@/src/components/SuccessAlert", () => () => null);
+jest.mock("@/src/components/PhotoComponent", () => () => null);
+jest.mock("@/src/components/modals/ScoreModal", () => () => null);
+jest.mock("@/src/components/modals/FinalScoreModal", () => () => null);
+jest.mock("@/src/components/modals/WinnerModal", () => () => null);
+jest.mock("@/src/components/IngameComunication/EmojiReaction", () => () => null);
+jest.mock("@/src/components/IngameComunication/EmojisButtons", () => () => null);
+jest.mock("@/src/components/ProgressBar", () => () => null);
 jest.mock("@react-native-community/hooks", () => ({ useBackHandler: () => {} }));
 
 let alertSpy: jest.SpyInstance;

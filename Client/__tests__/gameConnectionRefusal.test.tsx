@@ -1,7 +1,7 @@
 import React from "react";
 import TestRenderer, { act } from "react-test-renderer";
 import { FakeSocket } from "../testUtils/fakeSocket";
-import { useGameConnection } from "../app/hooks/useGameConnection";
+import { useGameConnection } from "../src/hooks/useGameConnection";
 
 // EXP-180: in game, a connection the server refuses (e.g. "Too many connections") is final for socket.io, so the
 // game screen leaves with the server's reason (translated on the home screen) instead of "Reconnecting…" forever.

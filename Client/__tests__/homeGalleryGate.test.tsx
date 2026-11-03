@@ -1,8 +1,8 @@
 import React from "react";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import { AppState } from "react-native";
-import { TEST_IDS } from "../app/utils/testIds";
-import { MAX_USERNAME_INPUT_LENGTH } from "../app/utils/protocolLimits";
+import { TEST_IDS } from "../src/utils/testIds";
+import { MAX_USERNAME_INPUT_LENGTH } from "../src/utils/protocolLimits";
 
 // EXP-118: Create / Search room require photo permission (full or limited) and at least one visible photo.
 // Limited access with photos plays; anything missing is explained on the home screen (never SettingsInstructions).
@@ -24,14 +24,14 @@ jest.mock("expo-splash-screen", () => ({ preventAutoHideAsync: jest.fn(), hideAs
 jest.mock("@expo/vector-icons", () => ({ Ionicons: () => null }));
 jest.mock("@react-native-community/hooks", () => ({ useBackHandler: () => {} }));
 jest.mock("@/app/screens/InitialScreen", () => () => null);
-jest.mock("../app/components/LanguageToggle", () => () => null);
-jest.mock("../app/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: 1 }) }));
-jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/en").default }) }));
+jest.mock("../src/components/LanguageToggle", () => () => null);
+jest.mock("../src/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: 1 }) }));
+jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: require("../src/i18n/en").default }) }));
 const mockSetGameCode = jest.fn();
 const mockSetJoinCodeDraft = jest.fn();
 const mockRequestNewRoom = jest.fn();
 let mockJoinCodeDraft = "";
-jest.mock("../app/providers/GameContext", () => ({
+jest.mock("../src/providers/GameContext", () => ({
   useGameContext: () => ({
     username: "ana", saveUsername: jest.fn(), gameCode: null, setGameCode: mockSetGameCode, socket: null, endSocket: jest.fn(),
     joinCodeDraft: mockJoinCodeDraft, setJoinCodeDraft: mockSetJoinCodeDraft,
@@ -68,7 +68,7 @@ jest.mock("expo-media-library", () => {
 });
 
 import Index from "../app/index";
-import { PhotoProvider } from "../app/providers/PhotoContext";
+import { PhotoProvider } from "../src/providers/PhotoContext";
 
 let appStateHandlers: ((s: string) => void)[] = [];
 beforeAll(() => {

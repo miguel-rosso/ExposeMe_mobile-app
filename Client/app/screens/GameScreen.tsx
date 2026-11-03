@@ -5,61 +5,61 @@ import {
 import { useLocalSearchParams, type Href } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import tw from "twrnc";
-import { useGameContext } from "../providers/GameContext";
+import { useGameContext } from "../../src/providers/GameContext";
 import {
   GamePausedData, GameResumedData, GameStateSnapshot, HoldEndData, HoldResumeData, Player, RoundRevealData,
   RoundScoresData, RoundSkippedData, RoundStartData, ScoreRound, WaitingPhotoData, YourTurnData,
-} from "../models/interfaces";
-import { usePhotoContext } from "../providers/PhotoContext";
+} from "../../src/models/interfaces";
+import { usePhotoContext } from "../../src/providers/PhotoContext";
 import { useRouter } from "expo-router";
 import getEnvVars from "@/config";
-import PhotoComponent from "@/app/components/PhotoComponent";
-import ScoreModal from "@/app/components/modals/ScoreModal";
-import { TEST_IDS } from "@/app/utils/testIds";
-import ProgressBar from "@/app/components/ProgressBar";
-import FinalScoreModal from "@/app/components/modals/FinalScoreModal";
-import WinnerModal from "@/app/components/modals/WinnerModal";
-import { getWinners, hasResult } from "@/app/utils/ranking";
-import RoomReactionLane from "@/app/components/IngameComunication/RoomReactionLane";
-import EmojisButton from "@/app/components/IngameComunication/EmojisButtons";
-import AnswerOption, { answerOptionState } from "@/app/components/AnswerOption";
-import AnswerOptionsGrid from "@/app/components/AnswerOptionsGrid";
-import DeferredMount from "@/app/components/DeferredMount";
-import { useI18n } from "../i18n";
-import { uploadPhoto } from "@/app/utils/uploadPhoto";
-import { photoAuthHeaders, resolvePhotoAuth } from "@/app/utils/photoAuth";
-import { prefetchImage } from "@/app/utils/image";
-import { photoWaitOf, pickAndUploadTurnPhoto } from "../utils/turnPhoto";
-import { SkipNotice, skipNoticeFor, skipNoticeText } from "../utils/waitingPhoto";
+import PhotoComponent from "@/src/components/PhotoComponent";
+import ScoreModal from "@/src/components/modals/ScoreModal";
+import { TEST_IDS } from "@/src/utils/testIds";
+import ProgressBar from "@/src/components/ProgressBar";
+import FinalScoreModal from "@/src/components/modals/FinalScoreModal";
+import WinnerModal from "@/src/components/modals/WinnerModal";
+import { getWinners, hasResult } from "@/src/utils/ranking";
+import RoomReactionLane from "@/src/components/IngameComunication/RoomReactionLane";
+import EmojisButton from "@/src/components/IngameComunication/EmojisButtons";
+import AnswerOption, { answerOptionState } from "@/src/components/AnswerOption";
+import AnswerOptionsGrid from "@/src/components/AnswerOptionsGrid";
+import DeferredMount from "@/src/components/DeferredMount";
+import { useI18n } from "../../src/i18n";
+import { uploadPhoto } from "@/src/utils/uploadPhoto";
+import { photoAuthHeaders, resolvePhotoAuth } from "@/src/utils/photoAuth";
+import { prefetchImage } from "@/src/utils/image";
+import { photoWaitOf, pickAndUploadTurnPhoto } from "../../src/utils/turnPhoto";
+import { SkipNotice, skipNoticeFor, skipNoticeText } from "../../src/utils/waitingPhoto";
 import {
   gameStateFollowUps, isAnotherGame, isRevealedOwner, phaseElapsed, RoundAction, roundOptions,
   roundReducer, RoundView, roundViewOfGame,
-} from "../utils/roundState";
-import { emitWhileConnected } from "../utils/socketEmit";
-import { useGameConnection } from "../hooks/useGameConnection";
-import { useTurnRequest } from "../hooks/useTurnRequest";
-import { usePickSender } from "../hooks/usePickSender";
-import { withHost, withoutPlayer } from "../utils/roomPlayers";
-import PausedModal from "@/app/components/modals/PausedModal";
-import LeaveGameConfirm from "@/app/components/modals/LeaveGameConfirm";
-import LeaveGameButton from "@/app/components/LeaveGameButton";
-import { useFocusedBackHandler } from "../hooks/useFocusedBackHandler";
-import GalleryAccessModal from "@/app/components/modals/GalleryAccessModal";
-import { useGalleryAccessGuard } from "@/app/hooks/useGalleryAccessGuard";
-import { useQaRenderAck } from "../hooks/useQaRenderAck";
-import { useScreenshotReaction } from "../hooks/useScreenshotReaction";
-import { answerOptionsLayout } from "../utils/answerOptionsLayout";
-import { usePlayerColors } from "../hooks/usePlayerColors";
-import { useReduceMotion } from "../hooks/useReduceMotion";
-import { attachHandlers, SocketHandlers } from "../utils/socketHandlers";
-import { safeBottomRow, safeTopRow } from "../utils/safeAreaRows";
-import { ANSWERS_BOTTOM, HOLD_BUTTON_BOTTOM } from "../utils/gameRows";
-import { PROGRESS_BAR_AREA, progressBarAreaBottom, progressBarRow } from "../utils/progressBarRow";
+} from "../../src/utils/roundState";
+import { emitWhileConnected } from "../../src/utils/socketEmit";
+import { useGameConnection } from "../../src/hooks/useGameConnection";
+import { useTurnRequest } from "../../src/hooks/useTurnRequest";
+import { usePickSender } from "../../src/hooks/usePickSender";
+import { withHost, withoutPlayer } from "../../src/utils/roomPlayers";
+import PausedModal from "@/src/components/modals/PausedModal";
+import LeaveGameConfirm from "@/src/components/modals/LeaveGameConfirm";
+import LeaveGameButton from "@/src/components/LeaveGameButton";
+import { useFocusedBackHandler } from "../../src/hooks/useFocusedBackHandler";
+import GalleryAccessModal from "@/src/components/modals/GalleryAccessModal";
+import { useGalleryAccessGuard } from "@/src/hooks/useGalleryAccessGuard";
+import { useQaRenderAck } from "../../src/hooks/useQaRenderAck";
+import { useScreenshotReaction } from "../../src/hooks/useScreenshotReaction";
+import { answerOptionsLayout } from "../../src/utils/answerOptionsLayout";
+import { usePlayerColors } from "../../src/hooks/usePlayerColors";
+import { useReduceMotion } from "../../src/hooks/useReduceMotion";
+import { attachHandlers, SocketHandlers } from "../../src/utils/socketHandlers";
+import { safeBottomRow, safeTopRow } from "../../src/utils/safeAreaRows";
+import { ANSWERS_BOTTOM, HOLD_BUTTON_BOTTOM } from "../../src/utils/gameRows";
+import { PROGRESS_BAR_AREA, progressBarAreaBottom, progressBarRow } from "../../src/utils/progressBarRow";
 import {
   GAME_SCREEN_PATH, GameScreenParams, openingGameNumber, opensOnGameInProgress,
-} from "../utils/gameScreenRoute";
-import { useGoHome } from "../hooks/useGoHome";
-import { isKickedByHost, KICKED_BY_HOST_MESSAGE } from "../utils/serverMessage";
+} from "../../src/utils/gameScreenRoute";
+import { useGoHome } from "../../src/hooks/useGoHome";
+import { isKickedByHost, KICKED_BY_HOST_MESSAGE } from "../../src/utils/serverMessage";
 
 const { SERVER_URL } = getEnvVars();
 // Rows over the photo (see safeAreaRows; the progress bar strip is in progressBarRow, the bottom ones in gameRows)

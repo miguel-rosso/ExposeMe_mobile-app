@@ -17,7 +17,7 @@ import { displayOrder } from "./displayOrder";
  */
 
 // Longest name in UTF-16 units: exactly what the app's name input takes (MAX_USERNAME_INPUT_LENGTH in
-// Client/app/utils/protocolLimits.ts; qa/lab/tests/protocol-constants.test.sh checks they are equal)
+// Client/src/utils/protocolLimits.ts; qa/lab/tests/protocol-constants.test.sh checks they are equal)
 export const MAX_USERNAME_LENGTH = 15;
 // NFKC can expand one character a lot (the Arabic ligature U+FDFA is 18 letters): bounds the work of the name keys
 const MAX_NORMALIZED_LENGTH = 60;

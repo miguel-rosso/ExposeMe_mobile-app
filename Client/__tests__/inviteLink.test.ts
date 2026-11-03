@@ -1,4 +1,4 @@
-import { LinkInput, linkStep } from "../app/utils/inviteLink";
+import { LinkInput, linkStep } from "../src/utils/inviteLink";
 
 // The waiting room's link decision (EXP-358, EXP-363, EXP-367, DEC-047), every mode against every kind of link.
 

@@ -1,5 +1,5 @@
 # Join room ${GAME_CODE} as ${USERNAME} and wait in the lobby.
-# Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
+# Selectors are testIDs (Client/src/utils/testIds.ts), so the flow works in any UI language.
 appId: com.socketNull.ExposeMe
 ---
 - runFlow: search-room.yaml

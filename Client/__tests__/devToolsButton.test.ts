@@ -1,4 +1,4 @@
-import { hideDevToolsButton } from "../app/utils/devToolsButton";
+import { hideDevToolsButton } from "../src/utils/devToolsButton";
 
 describe("dev client floating Tools button (EXP-200, EXP-142)", () => {
   it("hides the floating button in development builds so it never covers screen controls", async () => {

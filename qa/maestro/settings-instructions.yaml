@@ -7,7 +7,7 @@
 # No server or bots needed:
 #   ~/.maestro/bin/maestro --device <id> test qa/maestro/settings-instructions.yaml -e USERNAME=<label> -e METRO_URL=<url-encoded>
 # env: USERNAME, METRO_URL (url-encoded)
-# App selectors are testIDs (Client/app/utils/testIds.ts); the system permission dialog and Settings pages use text.
+# App selectors are testIDs (Client/src/utils/testIds.ts); the system permission dialog and Settings pages use text.
 appId: com.socketNull.ExposeMe
 ---
 - launchApp:

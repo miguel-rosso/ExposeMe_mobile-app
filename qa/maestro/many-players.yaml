@@ -7,7 +7,7 @@
 # (answering) + 3 s (reveal). So the checks are split over two rounds, a few cheap steps each (budgeted between the
 # `timed:` markers by qa/lab/tests/maestro-timing.test.sh): round 1 the layout, round 2 scrolling to the last option.
 # env: GAME_CODE, USERNAME, METRO_URL (url-encoded)
-# Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
+# Selectors are testIDs (Client/src/utils/testIds.ts), so the flow works in any UI language.
 appId: com.socketNull.ExposeMe
 ---
 - runFlow: open-app.yaml

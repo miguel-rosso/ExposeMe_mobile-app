@@ -1,7 +1,7 @@
 import React from "react";
 import TestRenderer, { act, ReactTestInstance, ReactTestRenderer } from "react-test-renderer";
 import { Image, Linking, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
-import { TEST_IDS, settingsStepId } from "../app/utils/testIds";
+import { TEST_IDS, settingsStepId } from "../src/utils/testIds";
 
 // EXP-123: "Open Settings" must use the public Linking.openSettings() on iOS too (never a private App-Prefs URL),
 // and the iOS steps must describe the app's own Settings page that it opens, not the Privacy path. iOS may still land
@@ -17,7 +17,7 @@ jest.mock("@/assets/images/PermInstructions3.jpg", () => "PermInstructions3", { 
 jest.mock("@/assets/images/IOSPermInstruction2.jpg", () => "IOSPermInstruction2", { virtual: true });
 jest.mock("@/assets/images/IOSPermInstruction1.jpg", () => "IOSPermInstruction1", { virtual: true });
 // Render every carousel item inline so all the steps can be inspected at once
-jest.mock("@/app/components/CustomCarousel/CustomCarousel", () => {
+jest.mock("@/src/components/CustomCarousel/CustomCarousel", () => {
   const React = require("react");
   const { View } = require("react-native");
   return React.forwardRef(({ data, renderItem }: any, _ref: any) => (
@@ -34,10 +34,10 @@ jest.mock("react-native-safe-area-context", () => {
   };
 });
 
-const en = require("../app/i18n/en").default;
-const es = require("../app/i18n/es").default;
+const en = require("../src/i18n/en").default;
+const es = require("../src/i18n/es").default;
 let mockT = en;
-jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: mockT }) }));
+jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: mockT }) }));
 // Platform.OS is read at render time, so the screen is imported once and rendered per platform
 const SettingsInstructionsScreen = require("../app/screens/SettingsInstructionsScreen").default;
 

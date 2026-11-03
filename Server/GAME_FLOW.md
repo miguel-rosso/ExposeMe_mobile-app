@@ -449,7 +449,7 @@ After last round: game-over
 - **Room codes** are 6 characters from the 31-symbol alphabet `23456789ABCDEFGHJKMNPQRSTUVWXYZ` (uppercase
   alphanumerics without the look-alikes 0/O and 1/I/L, ≈ 8.9e8 codes; e.g. `K7MQ4X`), each drawn with
   `crypto.randomInt` (not predictable from earlier codes) and unique among live rooms (`Server/managers/roomCode.ts`;
-  the app uses the same alphabet in `Client/app/utils/roomCode.ts`). An incoming code is trimmed and uppercased, ASCII
+  the app uses the same alphabet in `Client/src/utils/roomCode.ts`). An incoming code is trimmed and uppercased, ASCII
   only (surrounding spaces/tabs/newlines, `a-z` → `A-Z`), so `" k7mq4x "` joins `K7MQ4X`; any non-ASCII character
   (e.g. `ß`, `ſ`, full-width digits, which a Unicode uppercase would turn into code letters) leaves it malformed; `gameCode` null or `""` creates a room instead. A code that is malformed after that
   (wrong length or a character outside the alphabet), matches no room, or is not a string answers `"Game not found"` and counts against the sender's **IP**: after

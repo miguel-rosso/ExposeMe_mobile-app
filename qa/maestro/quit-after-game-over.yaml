@@ -7,7 +7,7 @@
 #   qa/lab/lab.sh play --flow quit-after-game-over --bots 3 --rounds 3 --devices <label> \
 #     --bot-args "--quit-after-game-over"
 # env: GAME_CODE, USERNAME, METRO_URL (url-encoded)
-# Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
+# Selectors are testIDs (Client/src/utils/testIds.ts), so the flow works in any UI language.
 appId: com.socketNull.ExposeMe
 ---
 - runFlow: open-app.yaml

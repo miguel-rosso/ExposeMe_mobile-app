@@ -1,7 +1,7 @@
 # From the home screen, ask to join room ${GAME_CODE} as ${USERNAME}: type the name and the code, then search (Enter).
 # Where that lands is the caller's to check: join-room.yaml waits for the lobby, kicked-while-offline.yaml for the
 # server's refusal back on home.
-# Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
+# Selectors are testIDs (Client/src/utils/testIds.ts), so the flow works in any UI language.
 appId: com.socketNull.ExposeMe
 ---
 # Clear a previously saved name before typing

@@ -1,7 +1,7 @@
 import React from "react";
 import { AccessibilityInfo } from "react-native";
 import TestRenderer, { act } from "react-test-renderer";
-import { resetReduceMotionSettingForTests, useReduceMotion, useReduceMotionSetting } from "../app/hooks/useReduceMotion";
+import { resetReduceMotionSettingForTests, useReduceMotion, useReduceMotionSetting } from "../src/hooks/useReduceMotion";
 
 // EXP-315: the setting was asked again on every mount and read false until the answer came back, so a component that
 // mounted already on screen (the scoreboard after a hold or on rejoin) bounced once with Reduce Motion on.

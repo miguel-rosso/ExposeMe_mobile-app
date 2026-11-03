@@ -8,7 +8,7 @@
 #   qa/lab/lab.sh play --flow play-again-linger --bots 2 --rounds 3 --devices <label> \
 #     --bot-args "--play-again-linger 25 --play-again-linger-bot 0"
 # env: GAME_CODE, USERNAME, METRO_URL (url-encoded)
-# Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
+# Selectors are testIDs (Client/src/utils/testIds.ts), so the flow works in any UI language.
 appId: com.socketNull.ExposeMe
 ---
 - runFlow: open-app.yaml

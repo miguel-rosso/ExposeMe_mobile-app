@@ -1,8 +1,8 @@
 import { FakeSocket } from "../testUtils/fakeSocket";
-import en from "../app/i18n/en";
-import es from "../app/i18n/es";
-import { AckSocket } from "../app/utils/socketAck";
-import { canOfferStart, sendStartGame, START_ACK_TIMEOUT_MS, startNoticeText } from "../app/utils/startGame";
+import en from "../src/i18n/en";
+import es from "../src/i18n/es";
+import { AckSocket } from "../src/utils/socketAck";
+import { canOfferStart, sendStartGame, START_ACK_TIMEOUT_MS, startNoticeText } from "../src/utils/startGame";
 
 // EXP-379: start-game resolves with the server's ack (or null when none came), the host is only offered Start with 2
 // players who are not gone, and a start that didn't happen is explained.

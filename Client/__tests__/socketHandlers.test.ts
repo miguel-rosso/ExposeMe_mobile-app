@@ -1,4 +1,4 @@
-import { attachHandlers } from "../app/utils/socketHandlers";
+import { attachHandlers } from "../src/utils/socketHandlers";
 import { FakeSocket } from "../testUtils/fakeSocket";
 
 // EXP-248: a screen removes only the listeners it attached; others on the shared socket stay

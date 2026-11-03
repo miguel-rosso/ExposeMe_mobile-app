@@ -1,10 +1,10 @@
 import React from "react";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import { AppState, Image, StyleSheet, Text } from "react-native";
-import { TEST_IDS } from "../app/utils/testIds";
-import { BRAND_RED } from "../app/theme/brand";
-import en from "../app/i18n/en";
-import es from "../app/i18n/es";
+import { TEST_IDS } from "../src/utils/testIds";
+import { BRAND_RED } from "../src/theme/brand";
+import en from "../src/i18n/en";
+import es from "../src/i18n/es";
 import {
   HOME_TOP_ROW_TOP,
   LOGO_BOX_HEIGHT,
@@ -13,7 +13,7 @@ import {
   LOGO_EMOJI_FACE_TOP_INSET,
   LOGO_EMOJI_SIZE,
   LOGO_EMOJI_TOP,
-} from "../app/utils/homeLayout";
+} from "../src/utils/homeLayout";
 
 // EXP-270: home banner for players who only share some photos (iOS limited, Android 14+ selected photos), with a
 // button that opens the system picker to share more. Hidden with full access or no access at all.
@@ -37,13 +37,13 @@ jest.mock("expo-splash-screen", () => ({ preventAutoHideAsync: jest.fn(), hideAs
 jest.mock("@expo/vector-icons", () => ({ Ionicons: () => null }));
 jest.mock("@react-native-community/hooks", () => ({ useBackHandler: () => {} }));
 jest.mock("@/app/screens/InitialScreen", () => () => null);
-jest.mock("../app/components/LanguageToggle", () => () => null);
-jest.mock("../app/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: 1 }) }));
+jest.mock("../src/components/LanguageToggle", () => () => null);
+jest.mock("../src/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: 1 }) }));
 let mockLang: "en" | "es" = "en";
-jest.mock("../app/i18n", () => ({
-  useI18n: () => ({ t: mockLang === "es" ? require("../app/i18n/es").default : require("../app/i18n/en").default }),
+jest.mock("../src/i18n", () => ({
+  useI18n: () => ({ t: mockLang === "es" ? require("../src/i18n/es").default : require("../src/i18n/en").default }),
 }));
-jest.mock("../app/providers/GameContext", () => ({
+jest.mock("../src/providers/GameContext", () => ({
   useGameContext: () => ({
     username: "ana", saveUsername: jest.fn(), gameCode: null, setGameCode: jest.fn(), socket: null, endSocket: jest.fn(),
     takeHomeNotice: () => null,
@@ -79,7 +79,7 @@ jest.mock("expo-media-library", () => {
 });
 
 import Index from "../app/index";
-import { PhotoProvider } from "../app/providers/PhotoContext";
+import { PhotoProvider } from "../src/providers/PhotoContext";
 
 let appStateHandlers: ((s: string) => void)[] = [];
 beforeAll(() => {

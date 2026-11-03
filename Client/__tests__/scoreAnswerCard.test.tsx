@@ -1,15 +1,15 @@
 import React, { Profiler } from "react";
 import { AccessibilityInfo, NativeModules } from "react-native";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
-import { ScoreRound } from "../app/models/interfaces";
-import { TEST_IDS, scoreGuessId } from "../app/utils/testIds";
-import { getWinners } from "../app/utils/ranking";
-import ScoreModal from "../app/components/modals/ScoreModal";
-import WinnerModal from "../app/components/modals/WinnerModal";
-import FinalScoreModal from "../app/components/modals/FinalScoreModal";
-import { resetReduceMotionSettingForTests, useReduceMotion } from "../app/hooks/useReduceMotion";
-import en from "../app/i18n/en";
-import es from "../app/i18n/es";
+import { ScoreRound } from "../src/models/interfaces";
+import { TEST_IDS, scoreGuessId } from "../src/utils/testIds";
+import { getWinners } from "../src/utils/ranking";
+import ScoreModal from "../src/components/modals/ScoreModal";
+import WinnerModal from "../src/components/modals/WinnerModal";
+import FinalScoreModal from "../src/components/modals/FinalScoreModal";
+import { resetReduceMotionSettingForTests, useReduceMotion } from "../src/hooks/useReduceMotion";
+import en from "../src/i18n/en";
+import es from "../src/i18n/es";
 
 // EXP-252: the round scoreboard shows whose photo it was in a highlighted card with the name in large type; the
 // owner (who only learns it here) gets "It was your photo!" instead. The owner votes like everyone, so their row shows
@@ -17,13 +17,13 @@ import es from "../app/i18n/es";
 // EXP-120: "1 point" singular in WinnerModal.
 
 let mockT: typeof en | typeof es = en;
-jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: mockT }) }));
+jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: mockT }) }));
 jest.mock("lottie-react-native", () => "LottieView");
 jest.mock("react-native-vector-icons/FontAwesome", () => "Icon");
 jest.mock("@expo/vector-icons", () => ({ Ionicons: "Ionicons" }));
 jest.mock("expo-linear-gradient", () => ({ LinearGradient: "LinearGradient" }));
 jest.mock("expo-router", () => ({ useRouter: () => ({ replace: jest.fn() }) }));
-jest.mock("../app/providers/GameContext", () => ({
+jest.mock("../src/providers/GameContext", () => ({
   useGameContext: () => ({
     endSocket: jest.fn(), setRoundsOfGame: jest.fn(), setPlayersProvider: jest.fn(), clearRejoinToken: jest.fn(),
   }),

@@ -1,25 +1,25 @@
 import React from "react";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
-import { getWinners, hasResult, rankScores } from "../app/utils/ranking";
-import { ScoreRound } from "../app/models/interfaces";
-import { TEST_IDS, finalRankId, finalWinnerId, scoreRankId, winnerNameId } from "../app/utils/testIds";
-import WinnerModal from "../app/components/modals/WinnerModal";
-import FinalScoreModal from "../app/components/modals/FinalScoreModal";
-import ScoreModal from "../app/components/modals/ScoreModal";
-import en from "../app/i18n/en";
-import es from "../app/i18n/es";
+import { getWinners, hasResult, rankScores } from "../src/utils/ranking";
+import { ScoreRound } from "../src/models/interfaces";
+import { TEST_IDS, finalRankId, finalWinnerId, scoreRankId, winnerNameId } from "../src/utils/testIds";
+import WinnerModal from "../src/components/modals/WinnerModal";
+import FinalScoreModal from "../src/components/modals/FinalScoreModal";
+import ScoreModal from "../src/components/modals/ScoreModal";
+import en from "../src/i18n/en";
+import es from "../src/i18n/es";
 
 // EXP-085 / DEC-013: tied players share the position (1, 1, 3) and every player tied
 // for first is shown as a winner.
 
 let mockT: typeof en | typeof es = en;
-jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: mockT }) }));
+jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: mockT }) }));
 jest.mock("lottie-react-native", () => "LottieView");
 jest.mock("react-native-vector-icons/FontAwesome", () => "Icon");
 jest.mock("@expo/vector-icons", () => ({ Ionicons: "Ionicons" }));
 jest.mock("expo-linear-gradient", () => ({ LinearGradient: "LinearGradient" }));
 jest.mock("expo-router", () => ({ useRouter: () => ({ replace: jest.fn() }) }));
-jest.mock("../app/providers/GameContext", () => ({
+jest.mock("../src/providers/GameContext", () => ({
   useGameContext: () => ({
     endSocket: jest.fn(), setRoundsOfGame: jest.fn(), setPlayersProvider: jest.fn(), clearRejoinToken: jest.fn(),
   }),

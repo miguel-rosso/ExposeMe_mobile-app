@@ -1,8 +1,8 @@
 import React from "react";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import { StyleSheet, Text } from "react-native";
-import CustomCarousel from "../app/components/CustomCarousel/CustomCarousel";
-import { CustomCarouselProps } from "../app/components/CustomCarousel/Interfaces";
+import CustomCarousel from "../src/components/CustomCarousel/CustomCarousel";
+import { CustomCarouselProps } from "../src/components/CustomCarousel/Interfaces";
 
 // EXP-019: the indicator radius prop was typed with a typo (`inidicatorBorderRadius`), which broke `tsc`.
 // Renamed to `indicatorBorderRadius`; this guards that the rename keeps the rendered radius (default 5,

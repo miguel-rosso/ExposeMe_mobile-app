@@ -1,5 +1,5 @@
 # Cold-start the dev client pointed at local Metro and get past first-run screens.
-# App screens are matched by testID (Client/app/utils/testIds.ts); text only checks the language of an element matched
+# App screens are matched by testID (Client/src/utils/testIds.ts); text only checks the language of an element matched
 # by id, or finds the Expo dev-client UI (dev-client-boot.yaml) and the system photo alert
 # (qa/lab/tests/maestro-selectors.test.sh). env: METRO_URL (url-encoded)
 appId: com.socketNull.ExposeMe

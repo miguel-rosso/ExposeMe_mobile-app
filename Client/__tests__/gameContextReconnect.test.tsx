@@ -13,7 +13,7 @@ const mockSocket = { connected: true, connect: jest.fn(), disconnect: jest.fn(),
 const mockIo = jest.fn((..._args: unknown[]) => mockSocket);
 jest.mock("socket.io-client", () => ({ io: (...args: unknown[]) => mockIo(...args) }));
 
-import { GameProvider, useGameContext } from "../app/providers/GameContext";
+import { GameProvider, useGameContext } from "../src/providers/GameContext";
 
 describe("GameContext socket", () => {
   it("never gives up reconnecting, and reconnects when the app returns to the foreground", () => {

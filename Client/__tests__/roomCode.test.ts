@@ -1,4 +1,4 @@
-import { isRoomCode, parseRoomCodeParam, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH, sanitizeRoomCodeInput } from "../app/utils/roomCode";
+import { isRoomCode, parseRoomCodeParam, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH, sanitizeRoomCodeInput } from "../src/utils/roomCode";
 
 // EXP-198: 6-character codes from the server's unambiguous alphanumeric alphabet (DEC-022).
 

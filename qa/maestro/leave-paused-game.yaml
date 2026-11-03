@@ -5,7 +5,7 @@
 #   qa/lab/lab.sh play --flow leave-paused-game --bots 1 --rounds 3 --devices <label> \
 #     --bot-args "--drop-round 2 --drop-secs 60"
 # env: GAME_CODE, USERNAME, METRO_URL (url-encoded)
-# Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
+# Selectors are testIDs (Client/src/utils/testIds.ts), so the flow works in any UI language.
 # lab: one device (a second device keeps 2 players connected when the bot drops, so the game never pauses)
 appId: com.socketNull.ExposeMe
 ---

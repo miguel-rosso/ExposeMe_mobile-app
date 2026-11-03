@@ -1,4 +1,4 @@
-import { handleHomeBackPress } from "../app/utils/homeBackPress";
+import { handleHomeBackPress } from "../src/utils/homeBackPress";
 
 const setup = (keyboardVisible: boolean, isJoiningGame: boolean) => {
   const keyboard = { isVisible: jest.fn(() => keyboardVisible), dismiss: jest.fn() };

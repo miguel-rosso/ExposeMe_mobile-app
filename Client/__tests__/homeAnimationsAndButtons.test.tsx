@@ -1,7 +1,7 @@
 import React from "react";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import { StyleSheet, Text } from "react-native";
-import { TEST_IDS } from "../app/utils/testIds";
+import { TEST_IDS } from "../src/utils/testIds";
 
 // EXP-331 (characterization): the home screen's custom animations, its three brand buttons and the logo's shadow,
 // pinned so that moving them out of app/index.tsx keeps exactly the same look and motion.
@@ -50,15 +50,15 @@ jest.mock("expo-splash-screen", () => ({ preventAutoHideAsync: jest.fn(), hideAs
 jest.mock("@expo/vector-icons", () => ({ Ionicons: () => null }));
 jest.mock("@react-native-community/hooks", () => ({ useBackHandler: () => {} }));
 jest.mock("@/app/screens/InitialScreen", () => () => null);
-jest.mock("../app/components/LanguageToggle", () => () => null);
-jest.mock("../app/components/LimitedAccessBanner", () => () => null);
-jest.mock("../app/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: 1 }) }));
-jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/en").default }) }));
-jest.mock("@/app/hooks/useGalleryAccessGuard", () => ({
+jest.mock("../src/components/LanguageToggle", () => () => null);
+jest.mock("../src/components/LimitedAccessBanner", () => () => null);
+jest.mock("../src/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: 1 }) }));
+jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: require("../src/i18n/en").default }) }));
+jest.mock("@/src/hooks/useGalleryAccessGuard", () => ({
   useGalleryAccessGuard: () => ({ check: async () => ({ status: "ok" }) }),
 }));
-jest.mock("@/app/components/modals/GalleryAccessModal", () => () => null);
-jest.mock("../app/providers/GameContext", () => {
+jest.mock("@/src/components/modals/GalleryAccessModal", () => () => null);
+jest.mock("../src/providers/GameContext", () => {
   const { useState } = require("react");
   return {
     useGameContext: () => {
@@ -73,7 +73,7 @@ jest.mock("../app/providers/GameContext", () => {
 });
 
 import Index from "../app/index";
-import en from "../app/i18n/en";
+import en from "../src/i18n/en";
 
 const { __registry: registry, __calls: animationCalls } = jest.requireMock("react-native-animatable") as {
   __registry: Record<string, unknown>;

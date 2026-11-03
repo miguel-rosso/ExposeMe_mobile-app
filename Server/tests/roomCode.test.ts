@@ -20,7 +20,7 @@ describe("room code alphabet", () => {
   it("is pinned, and the app and the lab bots use the very same one", () => {
     expect(ROOM_CODE_ALPHABET).toBe(PINNED_ALPHABET);
     const repo = path.resolve(__dirname, "../..");
-    for (const file of ["Client/app/utils/roomCode.ts", "qa/lab/bots.mjs"]) {
+    for (const file of ["Client/src/utils/roomCode.ts", "qa/lab/bots.mjs"]) {
       const source = fs.readFileSync(path.join(repo, file), "utf8");
       expect(source, file).toContain(`const ROOM_CODE_ALPHABET = "${PINNED_ALPHABET}";`);
     }

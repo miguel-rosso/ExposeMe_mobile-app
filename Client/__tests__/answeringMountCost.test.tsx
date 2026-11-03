@@ -14,7 +14,7 @@ import { honourNativeAnimationDurations } from "../testUtils/nativeAnimations";
 // and the emoji buttons.
 
 // The real ids, for the checks below (the module is mocked to count renders)
-const { TEST_IDS, emojiButtonId } = jest.requireActual<typeof import("../app/utils/testIds")>("../app/utils/testIds");
+const { TEST_IDS, emojiButtonId } = jest.requireActual<typeof import("../src/utils/testIds")>("../src/utils/testIds");
 
 jest.mock("@react-native-async-storage/async-storage", () =>
   require("@react-native-async-storage/async-storage/jest/async-storage-mock")
@@ -28,7 +28,7 @@ const mockPlayers = Array.from({ length: PLAYER_COUNT }, (_, i) => ({
 jest.mock("expo-router", () => ({
   useRouter: () => ({ replace: jest.fn() }), useLocalSearchParams: () => ({}), useFocusEffect: () => {},
 }));
-jest.mock("../app/providers/GameContext", () => ({
+jest.mock("../src/providers/GameContext", () => ({
   useGameContext: () => {
     const [playersProvider, setPlayersProvider] = require("react").useState(mockPlayers);
     return {
@@ -38,22 +38,22 @@ jest.mock("../app/providers/GameContext", () => ({
     };
   },
 }));
-jest.mock("../app/providers/PhotoContext", () => ({
+jest.mock("../src/providers/PhotoContext", () => ({
   usePhotoContext: () => ({ pickGamePhoto: jest.fn(), setPhotoUri: jest.fn() }),
 }));
-jest.mock("@/app/hooks/useGalleryAccessGuard", () => ({
+jest.mock("@/src/hooks/useGalleryAccessGuard", () => ({
   useGalleryAccessGuard: () => ({ blocked: null, check: jest.fn(), selectMore: jest.fn() }),
 }));
-jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/en").default }) }));
+jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: require("../src/i18n/en").default }) }));
 // A plain glyph: the icon font isn't loaded in tests
 jest.mock("react-native-vector-icons/FontAwesome", () => "Icon");
-jest.mock("@/app/components/modals/FinalScoreModal", () => () => null);
-jest.mock("@/app/components/modals/WinnerModal", () => () => null);
+jest.mock("@/src/components/modals/FinalScoreModal", () => () => null);
+jest.mock("@/src/components/modals/WinnerModal", () => () => null);
 // Every render of an answer option, the emoji buttons, the photo and the scoreboard: each one asks for its testID once
 // per render (the emoji buttons, one per button: the first one counts)
 const mockRenders = { options: 0, emojiButtons: 0, photo: 0, scoreboard: 0 };
-jest.mock("../app/utils/testIds", () => {
-  const actual = jest.requireActual("../app/utils/testIds");
+jest.mock("../src/utils/testIds", () => {
+  const actual = jest.requireActual("../src/utils/testIds");
   const countedId = (part: keyof typeof mockRenders, id: string) =>
     ({ enumerable: true, get: () => { mockRenders[part]++; return id; } });
   return {

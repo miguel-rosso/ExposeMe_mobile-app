@@ -515,11 +515,11 @@ const PAUSE_MIN_DURATION = 2_000;
 const OFFLINE_LEAVE_AWAY_MS = 2 * PAUSE_MIN_DURATION;
 const LEAVE_OWNER = !!args["leave-owner"]; // --leave-owner: round LEAVE_ROUND's photo owner leaves instead
 if (LEAVE_OWNER && !LEAVE_ROUND) exitUsage("--leave-owner needs --leave-round");
-// Like the app (Client/app/utils/leaveRoom.ts): the leaver closes its socket once leave-room is acked, or after this
+// Like the app (Client/src/utils/leaveRoom.ts): the leaver closes its socket once leave-room is acked, or after this
 const LEAVE_ACK_TIMEOUT_MS = 1_000;
-// Like the app (Client/app/utils/plantPhotoAck.ts): a planted photo counts as sent only once plant-photo is acked ok
+// Like the app (Client/src/utils/plantPhotoAck.ts): a planted photo counts as sent only once plant-photo is acked ok
 const PLANT_ACK_TIMEOUT_MS = 5_000;
-// Like the app (Client/app/utils/startGame.ts): the host's start-game waits this long for its ack
+// Like the app (Client/src/utils/startGame.ts): the host's start-game waits this long for its ack
 const START_ACK_TIMEOUT_MS = 5_000;
 // A lobby kick waits this long after NAME joined, like a host reading the list (and so a device's flow sees its lobby)
 const LOBBY_KICK_DELAY_MS = 5_000;

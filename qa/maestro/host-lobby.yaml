@@ -1,5 +1,5 @@
 # Device creates the room (bots then join with --code). Writes nothing; read the code from the screenshot/logs.
-# Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
+# Selectors are testIDs (Client/src/utils/testIds.ts), so the flow works in any UI language.
 appId: com.socketNull.ExposeMe
 ---
 - runFlow: open-app.yaml

@@ -1,8 +1,8 @@
 import React from "react";
 import TestRenderer, { act } from "react-test-renderer";
 import type { Socket } from "socket.io-client";
-import { useScreenshotReaction } from "../app/hooks/useScreenshotReaction";
-import { SCREENSHOT_EMOJI } from "../app/utils/reactions";
+import { useScreenshotReaction } from "../src/hooks/useScreenshotReaction";
+import { SCREENSHOT_EMOJI } from "../src/utils/reactions";
 
 // EXP-274: a screenshot taken offline is not sent. socket.io would buffer it and flush it on the new socket before the
 // rejoin, where the server drops it (spending that socket's emoji-reaction limit).

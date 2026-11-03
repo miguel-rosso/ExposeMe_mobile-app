@@ -1,9 +1,9 @@
 import React from "react";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
-import { TEST_IDS } from "../app/utils/testIds";
-import { ScoreRound } from "../app/models/interfaces";
-import WinnerModal from "../app/components/modals/WinnerModal";
-import FinalScoreModal from "../app/components/modals/FinalScoreModal";
+import { TEST_IDS } from "../src/utils/testIds";
+import { ScoreRound } from "../src/models/interfaces";
+import WinnerModal from "../src/components/modals/WinnerModal";
+import FinalScoreModal from "../src/components/modals/FinalScoreModal";
 
 // EXP-172: the winner and final screens keep the socket (the player is still in the room). "Play again" goes to the
 // lobby on the same socket and drops the planted photo of the game that ended (EXP-035); Exit leaves the room (the
@@ -17,12 +17,12 @@ const mockClearToken = jest.fn();
 const mockLeaveRoom = jest.fn();
 const mockMarkRoomExit = jest.fn();
 const mockSocket = { emit: jest.fn(), disconnect: jest.fn() };
-jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/en").default }) }));
+jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: require("../src/i18n/en").default }) }));
 jest.mock("lottie-react-native", () => "LottieView");
 jest.mock("@expo/vector-icons", () => ({ Ionicons: "Ionicons" }));
 jest.mock("expo-linear-gradient", () => ({ LinearGradient: "LinearGradient" }));
 jest.mock("expo-router", () => ({ useRouter: () => ({ replace: mockReplace, dismissTo: mockDismissTo }) }));
-jest.mock("../app/providers/GameContext", () => ({
+jest.mock("../src/providers/GameContext", () => ({
   useGameContext: () => ({
     socket: mockSocket, endSocket: mockEndSocket, setRoundsOfGame: jest.fn(), setPlayersProvider: jest.fn(),
     clearRejoinToken: mockClearToken, setPlantedPhotoUri: mockSetPlanted, leaveRoom: mockLeaveRoom,

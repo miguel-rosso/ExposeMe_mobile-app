@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The boot flows find the app by testID, never by its translated text (EXP-048): open-app.yaml and its
 # dev-client-boot.yaml subflow may only use text for the Expo dev-client UI and system alerts, or to check the
-# language of an element already matched by id. A text selector that matches any app string (Client/app/i18n) breaks
+# language of an element already matched by id. A text selector that matches any app string (Client/src/i18n) breaks
 # in other languages and can hit the app instead of the dev menu. hold-used-up.yaml and hold-closed.yaml filter the
 # hold button by its noHoldsLeft text: in both languages, as the app has it (EXP-176, EXP-354). The kick flows read the
 # host's removal notice, a system alert, by its text: message, title and button as the app has them in both languages
@@ -11,7 +11,7 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MAESTRO_DIR="${MAESTRO_DIR:-$HERE/../../maestro}"
-CLIENT_APP="$HERE/../../../Client/app"
+CLIENT_APP="$HERE/../../../Client/src"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 pass=0 fail=0
 ok() { pass=$((pass + 1)); echo "ok   - $1"; }
@@ -76,7 +76,7 @@ app_text_hits() {
   ' "$1" "$2"
 }
 
-# unknown_ids FLOW -> each alternative of an `id:` selector that matches no testID in Client/app/utils/testIds.ts:
+# unknown_ids FLOW -> each alternative of an `id:` selector that matches no testID in Client/src/utils/testIds.ts:
 # neither one of its strings nor an id of one of its helpers (`(username: string) => \`winner-name-${username}\``).
 # A helper's id is its prefix followed by a flow variable (${USERNAME}), .* / .+, or a value of the helper's
 # parameter: a name (letters, digits, "_": no "-", so a misspelt longer prefix like lobby-player-offlne-bot1 is not
@@ -183,7 +183,7 @@ want="$(tr '|' '\n' <<<"$bad_ids" | sort | tr '\n' '|')"
 
 # ── The boot flows find the app by testID ──
 app_strings "$TMP/strings" "$CLIENT_APP"
-[ "$(tr '\0' '\n' <"$TMP/strings" | grep -c .)" -gt 100 ] && ok "app strings read from Client/app/i18n" || ko "app strings read from Client/app/i18n"
+[ "$(tr '\0' '\n' <"$TMP/strings" | grep -c .)" -gt 100 ] && ok "app strings read from Client/src/i18n" || ko "app strings read from Client/src/i18n"
 for flow in $BOOT_FLOWS; do
   text_selectors "$MAESTRO_DIR/$flow" >"$TMP/selectors"
   hits="$(app_text_hits "$TMP/selectors" "$TMP/strings")"

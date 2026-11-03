@@ -1,10 +1,10 @@
 import fs from "fs";
 import path from "path";
-import en from "../app/i18n/en";
-import es from "../app/i18n/es";
+import en from "../src/i18n/en";
+import es from "../src/i18n/es";
 import {
   KICKED_BY_HOST_MESSAGE, KNOWN_SERVER_MESSAGES, serverMessageKey, translateServerMessage, UNKNOWN_SERVER_MESSAGE_KEY,
-} from "../app/utils/serverMessage";
+} from "../src/utils/serverMessage";
 
 // EXP-180 / EXP-036: server error texts (room-of-game refusals, connect_error) are shown in the user's language,
 // and anything unknown falls back to a generic localized message instead of raw English.

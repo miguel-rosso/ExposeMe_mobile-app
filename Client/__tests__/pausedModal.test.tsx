@@ -1,16 +1,16 @@
 import React from "react";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import { Text } from "react-native";
-import PausedModal from "../app/components/modals/PausedModal";
-import { TEST_IDS } from "../app/utils/testIds";
-import en from "../app/i18n/en";
-import es from "../app/i18n/es";
+import PausedModal from "../src/components/modals/PausedModal";
+import { TEST_IDS } from "../src/utils/testIds";
+import en from "../src/i18n/en";
+import es from "../src/i18n/es";
 
 // EXP-084 / DEC-012: each pause has its own 5:00 countdown and there are at most 3 per game.
 // The modal shows "Pause N of M" and, on the last one, that the game ends if nobody comes back.
 
 let mockT: typeof en | typeof es = en;
-jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: mockT }) }));
+jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: mockT }) }));
 
 const text = (root: ReactTestInstance, id: string) => {
   const found = root.findAll((n) => n.props.testID === id && typeof n.type === "string", { deep: true });

@@ -2,9 +2,9 @@ import React from "react";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import { BackHandler } from "react-native";
 import { FakeSocket } from "../testUtils/fakeSocket";
-import { TEST_IDS } from "../app/utils/testIds";
-import en from "../app/i18n/en";
-import es from "../app/i18n/es";
+import { TEST_IDS } from "../src/utils/testIds";
+import en from "../src/i18n/en";
+import es from "../src/i18n/es";
 // Loaded with the file (jest.mock calls below are hoisted above it): a cold transform must not hit the test timeout
 import GameScreen from "../app/screens/GameScreen";
 
@@ -31,7 +31,7 @@ jest.mock("expo-router", () => ({
   // Focused for the whole test: the Android back handler is subscribed on mount
   useFocusEffect: (effect: () => void | (() => void)) => require("react").useEffect(effect, []),
 }));
-jest.mock("../app/providers/GameContext", () => ({
+jest.mock("../src/providers/GameContext", () => ({
   useGameContext: () => ({
     username: "bob", gameCode: "123456", socket: mockSocket, endSocket: jest.fn(),
     playersProvider: mockPlayers, setPlayersProvider: jest.fn(), roundsOfGame: 10, plantedPhotoUri: null,
@@ -40,27 +40,27 @@ jest.mock("../app/providers/GameContext", () => ({
     markRoomExit: mockMarkRoomExit, leaveRoom: mockLeaveRoom,
   }),
 }));
-jest.mock("../app/providers/PhotoContext", () => ({
+jest.mock("../src/providers/PhotoContext", () => ({
   usePhotoContext: () => ({ pickGamePhoto: jest.fn(), setPhotoUri: jest.fn() }),
 }));
 // null: photo access is fine; a status: the game's blocking gallery notice is up
 let mockGalleryBlocked: { status: string; limited: boolean; canAskAgain: boolean } | null = null;
-jest.mock("@/app/hooks/useGalleryAccessGuard", () => ({
+jest.mock("@/src/hooks/useGalleryAccessGuard", () => ({
   useGalleryAccessGuard: () => ({ blocked: mockGalleryBlocked, check: jest.fn(), selectMore: jest.fn() }),
 }));
 let mockT: typeof en | typeof es = en;
-jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: mockT }) }));
+jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: mockT }) }));
 jest.mock("react-native-animatable", () => {
   const { View } = require("react-native");
   return { View };
 });
-jest.mock("@/app/components/PhotoComponent", () => () => null);
-jest.mock("@/app/components/modals/ScoreModal", () => () => null);
-jest.mock("@/app/components/modals/FinalScoreModal", () => () => null);
-jest.mock("@/app/components/modals/WinnerModal", () => () => null);
-jest.mock("@/app/components/IngameComunication/EmojiReaction", () => () => null);
-jest.mock("@/app/components/IngameComunication/EmojisButtons", () => () => null);
-jest.mock("@/app/components/ProgressBar", () => () => null);
+jest.mock("@/src/components/PhotoComponent", () => () => null);
+jest.mock("@/src/components/modals/ScoreModal", () => () => null);
+jest.mock("@/src/components/modals/FinalScoreModal", () => () => null);
+jest.mock("@/src/components/modals/WinnerModal", () => () => null);
+jest.mock("@/src/components/IngameComunication/EmojiReaction", () => () => null);
+jest.mock("@/src/components/IngameComunication/EmojisButtons", () => () => null);
+jest.mock("@/src/components/ProgressBar", () => () => null);
 
 let backHandlers: (() => boolean | null | undefined)[] = [];
 beforeAll(() => { jest.spyOn(console, "log").mockImplementation(() => {}); });

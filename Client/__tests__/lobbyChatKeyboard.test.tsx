@@ -1,16 +1,16 @@
 import React from "react";
 import TestRenderer, { act } from "react-test-renderer";
 import { Keyboard } from "react-native";
-import { LobbyChatFooter } from "../app/components/LobbyChat";
-import type { LobbyChat } from "../app/hooks/useLobbyChat";
-import { TEST_IDS } from "../app/utils/testIds";
+import { LobbyChatFooter } from "../src/components/LobbyChat";
+import type { LobbyChat } from "../src/hooks/useLobbyChat";
+import { TEST_IDS } from "../src/utils/testIds";
 
 // EXP-378: the keyboard's return key sends the lobby chat message and keeps the keyboard up to go on chatting; with
 // nothing typed it closes the keyboard. The send button closes it once the message is out. Those are the lobby's ways
 // back to the room on iOS. A refused send leaves the keyboard up.
 
 jest.mock("@expo/vector-icons", () => ({ Ionicons: () => null }));
-jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/en").default }) }));
+jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: require("../src/i18n/en").default }) }));
 jest.mock("expo-router", () => require("../testUtils/screenNavigation").screenNavigationMock());
 
 /** A chat whose send goes out (true) or is refused (false: cooldown, offline) */

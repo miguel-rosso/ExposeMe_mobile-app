@@ -6,7 +6,7 @@
 # Maestro can miss it. Bots that also stay silent keep it on screen for the 15 s wait:
 #   qa/lab/lab.sh play --flow waiting-photo --bots 3 --devices pair --bot-args "--photo-unavailable 0.5 --upload-fail 1"
 # (3 skips in a row end the game; play-rounds.yaml then just reaches the results screen).
-# Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
+# Selectors are testIDs (Client/src/utils/testIds.ts), so the flow works in any UI language.
 # env: GAME_CODE, USERNAME, METRO_URL (url-encoded)
 appId: com.socketNull.ExposeMe
 ---

@@ -1,4 +1,4 @@
-import { routeNameBelow } from "../app/hooks/useRouteBelow";
+import { routeNameBelow } from "../src/hooks/useRouteBelow";
 
 // EXP-363: the waiting room tells an invite link pushed over the game screen from Play again (which replaces it) by
 // the route right under it in the root stack.

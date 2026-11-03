@@ -5,7 +5,7 @@
 # and cheap: no settle waits, no conditional reads (a `runFlow` whose `when` is only a `true:` script reads nothing),
 # no text search (a testID filtered by an env variable, like `text: "${USERNAME}"`, or by any text but one, like
 # `text: "(?!${USERNAME}$).+"`, is no UI string, and one filtered by an app string in every language, `"<en>|<es>"` of
-# one Client/app/i18n key, works in either: all are allowed).
+# one Client/src/i18n key, works in either: all are allowed).
 # A poll loop (EXP-353: a `repeat` whose `while` is a script bound in time by Date.now(), holding only looks and
 # assertTrue scripts) is one step: a wait like extendedWaitUntil that notes when each of its looks starts and ends.
 # Then play-rounds.yaml's scoreboard deadline is checked against GameEngine.ts, and the flow is played on a fake game
@@ -17,7 +17,7 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MAESTRO_DIR="${MAESTRO_DIR:-$HERE/../../maestro}"
-CLIENT_APP="$HERE/../../../Client/app"
+CLIENT_APP="$HERE/../../../Client/src"
 GAME_ENGINE="$HERE/../../../Server/managers/GameEngine.ts"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 pass=0 fail=0
@@ -387,8 +387,8 @@ done
 # ── Every flow's timed blocks fit their budget ──
 i18n_pairs "$CLIENT_APP" >"$I18N_PAIRS"
 grep -qxF "$(sed -nE 's/^  noHoldsLeft: "(.*)",$/\1/p' "$CLIENT_APP/i18n/en.ts")|$(sed -nE 's/^  noHoldsLeft: "(.*)",$/\1/p' "$CLIENT_APP/i18n/es.ts")" "$I18N_PAIRS" \
-  && ok "app strings read from Client/app/i18n ($(wc -l <"$I18N_PAIRS" | tr -d ' ') in both languages)" \
-  || ko "app strings read from Client/app/i18n" "$(head -3 "$I18N_PAIRS")"
+  && ok "app strings read from Client/src/i18n ($(wc -l <"$I18N_PAIRS" | tr -d ' ') in both languages)" \
+  || ko "app strings read from Client/src/i18n" "$(head -3 "$I18N_PAIRS")"
 for flow in "$MAESTRO_DIR"/*.yaml; do check_flow "$flow"; done
 
 # ── The round flows mark their timed phases ──

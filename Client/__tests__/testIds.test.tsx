@@ -5,14 +5,15 @@ import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import {
   TEST_IDS, playerOptionId, lobbyPlayerId, lobbyPlayerOfflineId, roundsOptionId, winnerNameId, finalWinnerId, finalRankId,
   scoreRankId, settingsStepId,
-} from "../app/utils/testIds";
-import AlertModal from "../app/components/modals/AlertModal";
-import CloseButton from "../app/components/CloseButton";
+} from "../src/utils/testIds";
+import AlertModal from "../src/components/modals/AlertModal";
+import CloseButton from "../src/components/CloseButton";
+import { listAppSources } from "../testUtils/appSources";
 
 // Icon fonts are not loadable under jest
 jest.mock("react-native-vector-icons/FontAwesome", () => "Icon");
 // The close button names itself for screen readers in the UI language
-jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/en").default }) }));
+jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: require("../src/i18n/en").default }) }));
 
 // Animatable schedules animation frames: keep them on fake timers and unmount after each render
 beforeEach(() => jest.useFakeTimers());
@@ -21,15 +22,7 @@ afterEach(() => {
   jest.useRealTimers();
 });
 
-const APP_DIR = path.join(__dirname, "../app");
 const MAESTRO_DIR = path.join(__dirname, "../../qa/maestro");
-
-const listSources = (dir: string): string[] =>
-  fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
-    const p = path.join(dir, e.name);
-    if (e.isDirectory()) return listSources(p);
-    return /\.tsx?$/.test(e.name) ? [p] : [];
-  });
 
 const hasTestID = (root: ReactTestInstance, id: string) =>
   root.findAll((n) => n.props.testID === id, { deep: true }).length > 0;
@@ -64,7 +57,7 @@ describe("E2E testIDs (EXP-008)", () => {
   });
 
   it("wires every registered id into a component", () => {
-    const sources = listSources(APP_DIR)
+    const sources = listAppSources()
       .filter((f) => !f.endsWith(path.join("utils", "testIds.ts")))
       .map((f) => fs.readFileSync(f, "utf8"))
       .join("\n");

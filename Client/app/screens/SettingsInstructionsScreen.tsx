@@ -13,16 +13,16 @@ import {
 } from "react-native";
 import tw from "twrnc";
 import { useRouter } from "expo-router";
-import CustomCarousel from "@/app/components/CustomCarousel/CustomCarousel";
+import CustomCarousel from "@/src/components/CustomCarousel/CustomCarousel";
 import PermInstruction1 from "@/assets/images/PermInstructions1.jpg";
 import PermInstruction2 from "@/assets/images/PermInstructions2.jpg";
 import PermInstruction3 from "@/assets/images/PermInstructions3.jpg";
 import IOSPermInstruction1 from "@/assets/images/IOSPermInstruction1.jpg";
 import IOSPermInstruction2 from "@/assets/images/IOSPermInstruction2.jpg";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-import { useI18n } from "../i18n";
-import { TEST_IDS, settingsStepId } from "../utils/testIds";
-import { HOME_PATH } from "../utils/homeRoute";
+import { useI18n } from "../../src/i18n";
+import { TEST_IDS, settingsStepId } from "../../src/utils/testIds";
+import { HOME_PATH } from "../../src/utils/homeRoute";
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get("window");
 // Gap kept between the buttons and the bottom inset (same as the p-4 padding on the other edges)

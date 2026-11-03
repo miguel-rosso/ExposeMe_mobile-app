@@ -17,36 +17,36 @@ import tw from "twrnc";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import InitialScreen from "@/app/screens/InitialScreen";
-import { useGameContext } from "@/app/providers/GameContext";
+import { useGameContext } from "@/src/providers/GameContext";
 import { StatusBar } from "react-native";
 import * as Animatable from "react-native-animatable";
-import { useFocusedBackHandler } from "@/app/hooks/useFocusedBackHandler";
-import { useKeyboardPadding } from "@/app/hooks/useKeyboardPadding";
+import { useFocusedBackHandler } from "@/src/hooks/useFocusedBackHandler";
+import { useKeyboardPadding } from "@/src/hooks/useKeyboardPadding";
 import { useFocusEffect } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import { useBackgroundContext } from "./providers/BackgroundContext";
-import { useGalleryAccessGuard } from "@/app/hooks/useGalleryAccessGuard";
-import { useExitAnimationNavigation } from "@/app/hooks/useExitAnimationNavigation";
-import GalleryAccessModal from "@/app/components/modals/GalleryAccessModal";
+import { useBackgroundContext } from "../src/providers/BackgroundContext";
+import { useGalleryAccessGuard } from "@/src/hooks/useGalleryAccessGuard";
+import { useExitAnimationNavigation } from "@/src/hooks/useExitAnimationNavigation";
+import GalleryAccessModal from "@/src/components/modals/GalleryAccessModal";
 import { Ionicons } from "@expo/vector-icons";
-import { useI18n } from "./i18n";
-import LanguageToggle from "./components/LanguageToggle";
-import LimitedAccessBanner from "./components/LimitedAccessBanner";
-import BrandButton from "./components/BrandButton";
-import { BRAND_DISPLAY_FONT, BRAND_LOGO_SHADOW } from "./theme/brand";
+import { useI18n } from "../src/i18n";
+import LanguageToggle from "../src/components/LanguageToggle";
+import LimitedAccessBanner from "../src/components/LimitedAccessBanner";
+import BrandButton from "../src/components/BrandButton";
+import { BRAND_DISPLAY_FONT, BRAND_LOGO_SHADOW } from "../src/theme/brand";
 import {
   HOME_ANIMATION_MS,
   REAPPEAR_BOUNCE_DOWN,
   REAPPEAR_BOUNCE_UP,
   registerHomeAnimations,
   SHAKE_MS,
-} from "./theme/homeAnimations";
-import { TEST_IDS } from "./utils/testIds";
-import { handleHomeBackPress } from "./utils/homeBackPress";
-import { isRoomCode, sanitizeRoomCodeInput } from "./utils/roomCode";
-import { translateServerMessage } from "./utils/serverMessage";
-import { MAX_USERNAME_INPUT_LENGTH } from "./utils/protocolLimits";
-import { normalizeUsername } from "./utils/username";
+} from "../src/theme/homeAnimations";
+import { TEST_IDS } from "../src/utils/testIds";
+import { handleHomeBackPress } from "../src/utils/homeBackPress";
+import { isRoomCode, sanitizeRoomCodeInput } from "../src/utils/roomCode";
+import { translateServerMessage } from "../src/utils/serverMessage";
+import { MAX_USERNAME_INPUT_LENGTH } from "../src/utils/protocolLimits";
+import { normalizeUsername } from "../src/utils/username";
 import {
   HOME_TOP_ROW_HEIGHT,
   HOME_TOP_ROW_TOP,
@@ -54,7 +54,7 @@ import {
   LOGO_EMOJI_BOX_PERCENT,
   LOGO_EMOJI_TOP,
   logoEmojiScale,
-} from "./utils/homeLayout";
+} from "../src/utils/homeLayout";
 
 SplashScreen.preventAutoHideAsync();
 

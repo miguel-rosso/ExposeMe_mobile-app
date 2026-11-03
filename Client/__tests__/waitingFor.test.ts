@@ -1,7 +1,7 @@
-import en from "../app/i18n/en";
-import es from "../app/i18n/es";
-import { fillTemplate } from "../app/i18n/format";
-import { listWaitingNames, MAX_LISTED_WAITING_NAMES, waitingForText } from "../app/utils/waitingFor";
+import en from "../src/i18n/en";
+import es from "../src/i18n/es";
+import { fillTemplate } from "../src/i18n/format";
+import { listWaitingNames, MAX_LISTED_WAITING_NAMES, waitingForText } from "../src/utils/waitingFor";
 
 // EXP-380: the pause modal says whom the server waits for (game-paused `waitingFor`), readable for 1, 2 or many
 

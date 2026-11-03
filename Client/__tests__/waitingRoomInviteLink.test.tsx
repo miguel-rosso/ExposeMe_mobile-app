@@ -75,7 +75,7 @@ jest.mock("expo-router", () => ({
   useLocalSearchParams: () => (mockDeepLinkCode === undefined ? {} : { code: mockDeepLinkCode }),
   ...require("../testUtils/screenNavigation").screenNavigationMock(() => mockRoutesBelow),
 }));
-jest.mock("../app/providers/GameContext", () => {
+jest.mock("../src/providers/GameContext", () => {
   const { useSyncExternalStore } = require("react");
   const subscribe = (l: () => void) => {
     mockStore.listeners.add(l);
@@ -116,15 +116,15 @@ jest.mock("../app/providers/GameContext", () => {
     },
   };
 });
-jest.mock("../app/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: null }) }));
-jest.mock("../app/providers/PhotoContext", () => ({
+jest.mock("../src/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: null }) }));
+jest.mock("../src/providers/PhotoContext", () => ({
   usePhotoContext: () => ({
     requestGalleryPermission: jest.fn(),
     checkGalleryAccess: async () => ({ status: "ok", limited: false, canAskAgain: true }),
     selectMorePhotos: jest.fn(async () => {}),
   }),
 }));
-jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/en").default }) }));
+jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: require("../src/i18n/en").default }) }));
 jest.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 jest.mock("react-native-vector-icons/FontAwesome", () => "Icon");
 jest.mock("@expo/vector-icons", () => ({ Ionicons: "Ionicons" }));
@@ -132,11 +132,11 @@ jest.mock("react-native-animatable", () => ({ View: "AnimatableView", initialize
 jest.mock("expo-clipboard", () => ({ setStringAsync: jest.fn() }));
 jest.mock("expo-image-picker", () => ({ launchImageLibraryAsync: jest.fn() }));
 jest.mock("expo-linear-gradient", () => ({ LinearGradient: "LinearGradient" }));
-jest.mock("@/app/components/CloseButton", () => () => null);
-jest.mock("@/app/components/AnimatedDot", () => () => null);
-jest.mock("@/app/components/modals/AlertModal", () => () => null);
-jest.mock("@/app/components/IngameComunication/ChatMessage", () => "ChatMessage");
-jest.mock("@/app/components/SuccessAlert", () => () => null);
+jest.mock("@/src/components/CloseButton", () => () => null);
+jest.mock("@/src/components/AnimatedDot", () => () => null);
+jest.mock("@/src/components/modals/AlertModal", () => () => null);
+jest.mock("@/src/components/IngameComunication/ChatMessage", () => "ChatMessage");
+jest.mock("@/src/components/SuccessAlert", () => () => null);
 
 beforeAll(() => { jest.spyOn(console, "log").mockImplementation(() => {}); });
 afterAll(() => { jest.restoreAllMocks(); });

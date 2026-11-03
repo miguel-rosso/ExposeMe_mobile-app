@@ -8,8 +8,8 @@
 # the device owns about a third of the rounds:
 #   qa/lab/lab.sh play --flow hold-closed --bots 2 --rounds 10 --devices <label>
 # env: GAME_CODE, USERNAME, METRO_URL (url-encoded), LOBBY_WAIT_MS (optional; lab.sh play passes them)
-# Selectors are testIDs (Client/app/utils/testIds.ts). The button's text is filtered by noHoldsLeft in both languages
-# (Client/app/i18n, kept in sync by qa/lab/tests/maestro-selectors.test.sh); `enabled` is its disabled state.
+# Selectors are testIDs (Client/src/utils/testIds.ts). The button's text is filtered by noHoldsLeft in both languages
+# (Client/src/i18n, kept in sync by qa/lab/tests/maestro-selectors.test.sh); `enabled` is its disabled state.
 #
 # Timing: the look loop notes when the last look that found no button started (`hiddenFrom`): the phone painted the
 # scoreboard after it and before the look that saw it ended (`seenAt`). It may paint it up to 0.5 s after the server

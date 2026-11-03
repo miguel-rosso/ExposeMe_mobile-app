@@ -3,13 +3,13 @@ import { StyleSheet } from "react-native";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { FakeSocket } from "../testUtils/fakeSocket";
-import { TEST_IDS } from "../app/utils/testIds";
+import { TEST_IDS } from "../src/utils/testIds";
 // Loaded with the file (jest.mock calls below are hoisted above it): a cold transform must not hit the test timeout
 import GameScreen from "../app/screens/GameScreen";
-import EmojiReactionLane from "../app/components/IngameComunication/EmojiReactionLane";
-import EmojisButton from "../app/components/IngameComunication/EmojisButtons";
-import ScoreModal, { HOLD_BUTTON_CLEARANCE } from "../app/components/modals/ScoreModal";
-import { ANSWERS_BOTTOM, EMOJI_ROW_BOTTOM, HOLD_BUTTON_BOTTOM, LEAVE_BUTTON } from "../app/utils/gameRows";
+import EmojiReactionLane from "../src/components/IngameComunication/EmojiReactionLane";
+import EmojisButton from "../src/components/IngameComunication/EmojisButtons";
+import ScoreModal, { HOLD_BUTTON_CLEARANCE } from "../src/components/modals/ScoreModal";
+import { ANSWERS_BOTTOM, EMOJI_ROW_BOTTOM, HOLD_BUTTON_BOTTOM, LEAVE_BUTTON } from "../src/utils/gameRows";
 
 // EXP-205: the rows laid over the game photo (timer bar, reactions, answers, emoji row, hold button, reconnecting
 // banner) and the round scoreboard keep clear of the notch, the Dynamic Island, the home indicator and the navigation
@@ -28,25 +28,25 @@ const mockPlayers = ["alice", "bob", "carol"].map((username) => ({
 jest.mock("expo-router", () => ({
   useRouter: () => ({ replace: jest.fn() }), useLocalSearchParams: () => ({}), useFocusEffect: () => {},
 }));
-jest.mock("../app/providers/GameContext", () => ({
+jest.mock("../src/providers/GameContext", () => ({
   useGameContext: () => ({
     username: "bob", gameCode: "123456", socket: mockSocket, endSocket: jest.fn(),
     playersProvider: mockPlayers, setPlayersProvider: jest.fn(), roundsOfGame: 10, plantedPhotoUri: null,
     plantedPhotoSent: false, plantPhoto: jest.fn(), getRejoinToken: async () => "tok-123", saveRejoinToken: jest.fn(),
   }),
 }));
-jest.mock("../app/providers/PhotoContext", () => ({
+jest.mock("../src/providers/PhotoContext", () => ({
   usePhotoContext: () => ({ pickGamePhoto: jest.fn(), setPhotoUri: jest.fn() }),
 }));
-jest.mock("@/app/hooks/useGalleryAccessGuard", () => ({
+jest.mock("@/src/hooks/useGalleryAccessGuard", () => ({
   useGalleryAccessGuard: () => ({ blocked: null, check: jest.fn(), selectMore: jest.fn() }),
 }));
-jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/en").default }) }));
+jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: require("../src/i18n/en").default }) }));
 jest.mock("react-native-vector-icons/FontAwesome", () => "Icon");
-jest.mock("@/app/components/PhotoComponent", () => () => null);
-jest.mock("@/app/components/modals/FinalScoreModal", () => () => null);
-jest.mock("@/app/components/modals/WinnerModal", () => () => null);
-jest.mock("@/app/components/ProgressBar", () => () => null);
+jest.mock("@/src/components/PhotoComponent", () => () => null);
+jest.mock("@/src/components/modals/FinalScoreModal", () => () => null);
+jest.mock("@/src/components/modals/WinnerModal", () => () => null);
+jest.mock("@/src/components/ProgressBar", () => () => null);
 
 beforeAll(() => {
   jest.spyOn(console, "log").mockImplementation(() => {});

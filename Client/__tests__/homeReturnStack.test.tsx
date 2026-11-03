@@ -7,13 +7,13 @@ import Index from "../app/index";
 import WaitingRoom from "../app/screens/WaitingRoom";
 import GameScreen from "../app/screens/GameScreen";
 import SettingsInstructionsScreen from "../app/screens/SettingsInstructionsScreen";
-import { GameProvider, useGameContext } from "../app/providers/GameContext";
+import { GameProvider, useGameContext } from "../src/providers/GameContext";
 import type { FakeSocket } from "../testUtils/fakeSocket";
 import { openDeepLink, resetStack, routerCalls, StackScreens, stackPaths } from "../testUtils/stackRouter";
-import { TEST_IDS } from "../app/utils/testIds";
+import { TEST_IDS } from "../src/utils/testIds";
 import { pressInviteJoin } from "../testUtils/inviteConfirm";
-import { KICKED_BY_HOST_MESSAGE } from "../app/utils/serverMessage";
-import en from "../app/i18n/en";
+import { KICKED_BY_HOST_MESSAGE } from "../src/utils/serverMessage";
+import en from "../src/i18n/en";
 
 // EXP-339: home stays mounted at the bottom of the stack under the waiting room and the game screen. Every way back
 // (Exit, a refused join, kicked, the settings instructions' Back) pops to that same home instead of stacking a second
@@ -44,14 +44,14 @@ jest.mock("expo-router", () => require("../testUtils/stackRouter").expoRouterMoc
 
 jest.mock("expo-splash-screen", () => ({ preventAutoHideAsync: jest.fn(), hideAsync: jest.fn() }));
 jest.mock("@/app/screens/InitialScreen", () => () => null);
-jest.mock("../app/components/LanguageToggle", () => () => null);
-jest.mock("../app/components/LimitedAccessBanner", () => () => null);
-jest.mock("../app/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: null }) }));
+jest.mock("../src/components/LanguageToggle", () => () => null);
+jest.mock("../src/components/LimitedAccessBanner", () => () => null);
+jest.mock("../src/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: null }) }));
 const GALLERY_OK = { status: "ok", limited: false, canAskAgain: true };
 // Photo access denied for good: home's gallery gate offers "How to enable" (the settings instructions)
 const GALLERY_DENIED_FOR_GOOD = { status: "denied", limited: false, canAskAgain: false };
 let mockGalleryAccess = GALLERY_OK;
-jest.mock("../app/providers/PhotoContext", () => ({
+jest.mock("../src/providers/PhotoContext", () => ({
   usePhotoContext: () => ({
     requestGalleryPermission: jest.fn(),
     checkGalleryAccess: async () => mockGalleryAccess,
@@ -61,14 +61,14 @@ jest.mock("../app/providers/PhotoContext", () => ({
     setPhotoUri: jest.fn(),
   }),
 }));
-jest.mock("@/app/utils/uploadPhoto", () => ({ uploadPhoto: jest.fn() }));
+jest.mock("@/src/utils/uploadPhoto", () => ({ uploadPhoto: jest.fn() }));
 jest.mock("@/assets/images/PermInstructions1.jpg", () => "PermInstructions1", { virtual: true });
 jest.mock("@/assets/images/PermInstructions2.jpg", () => "PermInstructions2", { virtual: true });
 jest.mock("@/assets/images/PermInstructions3.jpg", () => "PermInstructions3", { virtual: true });
 jest.mock("@/assets/images/IOSPermInstruction2.jpg", () => "IOSPermInstruction2", { virtual: true });
 jest.mock("@/assets/images/IOSPermInstruction1.jpg", () => "IOSPermInstruction1", { virtual: true });
-jest.mock("@/app/components/CustomCarousel/CustomCarousel", () => () => null);
-jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/en").default }) }));
+jest.mock("@/src/components/CustomCarousel/CustomCarousel", () => () => null);
+jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: require("../src/i18n/en").default }) }));
 jest.mock("react-native-vector-icons/FontAwesome", () => "Icon");
 jest.mock("@expo/vector-icons", () => ({ Ionicons: "Ionicons" }));
 jest.mock("react-native-animatable", () => ({ View: "AnimatableView", initializeRegistryWithDefinitions: jest.fn() }));
@@ -76,18 +76,18 @@ jest.mock("expo-clipboard", () => ({ setStringAsync: jest.fn() }));
 jest.mock("expo-image-picker", () => ({ launchImageLibraryAsync: jest.fn() }));
 jest.mock("expo-linear-gradient", () => ({ LinearGradient: "LinearGradient" }));
 // The lobby's Exit button (X), pressed through its onPress
-jest.mock("@/app/components/CloseButton", () => "CloseButton");
-jest.mock("@/app/components/AnimatedDot", () => () => null);
-jest.mock("@/app/components/modals/AlertModal", () => () => null);
-jest.mock("@/app/components/IngameComunication/ChatMessage", () => "ChatMessage");
-jest.mock("@/app/components/SuccessAlert", () => () => null);
-jest.mock("@/app/components/PhotoComponent", () => () => null);
-jest.mock("@/app/components/modals/ScoreModal", () => () => null);
-jest.mock("@/app/components/modals/FinalScoreModal", () => () => null);
-jest.mock("@/app/components/modals/WinnerModal", () => () => null);
-jest.mock("@/app/components/IngameComunication/EmojiReaction", () => () => null);
-jest.mock("@/app/components/IngameComunication/EmojisButtons", () => () => null);
-jest.mock("@/app/components/ProgressBar", () => () => null);
+jest.mock("@/src/components/CloseButton", () => "CloseButton");
+jest.mock("@/src/components/AnimatedDot", () => () => null);
+jest.mock("@/src/components/modals/AlertModal", () => () => null);
+jest.mock("@/src/components/IngameComunication/ChatMessage", () => "ChatMessage");
+jest.mock("@/src/components/SuccessAlert", () => () => null);
+jest.mock("@/src/components/PhotoComponent", () => () => null);
+jest.mock("@/src/components/modals/ScoreModal", () => () => null);
+jest.mock("@/src/components/modals/FinalScoreModal", () => () => null);
+jest.mock("@/src/components/modals/WinnerModal", () => () => null);
+jest.mock("@/src/components/IngameComunication/EmojiReaction", () => () => null);
+jest.mock("@/src/components/IngameComunication/EmojisButtons", () => () => null);
+jest.mock("@/src/components/ProgressBar", () => () => null);
 
 // ── Android back: every screen's hardwareBackPress handlers, the newest first, as BackHandler runs them ──
 

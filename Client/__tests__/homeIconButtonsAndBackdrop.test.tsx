@@ -1,9 +1,9 @@
 import React from "react";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import { Image, Text } from "react-native";
-import { TEST_IDS } from "../app/utils/testIds";
-import en from "../app/i18n/en";
-import es from "../app/i18n/es";
+import { TEST_IDS } from "../src/utils/testIds";
+import en from "../src/i18n/en";
+import es from "../src/i18n/es";
 
 // EXP-046: the home screen's icon-only buttons (clear the name, clear the room code, open the Photo Explorer) have a
 // translated name for TalkBack / VoiceOver instead of being announced as a bare "button".
@@ -24,15 +24,15 @@ jest.mock("expo-splash-screen", () => ({ preventAutoHideAsync: jest.fn(), hideAs
 jest.mock("@expo/vector-icons", () => ({ Ionicons: () => null }));
 jest.mock("@react-native-community/hooks", () => ({ useBackHandler: () => {} }));
 jest.mock("@/app/screens/InitialScreen", () => () => null);
-jest.mock("@/app/components/modals/GalleryAccessModal", () => () => null);
-jest.mock("@/app/hooks/useGalleryAccessGuard", () => ({ useGalleryAccessGuard: () => ({ check: jest.fn() }) }));
-jest.mock("../app/components/LanguageToggle", () => () => null);
-jest.mock("../app/components/LimitedAccessBanner", () => () => null);
+jest.mock("@/src/components/modals/GalleryAccessModal", () => () => null);
+jest.mock("@/src/hooks/useGalleryAccessGuard", () => ({ useGalleryAccessGuard: () => ({ check: jest.fn() }) }));
+jest.mock("../src/components/LanguageToggle", () => () => null);
+jest.mock("../src/components/LimitedAccessBanner", () => () => null);
 const mockBackground = 7;
-jest.mock("../app/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: mockBackground }) }));
+jest.mock("../src/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: mockBackground }) }));
 let mockLang: "es" | "en" = "en";
-jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require(`../app/i18n/${mockLang}`).default }) }));
-jest.mock("../app/providers/GameContext", () => ({
+jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: require(`../src/i18n/${mockLang}`).default }) }));
+jest.mock("../src/providers/GameContext", () => ({
   useGameContext: () => ({
     username: "ana", saveUsername: jest.fn(), gameCode: null, setGameCode: jest.fn(), joinCodeDraft: "K7", setJoinCodeDraft: jest.fn(), socket: null, endSocket: jest.fn(),
   }),

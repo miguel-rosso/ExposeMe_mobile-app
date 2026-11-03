@@ -2,8 +2,8 @@ import fs from "fs";
 import path from "path";
 import {
   GAME_SCREEN_PATH, GAME_SCREEN_ROUTE_NAME, gameScreenAtStart, openingGameNumber, RESYNC_GAME_SCREEN,
-} from "../app/utils/gameScreenRoute";
-import { NO_GAME_NUMBER } from "../app/utils/roundState";
+} from "../src/utils/gameScreenRoute";
+import { NO_GAME_NUMBER } from "../src/utils/roundState";
 
 // EXP-368: the waiting room recognises the game screen under it by its route name in the root stack (EXP-363). That
 // name is derived from the screen's path, which only holds while app/_layout.tsx's Stack declares it as is and no

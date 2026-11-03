@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import React from "react";
 import TestRenderer, { act } from "react-test-renderer";
-import { TURN_ENDING_EVENTS, useTurnRequest } from "../app/hooks/useTurnRequest";
+import { TURN_ENDING_EVENTS, useTurnRequest } from "../src/hooks/useTurnRequest";
 
 // EXP-232: lifecycle of my own photo request, extracted from GameScreen
 

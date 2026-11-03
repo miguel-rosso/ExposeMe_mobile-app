@@ -1,7 +1,7 @@
 import React from "react";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import { Text } from "react-native";
-import { TEST_IDS } from "../app/utils/testIds";
+import { TEST_IDS } from "../src/utils/testIds";
 
 // EXP-243: opening the photo explorer animates every home element out and then pushes it. Home stays mounted
 // underneath, so when it is focused again (back) its elements must animate back in; otherwise the menu is left
@@ -56,15 +56,15 @@ jest.mock("expo-splash-screen", () => ({ preventAutoHideAsync: jest.fn(), hideAs
 jest.mock("@expo/vector-icons", () => ({ Ionicons: () => null }));
 jest.mock("@react-native-community/hooks", () => ({ useBackHandler: () => {} }));
 jest.mock("@/app/screens/InitialScreen", () => () => null);
-jest.mock("../app/components/LanguageToggle", () => () => null);
-jest.mock("../app/components/LimitedAccessBanner", () => () => null);
-jest.mock("@/app/components/modals/GalleryAccessModal", () => () => null);
-jest.mock("@/app/hooks/useGalleryAccessGuard", () => ({
+jest.mock("../src/components/LanguageToggle", () => () => null);
+jest.mock("../src/components/LimitedAccessBanner", () => () => null);
+jest.mock("@/src/components/modals/GalleryAccessModal", () => () => null);
+jest.mock("@/src/hooks/useGalleryAccessGuard", () => ({
   useGalleryAccessGuard: () => ({ blocked: null, check: jest.fn(), selectMore: jest.fn(), dismiss: jest.fn() }),
 }));
-jest.mock("../app/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: 1 }) }));
-jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/en").default }) }));
-jest.mock("../app/providers/GameContext", () => ({
+jest.mock("../src/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: 1 }) }));
+jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: require("../src/i18n/en").default }) }));
+jest.mock("../src/providers/GameContext", () => ({
   useGameContext: () => ({
     username: "ana", saveUsername: jest.fn(), gameCode: null, setGameCode: jest.fn(), socket: null, endSocket: jest.fn(),
     takeHomeNotice: () => null,
@@ -73,8 +73,8 @@ jest.mock("../app/providers/GameContext", () => ({
 }));
 
 import Index from "../app/index";
-import en from "../app/i18n/en";
-import { SCREEN_EXIT_ANIMATION_MS } from "../app/hooks/useExitAnimationNavigation";
+import en from "../src/i18n/en";
+import { SCREEN_EXIT_ANIMATION_MS } from "../src/hooks/useExitAnimationNavigation";
 
 const HOME_ANIMATED_ELEMENTS = 6; // logo, username, create, join, explorer button and its label
 

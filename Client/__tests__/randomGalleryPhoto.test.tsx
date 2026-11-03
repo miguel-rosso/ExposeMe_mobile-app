@@ -1,6 +1,6 @@
 import React from "react";
 import TestRenderer, { act } from "react-test-renderer";
-import { countPhotos, createRandomPhotoPicker, MAX_DRAWS_PER_PICK, PhotoAt } from "../app/utils/randomGalleryPhoto";
+import { countPhotos, createRandomPhotoPicker, MAX_DRAWS_PER_PICK, PhotoAt } from "../src/utils/randomGalleryPhoto";
 
 // EXP-174: a turn must not read the whole gallery to pick one photo. The image count is found once with
 // one-row probes and cached; each pick afterwards is a single one-row query at a random offset.
@@ -44,7 +44,7 @@ jest.mock("expo-media-library", () => {
   };
 });
 
-import { PhotoProvider, usePhotoContext } from "../app/providers/PhotoContext";
+import { PhotoProvider, usePhotoContext } from "../src/providers/PhotoContext";
 
 beforeAll(() => { jest.spyOn(console, "log").mockImplementation(() => {}); });
 afterAll(() => jest.restoreAllMocks());

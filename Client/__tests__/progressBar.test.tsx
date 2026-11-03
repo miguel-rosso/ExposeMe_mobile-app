@@ -1,7 +1,7 @@
 import React, { Profiler } from "react";
 import { Animated, StyleSheet } from "react-native";
 import TestRenderer, { act } from "react-test-renderer";
-import ProgressBar from "../app/components/ProgressBar";
+import ProgressBar from "../src/components/ProgressBar";
 import { honourNativeAnimationDurations } from "../testUtils/nativeAnimations";
 
 // EXP-175 / EXP-225: the bar animated its width on the JS thread, a layout pass and a JS frame of work for the whole

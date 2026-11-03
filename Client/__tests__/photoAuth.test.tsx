@@ -1,9 +1,9 @@
 import React from "react";
 import TestRenderer, { act } from "react-test-renderer";
 import { Image, Platform } from "react-native";
-import { photoAuthHeaders, resolvePhotoAuth } from "../app/utils/photoAuth";
-import { getImageSource } from "../app/utils/image";
-import PhotoComponent from "../app/components/PhotoComponent";
+import { photoAuthHeaders, resolvePhotoAuth } from "../src/utils/photoAuth";
+import { getImageSource } from "../src/utils/image";
+import PhotoComponent from "../src/components/PhotoComponent";
 import { FakeXhr, installFakeXhr } from "../testUtils/fakeXhr";
 
 // EXP-069: the server only serves a room's photos to its members, so the app sends the room code and the player's

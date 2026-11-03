@@ -19,7 +19,7 @@ const mockFinalProps: { visible?: boolean; finalScore?: unknown[] }[] = [];
 jest.mock("expo-router", () => ({
   useRouter: () => ({ replace: jest.fn() }), useLocalSearchParams: () => ({}), useFocusEffect: () => {},
 }));
-jest.mock("../app/providers/GameContext", () => ({
+jest.mock("../src/providers/GameContext", () => ({
   useGameContext: () => ({
     username: "bob", gameCode: "123456", socket: mockSocket, endSocket: jest.fn(),
     playersProvider: [], setPlayersProvider: jest.fn(), roundsOfGame: 10, plantedPhotoUri: null,
@@ -27,21 +27,21 @@ jest.mock("../app/providers/GameContext", () => ({
     setPlantedPhotoUri: jest.fn(),
   }),
 }));
-jest.mock("../app/providers/PhotoContext", () => ({
+jest.mock("../src/providers/PhotoContext", () => ({
   usePhotoContext: () => ({
     pickGamePhoto: jest.fn(), setPhotoUri: jest.fn(),
     checkGalleryAccess: async () => ({ status: "ok", limited: false, canAskAgain: true }), selectMorePhotos: jest.fn(async () => {}),
   }),
 }));
-jest.mock("@/app/utils/uploadPhoto", () => ({ uploadPhoto: jest.fn() }));
-jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/en").default }) }));
-jest.mock("@/app/components/PhotoComponent", () => () => null);
-jest.mock("@/app/components/modals/ScoreModal", () => () => null);
-jest.mock("@/app/components/modals/FinalScoreModal", () => (props: { visible?: boolean }) => { mockFinalProps.push(props); return null; });
-jest.mock("@/app/components/modals/WinnerModal", () => (props: { visible?: boolean }) => { mockWinnerProps.push(props); return null; });
-jest.mock("@/app/components/IngameComunication/EmojiReaction", () => () => null);
-jest.mock("@/app/components/IngameComunication/EmojisButtons", () => () => null);
-jest.mock("@/app/components/ProgressBar", () => () => null);
+jest.mock("@/src/utils/uploadPhoto", () => ({ uploadPhoto: jest.fn() }));
+jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: require("../src/i18n/en").default }) }));
+jest.mock("@/src/components/PhotoComponent", () => () => null);
+jest.mock("@/src/components/modals/ScoreModal", () => () => null);
+jest.mock("@/src/components/modals/FinalScoreModal", () => (props: { visible?: boolean }) => { mockFinalProps.push(props); return null; });
+jest.mock("@/src/components/modals/WinnerModal", () => (props: { visible?: boolean }) => { mockWinnerProps.push(props); return null; });
+jest.mock("@/src/components/IngameComunication/EmojiReaction", () => () => null);
+jest.mock("@/src/components/IngameComunication/EmojisButtons", () => () => null);
+jest.mock("@/src/components/ProgressBar", () => () => null);
 
 beforeAll(() => {
   jest.spyOn(console, "log").mockImplementation(() => {});

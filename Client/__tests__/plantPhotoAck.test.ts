@@ -1,7 +1,7 @@
 import { FakeSocket } from "../testUtils/fakeSocket";
 import {
   isFinalRefusal, isPhotoUnavailable, PLANT_ACK_TIMEOUT_MS, PlantingSocket, PlantPhotoAck, sendPlantPhoto,
-} from "../app/utils/plantPhotoAck";
+} from "../src/utils/plantPhotoAck";
 
 // EXP-152: plant-photo resolves with the server's ack, or null when the server may not have the photo.
 

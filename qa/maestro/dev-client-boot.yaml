@@ -1,6 +1,6 @@
 # Load the bundle from local Metro in a freshly launched dev client, keeping the Expo dev menu closed, ending on the app
 # (home or the first-run InitialScreen). Shared by open-app.yaml and flows that launch with other permissions.
-# The app is matched by testID (Client/app/utils/testIds.ts); only the Expo dev-client UI (always English) and the iOS
+# The app is matched by testID (Client/src/utils/testIds.ts); only the Expo dev-client UI (always English) and the iOS
 # link alert use text (checked by qa/lab/tests/maestro-selectors.test.sh). env: METRO_URL (url-encoded)
 # disableOnboarding=1 skips the dev-menu onboarding sheet, whose "Continue" button reads like the app's InitialScreen one.
 # The dev menu itself opens over the app at launch, which can happen after the app's testIDs show, and would then take

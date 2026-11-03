@@ -3,7 +3,7 @@
 # Run while the device is in a started game in room ${GAME_CODE} as ${USERNAME} (e.g. after join-room.yaml and
 # a game started with bots: node qa/lab/bots.mjs --bots 2 --code $GAME_CODE). env: METRO_URL (url-encoded). With 2 players the others see the
 # pause while the app is closed and the game resumes when it comes back.
-# Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
+# Selectors are testIDs (Client/src/utils/testIds.ts), so the flow works in any UI language.
 appId: com.socketNull.ExposeMe
 ---
 - stopApp

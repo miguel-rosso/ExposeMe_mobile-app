@@ -1,5 +1,5 @@
 # Play until GAME OVER: each round tap a guess, screenshot it and check the scoreboard.
-# Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
+# Selectors are testIDs (Client/src/utils/testIds.ts), so the flow works in any UI language.
 #
 # Timing (EXP-238, EXP-267, EXP-312): on a slow Android emulator every step that reads the screen takes 1-4 s, while the
 # server shows the options for 8.5 s (answering) + 3 s (reveal) and the scoreboard for 5 s. So each phase gets a few cheap

@@ -5,7 +5,7 @@ import {
   LOGO_EMOJI_SIZE,
   LOGO_EMOJI_TOP,
   logoEmojiScale,
-} from "../app/utils/homeLayout";
+} from "../src/utils/homeLayout";
 
 // EXP-281: with limited access the banner pill touched the logo emoji. The emoji now shrinks towards its bottom edge
 // just enough to clear the measured banner; nothing else in the logo moves.

@@ -1,6 +1,6 @@
 import type TestRenderer from "react-test-renderer";
 import { act } from "react-test-renderer";
-import { TEST_IDS } from "../app/utils/testIds";
+import { TEST_IDS } from "../src/utils/testIds";
 
 // The waiting room's invite dialog (InviteConfirmModal, DEC-046): an invite link joins nothing until Join.
 

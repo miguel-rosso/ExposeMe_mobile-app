@@ -8,7 +8,7 @@
 #   qa/lab/lab.sh play --flow leave-mid-game --bots 1 --rounds 3 --devices <label>
 # The same leave from the pause modal is leave-paused-game.yaml.
 # env: GAME_CODE, USERNAME, METRO_URL (url-encoded)
-# Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
+# Selectors are testIDs (Client/src/utils/testIds.ts), so the flow works in any UI language.
 appId: com.socketNull.ExposeMe
 ---
 - runFlow: open-app.yaml

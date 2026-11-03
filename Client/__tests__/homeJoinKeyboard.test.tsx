@@ -2,7 +2,7 @@ import React from "react";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import { Keyboard, Platform, StyleSheet, TouchableWithoutFeedback } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { TEST_IDS } from "../app/utils/testIds";
+import { TEST_IDS } from "../src/utils/testIds";
 
 // EXP-378: the join panel works with the keyboard. The room code field opens focused, its return key ("go") searches
 // the room, and a tap outside the field first only closes the keyboard; with the keyboard hidden it closes the panel.
@@ -37,18 +37,18 @@ jest.mock("expo-splash-screen", () => ({ preventAutoHideAsync: jest.fn(), hideAs
 jest.mock("@expo/vector-icons", () => ({ Ionicons: () => null }));
 jest.mock("@react-native-community/hooks", () => ({ useBackHandler: () => {} }));
 jest.mock("@/app/screens/InitialScreen", () => () => "initial-screen");
-jest.mock("../app/components/LanguageToggle", () => () => null);
-jest.mock("../app/components/LimitedAccessBanner", () => () => null);
-jest.mock("../app/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: 1 }) }));
-jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/en").default }) }));
-jest.mock("@/app/hooks/useGalleryAccessGuard", () => ({
+jest.mock("../src/components/LanguageToggle", () => () => null);
+jest.mock("../src/components/LimitedAccessBanner", () => () => null);
+jest.mock("../src/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: 1 }) }));
+jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: require("../src/i18n/en").default }) }));
+jest.mock("@/src/hooks/useGalleryAccessGuard", () => ({
   useGalleryAccessGuard: () => ({ check: async () => ({ status: "ok" }) }),
 }));
-jest.mock("@/app/components/modals/GalleryAccessModal", () => () => null);
+jest.mock("@/src/components/modals/GalleryAccessModal", () => () => null);
 
 import Index from "../app/index";
-import { GameProvider } from "../app/providers/GameContext";
-import en from "../app/i18n/en";
+import { GameProvider } from "../src/providers/GameContext";
+import en from "../src/i18n/en";
 
 beforeAll(() => jest.spyOn(console, "log").mockImplementation(() => {}));
 afterAll(() => jest.restoreAllMocks());

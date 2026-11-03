@@ -9,17 +9,17 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 jest.mock("@react-native-async-storage/async-storage", () =>
   require("@react-native-async-storage/async-storage/jest/async-storage-mock"));
 jest.mock("expo-router", () => ({ useRouter: () => ({ replace: jest.fn(), push: jest.fn() }) }));
-jest.mock("@/app/providers/PhotoContext", () => ({ usePhotoContext: () => ({ handleContinue: jest.fn() }) }));
-jest.mock("@/app/components/CustomCarousel/CustomCarousel", () => () => null);
+jest.mock("@/src/providers/PhotoContext", () => ({ usePhotoContext: () => ({ handleContinue: jest.fn() }) }));
+jest.mock("@/src/components/CustomCarousel/CustomCarousel", () => () => null);
 jest.mock("@expo/vector-icons", () => ({ Ionicons: "Ionicons" }));
 jest.mock("react-native-safe-area-context", () => {
   const { View } = require("react-native");
   return { SafeAreaView: View, useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) };
 });
 
-import { I18nProvider, useI18n, resolveInitialLang } from "../app/i18n";
-import { TEST_IDS } from "../app/utils/testIds";
-import LanguageToggle from "../app/components/LanguageToggle";
+import { I18nProvider, useI18n, resolveInitialLang } from "../src/i18n";
+import { TEST_IDS } from "../src/utils/testIds";
+import LanguageToggle from "../src/components/LanguageToggle";
 import InitialScreen from "../app/screens/InitialScreen";
 
 const mockLocale = (locale: string) =>

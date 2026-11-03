@@ -1,15 +1,15 @@
 import React from "react";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import { Linking, Text } from "react-native";
-import { checkGalleryAccess, GalleryPermission, PHOTO_QUERY_TIMEOUT_MS } from "../app/utils/galleryAccess";
-import GalleryAccessModal from "../app/components/modals/GalleryAccessModal";
-import { TEST_IDS } from "../app/utils/testIds";
-import en from "../app/i18n/en";
-import es from "../app/i18n/es";
+import { checkGalleryAccess, GalleryPermission, PHOTO_QUERY_TIMEOUT_MS } from "../src/utils/galleryAccess";
+import GalleryAccessModal from "../src/components/modals/GalleryAccessModal";
+import { TEST_IDS } from "../src/utils/testIds";
+import en from "../src/i18n/en";
+import es from "../src/i18n/es";
 
 // EXP-118: playing needs photo permission (full or limited access) and at least one photo visible to the app.
 
-jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/en").default }) }));
+jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: require("../src/i18n/en").default }) }));
 
 const perm = (status: string, accessPrivileges?: "all" | "limited" | "none", canAskAgain = true): GalleryPermission => ({
   status, accessPrivileges, canAskAgain,

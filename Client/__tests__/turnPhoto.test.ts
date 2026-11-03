@@ -1,6 +1,6 @@
-import { MAX_TURN_PHOTO_PICKS, PhotoWait, TurnPhotoDeps, photoWaitOf, pickAndUploadTurnPhoto } from "../app/utils/turnPhoto";
-import { initialRoundView } from "../app/utils/roundState";
-import { PhotoConversionError, UploadHttpError } from "../app/utils/uploadRetry";
+import { MAX_TURN_PHOTO_PICKS, PhotoWait, TurnPhotoDeps, photoWaitOf, pickAndUploadTurnPhoto } from "../src/utils/turnPhoto";
+import { initialRoundView } from "../src/utils/roundState";
+import { PhotoConversionError, UploadHttpError } from "../src/utils/uploadRetry";
 
 // EXP-292: a photo that can't be converted (corrupt, unsupported format) no longer skips my turn: another photo is
 // picked, a bounded number of times, while the turn still wants one and the server's photo wait isn't over.

@@ -1,9 +1,9 @@
 import React from "react";
 import TestRenderer, { act } from "react-test-renderer";
 import { Animated, Keyboard, Platform, StyleSheet } from "react-native";
-import { useKeyboardPadding } from "../app/hooks/useKeyboardPadding";
-import InviteConfirmModal from "../app/components/modals/InviteConfirmModal";
-import { TEST_IDS } from "../app/utils/testIds";
+import { useKeyboardPadding } from "../src/hooks/useKeyboardPadding";
+import InviteConfirmModal from "../src/components/modals/InviteConfirmModal";
+import { TEST_IDS } from "../src/utils/testIds";
 import { resetStack, stackRouter, StackScreens } from "../testUtils/stackRouter";
 
 // EXP-347 review: the window does not shrink for the keyboard, so the lobby's chat footer and the invite dialog add
@@ -12,7 +12,7 @@ import { resetStack, stackRouter, StackScreens } from "../testUtils/stackRouter"
 // EXP-397: the padding follows the keyboard only while its screen is focused. Home, kept mounted under the lobby,
 // animated its padding on iOS each time the lobby chat's keyboard came up.
 
-jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/en").default }) }));
+jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: require("../src/i18n/en").default }) }));
 // Outside a stack a component stands for a focused screen; StackScreens focuses only the top one
 jest.mock("expo-router", () => require("../testUtils/stackRouter").expoRouterMock);
 

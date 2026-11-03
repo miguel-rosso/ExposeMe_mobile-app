@@ -15,12 +15,12 @@ jest.mock("expo-media-library", () => ({}));
 // The background hook follows its screen's focus; the probes stand for a focused screen
 jest.mock("expo-router", () => ({ useIsFocused: () => true }));
 
-const GAME_PROVIDER = "../app/providers/GameContext";
-const GAME_CONTEXT = "../app/providers/GameContextInstance";
-const PHOTO_PROVIDER = "../app/providers/PhotoContext";
-const PHOTO_CONTEXT = "../app/providers/PhotoContextInstance";
-const BACKGROUND_PROVIDER = "../app/providers/BackgroundContext";
-const BACKGROUND_CONTEXT = "../app/providers/BackgroundContextInstance";
+const GAME_PROVIDER = "../src/providers/GameContext";
+const GAME_CONTEXT = "../src/providers/GameContextInstance";
+const PHOTO_PROVIDER = "../src/providers/PhotoContext";
+const PHOTO_CONTEXT = "../src/providers/PhotoContextInstance";
+const BACKGROUND_PROVIDER = "../src/providers/BackgroundContext";
+const BACKGROUND_CONTEXT = "../src/providers/BackgroundContextInstance";
 
 /** A fresh evaluation of `providerPath` (as after a Fast Refresh) that shares React and the context module. */
 const loadProviderCopy = <T,>(providerPath: string, contextPath: string): T => {
@@ -66,7 +66,7 @@ afterAll(() => { jest.restoreAllMocks(); });
 
 describe("provider contexts survive a re-evaluation of their provider module (EXP-309)", () => {
   it("GameContext: the provider from one copy serves the hook from another", () => {
-    type GameModule = typeof import("../app/providers/GameContext");
+    type GameModule = typeof import("../src/providers/GameContext");
     const mounted = loadProviderCopy<GameModule>(GAME_PROVIDER, GAME_CONTEXT);
     const refreshed = loadProviderCopy<GameModule>(GAME_PROVIDER, GAME_CONTEXT);
     expect(refreshed.useGameContext).not.toBe(mounted.useGameContext);
@@ -77,7 +77,7 @@ describe("provider contexts survive a re-evaluation of their provider module (EX
   });
 
   it("PhotoContext: the provider from one copy serves the hook from another", () => {
-    type PhotoModule = typeof import("../app/providers/PhotoContext");
+    type PhotoModule = typeof import("../src/providers/PhotoContext");
     const mounted = loadProviderCopy<PhotoModule>(PHOTO_PROVIDER, PHOTO_CONTEXT);
     const refreshed = loadProviderCopy<PhotoModule>(PHOTO_PROVIDER, PHOTO_CONTEXT);
     expect(refreshed.usePhotoContext).not.toBe(mounted.usePhotoContext);
@@ -88,7 +88,7 @@ describe("provider contexts survive a re-evaluation of their provider module (EX
   });
 
   it("BackgroundContext: the provider from one copy serves the hook from another", () => {
-    type BackgroundModule = typeof import("../app/providers/BackgroundContext");
+    type BackgroundModule = typeof import("../src/providers/BackgroundContext");
     const mounted = loadProviderCopy<BackgroundModule>(BACKGROUND_PROVIDER, BACKGROUND_CONTEXT);
     const refreshed = loadProviderCopy<BackgroundModule>(BACKGROUND_PROVIDER, BACKGROUND_CONTEXT);
     expect(refreshed.useBackgroundContext).not.toBe(mounted.useBackgroundContext);

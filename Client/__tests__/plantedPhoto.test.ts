@@ -1,4 +1,4 @@
-import { acceptsPlantedPhoto, gameWentBySince, ReplantCheck, shouldReplantAfterRejoin } from "../app/utils/plantedPhoto";
+import { acceptsPlantedPhoto, gameWentBySince, ReplantCheck, shouldReplantAfterRejoin } from "../src/utils/plantedPhoto";
 
 // EXP-277: after an in-game rejoin, a planted photo the server lost is planted again while the server still takes it
 

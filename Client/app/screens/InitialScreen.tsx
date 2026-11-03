@@ -8,13 +8,13 @@ import tw from "twrnc";
 import { useRouter } from "expo-router";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import backdropImage from "@/assets/images/bg1.jpg";
-import { usePhotoContext } from "@/app/providers/PhotoContext";
-import { useI18n } from "../i18n";
-import LanguageToggle from "../components/LanguageToggle";
-import PhotoFanHero, { HERO_HEIGHT } from "../components/PhotoFanHero";
-import { useReduceMotionSetting } from "../hooks/useReduceMotion";
-import { TEST_IDS } from "../utils/testIds";
-import { BRAND_DISPLAY_FONT, BRAND_GRADIENT, brandTitleShadow } from "../theme/brand";
+import { usePhotoContext } from "@/src/providers/PhotoContext";
+import { useI18n } from "../../src/i18n";
+import LanguageToggle from "../../src/components/LanguageToggle";
+import PhotoFanHero, { HERO_HEIGHT } from "../../src/components/PhotoFanHero";
+import { useReduceMotionSetting } from "../../src/hooks/useReduceMotion";
+import { TEST_IDS } from "../../src/utils/testIds";
+import { BRAND_DISPLAY_FONT, BRAND_GRADIENT, brandTitleShadow } from "../../src/theme/brand";
 
 // ── Look ──
 const BACKDROP_BLUR_RADIUS = 12;

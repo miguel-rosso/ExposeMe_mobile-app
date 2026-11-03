@@ -2,6 +2,7 @@ import React from "react";
 import fs from "fs";
 import path from "path";
 import TestRenderer, { act } from "react-test-renderer";
+import { clientRelative, listAppSources } from "../testUtils/appSources";
 
 // Real SDK 58 stubs: every legacy method imported from the "expo-media-library" entry throws at runtime
 const LEGACY_STUBS_PATH = path.join(__dirname, "../node_modules/expo-media-library/build/legacyWarnings");
@@ -53,7 +54,7 @@ jest.mock("expo-media-library", () => {
   };
 });
 
-import { PhotoProvider, usePhotoContext } from "../app/providers/PhotoContext";
+import { PhotoProvider, usePhotoContext } from "../src/providers/PhotoContext";
 
 describe("PhotoContext with expo-media-library SDK 58 (EXP-038)", () => {
   it("picks a random gallery photo through the class-based API", async () => {
@@ -85,20 +86,13 @@ describe("PhotoContext with expo-media-library SDK 58 (EXP-038)", () => {
     const stubbed = Object.keys(jest.requireActual(LEGACY_STUBS_PATH));
     expect(stubbed).toContain("getAssetsAsync");
 
-    const listSources = (dir: string): string[] =>
-      fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
-        const p = path.join(dir, e.name);
-        if (e.isDirectory()) return listSources(p);
-        return /\.tsx?$/.test(e.name) ? [p] : [];
-      });
-
-    const offenders = listSources(path.join(__dirname, "../app")).flatMap((file) => {
+    const offenders = listAppSources().flatMap((file) => {
       const src = fs.readFileSync(file, "utf8");
       const ns = src.match(/import \* as (\w+) from ["']expo-media-library["']/)?.[1];
       const named = src.match(/import \{([^}]*)\} from ["']expo-media-library["']/)?.[1] ?? "";
       return stubbed
         .filter((m) => (ns && new RegExp(`\\b${ns}\\.${m}\\b`).test(src)) || new RegExp(`\\b${m}\\b`).test(named))
-        .map((m) => `${path.relative(path.join(__dirname, ".."), file)}: ${m}`);
+        .map((m) => `${clientRelative(file)}: ${m}`);
     });
     expect(offenders).toEqual([]);
   });

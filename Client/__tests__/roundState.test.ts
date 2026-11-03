@@ -1,8 +1,8 @@
-import { GameStateSnapshot, Player } from "../app/models/interfaces";
+import { GameStateSnapshot, Player } from "../src/models/interfaces";
 import {
   gameStateFollowUps, initialRoundView, isAnotherGame, isRevealedOwner, NO_GAME_NUMBER, phaseElapsed, RoundAction, roundOptions,
   roundReducer, RoundView, roundViewOfGame,
-} from "../app/utils/roundState";
+} from "../src/utils/roundState";
 
 // Ported from the applyRoundStart / applyWaitingPhoto / applyGameState setter tests (EXP-215): same expectations,
 // now on the round reducer's next state.

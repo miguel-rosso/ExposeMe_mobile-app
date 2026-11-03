@@ -2,14 +2,14 @@ import React from "react";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import { FakeSocket } from "../testUtils/fakeSocket";
 import { StyleSheet } from "react-native";
-import { formatCountdown, turnUploadAction } from "../app/utils/gameState";
-import { useGameConnection } from "../app/hooks/useGameConnection";
-import { GameStateSnapshot } from "../app/models/interfaces";
-import { TEST_IDS, playerOptionId } from "../app/utils/testIds";
+import { formatCountdown, turnUploadAction } from "../src/utils/gameState";
+import { useGameConnection } from "../src/hooks/useGameConnection";
+import { GameStateSnapshot } from "../src/models/interfaces";
+import { TEST_IDS, playerOptionId } from "../src/utils/testIds";
 // Loaded with the file (jest.mock calls below are hoisted above it), not inside a test: a cold transform of
 // the screen and its imports must not count against the 5 s per-test timeout
 import GameScreen from "../app/screens/GameScreen";
-import { ANSWER_STATE_BORDER } from "../app/components/AnswerOption";
+import { ANSWER_STATE_BORDER } from "../src/components/AnswerOption";
 
 // EXP-006 / DEC-009: losing the socket mid-game keeps the game screen, rejoins on reconnect and renders the
 // server's game-state snapshot; a server pause shows its countdown.
@@ -134,8 +134,8 @@ jest.mock("expo-router", () => ({
   useLocalSearchParams: () => ({}),
   useFocusEffect: () => {},
 }));
-jest.mock("../app/providers/GameContext", () => {
-  const actual = jest.requireActual("../app/providers/GameContext");
+jest.mock("../src/providers/GameContext", () => {
+  const actual = jest.requireActual("../src/providers/GameContext");
   return {
     ...actual,
     useGameContext: () => ({
@@ -145,15 +145,15 @@ jest.mock("../app/providers/GameContext", () => {
     }),
   };
 });
-jest.mock("../app/providers/PhotoContext", () => ({ usePhotoContext: () => ({ getRandomPhoto: jest.fn(), setPhotoUri: jest.fn() }) }));
-jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/en").default }) }));
-jest.mock("@/app/components/PhotoComponent", () => () => null);
-jest.mock("@/app/components/modals/ScoreModal", () => () => null);
-jest.mock("@/app/components/modals/FinalScoreModal", () => () => null);
-jest.mock("@/app/components/modals/WinnerModal", () => () => null);
-jest.mock("@/app/components/IngameComunication/EmojiReaction", () => () => null);
-jest.mock("@/app/components/IngameComunication/EmojisButtons", () => () => null);
-jest.mock("@/app/components/ProgressBar", () => () => null);
+jest.mock("../src/providers/PhotoContext", () => ({ usePhotoContext: () => ({ getRandomPhoto: jest.fn(), setPhotoUri: jest.fn() }) }));
+jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: require("../src/i18n/en").default }) }));
+jest.mock("@/src/components/PhotoComponent", () => () => null);
+jest.mock("@/src/components/modals/ScoreModal", () => () => null);
+jest.mock("@/src/components/modals/FinalScoreModal", () => () => null);
+jest.mock("@/src/components/modals/WinnerModal", () => () => null);
+jest.mock("@/src/components/IngameComunication/EmojiReaction", () => () => null);
+jest.mock("@/src/components/IngameComunication/EmojisButtons", () => () => null);
+jest.mock("@/src/components/ProgressBar", () => () => null);
 
 const has = (root: ReactTestInstance, id: string) => root.findAll((n) => n.props.testID === id, { deep: true }).length > 0;
 

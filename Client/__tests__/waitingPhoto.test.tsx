@@ -1,12 +1,12 @@
 import React from "react";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import { FakeSocket } from "../testUtils/fakeSocket";
-import { skipNoticeFor, skipNoticeText } from "../app/utils/waitingPhoto";
-import { TEST_IDS } from "../app/utils/testIds";
-import { PhotoConversionError, TURN_UPLOAD_RETRY } from "../app/utils/uploadRetry";
-import { MAX_TURN_PHOTO_PICKS } from "../app/utils/turnPhoto";
-import en from "../app/i18n/en";
-import es from "../app/i18n/es";
+import { skipNoticeFor, skipNoticeText } from "../src/utils/waitingPhoto";
+import { TEST_IDS } from "../src/utils/testIds";
+import { PhotoConversionError, TURN_UPLOAD_RETRY } from "../src/utils/uploadRetry";
+import { MAX_TURN_PHOTO_PICKS } from "../src/utils/turnPhoto";
+import en from "../src/i18n/en";
+import es from "../src/i18n/es";
 // Loaded with the file (jest.mock calls below are hoisted above it): a cold transform must not hit the test timeout
 import GameScreen from "../app/screens/GameScreen";
 
@@ -24,29 +24,29 @@ const mockUploadPhoto = jest.fn();
 jest.mock("expo-router", () => ({
   useRouter: () => ({ replace: mockReplace }), useLocalSearchParams: () => ({}), useFocusEffect: () => {},
 }));
-jest.mock("../app/providers/GameContext", () => ({
+jest.mock("../src/providers/GameContext", () => ({
   useGameContext: () => ({
     username: "bob", gameCode: "123456", socket: mockSocket, endSocket: jest.fn(),
     playersProvider: [], setPlayersProvider: jest.fn(), roundsOfGame: 10, plantedPhotoUri: null,
     plantedPhotoSent: false, plantPhoto: jest.fn(), getRejoinToken: async () => "tok-123", saveRejoinToken: jest.fn(),
   }),
 }));
-jest.mock("../app/providers/PhotoContext", () => ({
+jest.mock("../src/providers/PhotoContext", () => ({
   usePhotoContext: () => ({ pickGamePhoto: mockPickGamePhoto, setPhotoUri: jest.fn() }),
 }));
-jest.mock("@/app/utils/uploadPhoto", () => ({ uploadPhoto: (...a: unknown[]) => mockUploadPhoto(...a) }));
-jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/en").default }) }));
+jest.mock("@/src/utils/uploadPhoto", () => ({ uploadPhoto: (...a: unknown[]) => mockUploadPhoto(...a) }));
+jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: require("../src/i18n/en").default }) }));
 const mockPhotoProps: { photoUrl: string; headers?: Record<string, string> }[] = [];
-jest.mock("@/app/components/PhotoComponent", () => (p: { photoUrl: string; headers?: Record<string, string> }) => {
+jest.mock("@/src/components/PhotoComponent", () => (p: { photoUrl: string; headers?: Record<string, string> }) => {
   mockPhotoProps.push(p);
   return null;
 });
-jest.mock("@/app/components/modals/ScoreModal", () => () => null);
-jest.mock("@/app/components/modals/FinalScoreModal", () => () => null);
-jest.mock("@/app/components/modals/WinnerModal", () => () => null);
-jest.mock("@/app/components/IngameComunication/EmojiReaction", () => () => null);
-jest.mock("@/app/components/IngameComunication/EmojisButtons", () => () => null);
-jest.mock("@/app/components/ProgressBar", () => (props: { duration: number }) => {
+jest.mock("@/src/components/modals/ScoreModal", () => () => null);
+jest.mock("@/src/components/modals/FinalScoreModal", () => () => null);
+jest.mock("@/src/components/modals/WinnerModal", () => () => null);
+jest.mock("@/src/components/IngameComunication/EmojiReaction", () => () => null);
+jest.mock("@/src/components/IngameComunication/EmojisButtons", () => () => null);
+jest.mock("@/src/components/ProgressBar", () => (props: { duration: number }) => {
   const { View } = require("react-native");
   return <View testID="progress-bar" duration={props.duration} />;
 });

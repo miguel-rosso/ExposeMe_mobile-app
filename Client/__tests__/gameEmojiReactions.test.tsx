@@ -4,10 +4,10 @@ import { FakeSocket } from "../testUtils/fakeSocket";
 // Loaded with the file (jest.mock calls below are hoisted above it): a cold transform must not hit the test timeout
 import GameScreen from "../app/screens/GameScreen";
 import { StyleSheet } from "react-native";
-import EmojiReaction from "../app/components/IngameComunication/EmojiReaction";
-import EmojiReactionLane, { REACTION_LANE_GAP, REACTION_PILL_HEIGHT } from "../app/components/IngameComunication/EmojiReactionLane";
-import ProgressBar from "../app/components/ProgressBar";
-import { useRoomReactions } from "../app/components/IngameComunication/RoomReactionLane";
+import EmojiReaction from "../src/components/IngameComunication/EmojiReaction";
+import EmojiReactionLane, { REACTION_LANE_GAP, REACTION_PILL_HEIGHT } from "../src/components/IngameComunication/EmojiReactionLane";
+import ProgressBar from "../src/components/ProgressBar";
+import { useRoomReactions } from "../src/components/IngameComunication/RoomReactionLane";
 
 // EXP-166: room emoji reactions are capped on screen, only known emojis are shown, they don't replay on the next photo,
 // and the screenshot reaction is a single listener per game that sends the fixed "📸" (label translated locally).
@@ -39,7 +39,7 @@ jest.mock("expo-screen-capture", () => ({
 jest.mock("expo-router", () => ({
   useRouter: () => ({ replace: jest.fn() }), useLocalSearchParams: () => ({}), useFocusEffect: () => {},
 }));
-jest.mock("../app/providers/GameContext", () => ({
+jest.mock("../src/providers/GameContext", () => ({
   useGameContext: () => {
     const [playersProvider, setPlayersProvider] = require("react").useState(mockPlayers);
     return {
@@ -49,22 +49,22 @@ jest.mock("../app/providers/GameContext", () => ({
     };
   },
 }));
-jest.mock("../app/providers/PhotoContext", () => ({
+jest.mock("../src/providers/PhotoContext", () => ({
   usePhotoContext: () => ({ pickGamePhoto: jest.fn(), setPhotoUri: jest.fn() }),
 }));
-jest.mock("@/app/hooks/useGalleryAccessGuard", () => ({
+jest.mock("@/src/hooks/useGalleryAccessGuard", () => ({
   useGalleryAccessGuard: () => ({ blocked: null, check: jest.fn(), selectMore: jest.fn() }),
 }));
-jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/es").default }) }));
-jest.mock("@/app/components/PhotoComponent", () => () => { mockScreenRenders.count++; return null; });
-jest.mock("@/app/components/modals/ScoreModal", () => () => null);
-jest.mock("@/app/components/modals/FinalScoreModal", () => () => null);
-jest.mock("@/app/components/modals/WinnerModal", () => () => null);
-jest.mock("@/app/components/ProgressBar", () => () => null);
+jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: require("../src/i18n/es").default }) }));
+jest.mock("@/src/components/PhotoComponent", () => () => { mockScreenRenders.count++; return null; });
+jest.mock("@/src/components/modals/ScoreModal", () => () => null);
+jest.mock("@/src/components/modals/FinalScoreModal", () => () => null);
+jest.mock("@/src/components/modals/WinnerModal", () => () => null);
+jest.mock("@/src/components/ProgressBar", () => () => null);
 // Times the reaction lane drew its pills (the real lane, counted)
 const mockLaneDraws = { count: 0 };
-jest.mock("../app/components/IngameComunication/EmojiReactionLane", () => {
-  const actual = jest.requireActual("../app/components/IngameComunication/EmojiReactionLane");
+jest.mock("../src/components/IngameComunication/EmojiReactionLane", () => {
+  const actual = jest.requireActual("../src/components/IngameComunication/EmojiReactionLane");
   const React = require("react");
   return {
     ...actual,

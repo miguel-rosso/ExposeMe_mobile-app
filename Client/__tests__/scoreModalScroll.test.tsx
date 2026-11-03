@@ -1,21 +1,21 @@
 import React from "react";
 import { StyleSheet } from "react-native";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
-import { ScoreRound } from "../app/models/interfaces";
-import { TEST_IDS, finalRankId, scoreGuessId, scoreRankId } from "../app/utils/testIds";
-import ScoreModal, { HOLD_BUTTON_CLEARANCE, SCORE_LIST_BACKING } from "../app/components/modals/ScoreModal";
-import FinalScoreModal from "../app/components/modals/FinalScoreModal";
+import { ScoreRound } from "../src/models/interfaces";
+import { TEST_IDS, finalRankId, scoreGuessId, scoreRankId } from "../src/utils/testIds";
+import ScoreModal, { HOLD_BUTTON_CLEARANCE, SCORE_LIST_BACKING } from "../src/components/modals/ScoreModal";
+import FinalScoreModal from "../src/components/modals/FinalScoreModal";
 
 // EXP-043: with up to 12 players the round scoreboard needs ~670 dp. The list must scroll inside the space left
 // between the header and the hold button (photo owner), so nothing is cut on small phones.
 
-jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/en").default }) }));
+jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: require("../src/i18n/en").default }) }));
 jest.mock("lottie-react-native", () => "LottieView");
 jest.mock("react-native-vector-icons/FontAwesome", () => "Icon");
 jest.mock("@expo/vector-icons", () => ({ Ionicons: "Ionicons" }));
 jest.mock("expo-linear-gradient", () => ({ LinearGradient: "LinearGradient" }));
 jest.mock("expo-router", () => ({ useRouter: () => ({ replace: jest.fn() }) }));
-jest.mock("../app/providers/GameContext", () => ({
+jest.mock("../src/providers/GameContext", () => ({
   useGameContext: () => ({
     endSocket: jest.fn(), setRoundsOfGame: jest.fn(), setPlayersProvider: jest.fn(), clearRejoinToken: jest.fn(),
   }),

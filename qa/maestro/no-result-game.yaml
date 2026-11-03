@@ -4,7 +4,7 @@
 #   qa/lab/lab.sh play --flow no-result-game --bots 1 --devices pair --bot-args --no-answer
 # Keep it to <= 3 players so every final-score row fits without scrolling.
 # env: GAME_CODE, USERNAME, METRO_URL (url-encoded)
-# Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
+# Selectors are testIDs (Client/src/utils/testIds.ts), so the flow works in any UI language.
 appId: com.socketNull.ExposeMe
 ---
 - runFlow: open-app.yaml

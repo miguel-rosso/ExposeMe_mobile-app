@@ -16,15 +16,15 @@ jest.mock("expo-router", () => require("../testUtils/stackRouter").expoRouterMoc
 jest.mock("expo-splash-screen", () => ({ preventAutoHideAsync: jest.fn(), hideAsync: jest.fn() }));
 jest.mock("@expo/vector-icons", () => ({ Ionicons: () => null }));
 jest.mock("@/app/screens/InitialScreen", () => () => null);
-jest.mock("@/app/components/modals/GalleryAccessModal", () => () => null);
-jest.mock("@/app/hooks/useGalleryAccessGuard", () => ({ useGalleryAccessGuard: () => ({ check: jest.fn() }) }));
-jest.mock("../app/components/LanguageToggle", () => () => null);
-jest.mock("../app/components/LimitedAccessBanner", () => () => null);
-jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/en").default }) }));
+jest.mock("@/src/components/modals/GalleryAccessModal", () => () => null);
+jest.mock("@/src/hooks/useGalleryAccessGuard", () => ({ useGalleryAccessGuard: () => ({ check: jest.fn() }) }));
+jest.mock("../src/components/LanguageToggle", () => () => null);
+jest.mock("../src/components/LimitedAccessBanner", () => () => null);
+jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: require("../src/i18n/en").default }) }));
 // Plain views: the entrance animations' own renders would count as home's
 jest.mock("react-native-animatable", () => ({ View: "AnimatableView", initializeRegistryWithDefinitions: jest.fn() }));
 // A game context that never changes: home's re-renders here come from the background alone
-jest.mock("../app/providers/GameContext", () => {
+jest.mock("../src/providers/GameContext", () => {
   const game = {
     username: "ana", saveUsername: jest.fn(), gameCode: null, setGameCode: jest.fn(), joinCodeDraft: "", setJoinCodeDraft: jest.fn(),
     socket: null, endSocket: jest.fn(), requestNewRoom: jest.fn(), takeHomeNotice: () => null, takeRoomExit: () => null,
@@ -33,8 +33,8 @@ jest.mock("../app/providers/GameContext", () => {
 });
 
 import Index from "../app/index";
-import { BACKGROUND_ROTATION_MS, BackgroundProvider, useBackgroundContext } from "../app/providers/BackgroundContext";
-import { backgrounds } from "../app/providers/BackgroundContextInstance";
+import { BACKGROUND_ROTATION_MS, BackgroundProvider, useBackgroundContext } from "../src/providers/BackgroundContext";
+import { backgrounds } from "../src/providers/BackgroundContextInstance";
 import { resetStack, stackRouter, StackScreens } from "../testUtils/stackRouter";
 
 const HOME = "/";

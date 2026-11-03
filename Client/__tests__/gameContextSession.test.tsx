@@ -17,8 +17,8 @@ const mockSockets: MockSocket[] = [];
 const mockIo = jest.fn(() => { const s = makeSocket(); mockSockets.push(s); return s; });
 jest.mock("socket.io-client", () => ({ io: () => mockIo() }));
 
-import { GameProvider, useGameContext } from "../app/providers/GameContext";
-import { LEAVE_ACK_TIMEOUT_MS } from "../app/utils/leaveRoom";
+import { GameProvider, useGameContext } from "../src/providers/GameContext";
+import { LEAVE_ACK_TIMEOUT_MS } from "../src/utils/leaveRoom";
 
 let ctx!: ReturnType<typeof useGameContext>;
 const Probe = () => { ctx = useGameContext(); return null; };

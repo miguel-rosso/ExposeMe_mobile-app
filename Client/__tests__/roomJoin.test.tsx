@@ -1,8 +1,8 @@
 import React from "react";
 import TestRenderer, { act } from "react-test-renderer";
 import { FakeSocket } from "../testUtils/fakeSocket";
-import { emitJoin, isConnectionRefused } from "../app/utils/roomJoin";
-import { useGameConnection } from "../app/hooks/useGameConnection";
+import { emitJoin, isConnectionRefused } from "../src/utils/roomJoin";
+import { useGameConnection } from "../src/hooks/useGameConnection";
 
 // EXP-234: the lobby and the game share how they join a room (join-create-game) and tell a refused connection from a
 // network error. The screens' own behaviour is pinned in waitingRoomRejoin, waitingRoomServerRefusal, gameReconnect

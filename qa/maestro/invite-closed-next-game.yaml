@@ -16,7 +16,7 @@
 # Game 1 runs the round loop inline (as play-again-auto-join.yaml) without play-rounds.yaml's final winner-continue
 # tap: the device must stay on the final screens.
 # env: GAME_CODE (room A), NEW_CODE (room B), USERNAME, METRO_URL (url-encoded)
-# Selectors are testIDs (Client/app/utils/testIds.ts), except the system alert's texts, matched in both UI languages.
+# Selectors are testIDs (Client/src/utils/testIds.ts), except the system alert's texts, matched in both UI languages.
 appId: com.socketNull.ExposeMe
 ---
 - runFlow: open-app.yaml

@@ -1,7 +1,7 @@
 import React from "react";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { TEST_IDS } from "../app/utils/testIds";
+import { TEST_IDS } from "../src/utils/testIds";
 
 // EXP-342: leaving the game flow forgets the room (GameContext's gameCode), but not the code typed in home's join
 // panel. A refused join (name taken, game not found, room full) sends the player back home, whose join panel still
@@ -25,17 +25,17 @@ jest.mock("expo-splash-screen", () => ({ preventAutoHideAsync: jest.fn(), hideAs
 jest.mock("@expo/vector-icons", () => ({ Ionicons: () => null }));
 jest.mock("@react-native-community/hooks", () => ({ useBackHandler: () => {} }));
 jest.mock("@/app/screens/InitialScreen", () => () => "initial-screen");
-jest.mock("../app/components/LanguageToggle", () => () => null);
-jest.mock("../app/components/LimitedAccessBanner", () => () => null);
-jest.mock("../app/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: 1 }) }));
-jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/en").default }) }));
-jest.mock("@/app/hooks/useGalleryAccessGuard", () => ({
+jest.mock("../src/components/LanguageToggle", () => () => null);
+jest.mock("../src/components/LimitedAccessBanner", () => () => null);
+jest.mock("../src/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: 1 }) }));
+jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: require("../src/i18n/en").default }) }));
+jest.mock("@/src/hooks/useGalleryAccessGuard", () => ({
   useGalleryAccessGuard: () => ({ check: async () => ({ status: "ok" }) }),
 }));
-jest.mock("@/app/components/modals/GalleryAccessModal", () => () => null);
+jest.mock("@/src/components/modals/GalleryAccessModal", () => () => null);
 
 import Index from "../app/index";
-import { GameProvider, useGameContext } from "../app/providers/GameContext";
+import { GameProvider, useGameContext } from "../src/providers/GameContext";
 
 beforeAll(() => jest.spyOn(console, "log").mockImplementation(() => {}));
 afterAll(() => jest.restoreAllMocks());

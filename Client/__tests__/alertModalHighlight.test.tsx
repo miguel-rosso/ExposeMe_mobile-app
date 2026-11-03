@@ -1,10 +1,10 @@
 import React from "react";
 import TestRenderer, { act } from "react-test-renderer";
 import { Text } from "react-native";
-import AlertModal from "../app/components/modals/AlertModal";
-import { splitHighlightTemplate } from "../app/utils/highlightTemplate";
-import en from "../app/i18n/en";
-import es from "../app/i18n/es";
+import AlertModal from "../src/components/modals/AlertModal";
+import { splitHighlightTemplate } from "../src/utils/highlightTemplate";
+import en from "../src/i18n/en";
+import es from "../src/i18n/es";
 
 // EXP-381: the kick confirmation was "Are you sure you want to remove" + " @name", with no closing "?". The message is
 // now a template whose {name} the dialog paints in red, and Spanish players read «anfitrión», never «host».

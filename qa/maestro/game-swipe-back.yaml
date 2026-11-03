@@ -8,7 +8,7 @@
 # Run with ONE bot and ONE device:
 #   qa/lab/lab.sh play --flow game-swipe-back --bots 1 --devices <label>
 # env: GAME_CODE, USERNAME, METRO_URL (url-encoded)
-# Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
+# Selectors are testIDs (Client/src/utils/testIds.ts), so the flow works in any UI language.
 appId: com.socketNull.ExposeMe
 ---
 - runFlow: open-app.yaml

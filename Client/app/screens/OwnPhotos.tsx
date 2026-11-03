@@ -2,15 +2,15 @@ import React, { useEffect, useRef, useState } from "react";
 import { View, TouchableOpacity, StatusBar, Text, BackHandler } from "react-native";
 import * as Animatable from "react-native-animatable";
 import tw from "twrnc";
-import { usePhotoContext } from "@/app/providers/PhotoContext";
+import { usePhotoContext } from "@/src/providers/PhotoContext";
 import { useRouter } from "expo-router";
-import PhotoComponent from "@/app/components/PhotoComponent";
-import CloseButton from "@/app/components/CloseButton";
+import PhotoComponent from "@/src/components/PhotoComponent";
+import CloseButton from "@/src/components/CloseButton";
 import NextImageAnimation from "@/assets/animations/NextImageAnimation.json";
 import LottieView from "lottie-react-native";
-import { useI18n } from "../i18n";
-import GalleryAccessModal from "@/app/components/modals/GalleryAccessModal";
-import { useGalleryAccessGuard } from "@/app/hooks/useGalleryAccessGuard";
+import { useI18n } from "../../src/i18n";
+import GalleryAccessModal from "@/src/components/modals/GalleryAccessModal";
+import { useGalleryAccessGuard } from "@/src/hooks/useGalleryAccessGuard";
 
 const OwnPhotos = () => {
   const { photoUri, getRandomPhoto, requestGalleryPermission, setPhotoUri } = usePhotoContext();

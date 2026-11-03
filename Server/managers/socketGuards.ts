@@ -373,7 +373,7 @@ export const CHAT_MESSAGE_LIMIT = { max: 1, windowMs: 250 } as const;
 
 /**
  * The only emoji-reaction values the server relays: the app's emoji picker
- * (Client/app/components/IngameComunication/EmojisButtons.tsx) plus "📸", sent when a player takes a screenshot.
+ * (Client/src/components/IngameComunication/EmojisButtons.tsx) plus "📸", sent when a player takes a screenshot.
  */
 export const ALLOWED_EMOJIS: ReadonlySet<string> = new Set(["😂", "😍", "❓", "😳", "🔥", "😭", "🤡", "😡", "📸"]);
 // The app sends at most one every 250 ms; a short burst of taps is fine, a flood is dropped silently

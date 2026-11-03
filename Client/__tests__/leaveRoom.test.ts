@@ -1,6 +1,6 @@
 import {
   LEAVE_ACK_TIMEOUT_MS, leaveAndClose, leaveFromAnywhere, LeavingSocket, OFFLINE_LEAVE_TIMEOUT_MS, OfflineLeavingSocket,
-} from "../app/utils/leaveRoom";
+} from "../src/utils/leaveRoom";
 
 // EXP-254: closing the socket in the same tick as leave-room can lose the leave (the server drops an event it
 // dispatches after the disconnect). The leave waits for the server's ack, and closes anyway after a short cap so

@@ -14,9 +14,9 @@ jest.mock("@react-native-async-storage/async-storage", () =>
 const mockReplace = jest.fn();
 jest.mock("expo-router", () => ({ useRouter: () => ({ replace: mockReplace, push: jest.fn() }) }));
 const mockHandleContinue = jest.fn();
-jest.mock("@/app/providers/PhotoContext", () => ({ usePhotoContext: () => ({ handleContinue: mockHandleContinue }) }));
+jest.mock("@/src/providers/PhotoContext", () => ({ usePhotoContext: () => ({ handleContinue: mockHandleContinue }) }));
 jest.mock("@expo/vector-icons", () => ({ Ionicons: "Ionicons" }));
-jest.mock("../app/components/LanguageToggle", () => () => null);
+jest.mock("../src/components/LanguageToggle", () => () => null);
 // EXP-192: a tall gesture-bar inset, so the test can tell whether the scroll content clears it
 const MOCK_BOTTOM_INSET = 48;
 jest.mock("react-native-safe-area-context", () => {
@@ -27,16 +27,16 @@ jest.mock("react-native-safe-area-context", () => {
   };
 });
 
-const en = require("../app/i18n/en").default;
-const es = require("../app/i18n/es").default;
+const en = require("../src/i18n/en").default;
+const es = require("../src/i18n/es").default;
 let mockT = en;
-jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: mockT }) }));
+jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: mockT }) }));
 
 import InitialScreen from "../app/screens/InitialScreen";
-import PhotoFanHero, { CARD_BLUR_RADIUS, FAN_CARDS, HERO_HEIGHT } from "../app/components/PhotoFanHero";
-import { TEST_IDS } from "../app/utils/testIds";
-import { resetReduceMotionSettingForTests, useReduceMotion, useReduceMotionSetting } from "../app/hooks/useReduceMotion";
-import { BRAND_GRADIENT, brandTitleShadow } from "../app/theme/brand";
+import PhotoFanHero, { CARD_BLUR_RADIUS, FAN_CARDS, HERO_HEIGHT } from "../src/components/PhotoFanHero";
+import { TEST_IDS } from "../src/utils/testIds";
+import { resetReduceMotionSettingForTests, useReduceMotion, useReduceMotionSetting } from "../src/hooks/useReduceMotion";
+import { BRAND_GRADIENT, brandTitleShadow } from "../src/theme/brand";
 
 // Rendered trees are unmounted after each test, so no entrance animation outlives it
 const mounted: ReactTestRenderer[] = [];

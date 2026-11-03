@@ -14,16 +14,16 @@ jest.mock("expo-router", () => {
   Stack.Screen = jest.fn(() => null);
   return { Stack };
 });
-jest.mock("../app/utils/devToolsButton", () => ({ hideDevToolsButton: jest.fn().mockResolvedValue(undefined) }));
+jest.mock("../src/utils/devToolsButton", () => ({ hideDevToolsButton: jest.fn().mockResolvedValue(undefined) }));
 jest.mock("expo-font", () => ({ useFonts: () => [true] }));
 jest.mock("expo-splash-screen", () => ({ preventAutoHideAsync: jest.fn(), hideAsync: jest.fn() }));
 jest.mock("expo-screen-orientation", () => ({ lockAsync: jest.fn(), OrientationLock: { PORTRAIT_UP: 1 } }));
 jest.mock("expo-device", () => ({ DeviceType: { PHONE: 1 }, getDeviceTypeAsync: jest.fn().mockResolvedValue(1) }));
 jest.mock("react-native-reanimated", () => ({}));
-jest.mock("@/app/providers/PhotoContext", () => ({ PhotoProvider: ({ children }: { children: React.ReactNode }) => children }));
-jest.mock("../app/providers/GameContext", () => ({ GameProvider: ({ children }: { children: React.ReactNode }) => children }));
-jest.mock("../app/providers/BackgroundContext", () => ({ BackgroundProvider: ({ children }: { children: React.ReactNode }) => children }));
-jest.mock("../app/i18n", () => ({ I18nProvider: ({ children }: { children: React.ReactNode }) => children }));
+jest.mock("@/src/providers/PhotoContext", () => ({ PhotoProvider: ({ children }: { children: React.ReactNode }) => children }));
+jest.mock("../src/providers/GameContext", () => ({ GameProvider: ({ children }: { children: React.ReactNode }) => children }));
+jest.mock("../src/providers/BackgroundContext", () => ({ BackgroundProvider: ({ children }: { children: React.ReactNode }) => children }));
+jest.mock("../src/i18n", () => ({ I18nProvider: ({ children }: { children: React.ReactNode }) => children }));
 
 import { Stack } from "expo-router";
 import RootLayout from "../app/_layout";

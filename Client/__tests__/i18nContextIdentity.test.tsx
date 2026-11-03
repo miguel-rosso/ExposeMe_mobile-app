@@ -10,9 +10,9 @@ import { Text } from "react-native";
 jest.mock("@react-native-async-storage/async-storage", () =>
   require("@react-native-async-storage/async-storage/jest/async-storage-mock"));
 
-import * as i18nContextModule from "../app/i18n/context";
+import * as i18nContextModule from "../src/i18n/context";
 
-type I18nModule = typeof import("../app/i18n");
+type I18nModule = typeof import("../src/i18n");
 
 /**
  * A fresh evaluation of i18n/index.tsx, like the one a Fast Refresh edit to it (or to es.ts/en.ts) leaves behind.
@@ -22,8 +22,8 @@ const loadI18nModule = (): I18nModule => {
   let mod!: I18nModule;
   jest.isolateModules(() => {
     jest.doMock("react", () => React);
-    jest.doMock("../app/i18n/context", () => i18nContextModule);
-    mod = require("../app/i18n");
+    jest.doMock("../src/i18n/context", () => i18nContextModule);
+    mod = require("../src/i18n");
   });
   return mod;
 };

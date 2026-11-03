@@ -4,12 +4,12 @@ import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import * as Haptics from "expo-haptics";
 import AnswerOption, {
   ANSWER_STATE_BORDER, AnswerOptionState, ENTRANCE_MAX_DELAY_MS, ENTRANCE_MS, MARKED_SCALE, entranceDelay,
-} from "../app/components/AnswerOption";
+} from "../src/components/AnswerOption";
 import {
   PLAYER_COLOR_INK, PLAYER_PALETTE, PlayerColors, playerColors, playerInitial, withPlayerColors,
-} from "../app/utils/playerColors";
-import { usePlayerColors } from "../app/hooks/usePlayerColors";
-import { playerOptionId } from "../app/utils/testIds";
+} from "../src/utils/playerColors";
+import { usePlayerColors } from "../src/hooks/usePlayerColors";
+import { playerOptionId } from "../src/utils/testIds";
 
 // EXP-253: the answer cards were flat grey blocks with just the name. Each player now has a colour and an initial,
 // the cards are dark and translucent, and my pick is marked by its border, a check/cross badge and a short motion.

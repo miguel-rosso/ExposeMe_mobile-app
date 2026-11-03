@@ -1,5 +1,5 @@
-import { uploadPhoto, UPLOAD_MAX_SIDE, UPLOAD_JPEG_QUALITY } from "../app/utils/uploadPhoto";
-import { PhotoConversionError, UploadAbandonedError, UploadHttpError } from "../app/utils/uploadRetry";
+import { uploadPhoto, UPLOAD_MAX_SIDE, UPLOAD_JPEG_QUALITY } from "../src/utils/uploadPhoto";
+import { PhotoConversionError, UploadAbandonedError, UploadHttpError } from "../src/utils/uploadRetry";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 
 // expo-image-manipulator: manipulate(uri, loadOptions) -> context.renderAsync() -> image.saveAsync()

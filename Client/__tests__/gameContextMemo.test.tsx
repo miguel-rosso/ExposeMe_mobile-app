@@ -21,8 +21,8 @@ jest.mock("socket.io-client", () => ({
   io: () => { const s = makeSocket(); mockSockets.push(s); return s; },
 }));
 
-import { GameProvider, useGameContext } from "../app/providers/GameContext";
-import type { GameContextProps } from "../app/models/interfaces";
+import { GameProvider, useGameContext } from "../src/providers/GameContext";
+import type { GameContextProps } from "../src/models/interfaces";
 
 type Ctx = GameContextProps;
 

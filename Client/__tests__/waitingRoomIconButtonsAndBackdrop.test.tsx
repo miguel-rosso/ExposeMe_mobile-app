@@ -2,12 +2,12 @@ import React from "react";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import { Image } from "react-native";
 import { FakeSocket } from "../testUtils/fakeSocket";
-import en from "../app/i18n/en";
-import es from "../app/i18n/es";
-import { TEST_IDS } from "../app/utils/testIds";
+import en from "../src/i18n/en";
+import es from "../src/i18n/es";
+import { TEST_IDS } from "../src/utils/testIds";
 // Loaded with the file (jest.mock calls below are hoisted above it), not inside a test
 import WaitingRoom from "../app/screens/WaitingRoom";
-import CloseButton from "../app/components/CloseButton";
+import CloseButton from "../src/components/CloseButton";
 
 // EXP-046: the lobby's icon-only buttons (copy and share the room code, send a chat message, leave the room) have a
 // translated name for TalkBack / VoiceOver instead of being announced as a bare "button".
@@ -22,7 +22,7 @@ jest.mock("expo-router", () => ({
   useLocalSearchParams: () => ({}),
   ...require("../testUtils/screenNavigation").screenNavigationMock(),
 }));
-jest.mock("../app/providers/GameContext", () => ({
+jest.mock("../src/providers/GameContext", () => ({
   useGameContext: () => ({
     startSocket: jest.fn(), endSocket: jest.fn(), leaveRoom: jest.fn(), gameCode: "K7MQ4X", setGameCode: jest.fn(),
     setPlayersProvider: jest.fn(), socket: mockSocket, username: "alice", setRoundsOfGame: jest.fn(), roundsOfGame: 10,
@@ -30,8 +30,8 @@ jest.mock("../app/providers/GameContext", () => ({
     getRejoinToken: async () => "tok-123", clearRejoinToken: jest.fn(),
   }),
 }));
-jest.mock("../app/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: mockBackground }) }));
-jest.mock("../app/providers/PhotoContext", () => ({
+jest.mock("../src/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: mockBackground }) }));
+jest.mock("../src/providers/PhotoContext", () => ({
   usePhotoContext: () => ({
     requestGalleryPermission: jest.fn(),
     checkGalleryAccess: jest.fn(async () => ({ status: "ok", limited: false, canAskAgain: true })),
@@ -39,7 +39,7 @@ jest.mock("../app/providers/PhotoContext", () => ({
     onGalleryChange: jest.fn(() => () => {}),
   }),
 }));
-jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require(`../app/i18n/${mockLang}`).default }) }));
+jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: require(`../src/i18n/${mockLang}`).default }) }));
 jest.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 jest.mock("react-native-vector-icons/FontAwesome", () => "Icon");
 jest.mock("@expo/vector-icons", () => ({ Ionicons: "Ionicons" }));
@@ -47,8 +47,8 @@ jest.mock("react-native-animatable", () => ({ View: "AnimatableView", initialize
 jest.mock("expo-clipboard", () => ({ setStringAsync: jest.fn(async () => true) }));
 jest.mock("expo-image-picker", () => ({ launchImageLibraryAsync: jest.fn() }));
 jest.mock("expo-linear-gradient", () => ({ LinearGradient: "LinearGradient" }));
-jest.mock("@/app/components/AnimatedDot", () => () => null);
-jest.mock("@/app/components/modals/AlertModal", () => () => null);
+jest.mock("@/src/components/AnimatedDot", () => () => null);
+jest.mock("@/src/components/modals/AlertModal", () => () => null);
 
 /** The lobby background keeps the blur it had with ImageBlur */
 const LOBBY_BACKDROP_BLUR_RADIUS = 10;

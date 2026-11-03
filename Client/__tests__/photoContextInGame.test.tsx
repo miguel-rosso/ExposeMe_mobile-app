@@ -34,7 +34,7 @@ jest.mock("expo-media-library", () => {
   };
 });
 
-import { PhotoProvider, usePhotoContext } from "../app/providers/PhotoContext";
+import { PhotoProvider, usePhotoContext } from "../src/providers/PhotoContext";
 
 beforeAll(() => { jest.spyOn(console, "log").mockImplementation(() => {}); });
 afterAll(() => jest.restoreAllMocks());

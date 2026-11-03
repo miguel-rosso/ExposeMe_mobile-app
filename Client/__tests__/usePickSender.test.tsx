@@ -1,6 +1,6 @@
 import React from "react";
 import TestRenderer, { act } from "react-test-renderer";
-import { PICK_SEND_INTERVAL, PickRound, usePickSender } from "../app/hooks/usePickSender";
+import { PICK_SEND_INTERVAL, PickRound, usePickSender } from "../src/hooks/usePickSender";
 
 // EXP-233: throttled sending of my pick (submit-answer), extracted from GameScreen
 

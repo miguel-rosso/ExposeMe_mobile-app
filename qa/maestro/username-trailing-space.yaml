@@ -4,7 +4,7 @@
 # No bots needed (the device hosts the room itself), so run it directly rather than through `lab.sh play`:
 #   ~/.maestro/bin/maestro --device <id> test qa/maestro/username-trailing-space.yaml -e METRO_URL=<url-encoded>
 # env: METRO_URL (url-encoded)
-# Selectors are testIDs (Client/app/utils/testIds.ts, lobbyPlayerId = "lobby-player-<name>"), so the flow works in any
+# Selectors are testIDs (Client/src/utils/testIds.ts, lobbyPlayerId = "lobby-player-<name>"), so the flow works in any
 # UI language. Ids are regexes (single-quoted so YAML keeps the backslashes).
 appId: com.socketNull.ExposeMe
 ---

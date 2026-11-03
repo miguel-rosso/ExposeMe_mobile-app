@@ -36,6 +36,8 @@ export interface Room {
   round?: number;
   /** Phase in play, null in the lobby and the ready phase. */
   phase?: ServerPhase | null;
+  /** The room's current game, or the last one when not started (0 before the first game). */
+  gameNumber?: number;
 }
 
 export interface RandomPhotoResponse {

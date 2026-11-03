@@ -1,4 +1,4 @@
-import { acceptsPlantedPhoto, ReplantCheck, shouldReplantAfterRejoin } from "../app/utils/plantedPhoto";
+import { acceptsPlantedPhoto, gameWentBySince, ReplantCheck, shouldReplantAfterRejoin } from "../app/utils/plantedPhoto";
 
 // EXP-277: after an in-game rejoin, a planted photo the server lost is planted again while the server still takes it
 
@@ -44,5 +44,19 @@ describe("shouldReplantAfterRejoin", () => {
   it("during round 1's wait, only a photo never sent: a sent one may be the one being played", () => {
     expect(check({ room: ROUND_1_WAIT })).toBe(true);
     expect(check({ room: ROUND_1_WAIT, plantedPhotoSent: true })).toBe(false);
+  });
+});
+
+// EXP-399: a lobby rejoin tells by the room's game number whether a game was played while it was away
+describe("gameWentBySince", () => {
+  it("only when the room's number is higher than the last one this lobby saw", () => {
+    expect(gameWentBySince(2, 3)).toBe(true);
+    expect(gameWentBySince(0, 1)).toBe(true);
+    expect(gameWentBySince(2, 2)).toBe(false);
+  });
+
+  it("not when either number is unknown (first answer of this lobby, or a server that sends none)", () => {
+    expect(gameWentBySince(null, 3)).toBe(false);
+    expect(gameWentBySince(2, undefined)).toBe(false);
   });
 });

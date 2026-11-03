@@ -293,7 +293,7 @@ describe("pause with fewer than 2 connected players", () => {
     expect(room._pauseCount).toBe(1);
     expect(room._totalPauses).toBe(2);
     const safe = rm.safeRoomData(room) as unknown as Record<string, unknown>;
-    expect(Object.keys(safe).sort()).toEqual(["gameCode", "held", "paused", "phase", "players", "round", "rounds", "started"]);
+    expect(Object.keys(safe).sort()).toEqual(["gameCode", "gameNumber", "held", "paused", "phase", "players", "round", "rounds", "started"]);
   });
 });
 

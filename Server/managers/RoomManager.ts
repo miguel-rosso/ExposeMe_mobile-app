@@ -269,8 +269,8 @@ export class RoomManager {
 
   /** room-of-game `room`: only these fields; players through publicPlayers (no owner while a photo is awaited). */
   safeRoomData(room: Room): SafeRoom {
-    const { gameCode, rounds, started, round, phase, held, paused } = room;
-    return { gameCode, rounds, started, round, phase, held, paused, players: this.publicPlayers(room) };
+    const { gameCode, rounds, started, round, phase, held, paused, gameNumber } = room;
+    return { gameCode, rounds, started, round, phase, held, paused, gameNumber, players: this.publicPlayers(room) };
   }
 
   /** Every player of `room` as sent to clients, answers of the round in play hidden. */

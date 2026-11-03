@@ -102,6 +102,18 @@ describe("public player data", () => {
     expect(rm.safeRoomData(room)).toMatchObject({ phase: "waiting-photo", started: true });
   });
 
+  // EXP-399: a lobby that missed a game (offline when it started) tells by the number that its picked photo is stale
+  it("room-of-game carries the room's game number: 0 before any game, the last game's in the lobby after it", () => {
+    expect(rm.safeRoomData(room).gameNumber).toBe(0);
+    engine.startGame(room);
+    expect(rm.safeRoomData(room)).toMatchObject({ started: true, gameNumber: 1 });
+    // Everyone else leaves: the game ends (game-over) and the room is back in the lobby
+    for (const name of ["bob", "carol"]) rm.removePlayer(room.gameCode, name);
+    engine.onConnectionChange(room);
+    expect(emits.some((e) => e.event === "game-over")).toBe(true);
+    expect(rm.safeRoomData(room)).toMatchObject({ started: false, gameNumber: 1 });
+  });
+
   it("game-started sends players without socket ids, tokens or planted photos", () => {
     room.players[2].plantedPhoto = PLANTED;
     engine.startGame(room);

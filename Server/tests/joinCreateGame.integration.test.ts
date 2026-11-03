@@ -11,7 +11,7 @@ import { useTestServer } from "./socketHarness";
 // `{ success: false, message }`.
 
 const JOINED_KEYS = ["hasPlantedPhoto", "rejoinToken", "room", "success"];
-const ROOM_KEYS = ["gameCode", "held", "paused", "phase", "players", "round", "rounds", "started"];
+const ROOM_KEYS = ["gameCode", "gameNumber", "held", "paused", "phase", "players", "round", "rounds", "started"];
 const PHOTO = "/temp/" + "b".repeat(32) + ".jpg";
 
 const { once, silent, newClient, joinAs, lobby, startGame } = useTestServer({ resetBetweenTests: true });

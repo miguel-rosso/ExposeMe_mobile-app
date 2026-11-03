@@ -81,8 +81,8 @@ const players = [
   { username: "alice", isHost: true, connected: true },
   { username: "bob", isHost: false, connected: true },
 ] as any[];
-const roomOfGame = (hasPlantedPhoto: boolean, started = false) => ({
-  success: true, room: { gameCode: "ABC123", players, rounds: 10, started }, rejoinToken: "tok-123", hasPlantedPhoto,
+const roomOfGame = (hasPlantedPhoto: boolean, started = false, gameNumber = 0) => ({
+  success: true, room: { gameCode: "ABC123", players, rounds: 10, started, gameNumber }, rejoinToken: "tok-123", hasPlantedPhoto,
 });
 
 const mount = async () => {
@@ -232,6 +232,36 @@ describe("WaitingRoom: planted photo state", () => {
     expect(mockPlantPhoto).toHaveBeenCalledTimes(1);
     await act(async () => { r.update(<WaitingRoom />); });
     expectPlanted(r, true);
+    act(() => r.unmount());
+  });
+
+  // EXP-399: offline when the next game started, back in the lobby once it is over: that game used or cleared the photo
+  it("back in the lobby after a game it missed (higher game number): drops the picked photo, plants nothing", async () => {
+    const alert = jest.spyOn(Alert, "alert").mockImplementation((_t, _m, buttons) => { buttons?.[1]?.onPress?.(); });
+    const r = await mount();
+    act(() => mockSocket.fire("room-of-game", roomOfGame(false, false, 2)));
+    await pickPhoto(r);
+    expectPlanted(r, true);
+    expect(mockPlantPhoto).toHaveBeenCalledTimes(1);
+    // Rejoin after game 3 was played without us: its game over cleared the server's mark
+    act(() => mockSocket.fire("room-of-game", roomOfGame(false, false, 3)));
+    await rerender(r);
+    expect(mockSetPlantedPhotoUri).toHaveBeenLastCalledWith(null);
+    expect(mockPlantPhoto).toHaveBeenCalledTimes(1);
+    expectPlanted(r, false);
+    alert.mockRestore();
+    act(() => r.unmount());
+  });
+
+  it("back in the lobby with the same game number (only the socket changed): plants the picked photo again", async () => {
+    const alert = jest.spyOn(Alert, "alert").mockImplementation((_t, _m, buttons) => { buttons?.[1]?.onPress?.(); });
+    const r = await mount();
+    act(() => mockSocket.fire("room-of-game", roomOfGame(false, false, 2)));
+    await pickPhoto(r);
+    act(() => mockSocket.fire("room-of-game", roomOfGame(false, false, 2)));
+    expect(mockPlantPhoto).toHaveBeenCalledTimes(2);
+    expect(mockSetPlantedPhotoUri).not.toHaveBeenCalledWith(null);
+    alert.mockRestore();
     act(() => r.unmount());
   });
 

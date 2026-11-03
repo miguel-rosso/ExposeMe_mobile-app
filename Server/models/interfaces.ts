@@ -166,6 +166,8 @@ export interface SafeRoom {
   phase: RoundPhase | null;
   held: boolean;
   paused: boolean;
+  /** The room's current game, or the last one when not started (Room.gameNumber) */
+  gameNumber: number;
   players: PublicPlayer[];
 }
 

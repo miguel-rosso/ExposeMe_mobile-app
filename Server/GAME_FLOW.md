@@ -91,7 +91,9 @@ After last round: game-over
   only inside a started game: never after `game-over`, which also leaves no phase but clears the marks; once round 1's
   wait has started, only a photo the app has no `ok` for: an acked one may be the one being played, whose mark is
   cleared when its wait starts; one accepted whose ack was lost is refused as `"too-late"` if it is the one awaited,
-  so it is never shown twice). Picking another photo replaces it. Whether a player planted
+  so it is never shown twice; the lobby only while `room-of-game.room.gameNumber` is the same as in its last one, or
+  on its first: a higher number means the game the photo was picked for went by, so the photo is dropped instead,
+  see "Game number", EXP-399). Picking another photo replaces it. Whether a player planted
   one goes back only to that player (`room-of-game.hasPlantedPhoto`); there is no way to drop a planted photo.
 - **Planted rounds look like any other round** (nobody can tell one was planted, nor by whom): the server sends
   the same room-wide `waiting-photo { round, duration: 15 s }`, sends **no `your-turn`** (not even to the planter),
@@ -505,8 +507,10 @@ After last round: game-over
   rejoin evicts the replaced one, and revokes their token: see "Kicked" above).
 - **Game number.** Every game run in a room gets the next integer (`room.gameNumber`: 0 before the first game, +1 on
   every accepted `start-game`; a refused start uses none). It is the third argument of `game-started`, and is in
-  every `waiting-photo` and `game-state` (in a not-started snapshot, the number of the last game, 0 if none was
-  played). The game screen keeps the number of the game it shows: `game-started`'s when the lobby opened it from that
+  every `waiting-photo`, `game-state` and `room-of-game.room` (when not started, the number of the last game, 0 if
+  none was played). The lobby keeps the number of its last not-started `room-of-game`: a higher one on a rejoin means
+  a game was played while the player was away (it started while they were offline, and ended before they came back),
+  so the photo picked for it is dropped instead of planted again (EXP-399). The game screen keeps the number of the game it shows: `game-started`'s when the lobby opened it from that
   event (so it knows its game already in the ready phase, EXP-384), else its first `waiting-photo` or `game-state`.
   A rejoin snapshot of a started game with another number is the next game, started while the player was away and
   missed the `game-over` of theirs, so the screen hands over to it as the final screens do (see below), however early
@@ -555,7 +559,7 @@ After last round: game-over
   answer earned (shown from `round-scores` on), the same rule as the `game-state` snapshot. A game that ends
   during `answering`/`reveal` (abandoned, pauses used up) drops that unrevealed round's answers and points:
   `game-over.finalScore` and the later snapshots never show them.
-- `room-of-game.room` is also an allowlist: `{ gameCode, rounds, started, round, phase, held, paused, players }`
+- `room-of-game.room` is also an allowlist: `{ gameCode, rounds, started, round, phase, held, paused, gameNumber, players }`
   (no current photo owner: it is secret until `round-reveal`, see "Whose photo it is").
 
 ## Disconnected players

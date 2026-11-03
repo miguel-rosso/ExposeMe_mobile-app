@@ -10,6 +10,14 @@ type PlantWindow = Pick<Room, "phase" | "round">;
 export const acceptsPlantedPhoto = ({ phase, round }: PlantWindow): boolean =>
   phase === null || (phase === "waiting-photo" && round === 0);
 
+/**
+ * A lobby's room-of-game says a game was played since the last one this lobby saw (`lastSeen`, null before its first):
+ * the room's game number went up, i.e. a game started while this device was offline. That game used or cleared the
+ * photo picked before it, so the lobby must not plant it again for the next one.
+ */
+export const gameWentBySince = (lastSeen: number | null, gameNumber: number | undefined): boolean =>
+  lastSeen !== null && gameNumber !== undefined && gameNumber > lastSeen;
+
 export interface ReplantCheck {
   /** The room as the rejoin's `room-of-game` describes it. */
   room: PlantWindow & Pick<Room, "started">;

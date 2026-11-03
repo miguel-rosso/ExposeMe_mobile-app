@@ -42,6 +42,7 @@ import { HOME_PATH } from "../utils/homeRoute";
 import { useGoHome } from "../hooks/useGoHome";
 import { useRouteBelow } from "../hooks/useRouteBelow";
 import { useBackHandler } from "@react-native-community/hooks";
+import { gameWentBySince } from "../utils/plantedPhoto";
 
 /** This screen's route */
 const WAITING_ROOM_PATH = "/screens/WaitingRoom";
@@ -108,6 +109,8 @@ const WaitingRoom = () => {
   const hasPlantedPhoto = plantedPhotoSent || serverPlanted;
   const plantedUriRef = useRef(plantedPhotoUri);
   useEffect(() => { plantedUriRef.current = plantedPhotoUri; }, [plantedPhotoUri]);
+  // Room's game number in this lobby's last room-of-game (null until the first): tells a game that went by (EXP-399)
+  const lobbyGameNumberRef = useRef<number | null>(null);
   const { requestGalleryPermission } = usePhotoContext();
   const galleryGuard = useGalleryAccessGuard({ watch: true });
   const [showPhotoAddedMessage, setShowPhotoAddedMessage] = useState<boolean>(false);
@@ -116,6 +119,12 @@ const WaitingRoom = () => {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const chat = useLobbyChat(socket, gameCode, username);
   const startRequest = useStartGame(socket);
+
+  /** Forgets the picked photo: the game it was picked for was played without this lobby. */
+  const dropPickedPhoto = () => {
+    setPlantedPhotoUri(null);
+    plantedUriRef.current = null;
+  };
 
   /** Plants the picked photo; once one is in, the server keeps a planted photo of mine whatever a replacement does. */
   const plantPickedPhoto = async (): Promise<boolean> => {
@@ -199,6 +208,7 @@ const WaitingRoom = () => {
     setPlayers([]);
     chat.clear();
     setServerPlanted(false);
+    lobbyGameNumberRef.current = null;
     setIsLoading(true);
     setDialogVisible(false);
     joinedRef.current = false;
@@ -408,8 +418,11 @@ const WaitingRoom = () => {
           setGameCode(data.room.gameCode);
           setRoundsOfGame(data.room.rounds);
           // Lobby only (a rejoin into a started game leaves the planted photo alone): show the server's own mark,
-          // and plant the picked photo again if the server doesn't have it (upload failed, or lost on a new socket)
+          // and plant the picked photo again if the server doesn't have it (upload failed, or lost on a new socket),
+          // unless a game started while we were away: it used or cleared that photo
           if (!data.room.started) {
+            if (gameWentBySince(lobbyGameNumberRef.current, data.room.gameNumber)) dropPickedPhoto();
+            lobbyGameNumberRef.current = data.room.gameNumber ?? null;
             setServerPlanted(!!data.hasPlantedPhoto);
             if (!data.hasPlantedPhoto && plantedUriRef.current) plantPickedPhoto();
           }

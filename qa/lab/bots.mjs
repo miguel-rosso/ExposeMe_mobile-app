@@ -773,6 +773,10 @@ function runRoom(roomIdx, fixedCode) {
           }
         }
         if (d.rejoinToken) bot.token = d.rejoinToken;
+        // The room's game number (EXP-399): never behind the last game-started this bot saw
+        if (!Number.isInteger(d.room.gameNumber) || d.room.gameNumber < (bot.gameNumber ?? 0)) {
+          errors.push(`${name}: room-of-game game number ${d.room.gameNumber} behind game ${bot.gameNumber ?? 0}`);
+        }
         bot.players = d.room.players.map((p) => p.username);
         if (isHost && !code) {
           code = d.room.gameCode;
@@ -867,6 +871,7 @@ function runRoom(roomIdx, fixedCode) {
         if (PLAYS_NEXT_GAME && bot.playAgainDone !== undefined) bot.game2 = true;
         // The room's number of this game (EXP-318): bots-analysis checkGameNumbers compares the game's events with it
         if (!Number.isInteger(gameNumber) || gameNumber < 1) errors.push(`${name}: game-started without a positive integer game number`);
+        bot.gameNumber = gameNumber;
         if (bot.lingering) {
           // Like the app's final screens (EXP-184): join the next game at once, the way "Play again" does: re-join on
           // the same socket (lobby hand-over); its game-state snapshot (ready phase) makes us send im-ready

@@ -56,7 +56,7 @@
  "uploads_rate_limited": 0,
  "missed_events": {},
  "consistency_errors": [
-  "bot2 rejoined without a game-state snapshot",
+  "bot2 rejoined without a game-state snapshot or game-over",
   "2 players: bot1 never got game-paused",
   "bot1: pause number went back 2 -> 1"
  ],

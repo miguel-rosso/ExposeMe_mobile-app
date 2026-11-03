@@ -660,5 +660,44 @@ waiting_photo_keys_case "waiting-photo keys: a missing round is reported" no-rou
 waiting_photo_keys_case "waiting-photo keys: a missing duration is reported" no-duration "bot1: waiting-photo payload of round 1 lacks [duration]"
 waiting_photo_keys_case "waiting-photo keys: a missing game number is reported" no-game-number "bot1: waiting-photo payload of round 1 lacks [gameNumber]"
 waiting_photo_keys_case "waiting-photo keys: a run from before game numbers needs only round and duration" legacy ""
+
+# ── Rejoin answer (EXP-388): a game-state snapshot, or the game-over of a rejoin that finds the bot alone (DEC-011) ──
+# bot1, alone in the room after the device left the pause, drops in round 2 for 60 s (t=1000, back at 61000). The
+# mutation picks what it gets after that. Prints checkPlannedDrops' rejoin error, if any.
+rejoin_answer() { # mutation: game-over (the it203 shape) | snapshot | none | earlier-game-over | second-game-over | late-game-over |
+  # not-alone (a game-over in the window whose final score still has the device: a normal end, not the lone rejoin)
+  node --input-type=module -e '
+    const { analyseRoom } = await import(process.argv[1]);
+    const mutation = process.argv[2];
+    const dropAt = 1000, secs = 60, backAt = dropAt + secs * 1000;
+    const finalScore = [{ username: "bot1", points: 1, isHost: true, lastAnswerCorrect: false, lastGuess: "" }];
+    const events = [{ bot: "bot1", ev: "game-started", round: 0, t: 0, payload: { rounds: 3, players: ["bot1", "ios-a"] } }];
+    if (mutation === "earlier-game-over") events.push({ bot: "bot1", ev: "game-over", round: 1, t: 500, payload: { finalScore } });
+    events.push({ bot: "bot1", ev: "planned-disconnect", round: 2, t: dropAt, payload: { secs } });
+    const after = {
+      "game-over": { ev: "game-over", t: backAt + 6 },
+      snapshot: { ev: "game-state", t: backAt + 10, payload: { started: true, phase: "answering", paused: false } },
+      "second-game-over": { ev: "g2-game-over", t: backAt + 6 },
+      "late-game-over": { ev: "game-over", t: backAt + 5000 },
+      "not-alone": { ev: "game-over", t: backAt + 6, payload: { finalScore: [...finalScore, { username: "ios-a", points: 0, isHost: false, lastAnswerCorrect: false, lastGuess: "" }] } },
+    }[mutation];
+    if (after) events.push({ bot: "bot1", round: 2, payload: { finalScore }, ...after });
+    const r = { code: "QAROOM", reason: "game-over", players: ["bot1"], errors: [], uploads: [], rateLimited: 0, events };
+    const opts = { host: true, rounds: 3, playAgainLingerS: 0, lingerBot: 0, startNextGameS: 0 };
+    console.log(analyseRoom(r, opts).consistency_errors.filter((e) => e.includes("rejoined without")).join("\n"));
+  ' "$ANALYSIS" "$1"
+}
+rejoin_answer_case() { # label, mutation, expected output ("" = no error)
+  local got; got="$(rejoin_answer "$2")"
+  [ "$got" = "$3" ] && ok "$1" || ko "$1" "expected [$3], got [$got]"
+}
+REJOIN_UNANSWERED="bot1 rejoined without a game-state snapshot or game-over"
+rejoin_answer_case "rejoin answer: the game-over of a rejoin that finds the bot alone counts" game-over ""
+rejoin_answer_case "rejoin answer: a game-state snapshot counts" snapshot ""
+rejoin_answer_case "rejoin answer: neither snapshot nor game-over is reported" none "$REJOIN_UNANSWERED"
+rejoin_answer_case "rejoin answer: a game-over before the drop does not count" earlier-game-over "$REJOIN_UNANSWERED"
+rejoin_answer_case "rejoin answer: the second game's game-over does not count" second-game-over "$REJOIN_UNANSWERED"
+rejoin_answer_case "rejoin answer: a game-over long after the rejoin does not count" late-game-over "$REJOIN_UNANSWERED"
+rejoin_answer_case "rejoin answer: a game-over with other players in its final score does not count" not-alone "$REJOIN_UNANSWERED"
 echo "# $pass passed, $fail failed"
 [ "$fail" = 0 ]

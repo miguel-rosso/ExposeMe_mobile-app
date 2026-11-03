@@ -34,6 +34,10 @@ const ANSWER_GRACE_MS = 800;
 const HOLD_RELEASE_MAX_MS = 1_000;
 // Holds per round, as in Server/managers/GameEngine.ts (GAME_FLOW.md "Hold"; bots-cli.test.sh checks the copy)
 const MAX_HOLDS_PER_ROUND = 3;
+// A rejoin that finds the player alone in the room ends the game (DEC-011, GAME_FLOW.md): its game-over comes this long
+// after the bot is back at most (its final score lists the bot alone), and a lone bot leaves on it before its game-state
+// snapshot arrives
+const REJOIN_GAME_OVER_MAX_MS = 2_000;
 
 // Phase events every player receives (keyed by round), and the events that ended a bot's stay in the room
 const SYNCED_EVENTS = ["round-start", "round-reveal", "round-scores", "game-over", "game-started"];
@@ -470,12 +474,26 @@ function repickErrors(r, d, after) {
   return out;
 }
 
-/** Planned drop: the bot must come back with a snapshot; with 2 players the game must pause and resume. */
+/**
+ * The server answered the bot's rejoin after planned drop `d` (EXP-388): a game-state snapshot, or the game-over of a
+ * rejoin that finds the bot alone, within REJOIN_GAME_OVER_MAX_MS of it being back (`secs` after the drop). Alone: the
+ * final score (the room's players, so without those who left) lists only the bot; a game-over with others in it is a
+ * normal end, which still owes the rejoin its snapshot. Only the drop's own game counts: a second game's events (and
+ * its planned drops) are recorded with a "g2-" prefix.
+ */
+function rejoinAnswered(r, d) {
+  const backAt = d.t + d.payload.secs * 1000;
+  const alone = (e) => e.payload?.finalScore?.length === 1 && e.payload.finalScore[0].username === d.bot;
+  const endedOnRejoin = (e) => e.ev === "game-over" && e.t >= backAt && e.t <= backAt + REJOIN_GAME_OVER_MAX_MS && alone(e);
+  return r.events.some((e) => e.bot === d.bot && e.t > d.t && (e.ev === "game-state" || endedOnRejoin(e)));
+}
+
+/** Planned drop: the bot must come back with an answer to its rejoin; with 2 players the game must pause and resume. */
 function checkPlannedDrops(r) {
   const out = [];
   const drops = r.events.filter((e) => e.ev === "planned-disconnect");
   for (const d of drops) {
-    if (!r.events.some((e) => e.bot === d.bot && e.ev === "game-state" && e.t > d.t)) out.push(`${d.bot} rejoined without a game-state snapshot`);
+    if (!rejoinAnswered(r, d)) out.push(`${d.bot} rejoined without a game-state snapshot or game-over`);
     if (d.payload?.onTurn) out.push(...ownerDropErrors(r, d));
   }
   if (r.players.length === 2) out.push(...twoPlayerDropErrors(r, drops));

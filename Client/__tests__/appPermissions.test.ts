@@ -53,6 +53,10 @@ describe("app permissions (EXP-055)", () => {
     );
   });
 
+  it("keeps VIBRATE: the answer haptics (expo-haptics impactAsync) drive Android's Vibrator (EXP-091)", () => {
+    expect(exp.android.blockedPermissions).not.toContain("android.permission.VIBRATE");
+  });
+
   it("configures the media plugins for photos only", () => {
     const pluginOptions = (name: string) =>
       (exp.plugins as any[]).find((p) => Array.isArray(p) && p[0] === name)?.[1];

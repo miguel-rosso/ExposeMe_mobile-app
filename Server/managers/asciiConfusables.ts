@@ -2079,11 +2079,13 @@ export const SYMBOL_CONFUSABLES: ReadonlyMap<string, string> = new Map<string, s
   ["\u{21FE8}", "\u276C"], // CJK UNIFIED IDEOGRAPH-21FE8
 ]);
 
-// Indic character → the spelling of its script it is drawn like, decomposed (Kannada read as Telugu): for
-// the visual keys, which read it on decomposed Indic text (playerName.readIndicLookalikes).
+// Indic character → the spelling of its script it is drawn like, decomposed (Kannada read as Telugu), or the
+// reviewed character of a sister script (Gurmukhi → Devanagari, Gujarati → Devanagari, Malayalam → Tamil):
+// for the visual keys, which read it on decomposed Indic text (playerName.readIndicLookalikes).
 export const INDIC_CONFUSABLES: ReadonlyMap<string, string> = new Map<string, string>([
   ["\u0904", "\u0905\u0946"], // DEVANAGARI LETTER SHORT A
   ["\u090E", "\u090F\u0946"], // DEVANAGARI LETTER SHORT E
+  ["\u093F", "\u09BF"], // DEVANAGARI VOWEL SIGN I
   ["\u0973", "\u0905\u093A"], // DEVANAGARI LETTER OE
   ["\u0975", "\u0905\u094F"], // DEVANAGARI LETTER AW
   ["\u0986", "\u0985\u09BE"], // BENGALI LETTER AA
@@ -2092,6 +2094,13 @@ export const INDIC_CONFUSABLES: ReadonlyMap<string, string> = new Map<string, st
   ["\u09F0", "\u09B0"], // BENGALI LETTER RA WITH MIDDLE DIAGONAL
   ["\u0A06", "\u0A05\u0A3E"], // GURMUKHI LETTER AA
   ["\u0A14", "\u0A05\u0A4C"], // GURMUKHI LETTER AU
+  ["\u0A1F", "\u091F"], // GURMUKHI LETTER TTA
+  ["\u0A20", "\u0920"], // GURMUKHI LETTER TTHA
+  ["\u0A24", "\u0909"], // GURMUKHI LETTER TA
+  ["\u0A2B", "\u0922"], // GURMUKHI LETTER PHA
+  ["\u0A38", "\u092E"], // GURMUKHI LETTER SA
+  ["\u0A3F", "\u09BF"], // GURMUKHI VOWEL SIGN I
+  ["\u0A48", "\u0948"], // GURMUKHI VOWEL SIGN AI
   ["\u0A86", "\u0A85\u0ABE"], // GUJARATI LETTER AA
   ["\u0A8D", "\u0A85\u0AC5"], // GUJARATI VOWEL CANDRA E
   ["\u0A8F", "\u0A85\u0AC7"], // GUJARATI LETTER E
@@ -2099,6 +2108,10 @@ export const INDIC_CONFUSABLES: ReadonlyMap<string, string> = new Map<string, st
   ["\u0A91", "\u0A85\u0ABE\u0AC5"], // GUJARATI VOWEL CANDRA O
   ["\u0A93", "\u0A85\u0ABE\u0AC7"], // GUJARATI LETTER O
   ["\u0A94", "\u0A85\u0ABE\u0AC8"], // GUJARATI LETTER AU
+  ["\u0AB0", "\u0AE8"], // GUJARATI LETTER RA
+  ["\u0ABD", "\u093D"], // GUJARATI SIGN AVAGRAHA
+  ["\u0AEA", "\u096A"], // GUJARATI DIGIT FOUR
+  ["\u0AEE", "\u096E"], // GUJARATI DIGIT EIGHT
   ["\u0B06", "\u0B05\u0B3E"], // ORIYA LETTER AA
   ["\u0B8A", "\u0B89\u0BB3"], // TAMIL LETTER UU
   ["\u0B9C", "\u0B90"], // TAMIL LETTER JA
@@ -2157,8 +2170,11 @@ export const INDIC_CONFUSABLES: ReadonlyMap<string, string> = new Map<string, st
   ["\u0D0C", "\u0D28\u0D41"], // MALAYALAM LETTER VOCALIC L
   ["\u0D13", "\u0D12\u0D3E"], // MALAYALAM LETTER OO
   ["\u0D14", "\u0D12\u0D57"], // MALAYALAM LETTER AU
+  ["\u0D16", "\u0BB5"], // MALAYALAM LETTER KHA
   ["\u0D19", "\u0D28\u0D41"], // MALAYALAM LETTER NGA
+  ["\u0D25", "\u0BAE"], // MALAYALAM LETTER THA
   ["\u0D31", "\u0D30"], // MALAYALAM LETTER RRA
+  ["\u0D3F", "\u0BBF"], // MALAYALAM VOWEL SIGN I
   ["\u0D42", "\u0D41"], // MALAYALAM VOWEL SIGN UU
   ["\u0D43", "\u0D41"], // MALAYALAM VOWEL SIGN VOCALIC R
   ["\u0D5A", "\u0D28\u0D4D\u0D2E"], // MALAYALAM FRACTION THREE EIGHTIETHS

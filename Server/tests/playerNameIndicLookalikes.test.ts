@@ -209,14 +209,14 @@ describe("Indic characters drawn like another spelling of their script (EXP-364)
     expectDistinct(a, b);
   });
 
-  it("keeps each generated entry within one script, Kannada counted as Telugu", () => {
+  it("keeps each generated entry within one script, Kannada counted as Telugu, but the reviewed ones (EXP-375)", () => {
     const scriptOf = (char: string) => {
       const block = Math.floor(char.codePointAt(0)! / 0x80);
       return block === 0x0c80 / 0x80 ? 0x0c00 / 0x80 : block;
     };
     const mixed = [...INDIC_CONFUSABLES].filter(([char, spelling]) =>
       Array.from(spelling).some((part) => scriptOf(part) !== scriptOf(char)));
-    expect(mixed).toEqual([]);
+    expect(mixed.map(([char]) => char)).toEqual(REVIEWED_CROSS_SCRIPT);
   });
 
   it("reads no spelling of the table again, and lets no measured entry replace a generated one", () => {
@@ -226,6 +226,59 @@ describe("Indic characters drawn like another spelling of their script (EXP-364)
     const replaced = [...INDIC_CONFUSABLES].filter(([char, spelling]) =>
       INDIC_LOOKALIKES.get(char) !== Array.from(spelling, (part) => INDIC_LOOKALIKES.get(part) ?? part).join(""));
     expect(replaced).toEqual([]);
+  });
+});
+
+// EXP-375: the cross-script pairs of UTS #39 that render essentially alike (scripts/generateAsciiConfusables.mjs,
+// CROSS_SCRIPT_INDIC), in code point order: a name may mix Indic scripts letter by letter, so one swapped letter copies
+// a name of the sister script. The Gujarati letter RA is read as the Gujarati digit two, a step of its UTS #39 entry,
+// so it stays within its script.
+const REVIEWED_CROSS_SCRIPT = [
+  "\u093F", "\u0A1F", "\u0A20", "\u0A24", "\u0A2B", "\u0A38", "\u0A3F", "\u0A48", "\u0ABD", "\u0AEA", "\u0AEE",
+  "\u0D16", "\u0D25", "\u0D3F",
+];
+
+describe("Indic characters drawn like one of a sister script (EXP-375)", () => {
+  it.each([
+    ["Devanagari Umesh / Gurmukhi TA for U", "\u0909\u092E\u0947\u0936", "\u0A24\u092E\u0947\u0936"],
+    ["Devanagari Kamal / Gurmukhi SA for MA", "\u0915\u092E\u0932", "\u0915\u0A38\u0932"],
+    ["Devanagari Pathak / Gurmukhi TTHA for TTHA", "\u092A\u093E\u0920\u0915", "\u092A\u093E\u0A20\u0915"],
+    ["Devanagari Dhal / Gurmukhi PHA for DDHA", "\u0922\u0932", "\u0A2B\u0932"],
+    ["Devanagari Tagore / Gurmukhi TTAI", "\u091F\u0948\u0917\u094B\u0930", "\u0A1F\u0A48\u0917\u094B\u0930"],
+    ["Devanagari Tiya / Gurmukhi TTI", "\u091F\u093F\u092F\u093E", "\u0A1F\u0A3F\u092F\u093E"],
+    ["Devanagari Tina / Gurmukhi TTII (EXP-375)", "\u091F\u0940\u0928\u093E", "\u0A1F\u0A40\u0928\u093E"],
+    ["Devanagari Tej / Gurmukhi TTEE (EXP-386)", "\u091F\u0947\u091C", "\u0A1F\u0A47\u091C"],
+    ["Devanagari Sumit / Gurmukhi SA for MA with II", "\u0938\u0941\u092E\u0940\u0924", "\u0938\u0941\u0A38\u0A40\u0924"],
+    ["Gujarati Kar / digit two for RA", "\u0A95\u0AB0", "\u0A95\u0AE8"],
+    ["Devanagari Ram 4 / Gujarati four", "\u0930\u093E\u092E\u096A", "\u0930\u093E\u092E\u0AEA"],
+    ["Devanagari Ram 8 / Gujarati eight", "\u0930\u093E\u092E\u096E", "\u0930\u093E\u092E\u0AEE"],
+    ["Devanagari Haa with avagraha / Gujarati avagraha", "\u0939\u093E\u093D", "\u0939\u093E\u0ABD"],
+    ["Tamil Kumaran / Malayalam THA for MA", "\u0B95\u0BC1\u0BAE\u0BB0\u0BA9\u0BCD", "\u0B95\u0BC1\u0D25\u0BB0\u0BA9\u0BCD"],
+    ["Tamil Vanitha / Malayalam KHA for VA", "\u0BB5\u0BA9\u0BBF\u0BA4\u0BBE", "\u0D16\u0BA9\u0BBF\u0BA4\u0BBE"],
+    ["Tamil Vimal / Malayalam KHI for VI", "\u0BB5\u0BBF\u0BAE\u0BB2\u0BCD", "\u0D16\u0D3F\u0BAE\u0BB2\u0BCD"],
+  ])("%s look too alike", (_label, a, b) => {
+    expectSimilar(a, b);
+  });
+
+  // Close shapes UTS #39 lists but the fonts draw apart, and real names of one script the pairs must not join
+  it.each([
+    ["Devanagari Pal / Gurmukhi DHA (hooked stem)", "\u092A\u0932", "\u0A27\u0932"],
+    ["Devanagari Bhan / Gurmukhi MA (Noto curls BHA)", "\u092D\u0928", "\u0A2E\u0928"],
+    ["Devanagari Ram 2 / Gujarati two (straight tail)", "\u0930\u093E\u092E\u0968", "\u0930\u093E\u092E\u0AE8"],
+    ["Tamil Ganapathi / Malayalam NNA for NNA", "\u0B95\u0BA3\u0BAA\u0BA4\u0BBF", "\u0B95\u0D23\u0BAA\u0BA4\u0BBF"],
+    ["Malayalam Kiran / Keeran (I and II signs)", "\u0D15\u0D3F\u0D30\u0D7A", "\u0D15\u0D40\u0D30\u0D7A"],
+    ["Gurmukhi Sant / Mant", "\u0A38\u0A70\u0A24", "\u0A2E\u0A70\u0A24"],
+    ["Gujarati Raj / Kaj", "\u0AB0\u0ABE\u0A9C", "\u0A95\u0ABE\u0A9C"],
+    // Vowel signs drawn apart from the sister script's (playerName CROSS_SCRIPT_VOWEL_SIGN_LOOKALIKES, "Left out")
+    ["Devanagari Seema / Gurmukhi SA + kanna (half-height AA)", "\u0938\u0940\u092E\u093E", "\u0938\u0940\u0A38\u0A3E"],
+    ["Devanagari Thakur / Gurmukhi TTHA + kanna", "\u0920\u093E\u0915\u0941\u0930", "\u0A20\u0A3E\u0915\u0941\u0930"],
+    ["Devanagari Tuktuk / Gurmukhi TTU (other hook)", "\u091F\u0941\u0915", "\u0A1F\u0A41\u0915"],
+    ["Devanagari Teri / Gurmukhi TTOO (OO would meet EE)", "\u091F\u0947\u0930\u0940", "\u0A1F\u0A4B\u0930\u0940"],
+    ["Gurmukhi Sohan / Sehan (OO and EE signs)", "\u0A38\u0A4B\u0A39\u0A28", "\u0A38\u0A47\u0A39\u0A28"],
+    ["Tamil Vaani / Malayalam KHA + AA", "\u0BB5\u0BBE\u0BA3\u0BBF", "\u0D16\u0D3E\u0BA3\u0BBF"],
+    ["Tamil Maaran / Malayalam THA + AA", "\u0BAE\u0BBE\u0BB1\u0BA9\u0BCD", "\u0D25\u0D3E\u0BB1\u0BA9\u0BCD"],
+  ])("%s stay different names", (_label, a, b) => {
+    expectDistinct(a, b);
   });
 });
 

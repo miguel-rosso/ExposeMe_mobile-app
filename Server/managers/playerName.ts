@@ -305,12 +305,21 @@ const CANDRA_LOOKALIKES: ReadonlyMap<string, string> = new Map([
   ["\u0949", "\u093E\u0945"], ["\u0911", "\u0906\u0945"], ["\u090D", "\u090F\u0945"], ["\u0972", "\u0905\u0945"],
   ["\u0AC9", "\u0ABE\u0AC5"],
 ]);
+// Visual keys only (EXP-375, EXP-386): Gurmukhi vowel signs drawn like the Devanagari ones (Gurmukhi MN and Kohinoor
+// on iOS, Noto Sans on Android), so a Gurmukhi letter drawn like a Devanagari one (INDIC_CONFUSABLES: "ਟ" as "ट")
+// copies its syllable too: II like II and EE like E ("ਟੀ" like "टी", "ਟੇ" like "टे"). Left out, drawn apart: AA (the
+// kanna stops at mid height), U, UU and AU (other hooks, no AU bar), OO (see INDIC_CONFUSABLES); and the Malayalam
+// AA, II, U and UU signs next to the Tamil ones, on the Malayalam letters drawn like Tamil ones ("ഖ" as "வ")
+const CROSS_SCRIPT_VOWEL_SIGN_LOOKALIKES: ReadonlyMap<string, string> = new Map([
+  ["\u0A40", "\u0940"], ["\u0A47", "\u0947"],
+]);
 const MEASURED_INDIC_LOOKALIKES: ReadonlyMap<string, string> = new Map([
-  ...VOWEL_SIGN_LOOKALIKES, ...CANDRA_LOOKALIKES,
+  ...VOWEL_SIGN_LOOKALIKES, ...CANDRA_LOOKALIKES, ...CROSS_SCRIPT_VOWEL_SIGN_LOOKALIKES,
 ]);
 // Visual keys only (EXP-356, EXP-364): Indic characters drawn like another spelling of their script, generated from
 // UTS #39 (INDIC_CONFUSABLES: Tamil "௧" as "க" and "ௗ" as "ள", Telugu "హ" as "వా", Malayalam "൬" as "ന്ന",
-// Kannada "ಅ" as Telugu "అ"), and the measured ones above. The generated spellings are read through the measured
+// Kannada "ಅ" as Telugu "అ"; EXP-375, reviewed across sister scripts: Gurmukhi "ਟ" as Devanagari "ट", Malayalam "ഖ"
+// as Tamil "வ"), and the measured ones above. The generated spellings are read through the measured
 // tables ("ऎ" as "ए" + short E sign, read as E sign), so no spelling holds a character the table reads, and no measured
 // entry replaces a generated one. Exported for tests
 export const INDIC_LOOKALIKES: ReadonlyMap<string, string> = new Map([
@@ -362,11 +371,17 @@ const UNASSIGNED_EMOJI = new RegExp(codePointClass(UNASSIGNED_EMOJI_RANGES), "gu
 // What the visual keys read them as: a private-use character, which names can't use, so it only meets another of them
 const EMPTY_BOX = "\uE000";
 
+// Visual keys only (EXP-376): Mongolian vowels the Unicode Standard encodes apart for their sound but "written
+// identically in all positional forms" (chapter 13.2, Mongolian; so Noto Sans Mongolian draws them): U as O and UE as
+// OE. O and OE stay apart: they are drawn alike only outside a word's first syllable, which depends on the shaping
+const MONGOLIAN_LOOKALIKES: ReadonlyMap<string, string> = new Map([["\u1824", "\u1823"], ["\u1826", "\u1825"]]);
+
 /**
- * Visual keys only: Indic characters drawn like a vowel sign or a letter and a sign read as those, emoji newer than
- * Unicode 15.1 as one box.
+ * Visual keys only: Indic characters drawn like a vowel sign or a letter and a sign read as those, Mongolian vowels
+ * written alike as one, emoji newer than Unicode 15.1 as one box.
  */
-const readDrawnAlike = (text: string) => readIndicLookalikes(text).replace(UNASSIGNED_EMOJI, EMPTY_BOX);
+const readDrawnAlike = (text: string) =>
+  replaceChars(readIndicLookalikes(text), MONGOLIAN_LOOKALIKES).replace(UNASSIGNED_EMOJI, EMPTY_BOX);
 
 // ── Japanese voicing marks ──────────────────────────
 
@@ -623,8 +638,10 @@ export function nameKey(name: string): string {
  * counts as on that kana: "〈" + dakuten reads as ぐ, "力" + dakuten as ガ; so does a spacing ゛ or ゜ after a space
  * ("た ゛" looks like だ). Voiced kana that NFKC made (squared "㌎" is ガロン) are split again so the second pass sees
  * the kana. Marks drawn like an Indic vowel sign read as that sign (EXP-343: "सँम" like "सॅम"), Indic characters
- * drawn like a letter and a vowel sign as those (EXP-356: "హరి" like "వారి", "चॉदनी" like "चाँदनी"), and every emoji
- * newer than Unicode 15.1 as the same empty box, as phones without it draw it ("Ana 🫩" like "Ana 🫆").
+ * drawn like a letter and a vowel sign as those (EXP-356: "హరి" like "వారి", "चॉदनी" like "चाँदनी"), Indic letters
+ * drawn like one of a sister script as it (EXP-375: Gurmukhi "ਟ" like Devanagari "ट"), Mongolian U as O and UE as OE
+ * (EXP-376: "ᠪᠤᠯ" like "ᠪᠣᠯ"), and every emoji newer than Unicode 15.1 as the same empty box, as phones without it
+ * draw it ("Ana 🫩" like "Ana 🫆").
  * Malayalam chillus typed with a joiner, and the digits drawn like a chillu, read as the atomic chillu first (EXP-372,
  * readChillusAsDrawn).
  */
@@ -639,8 +656,10 @@ export function visualKey(name: string): string {
 /**
  * The visual key without the symbol table (EXP-285): the skeleton with only the letter groups that differ in some
  * fonts, the marks drawn like an Indic vowel sign, the Indic characters drawn like a letter and a vowel sign (EXP-356)
- * and the emoji newer than Unicode 15.1 read alike. The symbol table reads small or circled o and zero as other symbols ("º", "ᵒ" and "⁰" as the degree sign, which keeps "(º_º)" next to "(°_°)"); here NFKC reads them as
- * the letter or digit they also look like, so "b⁰b" and "b⓪b" still meet "bob", and "bºb" meets "b0b".
+ * or a sister script's letter (EXP-375), the Mongolian vowels written alike (EXP-376) and the emoji newer than Unicode
+ * 15.1 read alike. The symbol table reads small or circled o and zero as other symbols ("º", "ᵒ" and "⁰" as the
+ * degree sign, which keeps "(º_º)" next to "(°_°)"); here NFKC reads them as the letter or digit they also look like,
+ * so "b⁰b" and "b⓪b" still meet "bob", and "bºb" meets "b0b".
  */
 export function letterVisualKey(name: string): string {
   return readLetterLookalikes(skeleton(readDrawnAlike(name)));

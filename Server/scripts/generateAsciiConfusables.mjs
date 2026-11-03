@@ -48,15 +48,17 @@
 // name spells them: Telugu "భ" as "బ" + a Latin dot below, Devanagari "आ" as "अ" + a Nandinagari sign), and letters
 // whose prototype holds a virama: the name keys drop it, so the letter would read as bare consonants it is not drawn
 // like (Malayalam chillu L as LA + virama would put "കമൽ" next to "കമല"). Other characters keep it: digits and
-// symbols, which real names don't hold ("൬" as "ന്ന").
+// symbols, which real names don't hold ("൬" as "ന്ന"). Across scripts (EXP-375), only the pairs of
+// CROSS_SCRIPT_INDIC, reviewed one by one: Gurmukhi "ਟ" as Devanagari "ट", Malayalam "ഖ" as Tamil "வ".
 import { readFileSync } from "fs";
 
 const ASCII_PROTOTYPE = /^[A-Za-z0-9]{1,3}$/;
 const COMBINING_MARKS = /\p{Mn}/gu;
 const NONSPACING_MARK = /\p{Mn}/u;
 // confusables.txt lines: "source ;\tprototype ;\tMA\t#[*] ( source → prototype ) SOURCE NAME → PROTOTYPE NAMES\t#...",
-// the prototype names separated by ", "
-const ENTRY = /^([0-9A-F]+) ;\t([0-9A-F ]+) ;\tMA\t#\*? \( .+ \) (.+?) \u2192 ([^\t]*)/;
+// the prototype names separated by ", ", then the characters UTS #39 drew the source like on the way to its
+// prototype, if any ("\t# \u2192\u0AE8\u2192" for the Gujarati letter RA, drawn like the Gujarati digit two)
+const ENTRY = /^([0-9A-F]+) ;\t([0-9A-F ]+) ;\tMA\t#\*? \( .+ \) (.+?) \u2192 ([^\t]*)(?:\t#\s*(.*))?/;
 
 // Latin small capitals (U+1D00-1D22 and the IPA ones) are their own prototype in confusables.txt: read them as the letter
 const SMALL_CAPITALS = {
@@ -101,13 +103,17 @@ if (!sourcePath) {
 const text = readFileSync(sourcePath, "utf8");
 const version = text.match(/^# Version: (.+)$/m)?.[1] ?? "unknown";
 
-/** The MA entries of confusables.txt: source character, raw prototype, the source's name and the prototype's names. */
+/**
+ * The MA entries of confusables.txt: source character, raw prototype, the source's name, the prototype's names and the
+ * characters UTS #39 drew the source like on the way to the prototype.
+ */
 const confusables = text.split("\n").flatMap((line) => {
   const match = line.match(ENTRY);
   if (!match) return [];
   const source = String.fromCodePoint(parseInt(match[1], 16));
   const prototype = String.fromCodePoint(...match[2].trim().split(" ").map((hex) => parseInt(hex, 16)));
-  return [{ source, prototype, name: match[3], prototypeNames: match[4].split(", ") }];
+  const steps = (match[5] ?? "").split("\u2192").map((step) => step.trim()).filter(Boolean);
+  return [{ source, prototype, name: match[3], prototypeNames: match[4].split(", "), steps }];
 });
 
 // ── ASCII_CONFUSABLES ───────────────────────────────
@@ -247,16 +253,59 @@ const indicScriptOf = (char) => {
   return block === KANNADA_BLOCK ? TELUGU_BLOCK : block;
 };
 
-/** Whether `source` reads in the Indic table as `prototype`, named `prototypeNames` (see the header). */
-const keepsIndic = (source, prototype, prototypeNames) => INDIC_CHAR.test(source)
+/**
+ * Whether `source` may read in the Indic table as `prototype`, named `prototypeNames`, whatever their scripts (see the
+ * header).
+ */
+const keepsIndicAnyScript = (source, prototype, prototypeNames) => INDIC_CHAR.test(source)
   && source.normalize("NFD") === source && !entries.has(source) && !symbols.has(source)
-  && !UNASSIGNED.test(source + prototype)
-  && Array.from(prototype).every((char) => INDIC_CHAR.test(char) && indicScriptOf(char) === indicScriptOf(source))
+  && !UNASSIGNED.test(source + prototype) && Array.from(prototype).every((char) => INDIC_CHAR.test(char))
   && !(LETTER.test(source) && prototypeNames.some((name) => VIRAMA_NAME.test(name)));
+
+/** Whether `source` reads in the Indic table as `prototype`, a spelling of its own script (see the header). */
+const keepsIndic = (source, prototype, prototypeNames) => keepsIndicAnyScript(source, prototype, prototypeNames)
+  && Array.from(prototype).every((char) => indicScriptOf(char) === indicScriptOf(source));
+
+// Cross-script lookalikes (EXP-375), reviewed one by one: source → the character it is read as, the UTS #39
+// prototype or one of the steps UTS #39 went through. Kept only when they render essentially alike in the fonts the
+// app uses (Gurmukhi MN, Kohinoor and the Sangam fonts on iOS, Noto Sans on Android, compared at large size): sister
+// scripts share many shapes that are close but not the same, and joining those would put real names of two scripts
+// next to each other. A name may mix Indic scripts letter by letter (only a vowel sign must match its letter's
+// script), so one swapped letter is enough to copy a name.
+const CROSS_SCRIPT_INDIC = new Map([
+  // Gurmukhi letters drawn like a Devanagari letter, with the same headline: TA like U, TTA like TTA, TTHA like TTHA,
+  // PHA like DDHA (an angular top for a rounded one) and SA like MA. Left out: DHA like PA (a hook on the stem),
+  // MA like BHA (Noto Sans Devanagari curls BHA), KA like VA (an open curl for a closed bowl) and VA like HA
+  ["\u0A24", "\u0909"], ["\u0A1F", "\u091F"], ["\u0A20", "\u0920"], ["\u0A2B", "\u0922"], ["\u0A38", "\u092E"],
+  // Gurmukhi vowel signs drawn like Devanagari ones on those letters: AI like AI, and Gurmukhi and Devanagari I both
+  // like the Bengali I they meet at (playerName measures the II and EE signs, which UTS #39 doesn't list). Left out:
+  // OO like the curved short E, which playerName reads as E, so OO would meet the Gurmukhi EE sign it is drawn apart
+  // from ("\u0A38\u0A4B\u0A39\u0A28" and "\u0A38\u0A47\u0A39\u0A28" are different names)
+  ["\u0A48", "\u0948"], ["\u0A3F", "\u09BF"], ["\u093F", "\u09BF"],
+  // Gujarati digits four and eight and the avagraha, drawn like the Devanagari ones; and (UTS #39 step) the Gujarati
+  // letter RA like the Gujarati digit two. Left out: the Gujarati digit two like the Devanagari one, whose tail is a
+  // straight stroke, and the Gujarati vowel signs and virama, which no Gujarati letter drawn like Devanagari carries
+  ["\u0AEA", "\u096A"], ["\u0AEE", "\u096E"], ["\u0ABD", "\u093D"], ["\u0AB0", "\u0AE8"],
+  // Malayalam THA and KHA drawn like Tamil MA and VA, and the Malayalam vowel sign I like the Tamil one. Left out:
+  // U, UU, JA, TTTA, NNA, LLLA and SHA (other curls or a tail), the E, EE and AI signs and the letter AI (the Tamil
+  // signs rise above the letters) and the II sign, which would also read Malayalam I and II alike
+  ["\u0D25", "\u0BAE"], ["\u0D16", "\u0BB5"], ["\u0D3F", "\u0BBF"],
+]);
 
 const indic = new Map();
 for (const { source, prototype, name, prototypeNames } of confusables) {
   if (!indic.has(source) && keepsIndic(source, prototype, prototypeNames)) indic.set(source, [prototype, name]);
+}
+// A reviewed pair must still be in UTS #39 (or the generator stops): a newer confusables.txt may draw it otherwise
+for (const [source, reviewed] of CROSS_SCRIPT_INDIC) {
+  const entry = confusables.find((candidate) => candidate.source === source);
+  const fromUts = entry && (entry.prototype === reviewed || entry.steps.includes(reviewed));
+  const names = entry?.prototype === reviewed ? entry.prototypeNames : [];
+  if (!fromUts || indic.has(source) || !keepsIndicAnyScript(source, reviewed, names)) {
+    console.error(`cross-script Indic lookalike ${escape(source)} is not an Indic entry of UTS #39 to review`);
+    process.exit(1);
+  }
+  indic.set(source, [reviewed, entry.name]);
 }
 
 // playerName reads the table once, on decomposed text: a prototype must already be decomposed and read as itself
@@ -342,8 +391,9 @@ const out = [
   "// kana and the kanji drawn like them, ideographs drawn alike...).",
   ...mapLines("SYMBOL_CONFUSABLES", symbols),
   "",
-  "// Indic character \u2192 the spelling of its script it is drawn like, decomposed (Kannada read as Telugu): for",
-  "// the visual keys, which read it on decomposed Indic text (playerName.readIndicLookalikes).",
+  "// Indic character \u2192 the spelling of its script it is drawn like, decomposed (Kannada read as Telugu), or the",
+  "// reviewed character of a sister script (Gurmukhi \u2192 Devanagari, Gujarati \u2192 Devanagari, Malayalam \u2192 Tamil):",
+  "// for the visual keys, which read it on decomposed Indic text (playerName.readIndicLookalikes).",
   ...mapLines("INDIC_CONFUSABLES", indic),
   "",
   `// Code points unassigned in Unicode ${process.versions.unicode}, the version of the tables above, but those reserved`,

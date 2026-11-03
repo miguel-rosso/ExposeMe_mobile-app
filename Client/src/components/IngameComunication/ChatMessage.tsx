@@ -48,7 +48,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ username, message, onAnimatio
   return (
     <Animated.View
       style={[
-        tw`bg-black bg-opacity-60 rounded-xl px-3 py-2 mb-2 max-w-[85%] self-start ml-4`,
+        tw`bg-black bg-opacity-60 rounded-xl px-3 py-2 mb-2 max-w-[85%] self-center`,
         { opacity, transform: [{ translateY }] },
       ]}
     >

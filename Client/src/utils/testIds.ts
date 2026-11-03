@@ -19,6 +19,7 @@ export const TEST_IDS = {
   homeLimitedAddMore: "home-limited-add-more",
   // ── Waiting room ──
   closeButton: "close-button",
+  lobbyCodeBlock: "lobby-code-block", // the "Room code" title and the code with its copy and share buttons
   lobbyGameCode: "lobby-game-code",
   copyCodeButton: "copy-code-button",
   shareCodeButton: "share-code-button",
@@ -32,6 +33,7 @@ export const TEST_IDS = {
   lobbyLoading: "lobby-loading", // shown until the join answer says this is a lobby (a started game opens the game)
   chatInput: "chat-input",
   chatSendButton: "chat-send-button",
+  lobbyChatMessages: "lobby-chat-messages", // the chat bubbles' area, from under the room code down to the chat input
   // Invite link confirmation (DEC-046): nothing joins until Join
   inviteConfirmModal: "invite-confirm-modal",
   inviteRoomCode: "invite-room-code",

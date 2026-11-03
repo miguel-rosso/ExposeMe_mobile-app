@@ -13,9 +13,17 @@ interface LobbyChatProps {
   chat: LobbyChat;
 }
 
-/** The chat bubbles, stacked under the top of the lobby; each one leaves once it has faded out. */
+/**
+ * The chat bubbles, centred and filling the area they are placed in: the lobby puts them over everything between the
+ * room code and the chat input, so they never cover the code or its copy and share buttons (EXP-411). They stack up
+ * from the bottom, the newest nearest the input; when the keyboard leaves too little room, the oldest are cut off at
+ * the top. Each one leaves once it has faded out. Taps go through them to the controls underneath.
+ */
 export const LobbyChatMessages = ({ chat }: LobbyChatProps) => (
-  <View style={tw`absolute top-20 left-0 right-0 z-40 items-center`}>
+  <View
+    testID={TEST_IDS.lobbyChatMessages}
+    style={[tw`absolute inset-0 z-40 items-center justify-end overflow-hidden`, { pointerEvents: "none" }]}
+  >
     {chat.messages.map((msg) => (
       <ChatMessage
         key={msg.id}

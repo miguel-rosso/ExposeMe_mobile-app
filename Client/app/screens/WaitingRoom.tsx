@@ -617,8 +617,6 @@ const WaitingRoom = () => {
       </View>
       <CloseButton onPress={handleClose} accessibilityLabel={invitedCode ? t.cancel : t.leaveRoom} />
 
-      <LobbyChatMessages chat={chat} />
-
       {/* Loading overlay and notifications */}
       {isLoading && <BusyOverlay testID={TEST_IDS.lobbyLoading} title={t.loadingGameRoom} subtitle={t.pleaseWait} />}
 
@@ -636,7 +634,7 @@ const WaitingRoom = () => {
         <View style={tw`flex-1 flex `}>
           {/* Main content area */}
           <View style={tw`flex-1 pt-14 px-4 max-w-[500px] w-full self-center ${isLoading ? "opacity-0" : "opacity-100"}`}>
-            <View style={tw`items-center mb-2`}>
+            <View testID={TEST_IDS.lobbyCodeBlock} style={tw`items-center`}>
               <Text style={[tw`text-xl text-white font-bold mb-1`, TITLE_SHADOW]}>{t.gameCode}</Text>
 
               <View style={tw`flex-row items-center mb-1 max-w-full`}>
@@ -671,101 +669,108 @@ const WaitingRoom = () => {
                   <Ionicons name="share-social-outline" size={24} color="rgba(255,255,255,0.7)" />
                 </TouchableOpacity>
               </View>
-
-              <Text style={[tw`text-white font-extrabold mb-2`, HEADING_SHADOW]}>
-                {roundsOfGame} {t.rounds}
-              </Text>
-
-              <PlantPhotoButton
-                planted={hasPlantedPhoto}
-                uploading={plantUpload === "uploading"}
-                failed={plantUpload === "failed"}
-                disabled={isSelecting}
-                onPress={pickAndPlantImage}
-              />
             </View>
 
-            {/* Player list with limited height */}
-            <FlatList
-              data={players}
-              renderItem={renderPlayer}
-              keyExtractor={playerKey}
-              style={tw`w-full flex-1`}
-              contentContainerStyle={tw`pb-2`}
-            />
-
-            {/* Bottom controls section */}
-            <View style={tw`w-full mt-2 mb-4`}>
-              {startRequest.notice && (
-                <Text testID={TEST_IDS.startGameNotice} style={[tw`text-red-300 font-medium text-center mb-2`, HINT_SHADOW]}>
-                  {startRequest.notice}
+            {/* Everything under the room code. The chat bubbles show over it, from the code down to the chat input,
+                so the keyboard shrinking the player list never squeezes them out (EXP-411) */}
+            <View style={tw`flex-1`}>
+              <View style={tw`items-center mb-2`}>
+                <Text style={[tw`text-white font-extrabold mb-2`, HEADING_SHADOW]}>
+                  {roundsOfGame} {t.rounds}
                 </Text>
-              )}
-              {isHost && canStart ? (
-                <>
-                  {/* Round selector — pill style */}
-                  <View style={[tw`flex-row justify-center mb-3 rounded-full p-1`, { backgroundColor: "rgba(255,255,255,0.08)" }]}>
-                    {ROUND_OPTIONS.map((rounds) => (
-                      <TouchableOpacity
-                        key={rounds}
-                        testID={roundsOptionId(rounds)}
-                        onPress={() => handleSetRounds(rounds)}
-                        // Fixed once Start is pressed: the game starts with the rounds the server has then
-                        disabled={startRequest.starting}
-                        accessibilityRole="button"
-                        accessibilityLabel={`${rounds} ${t.rounds}`}
-                        accessibilityState={{ disabled: startRequest.starting, selected: roundsOfGame === rounds }}
-                        style={[
-                          tw`flex-1 py-2 rounded-full items-center ${startRequest.starting ? "opacity-70" : ""}`,
-                          roundsOfGame === rounds ? { backgroundColor: BRAND_RED } : {},
-                        ]}
-                      >
-                        <Text style={tw`text-white text-sm ${roundsOfGame === rounds ? "font-bold" : "opacity-60"}`}>
-                          {rounds}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
 
-                  {/* Start button:"Starting…" and disabled until game-started or the server's answer */}
-                  <TouchableOpacity
-                    testID={TEST_IDS.startGameButton}
-                    onPress={startRequest.start}
-                    disabled={startRequest.starting}
-                    accessibilityState={{ disabled: startRequest.starting, busy: startRequest.starting }}
-                    activeOpacity={0.8}
-                    style={[
-                      tw`w-full py-4 rounded-2xl flex-row justify-center items-center ${startRequest.starting ? "opacity-70" : ""}`,
-                      { backgroundColor: BRAND_RED },
-                    ]}
-                  >
-                    {startRequest.starting && <ActivityIndicator color="white" style={tw`mr-2`} />}
-                    <Text style={tw`text-white font-bold text-lg`}>
-                      {startRequest.starting ? t.startingGame : t.startGame}
-                    </Text>
-                  </TouchableOpacity>
-                </>
-              ) : (
-                <View style={tw`p-2 w-full flex flex-col justify-center items-center`}>
-                  <View testID={TEST_IDS.lobbyWaiting} style={tw`flex flex-row justify-center opacity-70 items-center mb-4`}>
-                    <Text style={tw`text-white`}>{canStart ? t.waitingHost : t.waitingForPlayers}</Text>
-                    <View style={tw`flex-row`}>
-                      <AnimatedDot delay={0} />
-                      <AnimatedDot delay={200} />
-                      <AnimatedDot delay={400} />
+                <PlantPhotoButton
+                  planted={hasPlantedPhoto}
+                  uploading={plantUpload === "uploading"}
+                  failed={plantUpload === "failed"}
+                  disabled={isSelecting}
+                  onPress={pickAndPlantImage}
+                />
+              </View>
+
+              {/* Player list with limited height */}
+              <FlatList
+                data={players}
+                renderItem={renderPlayer}
+                keyExtractor={playerKey}
+                style={tw`w-full flex-1`}
+                contentContainerStyle={tw`pb-2`}
+              />
+
+              {/* Bottom controls section */}
+              <View style={tw`w-full mt-2 mb-4`}>
+                {startRequest.notice && (
+                  <Text testID={TEST_IDS.startGameNotice} style={[tw`text-red-300 font-medium text-center mb-2`, HINT_SHADOW]}>
+                    {startRequest.notice}
+                  </Text>
+                )}
+                {isHost && canStart ? (
+                  <>
+                    {/* Round selector — pill style */}
+                    <View style={[tw`flex-row justify-center mb-3 rounded-full p-1`, { backgroundColor: "rgba(255,255,255,0.08)" }]}>
+                      {ROUND_OPTIONS.map((rounds) => (
+                        <TouchableOpacity
+                          key={rounds}
+                          testID={roundsOptionId(rounds)}
+                          onPress={() => handleSetRounds(rounds)}
+                          // Fixed once Start is pressed: the game starts with the rounds the server has then
+                          disabled={startRequest.starting}
+                          accessibilityRole="button"
+                          accessibilityLabel={`${rounds} ${t.rounds}`}
+                          accessibilityState={{ disabled: startRequest.starting, selected: roundsOfGame === rounds }}
+                          style={[
+                            tw`flex-1 py-2 rounded-full items-center ${startRequest.starting ? "opacity-70" : ""}`,
+                            roundsOfGame === rounds ? { backgroundColor: BRAND_RED } : {},
+                          ]}
+                        >
+                          <Text style={tw`text-white text-sm ${roundsOfGame === rounds ? "font-bold" : "opacity-60"}`}>
+                            {rounds}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
                     </View>
-                  </View>
 
-                  {/* Host explanation message */}
-                  {isHost && !canStart && (
-                    <Animatable.View testID={TEST_IDS.lobbyHostHint} animation="fadeIn">
-                      <Text style={[tw`text-white text-center italic opacity-80 `, HINT_SHADOW]}>
-                        {t.sendCodeToFriends}
+                    {/* Start button:"Starting…" and disabled until game-started or the server's answer */}
+                    <TouchableOpacity
+                      testID={TEST_IDS.startGameButton}
+                      onPress={startRequest.start}
+                      disabled={startRequest.starting}
+                      accessibilityState={{ disabled: startRequest.starting, busy: startRequest.starting }}
+                      activeOpacity={0.8}
+                      style={[
+                        tw`w-full py-4 rounded-2xl flex-row justify-center items-center ${startRequest.starting ? "opacity-70" : ""}`,
+                        { backgroundColor: BRAND_RED },
+                      ]}
+                    >
+                      {startRequest.starting && <ActivityIndicator color="white" style={tw`mr-2`} />}
+                      <Text style={tw`text-white font-bold text-lg`}>
+                        {startRequest.starting ? t.startingGame : t.startGame}
                       </Text>
-                    </Animatable.View>
-                  )}
-                </View>
-              )}
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  <View style={tw`p-2 w-full flex flex-col justify-center items-center`}>
+                    <View testID={TEST_IDS.lobbyWaiting} style={tw`flex flex-row justify-center opacity-70 items-center mb-4`}>
+                      <Text style={tw`text-white`}>{canStart ? t.waitingHost : t.waitingForPlayers}</Text>
+                      <View style={tw`flex-row`}>
+                        <AnimatedDot delay={0} />
+                        <AnimatedDot delay={200} />
+                        <AnimatedDot delay={400} />
+                      </View>
+                    </View>
+
+                    {/* Host explanation message */}
+                    {isHost && !canStart && (
+                      <Animatable.View testID={TEST_IDS.lobbyHostHint} animation="fadeIn">
+                        <Text style={[tw`text-white text-center italic opacity-80 `, HINT_SHADOW]}>
+                          {t.sendCodeToFriends}
+                        </Text>
+                      </Animatable.View>
+                    )}
+                  </View>
+                )}
+              </View>
+              <LobbyChatMessages chat={chat} />
             </View>
           </View>
           <LobbyChatFooter chat={chat} />

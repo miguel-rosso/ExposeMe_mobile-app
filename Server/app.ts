@@ -46,10 +46,15 @@ app.use(errorHandler);
 const HEARTBEAT_MIN_MS = 1_000;
 const HEARTBEAT_MAX_MS = 300_000;
 
+/** Duration env var in ms, rounded and clamped; `fallback` when unset, or when not a positive number (logged). */
 export function envMs(name: string, fallback: number): number {
-  const raw = process.env[name];
+  const raw = process.env[name]?.trim();
+  if (!raw) return fallback;
   const v = Number(raw);
-  if (!raw || !Number.isFinite(v) || v <= 0) return fallback;
+  if (!Number.isFinite(v) || v <= 0) {
+    console.warn(`[config] ignoring ${name}=${raw} (not a positive number of ms)`);
+    return fallback;
+  }
   const min = process.env.NODE_ENV === "test" ? 1 : HEARTBEAT_MIN_MS;
   return Math.min(Math.max(Math.round(v), min), HEARTBEAT_MAX_MS);
 }

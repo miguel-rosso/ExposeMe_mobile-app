@@ -74,6 +74,8 @@ describe("socket heartbeat", () => {
       expect(app.envMs(key, 10_000)).toBe(300_000);
       vi.stubEnv(key, "20000");
       expect(app.envMs(key, 10_000)).toBe(20_000);
+      vi.stubEnv(key, "1500.6");
+      expect(app.envMs(key, 10_000)).toBe(1_501);
       for (const bad of ["", "abc", "-5", "0", "Infinity"]) {
         vi.stubEnv(key, bad);
         expect(app.envMs(key, 10_000)).toBe(10_000);
@@ -85,6 +87,31 @@ describe("socket heartbeat", () => {
       vi.stubEnv(key, "999999999");
       expect(app.envMs(key, 10_000)).toBe(300_000);
     } finally {
+      vi.unstubAllEnvs();
+      vi.stubEnv("SOCKET_PING_INTERVAL_MS", String(INTERVAL));
+      vi.stubEnv("SOCKET_PING_TIMEOUT_MS", String(TIMEOUT));
+    }
+  });
+
+  it("warns about an invalid env override, like envInt, but not about an unset or valid one", () => {
+    const key = "SOCKET_PING_TEST_MS";
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      for (const bad of ["abc", "-5", "0", "Infinity"]) {
+        warn.mockClear();
+        vi.stubEnv(key, bad);
+        expect(app.envMs(key, 10_000)).toBe(10_000);
+        expect(warn).toHaveBeenCalledOnce();
+        expect(warn.mock.calls[0][0]).toContain(`${key}=${bad}`);
+      }
+      warn.mockClear();
+      for (const quiet of ["", "  ", "20000", "1500.6"]) {
+        vi.stubEnv(key, quiet);
+        app.envMs(key, 10_000);
+      }
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
       vi.unstubAllEnvs();
       vi.stubEnv("SOCKET_PING_INTERVAL_MS", String(INTERVAL));
       vi.stubEnv("SOCKET_PING_TIMEOUT_MS", String(TIMEOUT));

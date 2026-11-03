@@ -1,8 +1,8 @@
-import React, { useState, useContext, useRef, useEffect } from "react";
+import React, { useState, useContext, useRef, useEffect, useCallback, useMemo } from "react";
 import { AppState } from "react-native";
 import { io, Socket } from "socket.io-client";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { GameProviderProps, PlantUploadState, Player, RoomOfGameResponse } from "@/app/models/interfaces";
+import { GameContextProps, GameProviderProps, PlantUploadState, Player, RoomOfGameResponse } from "@/app/models/interfaces";
 import getEnvVars from "@/config";
 import { uploadPhoto } from "@/app/utils/uploadPhoto";
 import { PLANT_UPLOAD_RETRY, uploadWithRetry } from "@/app/utils/uploadRetry";
@@ -36,9 +36,12 @@ interface PlantRun {
   done: Promise<boolean>;
 }
 
+// Every function the provider hands out keeps its identity for the provider's lifetime (useCallback), so the context
+// value only changes with its state, and a consumer's effect that depends on one of them does not run again on every
+// state change (EXP-403). They read state through refs (gameCodeRef, plantedUriRef…), never from a render's closure.
 export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   const [socket, setSocket] = useState<Socket | null>(null);
-  const [gameCode, setGameCode] = useState<string | null>(null);
+  const [gameCode, setGameCodeState] = useState<string | null>(null);
   // Home's typed room code: survives leaving the game flow (a refused join comes back to home with it)
   const [joinCodeDraft, setJoinCodeDraft] = useState("");
   const [username, setUsername] = useState<string | null>(null);
@@ -49,6 +52,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   const [plantedPhotoUri, setPlantedPhotoUriState] = useState<string | null>(null);
   const [plantedPhotoSent, setPlantedPhotoSent] = useState(false);
   const [plantUpload, setPlantUpload] = useState<PlantUploadState>("idle");
+  const gameCodeRef = useRef<string | null>(null);
   const plantedUriRef = useRef<string | null>(null);
   const plantRunRef = useRef<PlantRun | null>(null);
   const socketRef = useRef<Socket | null>(null);
@@ -56,15 +60,29 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   const roomSocketRef = useRef<Socket | null>(null);
   const rejoinTokenRef = useRef<StoredRejoinToken | null>(null);
 
+  // ── State kept in step with its ref ──
+
+  const setGameCode = useCallback((code: string | null) => {
+    gameCodeRef.current = code;
+    setGameCodeState(code);
+  }, []);
+
+  const setPlantedPhotoUri = useCallback((uri: string | null) => {
+    plantedUriRef.current = uri;
+    setPlantedPhotoUriState(uri);
+    setPlantedPhotoSent(false);
+    setPlantUpload("idle");
+  }, []);
+
   // ── Rejoin token (server requires it to reconnect with an existing username) ──
 
-  const saveRejoinToken = (code: string, name: string, token: string) => {
+  const saveRejoinToken = useCallback((code: string, name: string, token: string) => {
     const entry = { gameCode: code, username: name, token };
     rejoinTokenRef.current = entry;
     AsyncStorage.setItem(REJOIN_TOKEN_KEY, JSON.stringify(entry)).catch(() => {});
-  };
+  }, []);
 
-  const getRejoinToken = async (code: string, name: string): Promise<string | null> => {
+  const getRejoinToken = useCallback(async (code: string, name: string): Promise<string | null> => {
     let entry = rejoinTokenRef.current;
     if (!entry) {
       try {
@@ -76,14 +94,35 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
       }
     }
     return entry && entry.gameCode === code && entry.username === name ? entry.token : null;
-  };
+  }, []);
 
-  const clearRejoinToken = () => {
+  const clearRejoinToken = useCallback(() => {
     rejoinTokenRef.current = null;
     AsyncStorage.removeItem(REJOIN_TOKEN_KEY).catch(() => {});
-  };
+  }, []);
 
-  const startSocket = () => {
+  // ── Socket ──
+
+  /**
+   * Every (re)connection is a new server socket, in no room until its join-create-game is answered: the server drops
+   * room events (e.g. plant-photo) sent on it before that. The screens send the join; this only follows its answer.
+   */
+  const trackRoomBinding = useCallback((s: Socket) => {
+    s.on("connect", () => {
+      if (roomSocketRef.current === s) roomSocketRef.current = null;
+    });
+    s.on("room-of-game", (data: RoomOfGameResponse) => {
+      roomSocketRef.current = data.success && data.room ? s : null;
+    });
+  }, []);
+
+  /** The app's socket, if the server has bound its current connection to the room (still check `connected`). */
+  const roomSocket = useCallback(
+    (): Socket | null => (roomSocketRef.current === socketRef.current ? socketRef.current : null),
+    [],
+  );
+
+  const startSocket = useCallback(() => {
     // A room's lobby starts: a home notice still pending (home never got focus, e.g. a kick and an invite link in the
     // same navigation) is about the room left before, and must not show when the player leaves this one. The same for a
     // room exit home never took.
@@ -115,23 +154,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     trackRoomBinding(newSocket);
     socketRef.current = newSocket;
     setSocket(newSocket);
-  };
-
-  /**
-   * Every (re)connection is a new server socket, in no room until its join-create-game is answered: the server drops
-   * room events (e.g. plant-photo) sent on it before that. The screens send the join; this only follows its answer.
-   */
-  const trackRoomBinding = (s: Socket) => {
-    s.on("connect", () => {
-      if (roomSocketRef.current === s) roomSocketRef.current = null;
-    });
-    s.on("room-of-game", (data: RoomOfGameResponse) => {
-      roomSocketRef.current = data.success && data.room ? s : null;
-    });
-  };
-
-  /** The app's socket, if the server has bound its current connection to the room (still check `connected`). */
-  const roomSocket = (): Socket | null => (roomSocketRef.current === socketRef.current ? socketRef.current : null);
+  }, [trackRoomBinding]);
 
   /**
    * Leaving the game flow (Exit, back home, kicked, room gone): the socket is no longer the app's and none of its
@@ -140,7 +163,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
    * code, joinCodeDraft, stays). Game over keeps the socket and the room; "Play again" drops the planted photo
    * itself. Returns the detached socket (still open) for the caller to close.
    */
-  const detachSocket = (): Socket | null => {
+  const detachSocket = useCallback((): Socket | null => {
     setPlantedPhotoUri(null);
     setGameCode(null);
     const detached = socketRef.current;
@@ -148,27 +171,27 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     socketRef.current = null;
     setSocket(null);
     return detached;
-  };
+  }, [setPlantedPhotoUri, setGameCode]);
 
-  const endSocket = () => {
+  const endSocket = useCallback(() => {
     console.log("Ending socket");
     detachSocket()?.disconnect();
-  };
+  }, [detachSocket]);
 
   // Exit (and Join on an invite link to another room): the server removes us and hands the host role over, and the rejoin
   // token for this room is forgotten. The app moves on at once; the old socket closes once the server confirms. Offline
   // (reconnecting), the old socket keeps the token to name this seat in its leave once it is back (leaveFromAnywhere,
   // EXP-377, EXP-387).
-  const leaveRoom = () => {
+  const leaveRoom = useCallback(() => {
     console.log("Leaving room");
     const stored = rejoinTokenRef.current;
-    const seat = stored && stored.gameCode === gameCode
+    const seat = stored && stored.gameCode === gameCodeRef.current
       ? { gameCode: stored.gameCode, username: stored.username, rejoinToken: stored.token }
       : null;
     clearRejoinToken();
     const leaving = detachSocket();
     if (leaving) leaveFromAnywhere(leaving, seat);
-  };
+  }, [clearRejoinToken, detachSocket]);
 
   // ── Stored name ──
 
@@ -182,10 +205,10 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   }, []);
 
   /** The player's name, saved for later launches too (as given: home saves it while it is typed) */
-  const saveUsername = (name: string) => {
+  const saveUsername = useCallback((name: string) => {
     setUsername(name);
     AsyncStorage.setItem(USERNAME_STORAGE_KEY, name).catch(() => {});
-  };
+  }, []);
 
   // ── New room ──
 
@@ -193,16 +216,16 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   // only when home's Create game opened it
   const newRoomRequestedRef = useRef(false);
 
-  const requestNewRoom = () => {
+  const requestNewRoom = useCallback(() => {
     newRoomRequestedRef.current = true;
     setGameCode(null);
-  };
+  }, [setGameCode]);
 
-  const takeNewRoomRequest = (): boolean => {
+  const takeNewRoomRequest = useCallback((): boolean => {
     const requested = newRoomRequestedRef.current;
     newRoomRequestedRef.current = false;
     return requested;
-  };
+  }, []);
 
   // ── Home notice ──
 
@@ -210,15 +233,15 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   // kicked), shown once by home. Never a route param, which any link (exposeme:///?message=…) could forge.
   const homeNoticeRef = useRef<string | null>(null);
 
-  const setHomeNotice = (notice: string) => {
+  const setHomeNotice = useCallback((notice: string) => {
     homeNoticeRef.current = notice;
-  };
+  }, []);
 
-  const takeHomeNotice = (): string | null => {
+  const takeHomeNotice = useCallback((): string | null => {
     const notice = homeNoticeRef.current;
     homeNoticeRef.current = null;
     return notice;
-  };
+  }, []);
 
   // ── Room exit ──
 
@@ -227,15 +250,15 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   // the room as it is (EXP-373).
   const roomExitRef = useRef(false);
 
-  const markRoomExit = () => {
+  const markRoomExit = useCallback(() => {
     roomExitRef.current = true;
-  };
+  }, []);
 
-  const takeRoomExit = (): boolean => {
+  const takeRoomExit = useCallback((): boolean => {
     const exited = roomExitRef.current;
     roomExitRef.current = false;
     return exited;
-  };
+  }, []);
 
   // ── Invite asking over the room's screen ──
 
@@ -243,15 +266,15 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   // dialog when the next game starts, and tells the player so (DEC-049).
   const inviteOverRoomScreenRef = useRef<string | null>(null);
 
-  const setInviteOverRoomScreen = (code: string | null) => {
+  const setInviteOverRoomScreen = useCallback((code: string | null) => {
     inviteOverRoomScreenRef.current = code;
-  };
+  }, []);
 
-  const takeInviteOverRoomScreen = (): string | null => {
+  const takeInviteOverRoomScreen = useCallback((): string | null => {
     const code = inviteOverRoomScreenRef.current;
     inviteOverRoomScreenRef.current = null;
     return code;
-  };
+  }, []);
 
   // Handle app going to background/foreground
   useEffect(() => {
@@ -266,36 +289,7 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
 
   // ── Planted photo ──
 
-  const setPlantedPhotoUri = (uri: string | null) => {
-    plantedUriRef.current = uri;
-    setPlantedPhotoUriState(uri);
-    setPlantedPhotoSent(false);
-    setPlantUpload("idle");
-  };
-
-  /**
-   * Upload the picked planted photo and send plant-photo, right away from the lobby (so im-ready never waits for
-   * it), retrying while the server is busy. Returns true once the server acks it (plantedPhotoSent: the lobby shows
-   * it planted only then). A photo replaced or dropped while uploading is not sent nor retried. It is only sent on a
-   * connection the server has bound to the room: offline (socket.io would only flush it before the rejoin) or on a
-   * reconnected socket whose rejoin isn't answered yet, the server would drop it, so it stays not sent and the
-   * rejoin's room-of-game plants it again (the lobby's handler in WaitingRoom, the game's in useGameConnection).
-   * Asked again while that photo uploads, the caller gets the outcome of the upload in flight (one upload per photo).
-   */
-  const plantPhoto = (): Promise<boolean> => {
-    const uri = plantedUriRef.current;
-    // The server only accepts uploads from a member of the room (room code + rejoin token)
-    const entry = rejoinTokenRef.current;
-    if (!uri || !entry) return Promise.resolve(false);
-    const running = plantRunRef.current;
-    if (running?.uri === uri) return running.done;
-    const run: PlantRun = { uri, done: Promise.resolve(false) };
-    plantRunRef.current = run;
-    run.done = uploadAndPlant(run, { gameCode: entry.gameCode, token: entry.token });
-    return run.done;
-  };
-
-  const uploadAndPlant = async (run: PlantRun, auth: PhotoAuth): Promise<boolean> => {
+  const uploadAndPlant = useCallback(async (run: PlantRun, auth: PhotoAuth): Promise<boolean> => {
     const { uri } = run;
     setPlantedPhotoSent(false); // (re)planting: the server doesn't have it
     setPlantUpload("uploading");
@@ -344,48 +338,80 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     } finally {
       if (plantRunRef.current === run) plantRunRef.current = null;
     }
-  };
+  }, [roomSocket]);
 
-  return (
-    <GameContext.Provider
-      value={{
-        socket,
-        gameCode,
-        joinCodeDraft,
-        setJoinCodeDraft,
-        username,
-        usernameLoaded,
-        requestNewRoom,
-        takeNewRoomRequest,
-        setHomeNotice,
-        takeHomeNotice,
-        markRoomExit,
-        takeRoomExit,
-        setInviteOverRoomScreen,
-        takeInviteOverRoomScreen,
-        playersProvider,
-        roundsOfGame,
-        startSocket,
-        endSocket,
-        leaveRoom,
-        setGameCode,
-        setUsername,
-        saveUsername,
-        setPlayersProvider,
-        setRoundsOfGame,
-        plantedPhotoUri,
-        setPlantedPhotoUri,
-        plantedPhotoSent,
-        plantUpload,
-        plantPhoto,
-        saveRejoinToken,
-        getRejoinToken,
-        clearRejoinToken,
-      }}
-    >
-      {children}
-    </GameContext.Provider>
-  );
+  /**
+   * Upload the picked planted photo and send plant-photo, right away from the lobby (so im-ready never waits for
+   * it), retrying while the server is busy. Returns true once the server acks it (plantedPhotoSent: the lobby shows
+   * it planted only then). A photo replaced or dropped while uploading is not sent nor retried. It is only sent on a
+   * connection the server has bound to the room: offline (socket.io would only flush it before the rejoin) or on a
+   * reconnected socket whose rejoin isn't answered yet, the server would drop it, so it stays not sent and the
+   * rejoin's room-of-game plants it again (the lobby's handler in WaitingRoom, the game's in useGameConnection).
+   * Asked again while that photo uploads, the caller gets the outcome of the upload in flight (one upload per photo).
+   */
+  const plantPhoto = useCallback((): Promise<boolean> => {
+    const uri = plantedUriRef.current;
+    // The server only accepts uploads from a member of the room (room code + rejoin token)
+    const entry = rejoinTokenRef.current;
+    if (!uri || !entry) return Promise.resolve(false);
+    const running = plantRunRef.current;
+    if (running?.uri === uri) return running.done;
+    const run: PlantRun = { uri, done: Promise.resolve(false) };
+    plantRunRef.current = run;
+    run.done = uploadAndPlant(run, { gameCode: entry.gameCode, token: entry.token });
+    return run.done;
+  }, [uploadAndPlant]);
+
+  // ── Context value ──
+
+  // Stable for the provider's lifetime: every member is a state setter or one of the callbacks above
+  const actions = useMemo(() => ({
+    setJoinCodeDraft,
+    requestNewRoom,
+    takeNewRoomRequest,
+    setHomeNotice,
+    takeHomeNotice,
+    markRoomExit,
+    takeRoomExit,
+    setInviteOverRoomScreen,
+    takeInviteOverRoomScreen,
+    startSocket,
+    endSocket,
+    leaveRoom,
+    setGameCode,
+    setUsername,
+    saveUsername,
+    setPlayersProvider,
+    setRoundsOfGame,
+    setPlantedPhotoUri,
+    plantPhoto,
+    saveRejoinToken,
+    getRejoinToken,
+    clearRejoinToken,
+  }), [
+    requestNewRoom, takeNewRoomRequest, setHomeNotice, takeHomeNotice, markRoomExit, takeRoomExit,
+    setInviteOverRoomScreen, takeInviteOverRoomScreen, startSocket, endSocket, leaveRoom, setGameCode, saveUsername,
+    setPlantedPhotoUri, plantPhoto, saveRejoinToken, getRejoinToken, clearRejoinToken,
+  ]);
+
+  const value = useMemo<GameContextProps>(() => ({
+    ...actions,
+    socket,
+    gameCode,
+    joinCodeDraft,
+    username,
+    usernameLoaded,
+    playersProvider,
+    roundsOfGame,
+    plantedPhotoUri,
+    plantedPhotoSent,
+    plantUpload,
+  }), [
+    actions, socket, gameCode, joinCodeDraft, username, usernameLoaded, playersProvider, roundsOfGame, plantedPhotoUri,
+    plantedPhotoSent, plantUpload,
+  ]);
+
+  return <GameContext.Provider value={value}>{children}</GameContext.Provider>;
 };
 
 export const useGameContext = () => {

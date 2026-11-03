@@ -16,6 +16,10 @@ appId: com.socketNull.ExposeMe
     id: "paused-counter"
 - assertNotVisible:
     id: "paused-last-warning"
+# EXP-380: it names whom it waits for, the flow's only bot (bots.mjs names it bot1)
+- assertVisible:
+    id: "paused-waiting-for"
+    text: ".*bot1.*"
 - takeScreenshot: paused-${USERNAME}
 - extendedWaitUntil:
     notVisible:

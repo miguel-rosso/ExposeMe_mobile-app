@@ -4,6 +4,11 @@ import tw from "twrnc";
 import { useI18n } from "../../i18n";
 import { TEST_IDS } from "@/app/utils/testIds";
 import { formatCountdown } from "@/app/utils/gameState";
+import { waitingForText } from "@/app/utils/waitingFor";
+import { fillTemplate } from "@/app/i18n/format";
+
+// Safety cap for the "Waiting for …" line (names are at most 15 characters, so three of them fit in fewer lines)
+const WAITING_FOR_MAX_LINES = 4;
 
 interface PausedModalProps {
   /** When the server's pause countdown ends (local clock: receipt time + the server's duration), or null */
@@ -11,16 +16,18 @@ interface PausedModalProps {
   /** Which pause this is (1..maxPauses): on the last one the game ends if nobody comes back */
   pause: number;
   maxPauses: number;
+  /** Players the server is waiting for (game-paused `waitingFor`, updated while paused) */
+  waitingFor: readonly string[];
   /** Exit: asks whether to leave the game (the game screen's LeaveGameConfirm) */
   onLeave: () => void;
 }
 
 /**
  * Shown to every connected player while the server has the game paused (fewer than 2 connected).
- * Only displays the server's countdown (when it runs out the server sends game-over) and "pause N of M", with an Exit
- * for whoever doesn't want to wait (EXP-377).
+ * Only displays who the server waits for (EXP-380), its countdown (when it runs out the server sends game-over) and
+ * "pause N of M", with an Exit for whoever doesn't want to wait (EXP-377).
  */
-const PausedModal: React.FC<PausedModalProps> = ({ endsAt, pause, maxPauses, onLeave }) => {
+const PausedModal: React.FC<PausedModalProps> = ({ endsAt, pause, maxPauses, waitingFor, onLeave }) => {
   const { t } = useI18n();
   const [remaining, setRemaining] = useState(endsAt === null ? 0 : endsAt - Date.now());
 
@@ -41,13 +48,20 @@ const PausedModal: React.FC<PausedModalProps> = ({ endsAt, pause, maxPauses, onL
     >
       <View style={tw`rounded-lg p-6 bg-gray-800 w-4/5 max-w-[500px] items-center`}>
         <Text style={tw`text-2xl text-white font-bold text-center mb-3`}>{t.gamePaused}</Text>
-        <Text style={tw`text-lg text-white text-center mb-4`}>{t.waitingPlayersReturn}</Text>
+        <Text
+          testID={TEST_IDS.pausedWaitingFor}
+          numberOfLines={WAITING_FOR_MAX_LINES}
+          ellipsizeMode="tail"
+          style={tw`text-lg text-white text-center mb-4`}
+        >
+          {waitingForText(waitingFor, t)}
+        </Text>
         <Text testID={TEST_IDS.pausedCountdown} style={tw`text-4xl text-white font-bold`}>
           {formatCountdown(remaining)}
         </Text>
         {maxPauses > 0 && (
           <Text testID={TEST_IDS.pausedCounter} style={tw`text-base text-gray-300 text-center mt-4`}>
-            {t.pauseOf.replace("{pause}", String(pause)).replace("{max}", String(maxPauses))}
+            {fillTemplate(t.pauseOf, { pause: String(pause), max: String(maxPauses) })}
           </Text>
         )}
         {maxPauses > 0 && pause >= maxPauses && (

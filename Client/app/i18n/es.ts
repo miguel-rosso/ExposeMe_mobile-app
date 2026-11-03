@@ -79,7 +79,6 @@ export default {
 
   // GameScreen
   loadingGame: "Cargando partida…",
-  areYouReady: "¿ESTÁS LISTO?",
   holdPhoto: "Mantener Foto",
   noHoldsLeft: "Ya no puedes mantenerla",
   reconnecting: "Reconectando…",
@@ -87,6 +86,14 @@ export default {
   waitingPlayersReturn: "Esperando a que vuelvan los jugadores…",
   pauseOf: "Pausa {pause} de {max}",
   lastPauseWarning: "Es la última pausa: si no vuelven, la partida terminará.",
+  // Who the pause waits for (EXP-380): "{names}" is listed by app/utils/waitingFor
+  waitingForNames: "Esperando a {names}…",
+  namesListAnd: "y",
+  // «y» becomes «e» before an /i/ sound: «Ana e Iván»
+  namesListAndBeforeI: "e",
+  namesListMore: "{count} más",
+  // Ready phase: nothing to press, the server starts the first round once every device is ready (EXP-382)
+  waitingEveryoneReady: "Esperando a que todos estén listos…",
   // Leaving a game in progress (EXP-377)
   leaveGame: "Salir de la partida",
   leaveGameConfirmTitle: "¿Salir de la partida?",

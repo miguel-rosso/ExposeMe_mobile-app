@@ -1,6 +1,6 @@
 import React from "react";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
-import { Text } from "react-native";
+import { ActivityIndicator, Text } from "react-native";
 import { FakeSocket } from "../testUtils/fakeSocket";
 import { TEST_IDS, playerOptionId } from "../app/utils/testIds";
 import en from "../app/i18n/en";
@@ -93,6 +93,15 @@ describe("GameScreen: server phases drawn with the received duration (EXP-063)",
     expect(emitted("im-ready")).toHaveLength(1);
     expect(has(r.root, TEST_IDS.gameWaitingReady)).toBe(true);
     expect(bar(r.root)).toBeNull();
+  });
+
+  // EXP-382: nothing to press on the ready screen, so it says what it waits for (no question) and shows activity
+  it("the ready screen says it waits for everyone, with a spinner, and asks nothing", () => {
+    const [ready] = byId(r.root, TEST_IDS.gameWaitingReady);
+    const readyTexts = ready.findAllByType(Text).map((n) => [n.props.children].flat().join(""));
+    expect(readyTexts).toEqual([en.waitingEveryoneReady]);
+    expect(readyTexts.join("")).not.toMatch(/\?/);
+    expect(ready.findAllByType(ActivityIndicator)).toHaveLength(1);
   });
 
   it("answering -> reveal -> scores -> next wait: each phase with its own bar of the server's duration", () => {
@@ -290,6 +299,32 @@ describe("GameScreen: server phases drawn with the received duration (EXP-063)",
     expect(has(r.root, TEST_IDS.pausedModal)).toBe(false);
     expect(bar(r.root)!.duration).toBe(4_200);
     expect(has(r.root, playerOptionId("alice"))).toBe(true); // same round, same photo
+  });
+
+  // EXP-380: the modal names who the pause waits for, and follows the server's updates of that list
+  it("the paused modal names the awaited players from game-paused and its updates", () => {
+    const pausedTexts = () => byId(r.root, TEST_IDS.pausedModal)[0]
+      .findAllByType(Text).map((n) => [n.props.children].flat().join(""));
+    act(() => mockSocket.fire("round-start", START));
+    act(() => mockSocket.fire("game-paused", { duration: 300_000, waitingFor: ["alice", "carol"], pause: 1, maxPauses: 3 }));
+    expect(pausedTexts()).toContain("Waiting for alice and carol…");
+
+    // alice left for good: same pause, new list
+    act(() => mockSocket.fire("game-paused", { duration: 250_000, waitingFor: ["carol"], pause: 1, maxPauses: 3 }));
+    expect(pausedTexts()).toContain("Waiting for carol…");
+    expect(pausedTexts()).not.toContain("Waiting for alice and carol…");
+  });
+
+  // EXP-380: a rejoin learns the pause (and whom it waits for) from the game-state snapshot
+  it("the paused modal names the awaited players from a paused game-state snapshot", () => {
+    act(() => mockSocket.fire("game-state", {
+      started: true, gameNumber: 1, phase: "answering", round: 1, totalRounds: 10, photo: "/temp/x.jpg",
+      correctAnswer: null, yourGuess: null, duration: 4_200, phaseTotal: 7_700, held: false, holdsLeft: 3,
+      pause: { duration: 299_000, waitingFor: ["carol"], pause: 1, maxPauses: 3 },
+      scores: SCORES, players: mockPlayers, roundOptions: mockPlayers,
+    }));
+    const [line] = byId(r.root, TEST_IDS.pausedWaitingFor);
+    expect([line.props.children].flat().join("")).toBe("Waiting for carol…");
   });
 
   it("the next round drops a hold still pressed (the button goes), and the owner can hold again later", () => {

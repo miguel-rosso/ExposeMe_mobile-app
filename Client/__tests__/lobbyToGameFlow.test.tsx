@@ -257,7 +257,7 @@ describe("Lobby -> game in progress (EXP-289)", () => {
     const r = await rejoinGameInProgress();
     expect(has(r.root, TEST_IDS.gameLoading)).toBe(true);
     expect(has(r.root, TEST_IDS.gameWaitingReady)).toBe(false);
-    expect(texts(r.root)).not.toContain(en.areYouReady);
+    expect(texts(r.root)).not.toContain(en.waitingEveryoneReady);
     const [loader] = r.root.findAll((n) => n.props.testID === TEST_IDS.gameLoading && typeof n.type === "string");
     expect(loader.props.accessibilityLabel).toBe(en.loadingGame);
 

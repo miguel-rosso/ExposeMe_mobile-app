@@ -95,7 +95,7 @@ const GameScreen = () => {
   const photoHeadersRef = useRef<Record<string, string> | undefined>(undefined);
   const [roundView, setRoundView] = useState<RoundView>(initialRoundView);
   // Opened on a game in progress (a rejoin from the lobby): its phase is unknown until the server's snapshot, so a
-  // neutral loader is shown instead of the ready phase's "are you ready?" (EXP-289)
+  // neutral loader is shown instead of the ready phase's "waiting for everyone to be ready" (EXP-289)
   const routeParams = useLocalSearchParams<GameScreenParams>();
   const [awaitingSnapshot, setAwaitingSnapshot] = useState(() => opensOnGameInProgress(routeParams));
   // Device time the event that started the current phase (a new phaseKey) arrived: its progress bar ends `phaseDuration`
@@ -151,10 +151,10 @@ const GameScreen = () => {
 
   // ── Pause (fewer than 2 players connected) ───────────
   const [pauseEndsAt, setPauseEndsAt] = useState<number | null>(null);
-  const [pauseCount, setPauseCount] = useState({ pause: 0, maxPauses: 0 });
+  const [pauseInfo, setPauseInfo] = useState<Omit<GamePausedData, "duration">>({ pause: 0, maxPauses: 0, waitingFor: [] });
   const setPause = (p: GamePausedData | null) => {
     setPauseEndsAt(p === null ? null : Date.now() + p.duration);
-    if (p) setPauseCount({ pause: p.pause, maxPauses: p.maxPauses });
+    if (p) setPauseInfo({ pause: p.pause, maxPauses: p.maxPauses, waitingFor: p.waitingFor });
   };
 
   // ── End game ─────────────────────────────────────────
@@ -570,8 +570,9 @@ const GameScreen = () => {
       <FinalScoreModal visible={showFinalScore} finalScore={finalScore || []} />
       <PausedModal
         endsAt={finalScore ? null : pauseEndsAt}
-        pause={pauseCount.pause}
-        maxPauses={pauseCount.maxPauses}
+        pause={pauseInfo.pause}
+        maxPauses={pauseInfo.maxPauses}
+        waitingFor={pauseInfo.waitingFor}
         onLeave={() => setAskingToLeave(true)}
       />
       <LeaveGameConfirm
@@ -731,8 +732,9 @@ const GameScreen = () => {
             <ActivityIndicator size="large" color="white" />
           </View>
         ) : (
-          <View testID={TEST_IDS.gameWaitingReady} style={tw`flex-1 justify-center items-center`}>
-            <Text style={tw`text-xl text-white font-bold mb-4`}>{t.areYouReady}</Text>
+          <View testID={TEST_IDS.gameWaitingReady} style={tw`flex-1 justify-center items-center px-6`}>
+            <ActivityIndicator size="large" color="white" />
+            <Text style={tw`text-xl text-white font-bold text-center mt-4`}>{t.waitingEveryoneReady}</Text>
           </View>
         )}
       </View>

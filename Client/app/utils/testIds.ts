@@ -55,6 +55,7 @@ export const TEST_IDS = {
   pausedCountdown: "paused-countdown",
   pausedCounter: "paused-counter",
   pausedLastWarning: "paused-last-warning",
+  pausedWaitingFor: "paused-waiting-for",
   // Leaving a game in progress (EXP-377): the game's Exit, the pause modal's, and the question both open
   leaveGameButton: "leave-game-button",
   pausedLeaveButton: "paused-leave-button",

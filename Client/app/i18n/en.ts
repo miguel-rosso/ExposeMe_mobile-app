@@ -79,7 +79,6 @@ export default {
 
   // GameScreen
   loadingGame: "Loading game…",
-  areYouReady: "ARE YOU READY?",
   holdPhoto: "Hold photo",
   noHoldsLeft: "No holds left",
   reconnecting: "Reconnecting…",
@@ -87,6 +86,13 @@ export default {
   waitingPlayersReturn: "Waiting for players to come back…",
   pauseOf: "Pause {pause} of {max}",
   lastPauseWarning: "Last pause: if nobody comes back, the game will end.",
+  // Who the pause waits for (EXP-380): "{names}" is listed by app/utils/waitingFor
+  waitingForNames: "Waiting for {names}…",
+  namesListAnd: "and",
+  namesListAndBeforeI: "and",
+  namesListMore: "{count} more",
+  // Ready phase: nothing to press, the server starts the first round once every device is ready (EXP-382)
+  waitingEveryoneReady: "Waiting for everyone to be ready…",
   // Leaving a game in progress (EXP-377)
   leaveGame: "Leave game",
   leaveGameConfirmTitle: "Leave the game?",

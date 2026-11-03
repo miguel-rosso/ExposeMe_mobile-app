@@ -18,9 +18,9 @@ const text = (root: ReactTestInstance, id: string) => {
 };
 
 type Props = React.ComponentProps<typeof PausedModal>;
-const render = (props: Omit<Props, "onLeave"> & Partial<Pick<Props, "onLeave">>) => {
+const render = (props: Omit<Props, "onLeave" | "waitingFor"> & Partial<Pick<Props, "onLeave" | "waitingFor">>) => {
   let r!: TestRenderer.ReactTestRenderer;
-  act(() => { r = TestRenderer.create(<PausedModal onLeave={jest.fn()} {...props} />); });
+  act(() => { r = TestRenderer.create(<PausedModal onLeave={jest.fn()} waitingFor={["carol"]} {...props} />); });
   return r;
 };
 
@@ -67,6 +67,35 @@ describe("PausedModal", () => {
     mockT = es;
     r = render({ endsAt: Date.now() + 300_000, pause: 1, maxPauses: 3 });
     expect(label(r)).toBe("Salir de la partida");
+    act(() => r.unmount());
+  });
+
+  // EXP-380: the modal says who it waits for, so the others know whom to call
+  it("names the awaited players (en/es), and falls back to a generic line without names", () => {
+    const allTexts = (r: TestRenderer.ReactTestRenderer) =>
+      r.root.findAllByType(Text).map((n) => [n.props.children].flat().join(""));
+    let r = render({ endsAt: Date.now() + 300_000, pause: 1, maxPauses: 3, waitingFor: ["Ana", "Luis"] });
+    expect(allTexts(r)).toContain("Waiting for Ana and Luis…");
+    expect(allTexts(r)).not.toContain(en.waitingPlayersReturn);
+    act(() => r.unmount());
+
+    mockT = es;
+    r = render({ endsAt: Date.now() + 300_000, pause: 1, maxPauses: 3, waitingFor: ["Ana", "Luis"] });
+    expect(allTexts(r)).toContain("Esperando a Ana y Luis…");
+    act(() => r.unmount());
+
+    r = render({ endsAt: Date.now() + 300_000, pause: 1, maxPauses: 3, waitingFor: [] });
+    expect(allTexts(r)).toContain(es.waitingPlayersReturn);
+    act(() => r.unmount());
+  });
+
+  it("caps the awaited players' line so long names can't push the countdown and Exit off the modal", () => {
+    const longNames = ["W".repeat(15), "M".repeat(15), "Q".repeat(15), "Z".repeat(15)];
+    const r = render({ endsAt: Date.now() + 300_000, pause: 1, maxPauses: 3, waitingFor: longNames });
+    const line = r.root.find((n) => n.props.testID === TEST_IDS.pausedWaitingFor && typeof n.type === "string");
+    expect(text(r.root, TEST_IDS.pausedWaitingFor)).toBe(`Waiting for ${longNames[0]}, ${longNames[1]} and 2 more…`);
+    expect(line.props.numberOfLines).toBeGreaterThan(0);
+    expect(line.props.ellipsizeMode).toBe("tail");
     act(() => r.unmount());
   });
 

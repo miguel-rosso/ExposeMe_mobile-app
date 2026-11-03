@@ -48,6 +48,7 @@ import { useRemovePlayerQuestion } from "../../src/hooks/useRemovePlayerQuestion
 import { useMutedPlayers } from "../../src/hooks/useMutedPlayers";
 import { useMutedPhotoReveal } from "../../src/hooks/useMutedPhotoReveal";
 import LeaveGameButton from "@/src/components/LeaveGameButton";
+import ReconnectingBanner from "@/src/components/ReconnectingBanner";
 import { useFocusedBackHandler } from "../../src/hooks/useFocusedBackHandler";
 import GalleryAccessModal from "@/src/components/modals/GalleryAccessModal";
 import { useGalleryAccessGuard } from "@/src/hooks/useGalleryAccessGuard";
@@ -57,7 +58,7 @@ import { answerOptionsLayout } from "../../src/utils/answerOptionsLayout";
 import { usePlayerColors } from "../../src/hooks/usePlayerColors";
 import { useReduceMotion } from "../../src/hooks/useReduceMotion";
 import { attachHandlers, SocketHandlers } from "../../src/utils/socketHandlers";
-import { safeBottomRow, safeTopRow } from "../../src/utils/safeAreaRows";
+import { safeBottomRow } from "../../src/utils/safeAreaRows";
 import { ANSWERS_BOTTOM, HOLD_BUTTON_BOTTOM } from "../../src/utils/gameRows";
 import { PROGRESS_BAR_AREA, progressBarAreaBottom, progressBarRow } from "../../src/utils/progressBarRow";
 import {
@@ -67,8 +68,6 @@ import { useGoHome } from "../../src/hooks/useGoHome";
 import { isKickedByHost, KICKED_BY_HOST_MESSAGE } from "../../src/utils/serverMessage";
 
 const { SERVER_URL } = getEnvVars();
-// Rows over the photo (see safeAreaRows; the progress bar strip is in progressBarRow, the bottom ones in gameRows)
-const RECONNECTING_BANNER = { top: 8, margin: 8 } as const;
 const NO_SCORES: ScoreRound[] = [];
 
 const GameScreen = () => {
@@ -617,16 +616,8 @@ const GameScreen = () => {
         blocking
       />
 
-      {/* Subtle indicator while socket.io reconnects; the game screen stays */}
-      {!connected && !finalScore && (
-        <View
-          testID={TEST_IDS.reconnectingBanner}
-          style={[tw`absolute z-100 items-center`, safeTopRow(insets, RECONNECTING_BANNER.top, RECONNECTING_BANNER.margin)]}
-          pointerEvents="none"
-        >
-          <Text style={tw`text-white text-sm bg-gray-800 bg-opacity-80 px-3 py-1 rounded-full`}>{t.reconnecting}</Text>
-        </View>
-      )}
+      {/* While socket.io reconnects; the game screen stays */}
+      {!connected && !finalScore && <ReconnectingBanner socket={socket} />}
 
       <View style={tw`flex-1 bg-black`}>
         {/* Emoji reactions over the photo: own lane between the progress bar and the answer buttons, with its own

@@ -94,6 +94,9 @@ export default {
   holdPhoto: "Hold photo",
   noHoldsLeft: "No holds left",
   reconnecting: "Reconnecting…",
+  // The reconnecting banner once the connection has taken too long (EXP-429): a title, a hint, and tryAgain
+  gameServerUnreachable: "No connection to the server.",
+  gameServerUnreachableHint: "You'll be back in the game once it reconnects.",
   gamePaused: "Game paused",
   waitingPlayersReturn: "Waiting for players to come back…",
   pauseOf: "Pause {pause} of {max}",

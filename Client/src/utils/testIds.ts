@@ -58,6 +58,8 @@ export const TEST_IDS = {
   roundProgress: "round-progress",
   answerOptions: "answer-options",
   reconnectingBanner: "reconnecting-banner",
+  gameServerUnreachable: "game-server-unreachable", // the banner once the reconnection has taken too long (EXP-429)
+  gameServerUnreachableRetry: "game-server-unreachable-retry",
   pausedModal: "paused-modal",
   pausedCountdown: "paused-countdown",
   pausedCounter: "paused-counter",

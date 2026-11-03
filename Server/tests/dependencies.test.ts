@@ -20,6 +20,17 @@ const listServerSources = (dir: string): string[] =>
 const packageOf = (specifier: string) =>
   specifier.split("/").slice(0, specifier.startsWith("@") ? 2 : 1).join("/");
 
+/** Lowest multer release whose multipart parsing is safe to expose (EXP-439); npm audit skips its prereleases */
+const MIN_MULTER_VERSION = [2, 5, 0];
+
+/** "2.5.0" -> [2, 5, 0] (a prerelease tag such as "-lts.1" is dropped) */
+const versionParts = (version: string) => version.split("-")[0].split(".").map(Number);
+
+const isAtLeast = (version: number[], min: number[]) => {
+  const diff = version.map((part, i) => part - min[i]).find((d) => d !== 0);
+  return diff === undefined || diff > 0;
+};
+
 const importedPackages = new Set(
   listServerSources(SERVER_ROOT).flatMap((file) =>
     [...fs.readFileSync(file, "utf8").matchAll(IMPORT_SPECIFIER)].map((match) => packageOf(match[1]))
@@ -37,5 +48,10 @@ describe("server dependencies (EXP-052)", () => {
       .filter((name) => name.startsWith("@types/"))
       .filter((name) => !(name.slice("@types/".length) in pkg.dependencies));
     expect(orphanTypes).toEqual([]);
+  });
+
+  it("installs a multer release with the multipart parsing fixes (EXP-439)", () => {
+    const { version } = JSON.parse(fs.readFileSync(path.join(SERVER_ROOT, "node_modules/multer/package.json"), "utf8"));
+    expect(isAtLeast(versionParts(version), MIN_MULTER_VERSION), `installed multer ${version}`).toBe(true);
   });
 });

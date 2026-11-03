@@ -31,11 +31,16 @@ export const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 // trusted, so it is not filtered here), re-encodes the image and writes it under a random name.
 const upload = multer({
   storage: multer.memoryStorage(),
-  // Text fields are not used: a few tiny ones at most, so they can't add buffered memory either
-  limits: { fileSize: MAX_FILE_SIZE, files: 1, fields: 4, fieldSize: 1024 },
+  // The upload carries only the photo: any text field aborts it (LIMIT_FIELD_COUNT) before its name or value is
+  // parsed into req.body, and any other extra part, even one busboy would skip, aborts it too (LIMIT_PART_COUNT);
+  // both are answered with a 400
+  limits: { fileSize: MAX_FILE_SIZE, files: 1, fields: 0, parts: 1 },
 });
 
-/** multer.single(field) with JSON errors: 413 for a file over MAX_FILE_SIZE, 400 for any other malformed upload. */
+/**
+ * multer.single(field) with JSON errors: 413 for a file over MAX_FILE_SIZE, 400 for any other malformed upload
+ * (a text field, a second file, a wrong field name, a broken multipart body).
+ */
 export function singleImage(field: string) {
   const handler = upload.single(field);
   return (req: Request, res: Response, next: NextFunction) => {

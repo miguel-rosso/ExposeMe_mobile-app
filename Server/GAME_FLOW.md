@@ -860,7 +860,7 @@ Bot metrics only show when the server *sent* a phase; this shows when each phone
 
 ## Photo upload (HTTP)
 
-`POST /upload` (multipart, one file in field `image`, ≤5MB) → `200 { url: "/temp/<32 random hex>.<jpg|png|webp>" }`.
+`POST /upload` (multipart, one file in field `image` and no other part, ≤5MB) → `200 { url: "/temp/<32 random hex>.<jpg|png|webp>" }`.
 The app sends JPEGs of at most 1600 px (~300–600 KB), far below the limit.
 
 **Room members only.** Both `POST /upload` and `GET/HEAD /temp/<photo>` need the player's session credential from
@@ -925,7 +925,7 @@ unknown room or a token that is not a current member of it → **403**.
 | 401 | Missing/malformed `X-Game-Code` or `Authorization: Bearer` header |
 | 403 | Not a member of that room, or the room isn't accepting a photo from this player now |
 | 409 | The game ended / room closed / player left while the upload was processed (nothing stored) |
-| 400 | No file, malformed multipart, more than one file, wrong field, undecodable image |
+| 400 | No file, malformed multipart, more than one file, wrong field, any other part (text field…), undecodable image |
 | 408 | Upload not fully received within `UPLOAD_REQUEST_TIMEOUT_MS` (20 s) |
 | 413 | File over 5MB (refused before reading the body when `Content-Length` already says so), or image over 24 megapixels |
 | 415 | Not JPEG/PNG/WebP (e.g. HEIC) |

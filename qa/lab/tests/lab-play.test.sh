@@ -162,6 +162,34 @@ for flow in kicked-after-game kicked-while-offline; do
     && ok "$flow.yaml documents that invocation" || ko "$flow.yaml documents that invocation"
 done
 
+# ── Flows for one device only (EXP-389): a second one would break them, so play refuses it before starting anything ──
+# A flow says so in its header (ONE_DEVICE_MARKER); the fake QA dir gets a real one and one without the marker
+mkdir -p "$QA/maestro"
+cp "$MAESTRO_DIR/leave-paused-game.yaml" "$MAESTRO_DIR/leave-mid-game.yaml" "$QA/maestro/"
+for devices in "ios-a,android-a" all; do
+  play "r-one-$devices" --bots 1 --rounds 3 --devices "$devices" --flow leave-paused-game
+  rc=$?
+  [ $rc != 0 ] && grep -q "leave-paused-game.yaml runs on one device only" "$TMP/play.out" && grep -q -- "--devices <label>" "$TMP/play.out" \
+    && [ ! -s "$TMP/node.args" ] && [ ! -s "$TMP/maestro.args" ] \
+    && ok "leave-paused-game with --devices $devices: refused before any bots or device run" \
+    || ko "leave-paused-game refuses a second device (--devices $devices)" "rc=$rc $(cat "$TMP/play.out")"
+done
+play r-one-device --bots 1 --rounds 3 --devices ios-a --flow leave-paused-game
+rc=$?
+[ $rc = 0 ] && completed r-one-device && ok "leave-paused-game with one device plays" || ko "leave-paused-game with one device plays" "rc=$rc $(cat "$TMP/play.out")"
+play r-two-devices --bots 2 --rounds 3 --devices ios-a,android-a --flow leave-mid-game
+rc=$?
+[ $rc = 0 ] && completed r-two-devices && ok "a flow without the marker still plays on two devices" || ko "unmarked flow on two devices" "rc=$rc $(cat "$TMP/play.out")"
+rm -rf "$QA/maestro"
+# The flows a second device breaks carry the marker, with the reason play prints
+for flow in leave-paused-game lobby-host-drop kicked-notice kicked-after-game kicked-while-offline tie-game \
+  invite-link-mid-game invite-link-after-game; do
+  reason="$(flow_one_device_reason "$MAESTRO_DIR/$flow.yaml")"
+  [ -n "$reason" ] && ok "$flow.yaml is marked for one device $reason" || ko "$flow.yaml is marked for one device"
+done
+! flow_one_device_reason "$MAESTRO_DIR/play-game.yaml" >/dev/null && ok "play-game.yaml is not marked for one device" \
+  || ko "play-game.yaml is not marked for one device"
+
 # Second room never publishes a code: fail loudly, nothing left running, no device run
 STUB_NO_CODE=3 LAB_ROOM_CODE_TIMEOUT=1 play r3 --bots 2 --devices ios-a --second-room "--bots 3 --host --wait-players 99"
 rc=$?

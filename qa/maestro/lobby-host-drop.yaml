@@ -6,6 +6,7 @@
 # bot1 drops as soon as the device has joined, and the bots run ends there (nobody starts a game).
 # env: GAME_CODE, USERNAME, METRO_URL (url-encoded)
 # Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
+# lab: one device (only the first connected player becomes host when the bot host drops)
 appId: com.socketNull.ExposeMe
 ---
 - runFlow: open-app.yaml

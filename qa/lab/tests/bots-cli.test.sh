@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Command line of qa/lab/bots.mjs (EXP-197): --help and bad arguments exit before any network activity (also bad
 # --rounds, EXP-203, --drop-round/--drop-rounds, EXP-096, --name-prefix, EXP-207, --leave-round/--kick, EXP-139, and
-# --hold, EXP-303),
+# --hold, EXP-303, and --emoji-rate, EXP-400),
 # and the server constants it (and its checks, bots-analysis.mjs) mirrors match the server.
 # A local TCP listener stands in for the server and counts connections; nothing else is contacted.
 # Run: qa/lab/tests/bots-cli.test.sh
@@ -251,6 +251,25 @@ done
 [[ "$(node "$BOTS" --help)" == *"--hold P"* ]] && ok "--help lists --hold" || ko "--help lists --hold"
 mirrors managers/GameEngine.ts "$BOTS" HOLD_BUDGET_PER_ROUND HOLD_BUDGET_PER_ROUND
 mirrors managers/GameEngine.ts "$ANALYSIS" MAX_HOLDS_PER_ROUND MAX_HOLDS_PER_ROUND
+
+# ── --emoji-rate N: every bot sends N emojis/s in the reveal and the scoreboard (EXP-400) ──
+# Never faster than the server's per-socket rate (it drops the rest silently) and only the emojis it relays
+for bad in 0 -1 abc "" 4.5 5 Infinity; do
+  run 2 "--emoji-rate '$bad' exits 2" --bots 3 --host --emoji-rate "$bad" --timeout 1
+  [[ "$err" == *"--emoji-rate \"$bad\" is not a rate the server takes"* ]] && ok "--emoji-rate '$bad' is named" || ko "--emoji-rate '$bad' is named" "$err"
+done
+for good in "--emoji-rate 4" "--emoji-rate 0.5" "--emoji-rate 2 --hold 0.5"; do
+  # shellcheck disable=SC2086
+  SERVER_URL="$URL" node "$BOTS" --bots 3 --host $good --timeout 1 >/dev/null 2>"$TMP/err"; rc=$?
+  [[ "$rc" != 2 ]] && ok "$good is accepted" || ko "$good is accepted" "$(cat "$TMP/err")"
+done
+[[ "$(node "$BOTS" --help)" == *"--emoji-rate N"* ]] && ok "--help lists --emoji-rate" || ko "--help lists --emoji-rate"
+mirrors managers/socketGuards.ts "$BOTS" EMOJI_RATE_PER_S EMOJI_RATE_PER_S
+# ALLOWED_EMOJIS: the server's is a typed Set, ours its array
+server_emojis="$(sed -nE 's/^export const ALLOWED_EMOJIS: ReadonlySet<string> = new Set\((\[.*\])\);$/\1/p' "$SERVER_SRC/managers/socketGuards.ts")"
+bot_emojis="$(sed -nE 's/^const ALLOWED_EMOJIS = (\[.*\]);$/\1/p' "$BOTS")"
+[[ -n "$server_emojis" && "$bot_emojis" == "$server_emojis" ]] && ok "ALLOWED_EMOJIS matches the server's" \
+  || ko "ALLOWED_EMOJIS matches the server's" "ours=[$bot_emojis] server=[$server_emojis]"
 
 # ── --answer-right: the bots vote for the owner and end tied with points (EXP-348) ──
 # Options that make a bot miss or change a vote would break the tie, so they are refused with it

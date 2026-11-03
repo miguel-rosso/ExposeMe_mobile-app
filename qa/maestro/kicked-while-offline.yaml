@@ -14,6 +14,7 @@
 #     --bot-args "--kick <label> --kick-after-game 120"
 # env: GAME_CODE, USERNAME, METRO_URL (url-encoded)
 # Selectors are testIDs (Client/app/utils/testIds.ts) except the system alert, matched in both UI languages.
+# lab: one device (the host bot kicks the one device named in --kick)
 appId: com.socketNull.ExposeMe
 ---
 - runFlow: open-app.yaml

@@ -11,24 +11,26 @@
 # Selectors are testIDs (Client/app/utils/testIds.ts). The button's text is filtered by noHoldsLeft in both languages
 # (Client/app/i18n, kept in sync by qa/lab/tests/maestro-selectors.test.sh); `enabled` is its disabled state.
 #
-# Timing: the look loop notes when the last look that found no button started (`hiddenFrom`): the scoreboard opened
-# after it and before the look that saw it ended (`seenAt`). Its hold window closes 3.5 s after it opened, so it is
-# surely open until `closingFrom` (hiddenFrom + 3.5 s), and the scoreboard (nobody holds) is surely over by `closesBy`
-# (seenAt + 5 s). The enabled check only starts while a screen read still ends before closingFrom and waits for it until
-# then at most; the greyed out check only follows it and waits until closesBy at most. A scoreboard reached too late
-# for the first check is counted (`late`) and the flow waits for the device's next one. Taps would cost a 3 s settle
-# on iOS (see hold-used-up.yaml), so the flow only reads the screen: it runs on iOS and Android. The steps between
-# `timed:` markers are budgeted by qa/lab/tests/maestro-timing.test.sh, which also checks the copy of the server's times
-# below against Server/managers/GameEngine.ts and the two bounds.
+# Timing: the look loop notes when the last look that found no button started (`hiddenFrom`): the phone painted the
+# scoreboard after it and before the look that saw it ended (`seenAt`). It may paint it up to 0.5 s after the server
+# opened it (phaseLagMs, EXP-349), and the hold window closes 3.5 s after the server opened it, so it is surely open
+# until `closingFrom` (hiddenFrom + 3.5 s - 0.5 s, EXP-391), and the scoreboard (nobody holds) is surely over by
+# `closesBy` (seenAt + 5 s). The enabled check only starts while a screen read still ends before closingFrom and
+# waits for it until then at most; the greyed out check only follows it and waits until closesBy at most. A scoreboard
+# reached too late for the first check is counted (`late`) and the flow waits for the device's next one. Taps would
+# cost a 3 s settle on iOS (see hold-used-up.yaml), so the flow only reads the screen: it runs on iOS and Android. The
+# steps between `timed:` markers are budgeted by qa/lab/tests/maestro-timing.test.sh, which also checks the copy of the
+# server's times below against Server/managers/GameEngine.ts and the two bounds.
 appId: com.socketNull.ExposeMe
 ---
 - runFlow: open-app.yaml
 - runFlow: join-room.yaml
 - runFlow: wait-game-start.yaml
 # The server's scoreboard length and the time a hold needs left on it (GameEngine.ts: SCORE_DISPLAY_TIME,
-# HOLD_MIN_REMAINING); how much longer an unchecked one may take to close (a pause); how long to wait for the device's
-# next scoreboard (several rounds and their photo waits) and for the game over once one was checked
-- evalScript: "${output.timing = { scoresMs: 5000, holdMinMs: 1500, closeSlackMs: 5000, scoreboardWaitMs: 300000, gameOverWaitMs: 600000 }}"
+# HOLD_MIN_REMAINING); how late the phone may paint the scoreboard (play-rounds.yaml's phaseLagMs, it166's render
+# telemetry); how much longer an unchecked one may take to close (a pause); how long to wait for the device's next
+# scoreboard (several rounds and their photo waits) and for the game over once one was checked
+- evalScript: "${output.timing = { scoresMs: 5000, holdMinMs: 1500, phaseLagMs: 500, closeSlackMs: 5000, scoreboardWaitMs: 300000, gameOverWaitMs: 600000 }}"
 # Own scoreboards found too late to check, one checked, the game over (or no scoreboard of the device's in time)
 - evalScript: "${output.closed = { late: 0, checked: false, over: false }}"
 - repeat:
@@ -52,10 +54,10 @@ appId: com.socketNull.ExposeMe
                 commands:
                   - assertTrue: ${output.look.seenAt = Date.now()}
                   - assertTrue: ${output.look.shown = true}
-      # Known timing: an earlier look found no button, so the scoreboard opened after it started (see Timing).
-      # readMs: how long the look that saw it took
+      # Known timing: an earlier look found no button, so the scoreboard was painted after it started, at most
+      # phaseLagMs after the server opened it (see Timing). readMs: how long the look that saw it took
       - evalScript: ${output.round.known = output.look.shown && output.look.hiddenFrom > 0}
-      - evalScript: ${output.round.closingFrom = output.look.hiddenFrom + output.timing.scoresMs - output.timing.holdMinMs}
+      - evalScript: ${output.round.closingFrom = output.look.hiddenFrom - output.timing.phaseLagMs + output.timing.scoresMs - output.timing.holdMinMs}
       - evalScript: ${output.round.closesBy = output.look.seenAt + output.timing.scoresMs}
       - evalScript: ${output.round.readMs = output.look.seenAt - output.look.lookFrom}
       # ── timed: scores ──

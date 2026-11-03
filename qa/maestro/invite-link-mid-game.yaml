@@ -13,6 +13,7 @@
 # lab.sh passes its code as NEW_CODE and stops those bots when the run ends (their result does not count).
 # env: GAME_CODE (room A), NEW_CODE (room B), USERNAME, METRO_URL (url-encoded)
 # Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
+# lab: one device (a second device joining room B would make its 5 players and start its game)
 appId: com.socketNull.ExposeMe
 ---
 - runFlow: open-app.yaml

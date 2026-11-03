@@ -29,11 +29,13 @@
 #                               summary, the device render skew per phase (qa/runs/<RUN_ID>/render-skew.json) and how
 #                               many scoreboards each device checked (play-rounds.yaml), and keeps the game's raw
 #                               telemetry rows (qa/runs/<RUN_ID>/telemetry.jsonl); warns unless Maestro is 2.11.x
-#                               (--bot-args: extra bots.mjs flags, e.g. --flow no-result-game --bot-args --no-answer);
+#                               (--bot-args: extra bots.mjs flags, e.g. --flow no-result-game --bot-args --no-answer,
+#                               or --bot-args "--emoji-rate 4" to measure what emojis cost the render skew);
 #                               a device whose flow failed while the dev client was still booting (stuck on its
 #                               "Downloading N%", or dev-client-boot.yaml's loaded check failed: launcher, ANR dialog,
 #                               "There was a problem loading the project") is force-stopped and runs the flow once
-#                               more (maestro/<device>-retry)
+#                               more (maestro/<device>-retry); a flow whose header says "# lab: one device (<why>)"
+#                               is refused on more than one device before any bots start (pick one: --devices <label>)
 #        [--second-room "<bots.mjs args>"]  also start a 2nd bots room; its code reaches the flows as NEW_CODE
 #        [--maestro-env KEY=VALUE]          extra Maestro variable for every device (repeatable)
 #        [--server http://localhost:P | --port P]  bots and render telemetry use that lab server (e.g. a worktree's
@@ -897,6 +899,14 @@ wait_room_code() { # dir, label: prints the room code the bots wrote to dir/code
   cat "$dir/code"
 }
 
+# A flow that a second device breaks says so in its header, the comments before `appId` (EXP-389):
+# "# lab: one device (<why>)". play refuses to run it on more than one
+ONE_DEVICE_MARKER='# lab: one device'
+flow_one_device_reason() { # flow file: prints why it runs on one device only (exit 0), or nothing (exit 1)
+  [ -f "$1" ] && awk -v marker="$ONE_DEVICE_MARKER " '/^appId:/ { exit }
+    index($0, marker) == 1 { print substr($0, length(marker) + 1); found = 1; exit } END { exit !found }' "$1"
+}
+
 # ── Device-hosted rooms (play --device-host, EXP-390) ──
 # The device creates the room, so its code is only on its screen: the flow reads it and POSTs it with Maestro's http
 # (run by the Maestro CLI on this machine) to a listener on loopback, which writes the first one it gets where a bots
@@ -991,6 +1001,10 @@ cmd_play() {
   local n_dev; n_dev="$(devices | jq -c "$sel" | wc -l | tr -d ' ')"
   local total=$((bots + n_dev))
   [ "$total" -ge 2 ] || die "need at least 2 players"
+  local one_device_reason
+  if [ "$n_dev" -gt 1 ] && one_device_reason="$(flow_one_device_reason "$QA/maestro/$flow.yaml")"; then
+    die "$flow.yaml runs on one device only $one_device_reason: pick it with --devices <label> (got $n_dev devices)"
+  fi
   if [ "$device_host" = 1 ]; then
     [ "$n_dev" = 1 ] || die "--device-host needs exactly one device, the room's host (got $n_dev)"
     [ "$server_port" = "$SERVER_PORT" ] \

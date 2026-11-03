@@ -499,10 +499,11 @@ hold_taps="$(awk '/^[ \t]*- tapOn:/ { tap = 1; next } tap && /^[ \t]*repeat:/ { 
 # scoreboard's close any more. maestro-sim.mjs plays the flow against those bounds (scenario `hold`, below; it also
 # checks that the flow without phaseLagMs in closingFrom would pass on a broken app)
 # shellcheck disable=SC2016
-used_up_closing_from='${output.round.closingFrom = output.look.hiddenFrom - output.timing.phaseLagMs + output.timing.scoresMs - output.timing.holdMinMs}'
+# The same bound in hold-closed.yaml (EXP-391, below)
+hold_closing_from='${output.round.closingFrom = output.look.hiddenFrom - output.timing.phaseLagMs + output.timing.scoresMs - output.timing.holdMinMs}'
 used_up_bounded() { # FLOW -> whether its used-up check proves the holds only before closingFrom
   # shellcheck disable=SC2016
-  grep -qF "evalScript: $used_up_closing_from" "$1" \
+  grep -qF "evalScript: $hold_closing_from" "$1" \
     && grep -qF '!output.round.usedUpLooked && output.round.tappedBy + output.timing.tapLatencyMs < output.round.closingFrom' "$1" \
     && grep -qF 'assertTrue: ${(output.round.usedUp = output.round.greySeenAt > 0 && output.round.greySeenAt < output.round.closingFrom), true}' "$1" \
     && grep -qF 'assertTrue: ${output.round.greySeenAt = Date.now()}' "$1" \
@@ -529,15 +530,25 @@ closed_ms() { tr ',' '\n' <<<"$closed_timing" | sed -nE "s/^ *$1: ([0-9]+) *$/\1
 [ -n "$hold_min" ] && [ -n "$scores" ] && [ "$(closed_ms scoresMs)" = "$scores" ] && [ "$(closed_ms holdMinMs)" = "$hold_min" ] \
   && ok "hold-closed.yaml copies GameEngine.ts's scoreboard and hold window times ($scores/$hold_min ms)" \
   || ko "hold-closed.yaml's times match GameEngine.ts" "engine: scores=$scores min=$hold_min; flow: $closed_timing"
+# EXP-391: the same closingFrom as hold-used-up.yaml's, less the phone's paint delay of the scoreboard
+closed_bounded() { # FLOW -> whether it waits for the enabled button only while the window is surely open, then until closesBy
+  # shellcheck disable=SC2016
+  grep -qF "evalScript: $hold_closing_from" "$1" \
+    && grep -qF 'evalScript: ${output.round.closesBy = output.look.seenAt + output.timing.scoresMs}' "$1" \
+    && grep -qF 'true: ${output.round.known && Date.now() + output.round.readMs < output.round.closingFrom}' "$1" \
+    && grep -qF 'timeout: ${output.round.closingFrom - Date.now()}' "$1" \
+    && grep -qF 'timeout: ${output.round.closesBy - Date.now()}' "$1"
+}
+[ "$(closed_ms phaseLagMs)" = "${phase_lag:-x}" ] && closed_bounded "$CLOSED_FLOW" \
+  && ok "hold-closed.yaml waits for the enabled button until closingFrom (less a late painted scoreboard) and the greyed out one until closesBy" \
+  || ko "hold-closed.yaml's waits bound by closingFrom / closesBy" \
+    "phaseLagMs: hold-closed $(closed_ms phaseLagMs), play-rounds ${phase_lag:-none}"
+# The bound before EXP-391: the scoreboard taken as painted on time
 # shellcheck disable=SC2016
-closing_from='${output.round.closingFrom = output.look.hiddenFrom + output.timing.scoresMs - output.timing.holdMinMs}'
-grep -qF "evalScript: $closing_from" "$CLOSED_FLOW" \
-  && grep -qF 'evalScript: ${output.round.closesBy = output.look.seenAt + output.timing.scoresMs}' "$CLOSED_FLOW" \
-  && grep -qF 'true: ${output.round.known && Date.now() + output.round.readMs < output.round.closingFrom}' "$CLOSED_FLOW" \
-  && grep -qF 'timeout: ${output.round.closingFrom - Date.now()}' "$CLOSED_FLOW" \
-  && grep -qF 'timeout: ${output.round.closesBy - Date.now()}' "$CLOSED_FLOW" \
-  && ok "hold-closed.yaml waits for the enabled button until closingFrom and the greyed out one until closesBy" \
-  || ko "hold-closed.yaml's waits bound by closingFrom / closesBy"
+sed 's/output.look.hiddenFrom - output.timing.phaseLagMs + /output.look.hiddenFrom + /' "$CLOSED_FLOW" >"$TMP/hold-closed-on-time.yaml"
+! closed_bounded "$TMP/hold-closed-on-time.yaml" \
+  && ok "checker rejects a closingFrom that takes the scoreboard as painted on time" \
+  || ko "checker rejects the closingFrom without phaseLagMs"
 [ "$(blocks_of hold-closed.yaml scores)" = 1 ] && ! grep -qE '^[[:space:]]*- (tapOn|longPressOn|swipe):' "$CLOSED_FLOW" \
   && ok "hold-closed.yaml budgets its steps on the device's scoreboard and taps nothing" \
   || ko "hold-closed.yaml has a scores block and no taps"

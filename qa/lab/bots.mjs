@@ -168,6 +168,16 @@
 //                           not these presses again (EXP-355 will extend it).
 //   node qa/lab/bots.mjs --bots 3 --host --rounds 3 --hold 1
 //   node qa/lab/bots.mjs --bots 3 --host --rounds 10 --hold 0.5 --chaos 0.3
+//            --emoji-rate N  every bot sends N emoji-reaction per second (above 0, at most the server's EMOJI_RATE_PER_S,
+//                           4) during the reveal and the scoreboard, never while the game is paused, cycling through the
+//                           emojis the app offers, to measure what they cost the phones' rendering (EXP-393, EXP-400:
+//                           compare lab.sh play's render skew with and without it). summary: emojis_sent,
+//                           emojis_received (each emoji reaches every bot of the room, so about sent x bots; fewer:
+//                           relays lost or dropped by the server), emojis_received_paused (while paused: should be 0).
+//   node qa/lab/bots.mjs --bots 3 --host --rounds 3 --emoji-rate 4
+//   node qa/lab/bots.mjs --bots 2 --host --rounds 3 --emoji-rate 4 --hold 1 --chaos 1   # holders drop mid-scoreboard,
+//                           so the game pauses there: emojis_received_paused must stay 0 (a bot sending in the pause
+//                           shows up there, about 25 per run)
 //   Checks and metrics of each room: qa/lab/bots-analysis.mjs (tested on recorded events by qa/lab/tests/bots-analysis.test.sh).
 //   Every bot records waiting-photo { round, duration, gameNumber } (room-wide, owner secret; exactly WAITING_PHOTO_KEYS
 //   in bots-analysis.mjs, see GAME_FLOW.md «Game number»): same payload for all, skew measured.
@@ -212,6 +222,7 @@ const VALUE_FLAGS = new Set([
   "server", "bots", "rooms", "rounds", "wait-players", "code", "code-file", "photos", "out", "chaos", "upload-fail",
   "timeout", "no-ready", "drop-round", "drop-rounds", "drop-secs", "drop-bot", "photo-unavailable", "plant", "play-again-linger",
   "play-again-linger-bot", "start-next-game", "name-prefix", "leave-round", "leave-offline-round", "kick", "kick-after-game", "hold",
+  "emoji-rate",
 ]);
 const USAGE = `usage: node qa/lab/bots.mjs [options]
 
@@ -247,6 +258,9 @@ Headless ExposeMe players (see the header of qa/lab/bots.mjs for every scenario)
   --hold P                   the round's owner bot holds the scoreboard with probability P (0 to 1) and lets go within
                              the server's hold budget, and again while holds are left; with --chaos C, instead of
                              letting go it drops or rejoins on a new socket while holding, with probability C
+  --emoji-rate N             every bot sends N emoji reactions per second (above 0, at most the server's 4) during the
+                             reveal and the scoreboard (not while paused), to measure their render cost; summary:
+                             emojis_sent, emojis_received, emojis_received_paused
   --help, -h                 print this help and exit (no network)
 
 Exit codes: 0 pass, 1 fail, 2 bad arguments.`;
@@ -367,6 +381,25 @@ const HOLD_LENGTH_MS = [500, HOLD_BUDGET_PER_ROUND - 2_000];
 // Pressed this long after round-scores (min, max): the scores phase lasts 5 s and a hold needs more than 1.5 s of it
 // left (the server sends hold-closed when it gets there)
 const HOLD_PRESS_DELAY_MS = [200, 1_500];
+
+// ── Emoji reactions at a steady rate (--emoji-rate, EXP-400) ──
+// The emojis the server relays and its rate per socket (Server/managers/socketGuards.ts; bots-cli.test.sh checks the
+// copies): it drops anything faster silently, so a higher rate would put fewer emojis on the phones than it claims
+const ALLOWED_EMOJIS = ["😂", "😍", "❓", "😳", "🔥", "😭", "🤡", "😡", "📸"];
+const EMOJI_RATE_PER_S = 4;
+// The phases the bots react in: the photo with its answer, then the scoreboard
+const EMOJI_PHASES = new Set(["reveal", "scores"]);
+/** --emoji-rate N: emojis per second per bot, 0 when absent. */
+function emojiRateOption() {
+  const value = args["emoji-rate"];
+  if (value === undefined) return 0;
+  const rate = Number(value);
+  if (value.trim() === "" || !(rate > 0 && rate <= EMOJI_RATE_PER_S)) {
+    exitUsage(`--emoji-rate "${value}" is not a rate the server takes (above 0, at most ${EMOJI_RATE_PER_S} emojis/s per bot)`);
+  }
+  return rate;
+}
+const EMOJI_RATE = emojiRateOption();
 const UPLOAD_FAIL = Number(args["upload-fail"] || 0);
 const PHOTO_UNAVAILABLE = Number(args["photo-unavailable"] || 0);
 const NO_READY = Number(args["no-ready"] || 0);
@@ -627,6 +660,8 @@ function runRoom(roomIdx, fixedCode) {
     const bots = [];
     const socketIds = new Set(); // every socket id of this room's bots (they change on reconnect)
     const spareSockets = []; // short-lived second connections of a bot (a holder rejoining on a new socket, --hold)
+    // --emoji-rate: sent by this room's bots, relayed back to them (receivedPaused: while the game was paused)
+    const emojis = { sent: 0, received: 0, receivedPaused: 0, timers: [] };
     const offlineLeave = { sentAt: null }; // --leave-offline-round: when the leaver's seat leave was sent
     /** --leave-offline-round (EXP-387): every bot that left offline sent its seat leave and the server acked it. */
     const seatLeaveProblems = () => events.filter((e) => e.ev === "left-room" && e.payload?.offline).flatMap(({ bot }) => {
@@ -645,8 +680,12 @@ function runRoom(roomIdx, fixedCode) {
       ended = true;
       errors.push(...seatLeaveProblems());
       clearTimeout(timer);
+      emojis.timers.forEach(clearInterval);
       [...bots.map((b) => b.socket), ...spareSockets].forEach((s) => s.disconnect());
-      resolve({ code, events, errors, uploads, rateLimited, reason, players: bots.map((b) => b.name) });
+      resolve({
+        code, events, errors, uploads, rateLimited, reason, players: bots.map((b) => b.name),
+        emojis: { sent: emojis.sent, received: emojis.received, receivedPaused: emojis.receivedPaused },
+      });
     };
     const timer = setTimeout(() => {
       errors.push(`timeout after ${TIMEOUT_S}s`);
@@ -708,7 +747,7 @@ function runRoom(roomIdx, fixedCode) {
       // Privacy check of every received event. Runs before the event's own handler, so `phase` is the phase this
       // bot was in when it arrived; `baseline` = points per player at the last round-scores (null when unknown)
       // `askedRound`: round of the last your-turn since the last waiting-photo (only its round-skipped has a reason)
-      const priv = { phase: null, baseline: null, askedRound: null };
+      const priv = { phase: null, baseline: null, askedRound: null, paused: false };
       // `duration` of the last start event of each phase this bot saw: what a resync's phaseTotal must repeat
       const phaseStartDurations = new Map();
       socket.on("disconnect", () => { priv.baseline = null; }); // round-scores may be missed while away
@@ -739,8 +778,27 @@ function runRoom(roomIdx, fixedCode) {
           priv.phase = d?.started ? d.phase : null;
           if (d?.started) priv.baseline = new Map((d.scores ?? []).map((s) => [s.username, s.points]));
         }
+        // `paused`: from game-paused until game-resumed (or game over), or as the last snapshot says (a rejoin mid-pause)
+        if (ev === "game-paused") priv.paused = true;
+        else if (ev === "game-resumed" || ev === "game-over") priv.paused = false;
+        else if (ev === "game-state") priv.paused = !!d?.pause;
       });
       socket.on("connect_error", (e) => errors.push(`${name} connect_error ${e.message}`));
+      // --emoji-rate (EXP-400): like a player tapping the emoji row, one reaction every 1/N s while the round's photo
+      // is revealed or its scoreboard is up and the game is not paused (as this bot last heard it: the pause modal
+      // covers the game), cycling through the app's emojis. Counted apart, not recorded as events: at 4/s they would
+      // flood the room's checks. The server relays emojis during a pause too, so one received while this bot knows
+      // the game paused was sent in the pause (receivedPaused; at most one in flight as the pause began)
+      if (EMOJI_RATE) {
+        emojis.timers.push(setInterval(() => {
+          if (!EMOJI_PHASES.has(priv.phase) || priv.paused || bot.gone || bot.lingering || !socket.connected) return;
+          socket.emit("emoji-reaction", { emoji: ALLOWED_EMOJIS[emojis.sent++ % ALLOWED_EMOJIS.length] });
+        }, 1000 / EMOJI_RATE));
+        socket.on("emoji-reaction", () => {
+          emojis.received++;
+          if (priv.paused) emojis.receivedPaused++;
+        });
+      }
       socket.on("room-of-game", (d) => {
         if (!d.success) { errors.push(`${name} join failed: ${d.message}`); return; }
         // Play again on the same socket after game-over (EXP-172): same token, still in the room, host kept
@@ -1305,6 +1363,13 @@ const summary = {
   pass: rooms.every((r) => expectedEnd(r.reason) && r.consistency_errors.length === 0 && r.errors.length === 0),
   worst_skew_ms: Math.max(...rooms.map((r) => Number(r.skew_ms.max || 0))),
   uploads_rate_limited: rooms.reduce((n, r) => n + r.uploads_rate_limited, 0), // >0: server limit too low for this load, not a game bug
+  // --emoji-rate: each emoji is relayed to every bot of its room, so received is about sent x bots; received while
+  // paused should be 0 (a few at most: one in flight as a pause began)
+  ...(EMOJI_RATE ? {
+    emojis_sent: results.reduce((n, r) => n + r.emojis.sent, 0),
+    emojis_received: results.reduce((n, r) => n + r.emojis.received, 0),
+    emojis_received_paused: results.reduce((n, r) => n + r.emojis.receivedPaused, 0),
+  } : {}),
   rooms_detail: rooms,
 };
 console.log(JSON.stringify(summary, null, 2));

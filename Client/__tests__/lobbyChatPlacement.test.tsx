@@ -238,3 +238,43 @@ describe("LobbyChatMessages: centred bubbles (EXP-411)", () => {
     act(() => r.unmount());
   });
 });
+
+// ── Readability over the controls (EXP-416) ──────────────
+
+describe("LobbyChatMessages: bubbles readable over the controls (EXP-416)", () => {
+  /** A bubble lets this much of the Start button, the rounds pill or «Waiting…» under it show through, at most */
+  const MAX_SHOW_THROUGH = 0.1;
+
+  /** The alpha of an `rgba(...)`/`rgb(...)`/`#rrggbb[aa]` colour, 1 when it has none */
+  const alphaOf = (color: string): number => {
+    const rgba = /^rgba?\(([^)]+)\)$/.exec(color);
+    if (rgba) {
+      const parts = rgba[1].split(",").map((p) => p.trim());
+      return parts.length === 4 ? Number(parts[3]) : 1;
+    }
+    const hex = /^#([0-9a-f]{6})([0-9a-f]{2})?$/i.exec(color);
+    if (hex) return hex[2] ? parseInt(hex[2], 16) / 255 : 1;
+    throw new Error(`unexpected colour ${color}`);
+  };
+
+  it("draws each bubble on a near-opaque background with an edge that sets it apart, and still lets taps through", () => {
+    let r!: TestRenderer.ReactTestRenderer;
+    act(() => {
+      r = TestRenderer.create(
+        <LobbyChatMessages chat={{
+          messages: [{ id: "1", username: "chatter", message: "hola" }],
+          send: jest.fn(() => true), receive: jest.fn(), remove: jest.fn(), clear: jest.fn(),
+        }} />
+      );
+    });
+    const container = hostById(r.root, TEST_IDS.lobbyChatMessages);
+    const [bubble] = container.children.filter((c): c is ReactTestInstance => typeof c !== "string").flatMap(hostTops);
+    const style = styleOf(bubble);
+
+    expect(alphaOf(String(style.backgroundColor))).toBeGreaterThanOrEqual(1 - MAX_SHOW_THROUGH);
+    expect(style.borderWidth ?? 0).toBeGreaterThan(0);
+    expect(style.borderColor).toBeDefined();
+    expect(styleOf(container).pointerEvents).toBe("none");
+    act(() => r.unmount());
+  });
+});

@@ -45,10 +45,12 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ username, message, onAnimatio
     });
   }, []);
 
+  // Near-opaque with a light edge: the bubble sits over the lobby's controls (Start button, rounds pill, «Waiting…»),
+  // whose text would otherwise show through and mix with the message (EXP-416)
   return (
     <Animated.View
       style={[
-        tw`bg-black bg-opacity-60 rounded-xl px-3 py-2 mb-2 max-w-[85%] self-center`,
+        tw`bg-black/95 border border-white/20 rounded-xl px-3 py-2 mb-2 max-w-[85%] self-center`,
         { opacity, transform: [{ translateY }] },
       ]}
     >

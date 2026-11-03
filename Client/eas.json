@@ -1,7 +1,7 @@
 {
   "cli": {
     "version": ">= 15.0.12",
-    "appVersionSource": "local"
+    "appVersionSource": "remote"
   },
   "build": {
     "development": {
@@ -14,6 +14,7 @@
       }
     },
     "production": {
+      "autoIncrement": true,
       "android": {
         "buildType": "app-bundle"
       }

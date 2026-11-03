@@ -25,6 +25,23 @@ In the output, you'll find options to open the app in a
 
 You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
 
+## Deploy (EAS)
+
+Build numbers (`android.versionCode`, `ios.buildNumber`) are stored on EAS (`cli.appVersionSource: "remote"` in
+`eas.json`) and the `production` profile bumps them on every build (`autoIncrement`). The user-facing `version` in
+`app.json` is still bumped by hand for each store release.
+
+One-time step before the first remote production build: set the remote build number to the highest one already
+uploaded to each store, so the next build goes above it (Play and App Store Connect reject repeated or lower numbers):
+
+```bash
+npx eas-cli build:version:set --platform android   # enter the highest versionCode in the Play Console
+npx eas-cli build:version:set --platform ios       # enter the highest build number in App Store Connect (if any)
+```
+
+`android.versionCode` stays in `app.json` only for local builds (`expo prebuild`, the QA lab's dev clients): EAS ignores
+it with the remote source. Lowering it would make `adb install -r` refuse the downgrade over the installed dev build.
+
 ## Get a fresh project
 
 When you're ready, run:

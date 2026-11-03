@@ -478,7 +478,8 @@ const MONGOLIAN_LOOKALIKES: ReadonlyMap<string, string> = new Map([["\u1824", "\
 // Visual keys only (EXP-385): Mongolian letters drawn alike in some places of a word, as Noto Sans Mongolian 3.002 (the
 // font iOS ships) shapes them: measured with HarfBuzz, Android's shaper, on 44,000 pairs of random words one or more of
 // these letters apart, the only pairs read alike but drawn apart hold the word "ᠤᠤ" or "ᠦᠦ", which the font draws on
-// its own (already read as O + O by MONGOLIAN_LOOKALIKES). A word is a run of the letters U+1820-U+1842 with nothing
+// its own, and still read as O + O by MONGOLIAN_LOOKALIKES: Noto Sans Mongolian 1.04, the font Android ships, draws
+// them like "ᠣᠤ", "ᠤᠣ", "ᠣᠣ" and "ᠥᠦ", "ᠦᠥ", "ᠥᠥ" (EXP-407). A word is a run of the letters U+1820-U+1842 with nothing
 // next to it that could join it or change its shapes (MONGOLIAN_SHAPING): the Mongolian letters, the Sibe syllable
 // boundary marker, the nirugu, the variation selectors, the vowel separator, the joiners and any mark (measured so in
 // that font, but the Ali Gali signs U+1880-U+1884, the separator and the joiners, kept to be safe; names can't hold the

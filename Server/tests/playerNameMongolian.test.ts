@@ -47,7 +47,7 @@ describe("Mongolian vowels written alike (EXP-376)", () => {
 
 // EXP-385: letters the Unicode Standard (chapter 13.2) writes alike only in some places of a word: OE and UE like O and
 // U past the first syllable ("tolö" like "tolo"), and D like T inside a word before a vowel ("urtu" and "ordu"). Each
-// pair checked with HarfBuzz on Noto Sans Mongolian 3.002, the font of iOS and Android: drawn alike, or apart.
+// pair checked with HarfBuzz on Noto Sans Mongolian 3.002, the font of iOS: drawn alike, or apart.
 describe("Mongolian letters drawn alike by their place in the word (EXP-385)", () => {
   it.each([
     ["tolo / toloe (OE last)", `${TA}${O}${LA}${O}`, `${TA}${O}${LA}${OE}`],
@@ -102,6 +102,22 @@ describe("Mongolian letters drawn alike by their place in the word (EXP-385)", (
     ["none / baluda inside the word", "\u1822\u1826\u1833\u1821", "\u1822\u1825\u1833\u1885\u1821"],
     ["Ali Gali dagalga inside the word / none", "\u1825:\u1820\u18A9\u1825", "\u1825:\u1820\u1826"],
   ])("%s still look too alike", (_label, a, b) => {
+    expectSimilar(a, b);
+  });
+
+  // EXP-407: Noto Sans Mongolian 3.002 (iOS) draws the words "ᠤᠤ" and "ᠦᠦ" on their own, but 1.04, the font Android
+  // ships, draws them like these (HarfBuzz), so a name in one room may still not take the other
+  it.each([
+    ["U U / O U", `${U}${U}`, `${O}${U}`],
+    ["U U / U O", `${U}${U}`, `${U}${O}`],
+    ["U U / O O", `${U}${U}`, `${O}${O}`],
+    ["U U / U OE", `${U}${U}`, `${U}${OE}`],
+    ["UE UE / OE UE", `${UE}${UE}`, `${OE}${UE}`],
+    ["UE UE / UE OE", `${UE}${UE}`, `${UE}${OE}`],
+    ["UE UE / OE OE", `${UE}${UE}`, `${OE}${OE}`],
+    ["UE UE / UE U", `${UE}${UE}`, `${UE}${U}`],
+    ["U U before another word", `${U}${U} ${BA}${A}`, `${O}${U} ${BA}${A}`],
+  ])("keeps the word %s, drawn alike on Android, too alike", (_label, a, b) => {
     expectSimilar(a, b);
   });
 

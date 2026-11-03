@@ -74,7 +74,7 @@ export function platformOf(userAgent: string | undefined): InvitePlatform {
 
 // ── HTML ──
 
-const escapeHtml = (value: string) =>
+export const escapeHtml = (value: string) =>
   value
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")

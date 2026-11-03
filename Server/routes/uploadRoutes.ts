@@ -8,6 +8,7 @@ import { requireUploadAllowed, requireUploadMember } from "../middlewares/upload
 import { joinPageCsp } from "../middlewares/securityHeaders";
 import { isRoomCode, normalizeRoomCode } from "../managers/roomCode";
 import { APP_STORE_ID, INVITE_LANGUAGES, pickInviteLanguage, platformOf, renderJoinPage } from "./joinPage";
+import { servePrivacyPage } from "./privacyPage";
 
 const router = express.Router();
 
@@ -48,6 +49,9 @@ router.get("/join/:code", (req, res) => {
     }),
   );
 });
+
+// Privacy policy (see routes/privacyPage), linked from the stores and the app
+router.get("/privacy", servePrivacyPage);
 
 // Liveness only: no uptime, memory or other process details for anonymous callers
 router.get("/health", (_req, res) => {

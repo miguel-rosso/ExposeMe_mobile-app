@@ -42,6 +42,8 @@ point at its `/join` page too).
    | `NODE_ENV` | `production` | Express' production mode. Set it last: with it, npm skips dev dependencies unless told otherwise, so a build command without `--include=dev` would leave out ts-node and TypeScript, and a server still started with `npm start` (ts-node) would no longer start. |
    | `ALLOWED_HOSTS` | `exposeme-mobile-app-f72q.onrender.com` | The only Host the socket.io endpoint answers to. A wrong value refuses every phone (check step 4 right away). Add a custom domain here if one is ever pointed at the service. |
    | `TRUST_PROXY` | `1` | Render's proxy is one hop: the client IP for rate limits and per-IP caps comes from its X-Forwarded-For. Render's own `RENDER` variable already implies 1; setting it keeps that explicit. |
+   | `CONTACT_EMAIL` | the address for privacy requests | Shown on the privacy policy (`/privacy`) that the store listings link to. Unset, the page points to the store page's developer contact. |
+   | `CONTROLLER_NAME` | the publisher's name | Named on the privacy policy as responsible for the data. Unset, the page points to the developer on the store page (and the server logs a warning in production). |
 
    `PORT` and `RENDER` are set by Render. Leave every other variable unset (the defaults are the production values),
    `APP_STORE_ID` until the iOS app is published (the invite page then links to it), and **never** set the lab-only

@@ -1,7 +1,7 @@
 import { Server } from "socket.io";
 import {
   GameStateSnapshot, HoldEndData, PauseInfo, PhaseResumeData, Player, PlayerConnectionData, PublicPlayer, Room, RoomStateSnapshot, RoundPhase, RoundRevealData,
-  RoundSkipReason, RoundSkippedData, RoundStartData, ScoreRound, WaitingPhotoData, YourTurnData,
+  RoundSkipReason, RoundSkippedData, RoundStartData, ScoreRound, StartGameAck, WaitingPhotoData, YourTurnData,
 } from "../models/interfaces";
 import { DISCONNECT_GRACE, RoomManager } from "./RoomManager";
 import { uploadStore } from "../middlewares/uploadStore";
@@ -17,6 +17,7 @@ const REVEAL_TIME = 3_000;
 const SCORE_DISPLAY_TIME = 5_000;
 const GAME_START_DELAY = 1_000;
 const READY_TIMEOUT = 10_000; // After game-started, start the first round with whoever sent im-ready
+const MIN_PLAYERS_TO_START = 2;
 const PHOTO_WAIT_TIMEOUT = 15_000;
 // Countdown clients get when each phase starts (the `duration` of waiting-photo / round-start / round-reveal /
 // round-scores); resync payloads repeat it as `phaseTotal`, so a client that missed the start resumes its bar right
@@ -63,6 +64,9 @@ const PLANTED_PHOTO_MIN_LIFETIME = PHOTO_WAIT_TIMEOUT + ANSWER_TIME + REVEAL_TIM
 const PHASE_EMIT_ROUNDS_KEPT = 2;
 /** Server clock of each phase broadcast in one round; undefined for a phase broadcast more than once in it */
 type RoundPhaseEmits = Map<RoundPhase, number | undefined>;
+
+/** GameEngine.startGame: started, or refused because too few players are left once the gone ones were removed. */
+export type StartGameResult = Extract<StartGameAck, { ok: true } | { reason: "not-enough-players" }>;
 
 /** Why a player is taken out of their room (see GameEngine.removePlayer). */
 export type RemovalReason = "left" | "kicked" | "gone";
@@ -154,13 +158,13 @@ export class GameEngine {
    * start-game. Every gone player (disconnected for longer than DISCONNECT_GRACE) is removed from the room first
    * (they come back as new players), so a "Play again" has no ghosts among the answers or the ranking. A player
    * reconnecting right now (within the grace) stays; if they don't return, the ready/pause logic handles them.
-   * Refused (returns false) if fewer than 2 are left.
+   * Refused if fewer than 2 are left, naming the players it removed.
    */
-  startGame(room: Room): boolean {
-    this.removeDisconnected(room);
-    if (room.players.length < 2) {
+  startGame(room: Room): StartGameResult {
+    const removed = this.removeDisconnected(room);
+    if (room.players.length < MIN_PLAYERS_TO_START) {
       console.log(`[${room.gameCode}] Start refused — fewer than 2 players after removing disconnected ones`);
-      return false;
+      return { ok: false, reason: "not-enough-players", removed };
     }
     room.started = true;
     room.gameNumber++;
@@ -183,7 +187,7 @@ export class GameEngine {
       console.log(`[${room.gameCode}] Ready timeout — starting without: ${missing.join(", ")}`);
       this.onAllPlayersReady(room);
     });
-    return true;
+    return { ok: true };
   }
 
   /**
@@ -195,13 +199,16 @@ export class GameEngine {
     return this.runs.get(room)?.phaseEmits.get(round)?.get(phase);
   }
 
-  /** Game start: drop gone players like a leave (uploads released, host handed over, room notified). */
-  private removeDisconnected(room: Room): void {
+  /**
+   * Game start: drop gone players like a leave (uploads released, host handed over, room notified). Returns their
+   * usernames.
+   */
+  private removeDisconnected(room: Room): string[] {
     if (room._lobbyTimer) { clearTimeout(room._lobbyTimer); room._lobbyTimer = null; }
-    for (const ghost of room.players.filter((p) => this.roomManager.isGone(p))) {
-      this.removePlayer(room, ghost.username, "gone");
-    }
+    const gone = room.players.filter((p) => this.roomManager.isGone(p)).map((p) => p.username);
+    gone.forEach((username) => this.removePlayer(room, username, "gone"));
     this.forgetLeaversWaits(room);
+    return gone;
   }
 
   // ── Removing players ─────────────────────────────────

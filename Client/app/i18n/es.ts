@@ -22,6 +22,12 @@ export default {
   plantingPhoto: "Subiendo…",
   plantPhotoFailed: "No se pudo subir tu foto. Inténtalo de nuevo.",
   startGame: "Iniciar Partida",
+  startingGame: "Empezando…",
+  // WaitingRoom: why the host's Start didn't start the game
+  startRefusedPlayerGone: "{name} se había desconectado y ha salido de la sala.",
+  startRefusedPlayersGone: "Los jugadores desconectados han salido de la sala.",
+  startRefusedNotEnoughPlayers: "Hacen falta al menos 2 jugadores para empezar.",
+  startGameFailed: "No se ha podido empezar la partida. Inténtalo de nuevo.",
   waitingForPlayers: "Esperando jugadores",
   waitingHost: "Esperando al host",
   sendCodeToFriends: "¡Envía el código a tus amigos para que se unan!",

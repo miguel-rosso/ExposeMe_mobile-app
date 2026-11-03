@@ -204,7 +204,7 @@ describe("Lobby -> game with the server's events (EXP-187)", () => {
     act(() => mockSocket.fire("room-of-game", hostRoom));
 
     act(() => { r.root.find((n) => n.props.testID === TEST_IDS.startGameButton && typeof n.props.onPress === "function").props.onPress(); });
-    expect(mockSocket.emittedPayloads("start-game")).toEqual([{ gameCode: ROOM_CODE }]);
+    expect(mockSocket.emittedPayloads("start-game")).toEqual([expect.any(Function)]); // only the ack (EXP-379)
     expect(mockReplace).not.toHaveBeenCalled();
     expect(has(r.root, TEST_IDS.startGameButton)).toBe(true);
 

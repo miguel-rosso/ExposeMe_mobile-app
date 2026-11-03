@@ -22,6 +22,12 @@ export default {
   plantingPhoto: "Uploading…",
   plantPhotoFailed: "Your photo couldn't be uploaded. Try again.",
   startGame: "Start Game",
+  startingGame: "Starting…",
+  // WaitingRoom: why the host's Start didn't start the game
+  startRefusedPlayerGone: "{name} was disconnected and has left the room.",
+  startRefusedPlayersGone: "The disconnected players have left the room.",
+  startRefusedNotEnoughPlayers: "At least 2 players are needed to start.",
+  startGameFailed: "Couldn't start the game. Try again.",
   waitingForPlayers: "Waiting for players",
   waitingHost: "Waiting host",
   sendCodeToFriends: "Send the game code to your friends so they can join!",

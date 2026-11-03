@@ -48,7 +48,7 @@ describe("game start removes disconnected players (EXP-129)", () => {
     const room = lobby(["alice", "bob", "carol"]);
     rm.markDisconnected(room.gameCode, "carol", "sock-carol");
     vi.advanceTimersByTime(DISCONNECT_GRACE);
-    expect(engine.startGame(room)).toBe(true);
+    expect(engine.startGame(room)).toEqual({ ok: true });
     expect(names(room)).toEqual(["alice", "bob"]);
     const left = events("player-left");
     expect(left.map((e) => e.args[0])).toEqual(["carol"]);
@@ -84,7 +84,7 @@ describe("game start removes disconnected players (EXP-129)", () => {
     const room = lobby(["alice", "bob", "carol"]);
     rm.markDisconnected(room.gameCode, "alice", "sock-alice");
     vi.advanceTimersByTime(DISCONNECT_GRACE);
-    expect(engine.startGame(room)).toBe(true);
+    expect(engine.startGame(room)).toEqual({ ok: true });
     expect(names(room)).toEqual(["bob", "carol"]);
     expect(room.players[0].isHost).toBe(true);
     const nh = events("new-host");
@@ -129,7 +129,8 @@ describe("game start removes disconnected players (EXP-129)", () => {
     const room = lobby(["alice", "bob"]);
     rm.markDisconnected(room.gameCode, "bob", "sock-bob");
     vi.advanceTimersByTime(DISCONNECT_GRACE);
-    expect(engine.startGame(room)).toBe(false);
+    // The refusal names who was removed, so the host can be told why the game didn't start (EXP-379)
+    expect(engine.startGame(room)).toEqual({ ok: false, reason: "not-enough-players", removed: ["bob"] });
     expect(room.started).toBe(false);
     expect(names(room)).toEqual(["alice"]);
     expect(events("player-left").map((e) => e.args[0])).toEqual(["bob"]);
@@ -153,7 +154,7 @@ describe("game start removes disconnected players (EXP-129)", () => {
     rm.markDisconnected(room.gameCode, "carol", "sock-carol");
     vi.advanceTimersByTime(DISCONNECT_GRACE);
 
-    expect(engine.startGame(room)).toBe(true);
+    expect(engine.startGame(room)).toEqual({ ok: true });
 
     expect(names(room)).toEqual(["bob", "dave"]);
     expect(emits.map((e) => [e.event, e.target])).toEqual([
@@ -173,7 +174,7 @@ describe("game start removes disconnected players (EXP-129)", () => {
     const startAfter = DISCONNECT_GRACE / 2;
     vi.advanceTimersByTime(startAfter);
 
-    expect(engine.startGame(room)).toBe(true);
+    expect(engine.startGame(room)).toEqual({ ok: true });
     vi.advanceTimersByTime(DISCONNECT_GRACE - startAfter); // past carol's grace, before the ready timeout
 
     expect(names(room)).toEqual(["alice", "bob", "carol"]);

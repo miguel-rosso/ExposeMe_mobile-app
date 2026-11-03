@@ -190,7 +190,7 @@ describe("Invite link to another room from a lobby (EXP-358)", () => {
     await act(async () => {
       r.root.find((n) => n.props.testID === TEST_IDS.startGameButton && typeof n.props.onPress === "function").props.onPress();
     });
-    expect(socket.emittedPayloads("start-game")).toEqual([{ gameCode: MY_ROOM }]);
+    expect(socket.emittedPayloads("start-game")).toEqual([expect.any(Function)]); // only its ack (EXP-379)
   });
 
   it("the X and the Android back while it asks are Cancel too", async () => {

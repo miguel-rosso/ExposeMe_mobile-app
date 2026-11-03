@@ -1,5 +1,4 @@
-import type { Socket } from "socket.io-client";
-import { emitWhileConnected } from "./socketEmit";
+import { AckSocket, emitAwaitingAck, hasBooleanOk } from "./socketAck";
 
 /** How long plant-photo waits for the server's ack before counting the photo as not sent. */
 export const PLANT_ACK_TIMEOUT_MS = 5000;
@@ -12,10 +11,9 @@ export const PLANT_ACK_TIMEOUT_MS = 5000;
 export type PlantRefusal = "not-in-room" | "invalid" | "too-late" | "photo-unavailable";
 export type PlantPhotoAck = { ok: true } | { ok: false; reason: PlantRefusal };
 
-export type PlantingSocket = Pick<Socket, "connected" | "emit" | "on" | "off">;
+export type PlantingSocket = AckSocket;
 
-const isPlantPhotoAck = (answer: unknown): answer is PlantPhotoAck =>
-  typeof answer === "object" && answer !== null && typeof (answer as { ok?: unknown }).ok === "boolean";
+const isPlantPhotoAck = (answer: unknown): answer is PlantPhotoAck => hasBooleanOk(answer);
 
 export interface SendPlantPhotoOptions {
   timeoutMs?: number;
@@ -35,24 +33,7 @@ export function sendPlantPhoto(
   photoUrl: string,
   { timeoutMs = PLANT_ACK_TIMEOUT_MS, onLateAck }: SendPlantPhotoOptions = {},
 ): Promise<PlantPhotoAck | null> {
-  return new Promise((resolve) => {
-    let settled = false;
-    const settle = (answer: PlantPhotoAck | null) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      socket.off("disconnect", onDisconnect);
-      resolve(answer);
-    };
-    const onDisconnect = () => settle(null);
-    const timer = setTimeout(() => settle(null), timeoutMs);
-    socket.on("disconnect", onDisconnect);
-    const onAck = (answer: unknown) => {
-      const ack = isPlantPhotoAck(answer) ? answer : null;
-      if (settled) { if (ack) onLateAck?.(ack); } else settle(ack);
-    };
-    if (!emitWhileConnected(socket, "plant-photo", { photoUrl }, onAck)) settle(null);
-  });
+  return emitAwaitingAck(socket, "plant-photo", [{ photoUrl }], isPlantPhotoAck, { timeoutMs, onLateAck });
 }
 
 /** The server has no such upload of mine any more: uploading the photo again and re-sending it may succeed. */

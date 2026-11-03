@@ -353,7 +353,7 @@ describe("the awaited photo owner goes away (EXP-029, DEC-035)", () => {
     expect(events("game-over")).toHaveLength(1);
 
     // Play again: alice drops on her turn and gets the return window, then a free owner change, again
-    expect(engine.startGame(room)).toBe(true);
+    expect(engine.startGame(room)).toEqual({ ok: true });
     room.players.forEach((p) => engine.markReady(room, p));
     vi.advanceTimersByTime(GAME_START_DELAY);
     expect(room.currentPlayer?.username).toBe("alice");

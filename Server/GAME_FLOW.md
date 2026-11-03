@@ -449,11 +449,18 @@ After last round: game-over
   from the room exactly like a leave: uploads released (planted photo
   included), host handed over if needed (`new-host`) and `player-left <username>` to the room, all before
   `game-started` (whose player list no longer has them). If fewer than 2 players are left, the start is refused
-  (nothing else is emitted; the lobby shows the updated list). A removed player who comes back is a new player: their
+  (nothing else is emitted; the lobby shows the updated list, and the ack below names who was removed). A removed player who comes back is a new player: their
   old `rejoinToken` no longer rejoins (`"Game already started"` while the game runs; in the lobby the name is free
   and they join fresh with a new token and 0 points). A player disconnected for less than the grace (a socket
   reconnecting right when the host presses Start) stays in the game: they rejoin normally, and if they don't come
   back the ready timeout and the pause logic below apply as for any mid-game disconnect.
+- **Start acknowledgement.** `start-game` is acked once handled, after `game-started` when it starts:
+  `{ ok: true }`, or `{ ok: false, reason }` with `reason` `"not-in-room"` (socket bound to no room), `"not-host"`,
+  `"already-started"` (a game is running) or `"not-enough-players"` (fewer than 2 left after the cleanup above; then
+  also `removed`: the usernames that start removed, `[]` if none). Not acked when dropped by the rate limit. The app
+  only offers Start to the host with at least 2 players not shown as gone, shows "Starting…" with the button disabled
+  until `game-started` or the ack (giving up after 5 s without one), and on a refusal tells the host why (e.g. "Ana
+  was disconnected and has left the room").
 - Host only: `set-rounds` (lobby only; 10/15/20, anything else is ignored, and so is the value the room already
   has: no `rounds-updated` for it. **QA-only:** 3 rounds is also accepted
   when the server runs with `ALLOW_QA_ROUNDS=1`, which `qa/lab/lab.sh server` sets for short device runs; it is off
@@ -700,7 +707,7 @@ All game events are **atomic** — each contains everything the client needs.
 |-------|------|-------------|
 | `join-create-game` | `{ gameCode \| null, username, rejoinToken? }` | Create/join; rejoin needs `rejoinToken` (also after every reconnect in game) |
 | `set-rounds` | `{ rounds }` (10/15/20; 3 only with `ALLOW_QA_ROUNDS=1`, QA-only) | Host only, lobby only |
-| `start-game` | - | Host only |
+| `start-game` | - (with an ack callback) | Host only, not while a game is running. Acked `{ ok: true }` or `{ ok: false, reason: "not-in-room" \| "not-host" \| "already-started" \| "not-enough-players", removed? }` (`removed` only with `"not-enough-players"`, see "Start acknowledgement"); not acked when dropped by the rate limit |
 | `remove-player` | `{ username }` | Host only, lobby only (ignored while a game is running): removes that player (not the host), evicts their sockets and revokes their rejoin token (a join with it gets `"Removed by host"`) |
 | `leave-room` | - (with an ack callback) | Explicit leave (Exit button): player removed, host handed over, `player-left` to the room; from a socket replaced by a rejoin it only detaches that socket. Acked (no data) once handled, also from a socket bound to no room; not acked when dropped by the rate limit |
 | `im-ready` | - | Player ready to start (session player; payload ignored). Once the game is over: answered with `game-state` |

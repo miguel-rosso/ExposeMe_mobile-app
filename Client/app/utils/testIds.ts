@@ -24,7 +24,9 @@ export const TEST_IDS = {
   plantPhotoPlanted: "plant-photo-planted", // plant button state: a photo is planted
   plantPhotoNotPlanted: "plant-photo-not-planted",
   startGameButton: "start-game-button",
+  startGameNotice: "start-game-notice", // why the host's Start didn't start the game
   lobbyWaiting: "lobby-waiting",
+  lobbyHostHint: "lobby-host-hint", // host only, while Start isn't offered: "send the code to your friends"
   lobbyLoading: "lobby-loading", // shown until the join answer says this is a lobby (a started game opens the game)
   chatInput: "chat-input",
   chatSendButton: "chat-send-button",

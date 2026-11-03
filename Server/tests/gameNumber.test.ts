@@ -39,7 +39,7 @@ afterEach(() => {
 
 /** Starts a game with everyone ready and lets its first photo wait go out. */
 function startToFirstWait(): void {
-  expect(engine.startGame(room)).toBe(true);
+  expect(engine.startGame(room)).toEqual({ ok: true });
   room.players.forEach((p) => engine.markReady(room, p));
   vi.advanceTimersByTime(GAME_START_DELAY);
 }
@@ -79,7 +79,7 @@ describe("game number (EXP-318)", () => {
 
   it("a refused start (fewer than 2 players) does not use a number", () => {
     engine.removePlayer(room, "bob", "left");
-    expect(engine.startGame(room)).toBe(false);
+    expect(engine.startGame(room)).toEqual({ ok: false, reason: "not-enough-players", removed: [] });
     expect(room.gameNumber).toBe(0);
   });
 });

@@ -5,6 +5,8 @@ import { FakeSocket } from "../testUtils/fakeSocket";
 import WaitingRoom from "../app/screens/WaitingRoom";
 import { TEST_IDS, lobbyPlayerId, roundsOptionId } from "../app/utils/testIds";
 import { KICKED_BY_HOST_MESSAGE } from "../app/utils/serverMessage";
+import { START_ACK_TIMEOUT_MS } from "../app/utils/startGame";
+import { START_NOTICE_MS } from "../app/hooks/useStartGame";
 import { Keyboard } from "react-native";
 import { pressInviteJoin } from "../testUtils/inviteConfirm";
 
@@ -180,7 +182,7 @@ describe("WaitingRoom: player list and host controls (EXP-063)", () => {
     expect(mockCtx.setRoundsOfGame).toHaveBeenLastCalledWith(20);
 
     pressId(r, TEST_IDS.startGameButton);
-    expect(emitted("start-game")).toEqual([{ gameCode: "K7MQ4X" }]);
+    expect(emitted("start-game")).toHaveLength(1); // no payload: the server answers through the ack (EXP-379)
 
     act(() => mockSocket.fire("rounds-updated", 15));
     expect(mockCtx.setRoundsOfGame).toHaveBeenLastCalledWith(15);
@@ -203,6 +205,95 @@ describe("WaitingRoom: player list and host controls (EXP-063)", () => {
     expect(hasId(r, lobbyPlayerId("alice"))).toBe(true);
     expect(mockCtx.endSocket).not.toHaveBeenCalled();
     expect(mockDismissTo).not.toHaveBeenCalled();
+    act(() => r.unmount());
+  });
+});
+
+describe("WaitingRoom: the host's Start answers (EXP-379)", () => {
+  const startButton = (r: TestRenderer.ReactTestRenderer) =>
+    r.root.find((n) => n.props.testID === TEST_IDS.startGameButton && typeof n.props.onPress === "function");
+  const texts = (r: TestRenderer.ReactTestRenderer) =>
+    r.root.findAll((n) => typeof n.props.children === "string").map((n) => n.props.children as string);
+  const noticeText = (r: TestRenderer.ReactTestRenderer) =>
+    r.root.findAll((n) => n.props.testID === TEST_IDS.startGameNotice).map((n) => n.props.children)[0];
+  /** The ack callback of the last start-game the screen sent */
+  const startAck = () => {
+    const sent = mockSocket.emitted.filter(([e]) => e === "start-game").pop()!;
+    return sent[sent.length - 1] as (answer: unknown) => void;
+  };
+  /** Plays the server's ack and lets the screen render what it says */
+  const answer = async (ack: unknown) => { await act(async () => { startAck()(ack); }); };
+
+  it("shows Starting… and ignores taps until the ack; an accepted start stays so while game-started opens the game", async () => {
+    const r = await mount([player("alice", true), player("bob")]);
+    pressId(r, TEST_IDS.startGameButton);
+    expect(startButton(r).props.disabled).toBe(true);
+    expect(texts(r)).toContain("Starting…");
+    pressId(r, TEST_IDS.startGameButton);
+    expect(emitted("start-game")).toHaveLength(1);
+    // The rounds are fixed once Start is pressed: the game starts with what the server has
+    const pill = r.root.find((n) => n.props.testID === roundsOptionId(20) && typeof n.props.onPress === "function");
+    expect(pill.props.disabled).toBe(true);
+    expect(pill.props.accessibilityState).toMatchObject({ disabled: true });
+
+    act(() => mockSocket.fire("game-started", [player("alice", true), player("bob")]));
+    await answer({ ok: true });
+    expect(mockReplace).toHaveBeenCalledWith("/screens/GameScreen");
+    expect(startButton(r).props.disabled).toBe(true);
+    expect(hasId(r, TEST_IDS.startGameNotice)).toBe(false);
+    act(() => r.unmount());
+  });
+
+  it("refused because the only other player was gone: back to waiting, telling the host who left", async () => {
+    const r = await mount([player("alice", true), player("bob")]);
+    pressId(r, TEST_IDS.startGameButton);
+    act(() => mockSocket.fire("player-left", "bob")); // the start removed bob before answering
+    await answer({ ok: false, reason: "not-enough-players", removed: ["bob"] });
+    expect(hasId(r, TEST_IDS.startGameButton)).toBe(false);
+    expect(hasId(r, TEST_IDS.lobbyWaiting)).toBe(true);
+    expect(noticeText(r)).toBe("bob was disconnected and has left the room.");
+
+    act(() => { jest.advanceTimersByTime(START_NOTICE_MS); });
+    expect(hasId(r, TEST_IDS.startGameNotice)).toBe(false);
+    act(() => r.unmount());
+  });
+
+  it("no answer within the timeout: the button is usable again, with a generic notice", async () => {
+    const r = await mount([player("alice", true), player("bob")]);
+    pressId(r, TEST_IDS.startGameButton);
+    await act(async () => { jest.advanceTimersByTime(START_ACK_TIMEOUT_MS); });
+    expect(startButton(r).props.disabled).toBe(false);
+    expect(texts(r)).toContain("Start Game");
+    const pill = r.root.find((n) => n.props.testID === roundsOptionId(20) && typeof n.props.onPress === "function");
+    expect(pill.props.disabled).toBe(false); // the rounds can be changed again
+    expect(noticeText(r)).toBe("Couldn't start the game. Try again.");
+
+    pressId(r, TEST_IDS.startGameButton); // a new try clears the notice
+    expect(emitted("start-game")).toHaveLength(2);
+    expect(hasId(r, TEST_IDS.startGameNotice)).toBe(false);
+    act(() => r.unmount());
+  });
+
+  it("gone players don't count for the Start button", async () => {
+    const r = await mount([player("alice", true), player("bob")]);
+    expect(hasId(r, TEST_IDS.startGameButton)).toBe(true);
+    expect(hasId(r, TEST_IDS.lobbyHostHint)).toBe(false);
+    act(() => mockSocket.fire("player-connection", { username: "bob", connected: false }));
+    expect(hasId(r, TEST_IDS.startGameButton)).toBe(false);
+    expect(hasId(r, TEST_IDS.lobbyWaiting)).toBe(true);
+    expect(hasId(r, TEST_IDS.lobbyHostHint)).toBe(true); // the host is asked to invite more players
+    act(() => mockSocket.fire("player-connection", { username: "bob", connected: true }));
+    expect(hasId(r, TEST_IDS.startGameButton)).toBe(true);
+    act(() => r.unmount());
+  });
+
+  it("handed the role by a gone host with nobody else here: host hint, no Start (qa/maestro/lobby-host-drop.yaml)", async () => {
+    const r = await mount([player("bob", true), player("alice")]);
+    expect(hasId(r, TEST_IDS.lobbyHostHint)).toBe(false); // a guest
+    act(() => mockSocket.fire("player-connection", { username: "bob", connected: false }));
+    act(() => mockSocket.fire("new-host", player("alice", true)));
+    expect(hasId(r, TEST_IDS.lobbyHostHint)).toBe(true);
+    expect(hasId(r, TEST_IDS.startGameButton)).toBe(false);
     act(() => r.unmount());
   });
 });

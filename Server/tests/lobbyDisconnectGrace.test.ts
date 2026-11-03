@@ -104,7 +104,7 @@ describe("lobby host handover after the disconnect grace (EXP-157)", () => {
       { username: "alice", connected: true },
     ]);
     // the new host can start, the old one can't
-    expect(engine.startGame(room)).toBe(true);
+    expect(engine.startGame(room)).toEqual({ ok: true });
     expect(host(room)).toEqual(["bob"]);
   });
 
@@ -192,7 +192,7 @@ describe("game start keeps players within the disconnect grace (EXP-149)", () =>
     vi.advanceTimersByTime(DISCONNECT_GRACE + 1_000);
     drop(room, "carol");
     vi.advanceTimersByTime(1_500);
-    expect(engine.startGame(room)).toBe(true);
+    expect(engine.startGame(room)).toEqual({ ok: true });
     expect(names(room)).toEqual(["alice", "bob", "carol"]);
     expect(events("player-left").map((e) => e.args[0])).toEqual(["dave"]);
     const started = events("game-started")[0].args[0] as { username: string }[];
@@ -205,7 +205,7 @@ describe("game start keeps players within the disconnect grace (EXP-149)", () =>
   it("a player within the grace who never returns doesn't block the start (ready phase goes on)", () => {
     const room = lobby(["alice", "bob", "carol"]);
     drop(room, "carol");
-    expect(engine.startGame(room)).toBe(true);
+    expect(engine.startGame(room)).toEqual({ ok: true });
     expect(names(room)).toContain("carol");
     engine.markReady(room, room.players[0]);
     engine.markReady(room, room.players[1]);
@@ -218,7 +218,7 @@ describe("game start keeps players within the disconnect grace (EXP-149)", () =>
     const room = lobby(["alice", "bob"]);
     drop(room, "bob");
     vi.advanceTimersByTime(1_000);
-    expect(engine.startGame(room)).toBe(true);
+    expect(engine.startGame(room)).toEqual({ ok: true });
     expect(names(room)).toEqual(["alice", "bob"]);
   });
 });

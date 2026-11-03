@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
-import { View, Text, FlatList, StatusBar, TouchableOpacity, Alert, Keyboard, Share, Image, TextStyle } from "react-native";
+import { View, Text, FlatList, StatusBar, TouchableOpacity, Alert, Keyboard, Share, Image, TextStyle, ActivityIndicator } from "react-native";
 import tw from "twrnc";
 import { useGameContext } from "@/app/providers/GameContext";
 import { useRouter, useLocalSearchParams, type Href } from "expo-router";
@@ -17,6 +17,7 @@ import GalleryAccessModal from "@/app/components/modals/GalleryAccessModal";
 import InviteConfirmModal from "@/app/components/modals/InviteConfirmModal";
 import { useGalleryAccessGuard } from "@/app/hooks/useGalleryAccessGuard";
 import { useLobbyChat } from "@/app/hooks/useLobbyChat";
+import { useStartGame } from "@/app/hooks/useStartGame";
 import { Ionicons } from "@expo/vector-icons";
 import { LobbyChatFooter, LobbyChatMessages } from "@/app/components/LobbyChat";
 import BusyOverlay from "@/app/components/BusyOverlay";
@@ -34,6 +35,7 @@ import { linkStep, WaitingRoomMode } from "../utils/inviteLink";
 import { normalizeUsername } from "../utils/username";
 import { isKickedByHost, KICKED_BY_HOST_MESSAGE } from "../utils/serverMessage";
 import { ROUND_OPTIONS } from "../utils/protocolLimits";
+import { canOfferStart } from "../utils/startGame";
 import { dismissKeyboardOnBackPress } from "../utils/keyboardBackPress";
 import { GAME_SCREEN_PATH, GAME_SCREEN_ROUTE_NAME, RESYNC_GAME_SCREEN } from "../utils/gameScreenRoute";
 import { HOME_PATH } from "../utils/homeRoute";
@@ -110,6 +112,7 @@ const WaitingRoom = () => {
   // Until the room answers (or a started game's snapshot opens the game screen)
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const chat = useLobbyChat(socket, gameCode, username);
+  const startRequest = useStartGame(socket);
 
   /** Plants the picked photo; once one is in, the server keeps a planted photo of mine whatever a replacement does. */
   const plantPickedPhoto = async (): Promise<boolean> => {
@@ -500,12 +503,6 @@ const WaitingRoom = () => {
     return true;
   });
 
-  const handleStartGame = () => {
-    if (socket) {
-      socket.emit("start-game", { gameCode });
-    }
-  };
-
   const handleSetRounds = (rounds: number) => {
     setRoundsOfGame(rounds);
     if (socket) {
@@ -588,6 +585,8 @@ const WaitingRoom = () => {
   };
 
   const isHost = isHostIn(players, username);
+  // Gone players don't count: the server removes them at the start (EXP-379)
+  const canStart = canOfferStart(players);
 
   return (
     <View style={tw`flex-1`}>
@@ -677,7 +676,12 @@ const WaitingRoom = () => {
 
             {/* Bottom controls section */}
             <View style={tw`w-full mt-2 mb-4`}>
-              {isHost && players.length >= 2 ? (
+              {startRequest.notice && (
+                <Text testID={TEST_IDS.startGameNotice} style={[tw`text-red-300 font-medium text-center mb-2`, HINT_SHADOW]}>
+                  {startRequest.notice}
+                </Text>
+              )}
+              {isHost && canStart ? (
                 <>
                   {/* Round selector — pill style */}
                   <View style={[tw`flex-row justify-center mb-3 rounded-full p-1`, { backgroundColor: "rgba(255,255,255,0.08)" }]}>
@@ -686,8 +690,11 @@ const WaitingRoom = () => {
                         key={rounds}
                         testID={roundsOptionId(rounds)}
                         onPress={() => handleSetRounds(rounds)}
+                        // Fixed once Start is pressed: the game starts with the rounds the server has then
+                        disabled={startRequest.starting}
+                        accessibilityState={{ disabled: startRequest.starting, selected: roundsOfGame === rounds }}
                         style={[
-                          tw`flex-1 py-2 rounded-full items-center`,
+                          tw`flex-1 py-2 rounded-full items-center ${startRequest.starting ? "opacity-70" : ""}`,
                           roundsOfGame === rounds ? { backgroundColor: BRAND_RED } : {},
                         ]}
                       >
@@ -698,20 +705,28 @@ const WaitingRoom = () => {
                     ))}
                   </View>
 
-                  {/* Start button */}
+                  {/* Start button:"Starting…" and disabled until game-started or the server's answer */}
                   <TouchableOpacity
                     testID={TEST_IDS.startGameButton}
-                    onPress={handleStartGame}
+                    onPress={startRequest.start}
+                    disabled={startRequest.starting}
+                    accessibilityState={{ disabled: startRequest.starting, busy: startRequest.starting }}
                     activeOpacity={0.8}
-                    style={[tw`w-full py-4 rounded-2xl items-center`, { backgroundColor: BRAND_RED }]}
+                    style={[
+                      tw`w-full py-4 rounded-2xl flex-row justify-center items-center ${startRequest.starting ? "opacity-70" : ""}`,
+                      { backgroundColor: BRAND_RED },
+                    ]}
                   >
-                    <Text style={tw`text-white font-bold text-lg`}>{t.startGame}</Text>
+                    {startRequest.starting && <ActivityIndicator color="white" style={tw`mr-2`} />}
+                    <Text style={tw`text-white font-bold text-lg`}>
+                      {startRequest.starting ? t.startingGame : t.startGame}
+                    </Text>
                   </TouchableOpacity>
                 </>
               ) : (
                 <View style={tw`p-2 w-full flex flex-col justify-center items-center`}>
                   <View testID={TEST_IDS.lobbyWaiting} style={tw`flex flex-row justify-center opacity-70 items-center mb-4`}>
-                    <Text style={tw`text-white`}>{players.length < 2 ? t.waitingForPlayers : t.waitingHost}</Text>
+                    <Text style={tw`text-white`}>{canStart ? t.waitingHost : t.waitingForPlayers}</Text>
                     <View style={tw`flex-row`}>
                       <AnimatedDot delay={0} />
                       <AnimatedDot delay={200} />
@@ -720,8 +735,8 @@ const WaitingRoom = () => {
                   </View>
 
                   {/* Host explanation message */}
-                  {isHost && players.length <= 1 && (
-                    <Animatable.View animation="fadeIn">
+                  {isHost && !canStart && (
+                    <Animatable.View testID={TEST_IDS.lobbyHostHint} animation="fadeIn">
                       <Text style={[tw`text-white text-center italic opacity-80 `, HINT_SHADOW]}>
                         {t.sendCodeToFriends}
                       </Text>

@@ -45,7 +45,7 @@ afterEach(() => {
 
 /** First game, played to game-over with every player ready. */
 function playFirstGame(): void {
-  expect(engine.startGame(room)).toBe(true);
+  expect(engine.startGame(room)).toEqual({ ok: true });
   room.players.forEach((p) => engine.markReady(room, p));
   vi.advanceTimersByTime(GAME_START_DELAY);
   for (let i = 0; i < 10; i++) {
@@ -59,7 +59,7 @@ describe("a player lingering on the final screens joins the next game (EXP-184)"
   it("the next game waits for its im-ready and starts as soon as it arrives, not at the ready timeout", () => {
     playFirstGame();
     // alice and bob played again; carol is still on the final screens (connected, same socket)
-    expect(engine.startGame(room)).toBe(true);
+    expect(engine.startGame(room)).toEqual({ ok: true });
     engine.markReady(room, player("alice"));
     engine.markReady(room, player("bob"));
     vi.advanceTimersByTime(2_000);
@@ -86,7 +86,7 @@ describe("a player lingering on the final screens joins the next game (EXP-184)"
 
   it("without that im-ready the ready timeout is what starts the game (the wait the auto-join avoids)", () => {
     playFirstGame();
-    expect(engine.startGame(room)).toBe(true);
+    expect(engine.startGame(room)).toEqual({ ok: true });
     engine.markReady(room, player("alice"));
     engine.markReady(room, player("bob"));
     emits.length = 0;

@@ -142,6 +142,21 @@ export interface JoinCreateGameData {
   rejoinToken?: string;
 }
 
+/**
+ * Why start-game was refused: the socket is in no room, the sender is not the host, a game is already running, or
+ * fewer than 2 players are left once the gone (disconnected past the grace) ones were removed.
+ */
+export type StartRefusal = "not-in-room" | "not-host" | "already-started" | "not-enough-players";
+
+/**
+ * start-game's acknowledgement. A not-enough-players refusal names the gone players that start removed (also told
+ * to the room with player-left), so the host can be told why the game didn't start.
+ */
+export type StartGameAck =
+  | { ok: true }
+  | { ok: false; reason: "not-enough-players"; removed: string[] }
+  | { ok: false; reason: Exclude<StartRefusal, "not-enough-players"> };
+
 /** Room as sent in room-of-game: an explicit allowlist (RoomManager.safeRoomData); never names the photo owner. */
 export interface SafeRoom {
   gameCode: string;

@@ -10,6 +10,8 @@
 //   node qa/lab/bots.mjs --bots 2 --code K7MQ4X --name-prefix b-   # 2nd process in a room: names b-bot1, b-bot2
 //            (all bots share one IP: use a server started by lab.sh, which lifts the per-IP socket limits)
 //   --help prints the options (no network); unknown options exit 2. The server in use is printed at start.
+//   The host bot starts each game like the app: start-game with an ack, recorded as "start-ack" ({ ok, reason?,
+//   removed? }); a refusal, or no ack within START_ACK_TIMEOUT_MS on a live connection, is an error (EXP-379).
 //   options: --server URL  --photos DIR  --out FILE  --chaos 0.1  --upload-fail 0.2  --timeout 600
 //            --no-ready K   the last K bots never send im-ready (game must start via the server's ready timeout)
 //            --no-answer    bots always submit an empty guess (nobody scores: no result, DEC-044, see qa/maestro/no-result-game.yaml)
@@ -462,6 +464,8 @@ if (LEAVE_OWNER && !LEAVE_ROUND) exitUsage("--leave-owner needs --leave-round");
 const LEAVE_ACK_TIMEOUT_MS = 1_000;
 // Like the app (Client/app/utils/plantPhotoAck.ts): a planted photo counts as sent only once plant-photo is acked ok
 const PLANT_ACK_TIMEOUT_MS = 5_000;
+// Like the app (Client/app/utils/startGame.ts): the host's start-game waits this long for its ack
+const START_ACK_TIMEOUT_MS = 5_000;
 // A lobby kick waits this long after NAME joined, like a host reading the list (and so a device's flow sees its lobby)
 const LOBBY_KICK_DELAY_MS = 5_000;
 const KICK_SETTLE_MS = 1_000; // after a kick that ends the run: time for the kicked player to get its notice
@@ -650,6 +654,7 @@ function runRoom(roomIdx, fixedCode) {
       // Second game (--play-again-linger-bot): recorded apart so the first game's checks only see the first game
       const rec = (ev, round, payload) =>
         events.push({ bot: name, ev: bot.game2 && ev !== "payload-leak" ? `g2-${ev}` : ev, round, t: now(), payload });
+      bot.rec = rec;
 
       // rejoinToken (from our own room-of-game) is required by the server to reconnect with the same username
       const joinPayload = () => ({ gameCode: isHost && !code ? null : code, username: name, ...(bot.token ? { rejoinToken: bot.token } : {}) });
@@ -717,7 +722,7 @@ function runRoom(roomIdx, fixedCode) {
           else if (LINGER_BOT < 0 && START_NEXT_GAME_S && live.every((b) => b.playAgainDone)) {
             const host = live.find((b) => b.isHost);
             const wait = Math.max(300, START_NEXT_GAME_S * 1000 - (now() - (bot.gameOverAt ?? now())));
-            setTimeout(() => host?.socket.emit("start-game", { gameCode: code }), wait);
+            setTimeout(() => startGame(host), wait);
           }
           // --play-again-linger-bot 0: a device lingers instead, so the bots stay (connected, in the lobby) a while
           // longer than it does, then end
@@ -725,7 +730,7 @@ function runRoom(roomIdx, fixedCode) {
           // A non-host still on the final screens: the host starts the next game once everyone else is back
           else if (lingerer && !lingerer.isHost && live.every((b) => b.playAgainDone || b === lingerer)) {
             const host = live.find((b) => b.isHost);
-            setTimeout(() => host?.socket.emit("start-game", { gameCode: code }), 300);
+            setTimeout(() => startGame(host), 300);
           }
         }
         if (d.rejoinToken) bot.token = d.rejoinToken;
@@ -1110,6 +1115,17 @@ function runRoom(roomIdx, fixedCode) {
       return bot;
     };
 
+    // The host starts a game like the app does (EXP-379): start-game acked { ok: true } (after game-started), or a
+    // refusal that says why. A connection dropped meanwhile (--chaos, --drop-*) loses the ack: not a server fault
+    const startGame = async (host) => {
+      if (!host) return;
+      const ack = await host.socket.timeout(START_ACK_TIMEOUT_MS).emitWithAck("start-game").catch(() => null);
+      host.rec("start-ack", host.round, ack ?? { ok: null });
+      if (!ack?.ok && (ack || host.socket.connected)) {
+        errors.push(`${host.name}: start-game not accepted (${ack ? ack.reason : "no ack"})`);
+      }
+    };
+
     // --kick (EXP-139): the host removes KICK once, in the lobby (before the game, or after it with --kick-after-game)
     const kick = { scheduled: false, confirmed: false };
     const kickTargetMissing = () => `--kick ${KICK} never joined the lobby`;
@@ -1148,7 +1164,7 @@ function runRoom(roomIdx, fixedCode) {
       nextGame.scheduled = true;
       const host = live.find((b) => b.isHost);
       const wait = nextGame.quitAt + DISCONNECT_GRACE_MS + GONE_START_MARGIN_MS - now();
-      setTimeout(() => host?.socket.emit("start-game", { gameCode: code }), Math.max(0, wait));
+      setTimeout(() => startGame(host), Math.max(0, wait));
     };
 
     // Every bot of this process left (--leave-round with real devices playing on) or was kicked (by another bots
@@ -1185,7 +1201,7 @@ function runRoom(roomIdx, fixedCode) {
           return;
         }
         started = true;
-        setTimeout(() => host.socket.emit("start-game", { gameCode: code }), 500);
+        setTimeout(() => startGame(host), 500);
       }
     };
 

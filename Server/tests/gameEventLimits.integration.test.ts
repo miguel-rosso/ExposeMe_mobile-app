@@ -75,7 +75,8 @@ describe("per-socket game event limits (EXP-062)", () => {
 
   it("start-game", async () => {
     const { host, barrier } = await lobby();
-    const startGame = vi.spyOn(GameEngine.prototype, "startGame").mockReturnValue(false);
+    const startGame = vi.spyOn(GameEngine.prototype, "startGame")
+      .mockReturnValue({ ok: false, reason: "not-enough-players", removed: [] });
     await expectFloodCapped(host, "start-game", undefined, startGame, barrier);
   });
 

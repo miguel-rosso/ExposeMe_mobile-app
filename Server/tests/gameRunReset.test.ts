@@ -33,7 +33,7 @@ function createRoom(names: string[]): Room {
 
 /** start-game and every player ready: the first round is scheduled (GAME_START_DELAY). */
 function startAndReady(rounds: number): void {
-  expect(engine.startGame(room)).toBe(true);
+  expect(engine.startGame(room)).toEqual({ ok: true });
   room.rounds = rounds;
   room.players.forEach((p) => engine.markReady(room, p));
 }
@@ -79,7 +79,7 @@ describe("per-game engine state (EXP-329)", () => {
     expect(events("game-over")).toHaveLength(1);
     expect(engine.phaseEmittedAt(room, "scores", 1)).toBe(scoresAt);
 
-    expect(engine.startGame(room)).toBe(true);
+    expect(engine.startGame(room)).toEqual({ ok: true });
     expect(engine.phaseEmittedAt(room, "scores", 1)).toBe(scoresAt); // still in the ready phase
     room.players.forEach((p) => engine.markReady(room, p));
     expect(engine.phaseEmittedAt(room, "scores", 1)).toBeUndefined();

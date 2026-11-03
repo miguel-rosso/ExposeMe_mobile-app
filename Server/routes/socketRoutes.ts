@@ -15,7 +15,7 @@ import {
   MAX_CONNECTIONS_PER_IP,
 } from "../managers/socketGuards";
 import { createQaTelemetry, isQaAck, QA_ACK_BURST, QA_ACK_RATE_PER_S } from "../managers/qaTelemetry";
-import { JoinCreateGameData, PhotoUnavailableData, Player, Room, RoomOfGameResponse } from "../models/interfaces";
+import { JoinCreateGameData, PhotoUnavailableData, Player, Room, RoomOfGameResponse, StartGameAck } from "../models/interfaces";
 
 const roomManager = new RoomManager();
 const gameEngine = new GameEngine(io, roomManager);
@@ -108,6 +108,17 @@ function plantPhoto(socket: Socket, photoUrl: unknown): PlantPhotoAck {
   gameEngine.onLatePlantedPhoto(room); // retry sent after the planted rounds were drawn
   console.log(`[${room.gameCode}] Planted photo received from ${player.username}`);
   return { ok: true };
+}
+
+// ── Starting a game ──
+
+/** Starts the game of the session's room if the sender is its host and no game is running, or says why not. */
+function startGame(socket: Socket): StartGameAck {
+  const s = session(socket);
+  if (!s) return { ok: false, reason: "not-in-room" };
+  if (!s.player.isHost) return { ok: false, reason: "not-host" };
+  if (s.room.started) return { ok: false, reason: "already-started" };
+  return gameEngine.startGame(s.room);
 }
 
 /**
@@ -363,12 +374,13 @@ io.on("connection", (socket: Socket) => {
     } catch (e) { console.error("set-rounds error:", e); }
   });
 
-  socket.on("start-game", () => {
+  // Acked once handled (after game-started, when it starts), so the host's button can say why nothing happened.
+  // Not acked when dropped by the rate limit, like every limited event: the app gives up waiting on its own
+  socket.on("start-game", (ack?: unknown) => {
     try {
       if (!gameEvents.take("start-game")) return;
-      const s = session(socket);
-      if (!s || !s.player.isHost || s.room.started) return;
-      gameEngine.startGame(s.room);
+      const answer = startGame(socket);
+      if (typeof ack === "function") ack(answer);
     } catch (e) { console.error("start-game error:", e); }
   });
 

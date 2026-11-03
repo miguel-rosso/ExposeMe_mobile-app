@@ -823,6 +823,17 @@ Token buckets: burst, then refilled at the rate.
 
 The game-event limits are `GAME_EVENT_LIMITS` in `managers/socketGuards.ts`.
 
+**Message size**: every client message must be at most **16 KB** (`MAX_SOCKET_MESSAGE_BYTES` in
+`middlewares/socketPayload.ts`, socket.io's `maxHttpBufferSize`): one WebSocket frame, or the body of one long-polling
+POST. The largest real one is a chat message (≤100 chars, at most ~400 bytes of UTF-8); photos go through `/upload`.
+engine.io announces the bound in its handshake (`maxPayload`) and socket.io-client splits its polling batches below
+it. The server refuses a larger message before reading it in full or parsing it (WebSocket: closes with 1009;
+polling: 413, and the client then drops the connection). No event carries **binary** data either: a binary event (or
+a lone binary attachment) closes the connection at once, so socket.io never holds attachments waiting for the rest
+(defence in depth: socket.io-parser already allows at most 10 per event, i.e. 10 × 16 KB with the size cap). Either
+case affects only that connection and the event never reaches a handler; the client sees `disconnect`, and a player
+in a room is marked disconnected and can rejoin. Messages from the server are not limited.
+
 ## QA render telemetry (dev only)
 
 Bot metrics only show when the server *sent* a phase; this shows when each phone actually *rendered* it.

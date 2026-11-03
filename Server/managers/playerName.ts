@@ -471,79 +471,111 @@ const UNASSIGNED_EMOJI = new RegExp(codePointClass(UNASSIGNED_EMOJI_RANGES), "gu
 const EMPTY_BOX = "\uE000";
 
 // Visual keys only (EXP-376): Mongolian vowels the Unicode Standard encodes apart for their sound but "written
-// identically in all positional forms" (chapter 13.2, Mongolian; so Noto Sans Mongolian draws them): U as O and UE as
-// OE. O and OE are drawn alike only outside a word's first syllable (MONGOLIAN_READINGS)
+// identically in all positional forms" (chapter 13.2, Mongolian; so Noto Sans Mongolian draws them but in a few words
+// and places, see U_OR_UE_WRITTEN_ALIKE): U as O and UE as OE. O and OE are drawn alike only outside a word's first
+// syllable (MONGOLIAN_READINGS)
 const MONGOLIAN_LOOKALIKES: ReadonlyMap<string, string> = new Map([["\u1824", "\u1823"], ["\u1826", "\u1825"]]);
 
 // Visual keys only (EXP-385, EXP-409, EXP-410): Mongolian letters drawn alike in some places of a word, which Noto Sans
 // Mongolian 3.002 (the font iOS ships) and 1.04 (the font Android ships) place apart, so each font has its readings
-// (MONGOLIAN_READINGS). Measured with HarfBuzz, Android's shaper, on 44,000 pairs of random words one or more of these
-// letters apart and checked on 640,000 more: no pair read alike is drawn apart by both fonts. A word is a run of the
-// letters U+1820-U+1842 with nothing next to it that could join it or change its shapes (MONGOLIAN_SHAPING): the
-// Mongolian letters, the Sibe syllable boundary marker, the nirugu, the variation selectors, the vowel separator, the
-// joiners and any mark (measured so in 3.002, but the Ali Gali signs U+1880-U+1884, the separator and the joiners, kept
-// to be safe; names can't hold the last three). Punctuation (the full stop "᠃", the Manchu "᠉") and digits ("᠑") join
-// nothing: a word next to them is read too
+// (MONGOLIAN_READINGS). Measured with HarfBuzz, Android's shaper, on 756,000 pairs of random words one or more of these
+// letters apart and 120,000 pairs of two-word names (EXP-414, EXP-415): each reading reads a pair alike only where its
+// font draws it alike. A word is a run of the letters U+1820-U+1842 with nothing next to it that could join it or
+// change its shapes (MONGOLIAN_SHAPING): the Mongolian letters, the Sibe syllable boundary marker, the nirugu, the
+// variation selectors, the vowel separator, the joiners and any mark (measured so in 3.002, but the Ali Gali signs
+// U+1880-U+1884, the separator and the joiners, kept to be safe; names can't hold the last three). Punctuation (the
+// full stop "᠃", the Manchu "᠉") and digits ("᠑") join nothing: a word next to them is read too
 const MONGOLIAN_SHAPING = "[\\u1807\\u180A-\\u180F\\u1820-\\u1878\\u1880-\\u18AA\\u200C\\u200D\\p{M}]";
 const MONGOLIAN_WORD = new RegExp(`(?<!${MONGOLIAN_SHAPING})[\\u1820-\\u1842]+(?!${MONGOLIAN_SHAPING})`, "gu");
 const MONGOLIAN_O = "\u1823";
 const MONGOLIAN_T = "\u1832";
 
-// iOS (EXP-385): OE and UE outside the first syllable, which Unicode (chapter 13.2) writes like O and U: after an
-// earlier vowel of the word ("ᠲᠣᠯᠥ" like "ᠲᠣᠯᠣ")
-const OE_UE_PAST_FIRST_SYLLABLE = /(?<=[\u1820-\u1827][\u1820-\u1842]*)[\u1825\u1826]/gu;
-// Q and G, drawn one way in a word with masculine vowels and another with feminine ones: there OE and O still differ
-const Q_OR_G = /[\u182C\u182D]/u;
-// D inside a word before a vowel but EE, drawn like T there (chapter 13.2: "urtu" and "ordu" are written alike)
-const MEDIAL_D_BEFORE_VOWEL = /(?<=[\u1820-\u1842])\u1833(?=[\u1820-\u1826])/gu;
-
-/** Mongolian `text` with OE and UE past a word's first syllable read as O, and D inside a word as T where alike. */
-const readMongolianWordsAsDrawnOnIos = (text: string) => text.replace(MONGOLIAN_WORD, (word) => {
-  const vowelsRead = Q_OR_G.test(word) ? word : word.replace(OE_UE_PAST_FIRST_SYLLABLE, MONGOLIAN_O);
-  return vowelsRead.replace(MEDIAL_D_BEFORE_VOWEL, MONGOLIAN_T);
-});
-
-// iOS (EXP-409): the words "ᠤᠤ" and "ᠦᠦ" on their own, drawn alike there (O + U) and apart from "ᠣᠣ" and "ᠥᠥ", which
-// MONGOLIAN_LOOKALIKES reads them as: a private-use character, which names can't use, only meets the other one
-const UU_WORD = /^(?:\u1824\u1824|\u1826\u1826)$/u;
-const UU_WORD_MARK = "\uE001";
-
-/** The iOS reading of Mongolian `text` with the words "ᠤᠤ" and "ᠦᠦ" read as one mark. */
-const readMongolianWordsAsDrawnOnIosWithUuAsOne = (text: string) => readMongolianWordsAsDrawnOnIos(
-  text.replace(MONGOLIAN_WORD, (word) => (UU_WORD.test(word) ? UU_WORD_MARK : word)),
-);
-
-// Android (EXP-410): Noto Sans Mongolian 1.04 draws OE and UE like O and U but where they keep their stroke: first in
-// a word, or second after a consonant with letters after them (ONE_CONSONANT_BEFORE). After B inside a word, with
-// letters after, it draws U like OE and UE, and only O apart (B_INSIDE_WORD). Q and G take the shape of a vowel next to
-// them, so the vowels they look at are read as typed (SHAPED_BY_Q_OR_G_BEFORE, SHAPING_G_AFTER; measured on every
-// context of up to three letters between them, and kept to be safe where those differ)
+// Letters the font readings look at, as regex sources
 const MONGOLIAN_LETTER = "[\\u1820-\\u1842]";
 const MONGOLIAN_VOWEL = "[\\u1820-\\u1827]";
-const MONGOLIAN_VOWEL_BUT_I = "[\\u1820\\u1821\\u1823-\\u1827]";
+const MONGOLIAN_VOWEL_BUT_EE = "[\\u1820-\\u1826]";
+const MONGOLIAN_MASCULINE_VOWEL = "[\\u1820\\u1823\\u1824]";
 const MONGOLIAN_CONSONANT = "[\\u1828-\\u1842]";
+const MONGOLIAN_CONSONANT_BUT_N_D = "[\\u1829-\\u1832\\u1834-\\u1842]";
 const MONGOLIAN_I = "\u1822";
+const MONGOLIAN_B = "\u182A";
 const MONGOLIAN_Q = "\u182C";
 const MONGOLIAN_G = "\u182D";
+const MONGOLIAN_Q_OR_G = `[${MONGOLIAN_Q}${MONGOLIAN_G}]`;
 const MONGOLIAN_D = "\u1833";
 const MONGOLIAN_U = "\u1824";
 const MONGOLIAN_OE = "\u1825";
+const MONGOLIAN_UE = "\u1826";
 const I_OR_CONSONANT = `(?:${MONGOLIAN_I}|${MONGOLIAN_CONSONANT})`;
+// Q and G take the gender of a vowel next to them (drawn one way by masculine vowels and another by feminine ones), so
+// a vowel one of them looks at keeps its gender (EXP-414: measured on every context of 270,000 pairs of words one
+// vowel apart): the one right after it, or with none (a G before a consonant or ending the word, a Q before a
+// consonant), each font looks for it elsewhere
+const Q_OR_G_LOOKING_ELSEWHERE = `(?:${MONGOLIAN_G}(?!${MONGOLIAN_VOWEL})|${MONGOLIAN_Q}(?=${MONGOLIAN_CONSONANT}))`;
+const RIGHT_AFTER_Q_OR_G = `${MONGOLIAN_Q_OR_G}$`;
+
+// iOS (EXP-385, EXP-414): OE and UE where they lose their stroke, which Unicode (chapter 13.2) writes like O and U:
+// after an earlier vowel of the word ("ᠲᠣᠯᠥ" like "ᠲᠣᠯᠣ"), or ending it after two consonants or more ("ᠳᠰᠥ" like
+// "ᠳᠰᠣ"); U and UE are read as O and OE first
+const OE_LIKE_O_ON_IOS = new RegExp(
+  `(?<=${MONGOLIAN_VOWEL}${MONGOLIAN_LETTER}*)${MONGOLIAN_OE}|(?<=^${MONGOLIAN_CONSONANT}{2,})${MONGOLIAN_OE}$`,
+  "gu",
+);
+// iOS (EXP-414): a Q or G looking elsewhere takes the gender of the vowel before it, also past consonants and I if an
+// I is right before it; one right after an I no other vowel comes before, of the next vowel past consonants and I
+const SEEN_BY_Q_OR_G_BEFORE_ON_IOS = new RegExp([
+  RIGHT_AFTER_Q_OR_G,
+  `^${I_OR_CONSONANT}*${MONGOLIAN_I}${Q_OR_G_LOOKING_ELSEWHERE}${I_OR_CONSONANT}+$`,
+].join("|"), "u");
+const SEEN_BY_Q_OR_G_AFTER_ON_IOS = new RegExp(
+  `^(?:${I_OR_CONSONANT}*${MONGOLIAN_I})?${Q_OR_G_LOOKING_ELSEWHERE}`,
+  "u",
+);
+// D drawn like T: inside a word before a vowel but EE (chapter 13.2: "urtu" and "ordu" are written alike), and first
+// in it before a consonant or a vowel and more letters (EXP-414), but before a G and a masculine vowel
+const G_BEFORE_MASCULINE_VOWEL = `${MONGOLIAN_G}${MONGOLIAN_MASCULINE_VOWEL}`;
+const D_LIKE_T_ON_IOS = new RegExp([
+  `(?<=${MONGOLIAN_LETTER})${MONGOLIAN_D}(?=${MONGOLIAN_VOWEL_BUT_EE})`,
+  `^${MONGOLIAN_D}(?=${MONGOLIAN_CONSONANT}|${MONGOLIAN_VOWEL}${MONGOLIAN_LETTER})(?!${G_BEFORE_MASCULINE_VOWEL})`,
+].join("|"), "gu");
+// iOS (EXP-409, EXP-415): words its font draws by a rule of their own, read as what they look like: "ᠤᠤ" and "ᠦᠦ"
+// alike (O + U) and apart from "ᠣᠣ" and "ᠥᠥ" (a private-use character, which names can't use, only meets the other
+// one), "ᠪᠦᠦ" like "ᠪᠤᠤ"
+const UU_WORD_MARK = "\uE001";
+const IOS_WORD_SPELLINGS: ReadonlyMap<string, string> = new Map([
+  ["\u1824\u1824", UU_WORD_MARK], ["\u1826\u1826", UU_WORD_MARK], ["\u182A\u1826\u1826", "\u182A\u1824\u1824"],
+]);
+
+/** Whether no Q or G takes the gender of the vowel at `index` of a Mongolian `word` in iOS's font. */
+const isGenderUnseenOnIos = (word: string, index: number) => !SEEN_BY_Q_OR_G_BEFORE_ON_IOS.test(word.slice(0, index))
+  && !SEEN_BY_Q_OR_G_AFTER_ON_IOS.test(word.slice(index + 1));
+
+/** A Mongolian `word` as iOS draws it: U and UE as O and OE, then OE and D read by their place in it. */
+function readMongolianWordOnIos(word: string): string {
+  const vowelsAlike = replaceChars(IOS_WORD_SPELLINGS.get(word) ?? word, MONGOLIAN_LOOKALIKES);
+  return vowelsAlike
+    .replace(OE_LIKE_O_ON_IOS, (oe, index: number) => (isGenderUnseenOnIos(vowelsAlike, index) ? MONGOLIAN_O : oe))
+    .replace(D_LIKE_T_ON_IOS, MONGOLIAN_T);
+}
+
+// Android (EXP-410): Noto Sans Mongolian 1.04 draws OE and UE like O and U but where they keep their stroke: first in
+// a word, or second after a consonant with letters after them (ONE_CONSONANT_BEFORE). After B inside a word, with
+// letters after, it draws U like OE and UE, and only O apart (B_INSIDE_WORD). The word "ᠬᠦ" is drawn apart from "ᠬᠥ"
+// (EXP-415)
 const ROUND_VOWEL_BUT_O = /[\u1824-\u1826]/gu;
 const ONE_CONSONANT_BEFORE = new RegExp(`^${MONGOLIAN_CONSONANT}$`, "u");
-const B_INSIDE_WORD = /.\u182A$/u;
-const SHAPED_BY_Q_OR_G_BEFORE = new RegExp([
-  // right after Q or G
-  `(?:${MONGOLIAN_Q}|${MONGOLIAN_G})$`,
-  // after a G that starts the word or follows I or a consonant, with only consonants and I since: that G looks ahead
-  `(?:^|${I_OR_CONSONANT})${MONGOLIAN_G}${I_OR_CONSONANT}*$`,
-].join("|"), "u");
-const SHAPING_G_AFTER = new RegExp([
-  // right before a G that no vowel but I follows
-  `^${MONGOLIAN_G}(?!${MONGOLIAN_VOWEL_BUT_I})`,
-  // a consonant before a G ending the word
-  `^${MONGOLIAN_CONSONANT}${MONGOLIAN_G}$`,
-  // consonants, then one I right before a G that no vowel follows
+const B_INSIDE_WORD = new RegExp(`.${MONGOLIAN_B}$`, "u");
+const Q_UE_WORD = "\u182C\u1826";
+// Android (EXP-410, EXP-414): a G looking elsewhere takes the gender of the vowel right before it, of the vowel before
+// a consonant but N and D if it ends the word, or past consonants and one I right before it; a G that starts the word
+// or follows I, the next vowel past one consonant
+const SEEN_BY_Q_OR_G_BEFORE_ON_ANDROID = new RegExp(
+  `${RIGHT_AFTER_Q_OR_G}|(?:^|${MONGOLIAN_I})${MONGOLIAN_G}${MONGOLIAN_CONSONANT}$`,
+  "u",
+);
+const SEEN_BY_G_AFTER_ON_ANDROID = new RegExp([
+  `^${MONGOLIAN_G}(?!${MONGOLIAN_VOWEL})`,
+  `^${MONGOLIAN_CONSONANT_BUT_N_D}${MONGOLIAN_G}$`,
   `^${MONGOLIAN_CONSONANT}+${MONGOLIAN_I}${MONGOLIAN_G}(?!${MONGOLIAN_VOWEL})`,
 ].join("|"), "u");
 // D drawn like T there: first in a word before any letter, inside it before any vowel
@@ -554,25 +586,52 @@ const D_LIKE_T_ON_ANDROID = new RegExp(
 
 /** The U, OE or UE `vowel` at `index` of a Mongolian `word` read as the vowel Android's font draws it like. */
 function readRoundVowelOnAndroid(word: string, vowel: string, index: number): string {
+  if (word === Q_UE_WORD) return vowel;
   const before = word.slice(0, index);
   const after = word.slice(index + 1);
-  if (SHAPED_BY_Q_OR_G_BEFORE.test(before) || SHAPING_G_AFTER.test(after)) return vowel;
-  if (after && B_INSIDE_WORD.test(before)) return MONGOLIAN_OE;
-  if (vowel === MONGOLIAN_U || !before || (after && ONE_CONSONANT_BEFORE.test(before))) return vowel;
-  return MONGOLIAN_O;
+  const seenByQOrG = SEEN_BY_Q_OR_G_BEFORE_ON_ANDROID.test(before) || SEEN_BY_G_AFTER_ON_ANDROID.test(after);
+  if (after && B_INSIDE_WORD.test(before)) return seenByQOrG && vowel === MONGOLIAN_U ? vowel : MONGOLIAN_OE;
+  const keepsStroke = !before || (after && ONE_CONSONANT_BEFORE.test(before));
+  return seenByQOrG || keepsStroke ? MONGOLIAN_LOOKALIKES.get(vowel) ?? vowel : MONGOLIAN_O;
 }
 
-/** Mongolian `text` with U, OE, UE and D read as the vowel and T Android draws them like. */
-const readMongolianWordsAsDrawnOnAndroid = (text: string) => text.replace(MONGOLIAN_WORD, (word) => word
+/** A Mongolian `word` as Android draws it: U, OE, UE and D read by their place in it. */
+const readMongolianWordOnAndroid = (word: string) => word
   .replace(ROUND_VOWEL_BUT_O, (vowel, index: number) => readRoundVowelOnAndroid(word, vowel, index))
-  .replace(D_LIKE_T_ON_ANDROID, MONGOLIAN_T));
+  .replace(D_LIKE_T_ON_ANDROID, MONGOLIAN_T);
 
 // Each reading of a Mongolian name as one font draws it: the keys take one at a time (similarKeys), since a phone
-// draws every name with the same font. The iOS one also without the mark for "ᠤᠤ" and "ᠦᠦ", which Android draws like
-// "ᠣᠣ" and "ᠥᠥ", so with a reading that changes one name and not the other a pair still meets as typed
+// draws every name with the same font. Each reads alike only what its font draws alike, so a name of several words
+// meets another only where one font draws all of them alike (EXP-415)
 const MONGOLIAN_READINGS = [
-  readMongolianWordsAsDrawnOnIos, readMongolianWordsAsDrawnOnIosWithUuAsOne, readMongolianWordsAsDrawnOnAndroid,
+  (text: string) => text.replace(MONGOLIAN_WORD, readMongolianWordOnIos),
+  (text: string) => text.replace(MONGOLIAN_WORD, readMongolianWordOnAndroid),
 ];
+
+// Visual keys only (EXP-376, EXP-415): inside a Mongolian word (MONGOLIAN_WORD), the U and UE some font draws apart
+// from O and OE are kept as typed: the words "ᠤᠤ", "ᠦᠦ" and "ᠪᠦᠦ" (iOS) and "ᠬᠦ" (Android), and U after B with
+// letters after (Android). Any other U or UE of the word (captured) reads as O or OE
+const WORDS_WITH_U_OR_UE_DRAWN_APART = [...IOS_WORD_SPELLINGS.keys(), Q_UE_WORD];
+const U_OR_UE_KEPT_IN_WORD = new RegExp([
+  `^(?:${WORDS_WITH_U_OR_UE_DRAWN_APART.join("|")})$`,
+  `(?<=${MONGOLIAN_LETTER}${MONGOLIAN_B})${MONGOLIAN_U}(?=${MONGOLIAN_LETTER})`,
+  `([${MONGOLIAN_U}${MONGOLIAN_UE}])`,
+].join("|"), "gu");
+// A Mongolian word (captured), or a U or UE outside one: no font reading reads those, so they all read as O and OE,
+// as the Unicode Standard writes them
+const MONGOLIAN_WORD_OR_U_OR_UE = new RegExp(`(${MONGOLIAN_WORD.source})|[${MONGOLIAN_U}${MONGOLIAN_UE}]`, "gu");
+
+/** A Mongolian `word` with each U and UE read as O and OE where both fonts draw them alike. */
+const readWordVowelsWrittenAlike = (word: string) => word.replace(
+  U_OR_UE_KEPT_IN_WORD,
+  (match, vowel?: string) => (vowel ? MONGOLIAN_LOOKALIKES.get(vowel) ?? vowel : match),
+);
+
+/** `text` with each Mongolian U and UE read as O and OE, but those a font draws apart inside a word. */
+const readMongolianVowelsWrittenAlike = (text: string) => text.replace(
+  MONGOLIAN_WORD_OR_U_OR_UE,
+  (match, word?: string) => (word ? readWordVowelsWrittenAlike(word) : MONGOLIAN_LOOKALIKES.get(match) ?? match),
+);
 
 // Visual keys only (EXP-374): the viramas of Devanagari, Bengali, Gurmukhi, Gujarati and Oriya with no letter of their
 // script after them, past marks (at the end of a word, before a space or punctuation), a tick under the letter the size
@@ -588,11 +647,12 @@ const TICK_VIRAMA_ENDING_WORD = new RegExp(
 /**
  * Visual keys only: Indic characters drawn like a vowel sign or a letter and a sign read as those, a tick virama
  * ending a word dropped, Mongolian vowels written alike in all forms as one, emoji newer than Unicode 15.1 as one box.
+ * The Mongolian vowels go first, so they find the same words as the font readings (a virama next to a run keeps it
+ * out of the words).
  */
-const readDrawnAlike = (text: string) => replaceChars(
-  readIndicLookalikes(text).replace(TICK_VIRAMA_ENDING_WORD, ""),
-  MONGOLIAN_LOOKALIKES,
-).replace(UNASSIGNED_EMOJI, EMPTY_BOX);
+const readDrawnAlike = (text: string) => readIndicLookalikes(readMongolianVowelsWrittenAlike(text))
+  .replace(TICK_VIRAMA_ENDING_WORD, "")
+  .replace(UNASSIGNED_EMOJI, EMPTY_BOX);
 
 // ── Japanese voicing marks ──────────────────────────
 

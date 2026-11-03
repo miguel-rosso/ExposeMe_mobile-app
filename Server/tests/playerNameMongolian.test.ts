@@ -21,6 +21,12 @@ const OE = "\u1825";
 const UE = "\u1826";
 const EE = "\u1827";
 const I = "\u1822";
+const YA = "\u1836";
+const TSA = "\u183C";
+const HA = "\u183E";
+const ZRA = "\u183F";
+const LHA = "\u1840";
+const ZHA = "\u1841";
 
 const expectSimilar = (a: string, b: string) => {
   expect(isValidUsername(a)).toBe(true);
@@ -185,5 +191,79 @@ describe("Mongolian letters drawn alike by Android's font (EXP-410)", () => {
     ["with a word only iOS draws alike", `${LA}${BA}${U}${LA} ${TA}${OE}`, `${LA}${BA}${O}${LA} ${TA}${O}`],
   ])("%s are different names", (_label, a, b) => {
     expectDistinct(a, b);
+  });
+});
+
+// EXP-414: Q and G take the gender of the vowel they look at, so only that vowel keeps its gender; the other vowels of
+// the word are read as each font draws them. Each pair checked with HarfBuzz on both fonts
+describe("Mongolian vowels in words with Q or G (EXP-414)", () => {
+  it.each([
+    ["OE before a G and an I ending the word", `${LA}${O}${LA}${OE}${GA}${I}`, `${LA}${O}${LA}${O}${GA}${I}`],
+    ["OE after a G and an I", `${ZHA}${GA}${I}${OE}`, `${ZHA}${GA}${I}${O}`],
+    ["OE after a G that takes an earlier vowel's gender", `${TSA}${U}${DA}${GA}${RA}${O}${TSA}${EE}`,
+      `${TSA}${U}${DA}${GA}${RA}${OE}${TSA}${EE}`],
+    ["O / UE before a G two letters on", `${GA}${I}${O}${HA}${GA}${TA}`, `${GA}${I}${UE}${HA}${GA}${TA}`],
+    ["OE before a G that an I follows", `${UE}${OE}${GA}${I}${U}${UE}${I}`, `${UE}${O}${GA}${I}${U}${UE}${I}`],
+    // Android: a G looks ahead past one consonant only
+    ["OE two consonants after a G", `${TA}${GA}${DA}${LHA}${OE}${A}`, `${TA}${GA}${DA}${LHA}${O}${A}`],
+    // iOS: a G ending the word only looks at a vowel right before it, or before an I
+    ["OE two letters before a G ending the word", `${A}${LA}${OE}${LA}${GA}`, `${A}${LA}${O}${LA}${GA}`],
+    // iOS: only a G right after an I looks ahead, past consonants and I
+    ["OE after a G no I comes before", `${LA}${GA}${LA}${I}${OE}`, `${LA}${GA}${LA}${I}${O}`],
+  ])("%s look too alike", (_label, a, b) => {
+    expectSimilar(a, b);
+  });
+
+  it.each([
+    // iOS: a G ending the word after an I looks back past consonants and I; Android: past consonants and one I
+    ["OE before D, I and a G ending the word", `${A}${LA}${OE}${DA}${I}${GA}`, `${A}${LA}${O}${DA}${I}${GA}`],
+  ])("%s are different names", (_label, a, b) => {
+    expectDistinct(a, b);
+  });
+
+  // iOS draws these like the font of Android too, so a name with a word only iOS draws alike still meets
+  it.each([
+    ["D first before a consonant", `${TA}${LA}${A} ${A}${LA}${OE}${LA}${GA}`, `${DA}${LA}${A} ${A}${LA}${O}${LA}${GA}`],
+    ["OE ending a word after two consonants", `${DA}${ZRA}${OE} ${A}${LA}${OE}${LA}${GA}`,
+      `${DA}${ZRA}${O} ${A}${LA}${O}${LA}${GA}`],
+  ])("reads %s as iOS draws it", (_label, a, b) => {
+    expectSimilar(a, b);
+  });
+});
+
+// EXP-415: each font's reading reads alike only what that font draws alike, so a name of two words, one drawn alike
+// only on iOS and the other only on Android, is drawn apart on every phone
+describe("Mongolian names of several words drawn alike by no font (EXP-415)", () => {
+  it.each([
+    // "ᠤᠤ" like "ᠣᠣ" on Android, U after B like O on iOS
+    ["U U / O O and U / O after B", `${O}${O} ${LA}${BA}${O}${LA}`, `${U}${U} ${LA}${BA}${U}${LA}`],
+    // "ᠬᠦ" apart from "ᠬᠥ" on Android
+    ["Q UE / Q OE", `${QA}${UE} ${TA}${OE}`, `${QA}${OE} ${TA}${O}`],
+    // "ᠪᠦᠦ" apart from "ᠪᠥᠦ" on iOS
+    ["B UE UE / B OE UE", `${BA}${UE}${UE} ${QA}${UE}`, `${BA}${OE}${UE} ${QA}${OE}`],
+    // U after B by a G apart from O on Android
+    ["U / O after B by a G", `${GA}${BA}${U}${UE}${YA} ${TA}${OE}`, `${GA}${BA}${O}${UE}${YA} ${TA}${O}`],
+  ])("%s with a word only the other font draws alike are different names", (_label, a, b) => {
+    expectDistinct(a, b);
+  });
+
+  // A run a mark, an Ali Gali sign or a virama touches is no word, so no font reading reads it: there U and UE read as
+  // O and OE as Unicode writes them, as one font draws them
+  it.each([
+    ["an Ali Gali sign after", `${LA}${BA}${O}${LA}\u1885`, `${LA}${BA}${U}${LA}\u1885`],
+    ["a Gurmukhi udaat before", `\u0A1C\u0A51${LA}${BA}${O}${LA}`, `\u0A1C\u0A51${LA}${BA}${U}${LA}`],
+    ["a Bengali virama before Q OE / Q UE", `\u09A4\u09CD${QA}${OE}`, `\u09A4\u09CD${QA}${UE}`],
+    ["a Bengali virama before U U / O U", `\u09A4\u09CD${U}${U}`, `\u09A4\u09CD${O}${U}`],
+  ])("%s: U and UE read as O and OE", (_label, a, b) => {
+    expectSimilar(a, b);
+  });
+
+  it.each([
+    ["B UE UE / B U U, alike on iOS", `${BA}${UE}${UE}`, `${BA}${U}${U}`],
+    ["two words alike on iOS", `${BA}${UE}${UE} ${U}${U}`, `${BA}${U}${U} ${UE}${UE}`],
+    ["two words alike on Android", `${BA}${UE}${UE} ${TA}${OE}`, `${BA}${OE}${UE} ${TA}${O}`],
+    ["U / O after B by a G, alike on iOS", `${GA}${BA}${U}${UE}${YA}`, `${GA}${BA}${O}${UE}${YA}`],
+  ])("%s look too alike", (_label, a, b) => {
+    expectSimilar(a, b);
   });
 });

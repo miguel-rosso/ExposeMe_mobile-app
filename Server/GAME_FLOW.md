@@ -302,17 +302,23 @@ After last round: game-over
   `উৎসব`); as typed they read as consonant + virama, like a virama without ZWJ, never as the bare consonant (EXP-374:
   `കമല്` + ZWJ stays apart from `കമല`). The Gurmukhi udaat and yakash, a hook under the letter where the virama is,
   are dropped like a dot as typed and read as the virama in another reading (EXP-374, EXP-405: `ਰਾਜੑ` next to
-  `ਰਾਜ੍`, `৽ਕੑਸ` next to `॰ਕਸ`). Mongolian U and UE read as O and OE everywhere (EXP-376: the Unicode Standard
-  writes them alike). The other readings draw a Mongolian name as one font does, one font at a time (a phone draws
-  every name with the same one), a word being a run of letters with nothing next to it that joins or reshapes it:
-  as Noto Sans Mongolian 3.002 (iOS), OE and UE past a word's first syllable read as O (not in words with Q or G,
-  drawn by the word's vowels), and D inside a word before a vowel other than EE as T (EXP-385: `ᠲᠣᠯᠥ` next to
-  `ᠲᠣᠯᠣ`, `urtu` next to `ordu`), also with the words `ᠤᠤ` and `ᠦᠦ` read as one mark (EXP-409); as 1.04 (Android),
-  OE and UE read as O but first in a word, second after a consonant with letters after them, and where a Q or G
-  takes their shape, U, OE and UE after B inside a word as OE, and D as T first in a word before any letter and
-  inside it before any vowel (EXP-410: `ᠲᠥ` next to `ᠲᠣ`, `ᠳᠠ` next to `ᠲᠠ`, `ᠯᠪᠤᠯ` next to `ᠯᠪᠥᠯ`). Measured
-  with HarfBuzz on both fonts over 690,000 pairs of single words (names of several words were not measured, but
-  for a few two-word test names): no pair read alike is drawn apart by both. In both visual keys the Gurmukhi
+  `ਰਾਜ੍`, `৽ਕੑਸ` next to `॰ਕਸ`). Mongolian U and UE read as O and OE where
+  both fonts draw them so (EXP-376: the Unicode Standard writes them alike): all but the words `ᠤᠤ`, `ᠦᠦ`, `ᠪᠦᠦ` and
+  `ᠬᠦ` and U after B inside a word (EXP-415). The other readings draw a Mongolian name as one font does, one font at
+  a time (a phone draws every name with the same one), each reading alike only what its font draws alike, so a name of
+  several words meets another only where one font draws every word alike (EXP-415: `ᠣᠣ ᠯᠪᠣᠯ` stays apart from
+  `ᠤᠤ ᠯᠪᠤᠯ`); a word is a run of letters with nothing next to it that joins or reshapes it. As Noto Sans Mongolian
+  3.002 (iOS), U and UE read as O and OE, OE past a word's first syllable or ending it after two consonants or more as
+  O, and D as T inside a word before a vowel other than EE and first in it before a consonant or a vowel and more
+  letters, but not before a G and a masculine vowel (EXP-385, EXP-414: `ᠲᠣᠯᠥ` next to `ᠲᠣᠯᠣ`, `urtu` next to
+  `ordu`), with the words `ᠤᠤ` and `ᠦᠦ` read as one mark and `ᠪᠦᠦ` as `ᠪᠤᠤ` (EXP-409, EXP-415); as 1.04 (Android), OE and UE read as O but first in a word or second
+  after a consonant with letters after them, U, OE and UE after B inside a word as OE, and D as T first in a word
+  before any letter and inside it before any vowel (EXP-410: `ᠲᠥ` next to `ᠲᠣ`, `ᠳᠠ` next to `ᠲᠠ`, `ᠯᠪᠤᠯ` next to
+  `ᠯᠪᠥᠯ`). In both, a vowel whose gender a Q or G takes keeps it: the vowel right after it or, for one with none
+  after it, the vowel each font looks for before or after it (EXP-414: `ᠯᠣᠯᠥᠭᠢ` next to `ᠯᠣᠯᠣᠭᠢ`, as that G takes
+  the I's). Measured with HarfBuzz on both fonts over 756,000 pairs of single words and 120,000 of two-word names: no
+  pair read alike is drawn apart by both. Outside a word (next to a mark, an Ali Gali sign or a virama) Mongolian
+  U and UE always read as O and OE. In both visual keys the Gurmukhi
   and Kannada viramas read as the Devanagari
   and Telugu ones (`ਸ੍` next to `म्`, Kannada `ಜಯ್` next to Telugu `జయ్`); a virama is
   kept on a letter of its script or its sister script (Devanagari and Gurmukhi, Telugu and Kannada: `ਪ੍ਰੇਮ` stays

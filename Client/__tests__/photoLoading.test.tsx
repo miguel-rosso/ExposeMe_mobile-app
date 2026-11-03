@@ -3,7 +3,7 @@ import { ActivityIndicator, Image, Platform } from "react-native";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import { FakeSocket } from "../testUtils/fakeSocket";
 import { TEST_IDS } from "../app/utils/testIds";
-import { downloadImageToMemory, prefetchImage } from "../app/utils/image";
+import { downloadImageToMemory, PHOTO_DOWNLOAD_STALL_TIMEOUT_MS, prefetchImage } from "../app/utils/image";
 import { FakeXhr, installFakeXhr } from "../testUtils/fakeXhr";
 import PhotoComponent from "../app/components/PhotoComponent";
 // Loaded with the file (jest.mock calls below are hoisted above it): a cold transform must not hit the test timeout
@@ -16,6 +16,8 @@ import getEnvVars from "../config";
 // it is drawn once the main photo has loaded, from the same source.
 // EXP-394: on iOS the main photo and the backdrop each downloaded the photo (no-store responses aren't cached there):
 // the photo is downloaded once into memory and both views draw that copy, the backdrop once the main photo has loaded.
+// EXP-401: a stalled in-memory download settled neither way, so the loading indicator stayed up all round: it times out
+// and falls back to the photo URL, like a failed download.
 
 jest.mock("@react-native-async-storage/async-storage", () =>
   require("@react-native-async-storage/async-storage/jest/async-storage-mock")
@@ -218,6 +220,7 @@ describe("PhotoComponent on iOS downloads the photo once (EXP-394)", () => {
   it.each([
     ["a network error", () => act(async () => FakeXhr.requests[0].fail())],
     ["an HTTP error", () => finishDownload(403)],
+    ["a stall (EXP-401)", () => act(async () => FakeXhr.requests[0].stall(PHOTO_DOWNLOAD_STALL_TIMEOUT_MS))],
   ])("after %s falls back to the photo URL, so the <Image> retries it and reports the error", async (_, failDownload) => {
     const r = await renderPhoto();
     await failDownload();
@@ -285,6 +288,19 @@ describe("downloadImageToMemory (EXP-394)", () => {
     expect(blob.close).toHaveBeenCalledTimes(1);
     download.release();
     expect(blob.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("times out once the network sends nothing for the stall timeout, leaving time to retry in the round (EXP-401)", async () => {
+    const download = downloadImageToMemory(PHOTO_URL, HEADERS);
+    const request = FakeXhr.requests[0];
+    request.stall(PHOTO_DOWNLOAD_STALL_TIMEOUT_MS - 1);
+    request.stall(PHOTO_DOWNLOAD_STALL_TIMEOUT_MS);
+    await expect(download.uri).rejects.toThrow("Photo download failed");
+    // Under half of the 7.7 s answer bar: the photo URL fallback still has most of the round to load
+    expect(PHOTO_DOWNLOAD_STALL_TIMEOUT_MS).toBeLessThanOrEqual(7_700 / 2);
+    // Nothing to free or cancel: a timed-out request has no blob and has already ended
+    download.release();
+    expect(request.aborted).toBe(false);
   });
 
   it("aborts a download released before it finishes", async () => {

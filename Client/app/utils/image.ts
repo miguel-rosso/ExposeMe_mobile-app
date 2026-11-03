@@ -40,6 +40,15 @@ type NativeBlob = Blob & { close(): void };
 /** XMLHttpRequest.LOADING: React Native has received the whole blob response and created its native blob. */
 const XHR_RESPONSE_ARRIVED = 3;
 
+/**
+ * How long a photo download may receive nothing before it gives up (EXP-401), so its caller falls back to the photo
+ * URL as on a failure: a stalled download fires neither load nor error and would keep the loading indicator up for the
+ * whole round. It is the native request timeout, which on iOS (NSURLRequest.timeoutInterval) restarts whenever data
+ * arrives: a slow photo that keeps arriving is never cut off, a silent connection is. 3 s of silence is far beyond a
+ * working network's first byte, and leaves the retry most of the 7.7 s answer bar.
+ */
+export const PHOTO_DOWNLOAD_STALL_TIMEOUT_MS = 3_000;
+
 /** A photo downloaded once into native memory, for several <Image> views to draw without downloading it again. */
 export interface MemoryImage {
   /** Resolves with a local `blob:` URI of the photo; rejects if the download fails. */
@@ -56,7 +65,8 @@ export interface MemoryImage {
  * read `blob:` URIs, and its pipeline already shares one download between views (see prefetchImage).
  *
  * Every native blob the request creates has an owner: the caller once the URI resolves (it frees it with release),
- * otherwise this function, which frees it when the download failed or was released before it finished.
+ * otherwise this function, which frees it when the download failed or was released before it finished. A download
+ * that stalls fails after PHOTO_DOWNLOAD_STALL_TIMEOUT_MS.
  */
 export const downloadImageToMemory = (uri: string, headers: Record<string, string> = {}): MemoryImage => {
   let request: XMLHttpRequest | null = null;
@@ -87,6 +97,7 @@ export const downloadImageToMemory = (uri: string, headers: Record<string, strin
     xhr.open('GET', uri);
     // The response stays in native memory: the photo's bytes never cross into JS
     xhr.responseType = 'blob';
+    xhr.timeout = PHOTO_DOWNLOAD_STALL_TIMEOUT_MS;
     Object.entries(headers).forEach(([name, value]) => xhr.setRequestHeader(name, value));
     xhr.send();
   });

@@ -1,7 +1,7 @@
 // ── Fake XMLHttpRequest ──
 // Jest's Node environment has no XMLHttpRequest. This records every request (one per network download) and lets a
 // test answer it: respond() with a status and a fake native blob (arrive() first to stop just before its load event),
-// or fail() it as a network error.
+// fail() it as a network error, or stall() it to let its timeout run out.
 
 export interface FakeBlob {
   size: number;
@@ -19,6 +19,7 @@ export class FakeXhr {
   method = "";
   url = "";
   responseType = "";
+  timeout = 0;
   headers: Record<string, string> = {};
   status = 0;
   response: unknown = null;
@@ -71,6 +72,17 @@ export class FakeXhr {
 
   fail() {
     this.onerror?.();
+  }
+
+  /**
+   * The network sends nothing for `ms`. Like React Native's native request timeout (an idle timeout: iOS's
+   * NSURLRequest.timeoutInterval), a stall at least as long as `timeout` ends the request with a timeout event; with
+   * no timeout (0) the request just keeps waiting.
+   */
+  stall(ms: number) {
+    if (this.timeout <= 0 || ms < this.timeout) return;
+    this.readyState = FakeXhr.DONE;
+    this.ontimeout?.();
   }
 }
 

@@ -3,6 +3,7 @@ import { io } from "../app";
 import { isAllowedRounds, RoomManager } from "../managers/RoomManager";
 import { GameEngine } from "../managers/GameEngine";
 import { isValidUsername, MAX_USERNAME_LENGTH } from "../managers/playerName";
+import { maskOffensiveWords } from "../managers/chatFilter";
 import { isRoomCode, normalizeRoomCode } from "../managers/roomCode";
 import { acceptsPlantedPhoto, setUploadRooms } from "../middlewares/uploadAccess";
 import { UploadRecord, uploadStore } from "../middlewares/uploadStore";
@@ -505,13 +506,16 @@ io.on("connection", (socket: Socket) => {
     } catch (e) { console.error("plant-photo error:", e); }
   });
 
-  socket.on("chat-message", (data: { message: string }) => {
+  // Acked with the text the room got (offensive words masked), so the sender shows exactly that; not acked when dropped
+  socket.on("chat-message", (data: { message: string }, ack?: unknown) => {
     try {
       const s = session(socket);
       const message = data?.message;
       if (!s || typeof message !== "string" || !message.trim() || message.length > MAX_CHAT_LENGTH) return;
       if (!chatMessages.take(socket.id)) return;
-      socket.broadcast.to(s.room.gameCode).emit("chat-message", { username: s.player.username, message });
+      const relayed = maskOffensiveWords(message);
+      socket.broadcast.to(s.room.gameCode).emit("chat-message", { username: s.player.username, message: relayed });
+      if (typeof ack === "function") ack({ message: relayed });
     } catch (e) { console.error("chat error:", e); }
   });
 

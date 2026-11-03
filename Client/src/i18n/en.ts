@@ -59,6 +59,7 @@ export default {
   selectingPhoto: "Selecting your photo...",
   slowDown: "Slow down",
   pleaseWaitBeforeSending: "Please wait before sending another message",
+  chatMessageNotSent: "Your message couldn't be sent. Check your connection.",
   plantSecretPhoto: "Plant a Secret Photo",
   choosePhotoDescription: "Choose a photo that will appear at a random moment in the game.",
   choosePhoto: "Choose Photo",

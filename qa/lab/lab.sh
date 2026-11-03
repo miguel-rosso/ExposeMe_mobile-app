@@ -38,6 +38,10 @@
 #        [--maestro-env KEY=VALUE]          extra Maestro variable for every device (repeatable)
 #        [--server http://localhost:P | --port P]  bots and render telemetry use that lab server (e.g. a worktree's
 #                                           own: server --port P); devices and Metro always stay on :3000
+#        [--device-host]                    the one selected device creates the room and starts it (its lobby's
+#                                           default rounds: no --rounds; 3+ bots, no --name-prefix); the bots join the
+#                                           code its flow posts to a loopback listener (CODE_SINK_URL), e.g.
+#                                           --flow device-host-start (EXP-390)
 #   bots [args]                 Run qa/lab/bots.mjs directly (headless players / load / sync metrics)
 set -euo pipefail
 
@@ -884,10 +888,78 @@ wait_room_code() { # dir, label: prints the room code the bots wrote to dir/code
   cat "$dir/code"
 }
 
+# ── Device-hosted rooms (play --device-host, EXP-390) ──
+# The device creates the room, so its code is only on its screen: the flow reads it and POSTs it with Maestro's http
+# (run by the Maestro CLI on this machine) to a listener on loopback, which writes the first one it gets where a bots
+# room leaves its code. The bots then join that code.
+# The device posts once it is in its lobby, so this covers the lobby budget: a stuck boot and its retry (LOBBY_WAIT_MS)
+DEVICE_ROOM_CODE_TIMEOUT_S=$((LOBBY_WAIT_MS / 1000))
+# A room code as the server makes them (Server/managers/roomCode.ts; lab-device-host.test.sh checks the copy matches)
+ROOM_CODE_ALPHABET=23456789ABCDEFGHJKMNPQRSTUVWXYZ
+ROOM_CODE_LENGTH=6
+# The listener answers 200 for the room code (again for the same one), 409 for another code once it has one, and 400
+# for anything that is not a room code
+CODE_SINK_JS='
+const fs = require("fs");
+const [file, portFile, alphabet, length] = process.argv.slice(1);
+const roomCode = new RegExp(`^[${alphabet}]{${length}}$`);
+const server = require("http").createServer((req, res) => {
+  let body = "";
+  req.on("data", (chunk) => (body += chunk));
+  req.on("end", () => {
+    const code = body.trim();
+    if (req.method !== "POST" || !roomCode.test(code)) res.statusCode = 400;
+    else if (!fs.existsSync(file)) { fs.writeFileSync(`${file}.tmp`, code); fs.renameSync(`${file}.tmp`, file); }
+    else if (fs.readFileSync(file, "utf8") !== code) res.statusCode = 409;
+    res.end();
+  });
+});
+server.listen(0, "127.0.0.1", () => fs.writeFileSync(portFile, String(server.address().port)));
+'
+CODE_SINK_START_POLLS=50          # x 0.1 s for the listener to report its port
+# device-host-start.yaml removes bot3 and guesses bot1: the bots need their own names, and at least three of them
+DEVICE_HOST_MIN_BOTS=3
+BOTS_NAME_PREFIX_RE='(^|[[:space:]])--name-prefix([[:space:]=]|$)'
+
+start_code_sink() { # file: starts the room code listener (stopped with the bots on exit); sets CODE_SINK_URL
+  local file=$1 port_file="$1.sink-port" i
+  rm -f "$file" "$port_file"
+  node -e "$CODE_SINK_JS" "$file" "$port_file" "$ROOM_CODE_ALPHABET" "$ROOM_CODE_LENGTH" &
+  PLAY_BG_PIDS+=("$!")
+  for ((i = 0; i < CODE_SINK_START_POLLS; i++)); do [ -s "$port_file" ] && break; sleep 0.1; done
+  [ -s "$port_file" ] || die "the room code listener did not start"
+  CODE_SINK_URL="http://127.0.0.1:$(cat "$port_file")/room-code"
+}
+
+wait_device_room_code() { # dir, flow pid: prints the code the device's flow posted (dir/code), or dies when the flow
+  # ended without posting one or DEVICE_ROOM_CODE_TIMEOUT_S passed
+  local dir=$1 pid=$2 i
+  for ((i = 0; i < ${LAB_DEVICE_ROOM_CODE_TIMEOUT:-$DEVICE_ROOM_CODE_TIMEOUT_S}; i++)); do
+    [ -s "$dir/code" ] && break
+    kill -0 "$pid" 2>/dev/null || break   # the code check after the loop still sees a post made just before it ended
+    sleep 1
+  done
+  [ -s "$dir/code" ] || die "the device did not post its room code — see $dir/maestro"
+  cat "$dir/code"
+}
+
+process_tree() { # pid: prints it and all its descendants (by parent pid, never by name), parents first
+  local child; echo "$1"
+  for child in $(pgrep -P "$1" 2>/dev/null); do process_tree "$child"; done
+}
+
+stop_process_tree() { # pid: stops it and its descendants, all listed before any is signalled (none lost to a reparent)
+  local tree; tree="$(process_tree "$1")"
+  # shellcheck disable=SC2086 # one pid per word
+  kill $tree 2>/dev/null || true
+}
+
 cmd_play() {
   local bots=3 rounds=10 which=all flow=play-game bot_args="" second_room="" maestro_env=() server_port=$SERVER_PORT
+  local device_host=0 rounds_given=0
   while [ $# -gt 0 ]; do case $1 in
-    --bots) bots=$2; shift 2;; --rounds) rounds=$2; shift 2;; --devices) which=$2; shift 2;; --flow) flow=$2; shift 2;;
+    --bots) bots=$2; shift 2;; --rounds) rounds=$2; rounds_given=1; shift 2;; --devices) which=$2; shift 2;; --flow) flow=$2; shift 2;;
+    --device-host) device_host=1; shift;;
     --bot-args) bot_args=$2; shift 2;;
     --second-room) [ $# -ge 2 ] || die "--second-room needs the bots.mjs args of the 2nd room"; second_room=$2; shift 2;;
     --maestro-env) [[ ${2:-} =~ $MAESTRO_ENV_RE ]] || die "--maestro-env needs KEY=VALUE (got '${2:-}')"
@@ -910,7 +982,18 @@ cmd_play() {
   local n_dev; n_dev="$(devices | jq -c "$sel" | wc -l | tr -d ' ')"
   local total=$((bots + n_dev))
   [ "$total" -ge 2 ] || die "need at least 2 players"
-  log "RUN $RUN_ID: $bots bots + $n_dev devices, $rounds rounds, server $server_url"
+  if [ "$device_host" = 1 ]; then
+    [ "$n_dev" = 1 ] || die "--device-host needs exactly one device, the room's host (got $n_dev)"
+    [ "$server_port" = "$SERVER_PORT" ] \
+      || die "--device-host: the device's room is on the shared server :$SERVER_PORT, so the bots play there too (no --server/--port)"
+    [ "$rounds_given" = 0 ] || die "--device-host: the device's game plays its lobby's default rounds, drop --rounds"
+    [ "$bots" -ge "$DEVICE_HOST_MIN_BOTS" ] \
+      || die "--device-host needs at least $DEVICE_HOST_MIN_BOTS bots: device-host-start.yaml removes bot3 (got --bots $bots)"
+    [[ ! $bot_args =~ $BOTS_NAME_PREFIX_RE ]] \
+      || die "--device-host: device-host-start.yaml names the bots bot1..botN, drop --name-prefix from --bot-args"
+  fi
+  local rounds_desc="$rounds rounds"; [ "$device_host" = 0 ] || rounds_desc="the lobby's default rounds"
+  log "RUN $RUN_ID: $bots bots + $n_dev devices, $rounds_desc, server $server_url"
   if [ "$server_port" != "$SERVER_PORT" ] && [ "$n_dev" -gt 0 ]; then
     warn "devices and Metro always use the shared server :$SERVER_PORT, so they can't join a room on :$server_port" \
       "(their flows will fail); use --devices none to play bots only against your own server"
@@ -924,23 +1007,45 @@ cmd_play() {
     local new_code; new_code="$(wait_room_code "$dir/second-room" "second room")" || exit 1
     log "second room $new_code"; maestro_env+=(-e "NEW_CODE=$new_code")
   fi
-  # shellcheck disable=SC2086 # bot_args is a list of bots.mjs flags
-  start_bots_room "$dir" "$server_url" --bots "$bots" --host --rounds "$rounds" --wait-players "$total" $bot_args
-  local bots_pid=$BOTS_PID
-  local code; code="$(wait_room_code "$dir" "bots")" || exit 1
-  log "room $code"
-  [ "$n_dev" = 0 ] || maestro_version_check || true
-  local pids=()
-  while read -r d; do
-    [ -n "$d" ] || continue
-    local dl; dl="$(jq -r .label <<<"$d")"
-    run_device_flow "$d" "$QA/maestro/$flow.yaml" "$dir/maestro" \
-      -e GAME_CODE="$code" -e USERNAME="$dl" -e METRO_URL="http%3A%2F%2Flocalhost%3A$METRO_PORT" -e LOBBY_WAIT_MS="$LOBBY_WAIT_MS" \
+  local code bots_pid pids=() metro_url="http%3A%2F%2Flocalhost%3A$METRO_PORT"
+  if [ "$device_host" = 1 ]; then
+    # The device creates the room: its flow posts the code, then the bots join it
+    local host_device host_label; host_device="$(devices | jq -c "$sel")"; host_label="$(jq -r .label <<<"$host_device")"
+    start_code_sink "$dir/code"
+    maestro_version_check || true
+    run_device_flow "$host_device" "$QA/maestro/$flow.yaml" "$dir/maestro" \
+      -e USERNAME="$host_label" -e CODE_SINK_URL="$CODE_SINK_URL" -e METRO_URL="$metro_url" \
       ${maestro_env[@]+"${maestro_env[@]}"} &
     pids+=($!)
-  done < <(devices | jq -c "$sel")
+    # A flow still running without having posted (timeout) is stopped with its Maestro, not left behind
+    code="$(wait_device_room_code "$dir" "${pids[0]}")" || { stop_process_tree "${pids[0]}"; exit 1; }
+    log "room $code (created by $host_label)"
+    # shellcheck disable=SC2086 # bot_args is a list of bots.mjs flags
+    start_bots_room "$dir" "$server_url" --bots "$bots" --code "$code" $bot_args
+    bots_pid=$BOTS_PID
+  else
+    # shellcheck disable=SC2086 # bot_args is a list of bots.mjs flags
+    start_bots_room "$dir" "$server_url" --bots "$bots" --host --rounds "$rounds" --wait-players "$total" $bot_args
+    bots_pid=$BOTS_PID
+    code="$(wait_room_code "$dir" "bots")" || exit 1
+    log "room $code"
+    [ "$n_dev" = 0 ] || maestro_version_check || true
+    while read -r d; do
+      [ -n "$d" ] || continue
+      local dl; dl="$(jq -r .label <<<"$d")"
+      run_device_flow "$d" "$QA/maestro/$flow.yaml" "$dir/maestro" \
+        -e GAME_CODE="$code" -e USERNAME="$dl" -e METRO_URL="$metro_url" -e LOBBY_WAIT_MS="$LOBBY_WAIT_MS" \
+        ${maestro_env[@]+"${maestro_env[@]}"} &
+      pids+=($!)
+    done < <(devices | jq -c "$sel")
+  fi
   local fail=0
   for p in "${pids[@]:-}"; do [ -n "$p" ] && { wait "$p" || fail=1; }; done
+  # A device-hosted game has nobody else to start or play it: once the host's flow failed, don't wait the bots out
+  if [ "$device_host" = 1 ] && [ $fail = 1 ]; then
+    warn "the hosting device's flow failed: stopping the bots"
+    kill "$bots_pid" 2>/dev/null || true
+  fi
   wait $bots_pid || fail=1
   forget_bots_pid "$bots_pid"
   stop_play_bots

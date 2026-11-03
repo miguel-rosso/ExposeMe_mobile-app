@@ -114,8 +114,9 @@ unknown_ids() {
     }
   ' "$TMP/ids" "$TMP/known-ids" "$TMP/known-helpers"
 }
-# Flows besides the boot ones whose ids are all checked against testIds.ts (EXP-176, EXP-348, EXP-346, EXP-354, EXP-339)
-ID_CHECKED_FLOWS="tie-game.yaml hold-used-up.yaml hold-closed.yaml kicked-after-game.yaml kicked-while-offline.yaml join-room.yaml search-room.yaml kicked-notice.yaml"
+# Flows besides the boot ones whose ids are all checked against testIds.ts (EXP-176, EXP-348, EXP-346, EXP-354, EXP-339,
+# EXP-390)
+ID_CHECKED_FLOWS="tie-game.yaml hold-used-up.yaml hold-closed.yaml kicked-after-game.yaml kicked-while-offline.yaml join-room.yaml search-room.yaml kicked-notice.yaml device-host-start.yaml"
 # Flows that read the host's removal notice, a system alert matched by its text (EXP-139, EXP-346)
 KICK_NOTICE_FLOWS="kicked-notice.yaml kicked-after-game.yaml kicked-while-offline.yaml"
 
@@ -265,6 +266,55 @@ for name in hold-used-up.yaml hold-closed.yaml; do # their ids are checked with 
     && ok "$name: the hold button's text filter is noHoldsLeft in en and es ($no_holds_left)" \
     || ko "$name: text filter is the hold button's noHoldsLeft in en|es" "app: $no_holds_left; flow: $(tr '\n' ';' <<<"$hold_texts")"
 done
+
+# ── device-host-start.yaml reads the remove-player confirmation and Start's "Starting…" in both languages (EXP-390) ──
+# The app fills the confirmation's {name} with the highlighted "@<name>"; the flow removes bot3 (a bot id the Client's
+# testIds test knows). Each key must be matched by one of the flow's text selectors in en and es, so a change of
+# wording fails here rather than as a device run waiting for a text that never shows.
+DEVICE_HOST_FLOW="$MAESTRO_DIR/device-host-start.yaml"
+DEVICE_HOST_REMOVED="bot3"
+# matches_i18n_named PATTERN KEY NAME -> like matches_i18n, with the string's {name} filled in with NAME
+matches_i18n_named() {
+  i18n_js "$CLIENT_APP" '
+    const re = new RegExp(`^(?:${args[0]})$`, "is");
+    const ok = (lang) => typeof lang[args[1]] === "string" && re.test(lang[args[1]].replace("{name}", args[2]));
+    process.exit([en, es].every(ok) ? 0 : 1);
+  ' "$1" "$2" "$3"
+}
+# flow_text_for FLOW KEY NAME -> the first text selector of FLOW that matches KEY (its {name} filled in) in en and es
+# (text_selectors keeps YAML's double-quoted escapes: a regex's \? is written \\? in the flow)
+flow_text_for() {
+  local pattern
+  while IFS= read -r pattern; do
+    pattern="$(sed 's/\\\\/\\/g' <<<"$pattern")"
+    matches_i18n_named "$pattern" "$2" "$3" && { echo "$pattern"; return 0; }
+  done < <(text_selectors "$1" | cut -f2)
+  return 1
+}
+# The checker itself: the name must be the one filled in, and a selector in one language only does not count
+cat >"$TMP/named-flow.yaml" <<'EOF'
+- assertVisible:
+    text: "(Are you sure you want to remove|¿Seguro que quieres expulsar a) @bot3 (from the room|de la sala)\\?"
+EOF
+cat >"$TMP/named-en-flow.yaml" <<'EOF'
+- assertVisible:
+    text: "Are you sure you want to remove @bot3 from the room\\?"
+EOF
+flow_text_for "$TMP/named-flow.yaml" areYouSureRemove "@bot3" >/dev/null \
+  && ok "checker takes a confirmation selector with the name filled in, in en and es" \
+  || ko "checker takes a confirmation selector in en and es" "$(cat "$TMP/named-flow.yaml")"
+flow_text_for "$TMP/named-flow.yaml" areYouSureRemove "@bot2" >/dev/null \
+  && ko "checker takes a confirmation selector for another name" || ok "checker flags a confirmation selector for another name"
+flow_text_for "$TMP/named-en-flow.yaml" areYouSureRemove "@bot3" >/dev/null \
+  && ko "checker takes a confirmation selector in English only" || ok "checker flags a confirmation selector in English only"
+for key in confirmRemovePlayer areYouSureRemove startingGame; do
+  found="$(flow_text_for "$DEVICE_HOST_FLOW" "$key" "@$DEVICE_HOST_REMOVED")" \
+    && ok "device-host-start.yaml: reads $key in en and es ($found)" \
+    || ko "device-host-start.yaml: no text selector matches $key in en and es (name @$DEVICE_HOST_REMOVED)"
+done
+grep -qF "id: \"lobby-player-$DEVICE_HOST_REMOVED\"" "$DEVICE_HOST_FLOW" \
+  && ok "device-host-start.yaml: removes the player its confirmation names ($DEVICE_HOST_REMOVED)" \
+  || ko "device-host-start.yaml: taps lobby-player-$DEVICE_HOST_REMOVED"
 
 # ── Flow simulator ──
 # maestro-sim.mjs runs a flow's own YAML and JS against a fake device with Maestro 2.11's semantics (see its header)

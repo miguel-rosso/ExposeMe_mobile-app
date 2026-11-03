@@ -54,6 +54,11 @@ qa/lab/lab.sh play --flow kicked-after-game --bots 2 --rounds 3 --devices ios-a 
 qa/lab/lab.sh play --flow kicked-while-offline --bots 2 --rounds 3 --devices ios-a --bot-args '--kick ios-a --kick-after-game 120'
 ```
 
+The device as the host (EXP-390, `qa/maestro/device-host-start.yaml`): `play --device-host` lets the one selected device create the room. Its flow reads the code from the lobby and POSTs it with Maestro's `http` to a listener `play` starts on loopback (`CODE_SINK_URL`; it takes only a room code of the server's alphabet and length, and keeps the first one). Then the bots join with `bots.mjs --code`. The device opens the remove-player confirmation on bot3 («…@bot3…?» in en|es), cancels it, removes bot3, taps Start (the optional, short look for «Starting…|Empezando…» is WARNED when it misses that ~0.5 s window, which is not a failure) and plays the lobby's default 10 rounds to the end. Constraints: exactly one device, the shared server :3000 (no `--server`/`--port`), no `--rounds`, at least 3 bots and no `--name-prefix` in `--bot-args`. A flow that ends or times out without posting fails the run and is stopped with its Maestro children, and a hosting flow that fails stops the bots instead of waiting them out. The plumbing is checked without devices by `qa/lab/tests/lab-device-host.test.sh` (stub bots/maestro, real listener):
+```bash
+qa/lab/lab.sh play --device-host --flow device-host-start --devices ios-a --bots 3
+```
+
 `--rounds` takes 10/15/20, or 3 for short QA runs (~1 min): 3 is QA-only, accepted only because `lab.sh server` starts the server with `ALLOW_QA_ROUNDS=1` (a server started another way, or production, ignores it and the bots report a `game-started with 10 rounds, asked for 3` consistency error). The app never offers 3 rounds.
 
 ## Why the photos are labelled

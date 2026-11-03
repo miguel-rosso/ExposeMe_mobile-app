@@ -1,0 +1,95 @@
+# EXP-390: the device is the host. It creates the room, the bots join its code, it opens the remove-player confirmation
+# on a bot (EXP-381: "Are you sure you want to remove @bot3 from the room?" / "¿Seguro que quieres expulsar a @bot3 de
+# la sala?", the name highlighted), cancels it, then removes that bot; then it taps Start (EXP-379: the button says
+# "Starting…" / "Empezando…" until the game opens) and plays the game, the lobby's default rounds (10), to the end.
+#   qa/lab/lab.sh play --device-host --flow device-host-start --devices <label> --bots 3
+# `--device-host` starts a loopback listener, passes its URL as CODE_SINK_URL and starts the bots (bots.mjs --code)
+# once this flow posted the room code it reads from the lobby. bot3 is the one removed (its process gets
+# player-removed and is let go; bots.mjs passes as long as the other two play to game over), so the bots keep their
+# own names (lab.sh refuses fewer than 3 bots and a --name-prefix). The device guesses bot1 each round (play-rounds.yaml).
+# "Starting…" only shows between the tap and the game screen (the server's answer and the screen change: an estimated
+# ~0.5 s on the lab's loopback, not measured), shorter than one screen read on a slow emulator: that look is optional
+# and short (WARNED in Maestro's report when it missed it, see its label). The hard check that the game opens after the
+# tap is play-rounds.yaml's own wait for it.
+# env: USERNAME, METRO_URL (url-encoded), CODE_SINK_URL
+# Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language; the confirmation and the
+# Start button's text are read in both languages (checked against Client/app/i18n by maestro-selectors.test.sh).
+appId: com.socketNull.ExposeMe
+---
+- runFlow: host-lobby.yaml
+# The code shows once the server answered the create (an empty text until then)
+- extendedWaitUntil:
+    visible:
+      id: "lobby-game-code"
+      text: "[A-Z0-9]{6}"
+    timeout: 30000
+- copyTextFrom:
+    id: "lobby-game-code"
+    text: "[A-Z0-9]{6}"
+# Maestro's http runs on the lab machine, where lab.sh's listener waits for the code (then starts the bots)
+- evalScript: "${output.codePost = http.post(CODE_SINK_URL, { body: maestro.copiedText }).status}"
+- assertTrue:
+    condition: ${output.codePost == 200}
+    label: "lab.sh's listener took the room code (CODE_SINK_URL)"
+- extendedWaitUntil:
+    visible:
+      id: "lobby-player-bot3"
+    timeout: 60000
+    label: "The bots joined the device's room"
+- assertVisible:
+    id: "lobby-player-bot1"
+# ── Remove-player confirmation (EXP-381): cancel keeps the player ──
+- tapOn:
+    id: "lobby-player-bot3"
+- extendedWaitUntil:
+    visible:
+      id: "alert-modal"
+    timeout: 5000
+- assertVisible:
+    text: "Remove player|Expulsar jugador"
+- assertVisible:
+    text: "(Are you sure you want to remove|¿Seguro que quieres expulsar a) @bot3 (from the room|de la sala)\\?"
+    label: "The confirmation names the highlighted @bot3 and asks, in the app's language"
+- takeScreenshot: device-host-remove-confirm-${USERNAME}
+- tapOn:
+    id: "alert-modal-cancel"
+- extendedWaitUntil:
+    notVisible:
+      id: "alert-modal"
+    timeout: 5000
+- assertVisible:
+    id: "lobby-player-bot3"
+# ── ...and Remove takes it out of the room ──
+- tapOn:
+    id: "lobby-player-bot3"
+- extendedWaitUntil:
+    visible:
+      id: "alert-modal"
+    timeout: 5000
+- tapOn:
+    id: "alert-modal-confirm"
+- extendedWaitUntil:
+    notVisible:
+      id: "lobby-player-bot3"
+    timeout: 10000
+    label: "The removed bot left the lobby list"
+- assertVisible:
+    id: "lobby-player-bot1"
+# ── Start (EXP-379) ──
+- assertVisible:
+    id: "start-game-button"
+# No retry and almost no settle wait after the tap, so the next look comes while the button may still be starting
+- tapOn:
+    id: "start-game-button"
+    retryTapIfNoChange: false
+    waitToSettleTimeoutMs: 100
+# The button's text (iOS reads it with the spinner's label before it); optional: see the header
+- extendedWaitUntil:
+    visible:
+      text: ".*(Starting…|Empezando…).*"
+    timeout: 1500
+    optional: true
+    label: "EXP-379: the Start button showed Starting… / Empezando… (optional: the window is shorter than a slow read)"
+# No look of its own for the game screen: play-rounds.yaml's lobby wait and its wait for round 1's options fail when
+# the game doesn't open, and one more screen read here could cost a slow Android its round 1 guess (EXP-326)
+- runFlow: play-rounds.yaml

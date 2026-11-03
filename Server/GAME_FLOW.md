@@ -293,14 +293,21 @@ After last round: game-over
   (so `ௌ` as `ெள`: `கௌரி` next to `கெளரி`); digits such as Tamil `௧` as `க` (`௧ண்ணன்` next to `கண்ணன்`), `௫` as
   `ரு`, Malayalam `൬` as `ന്ന` (`പ്രസ൬` next to `പ്രസന്ന`). The Tamil sign AI, drawn before its letter and like `ன`,
   is read there (EXP-365: `கை` next to `னக`, apart from `கன`), also before the KSSA ligature
-  (EXP-372: `க்ஷை` next to `னக்ஷ`). In the visual key, Malayalam chillus typed as before Unicode
-  5.1, consonant + virama + ZWJ, read as the atomic chillu fonts draw, and so do the digits nine `൯` and four
-  `൪`, drawn exactly like chillu N and chillu RR (EXP-372: `അന്` + ZWJ + `വർ`, `അൻവർ` and
-  `അ൯വർ` together); the letter visual key keeps reading them as consonant + virama, like a virama without ZWJ, never
-  as the bare consonant (EXP-374: `കമല്` + ZWJ stays apart from `കമല`). In both visual keys the Gurmukhi and Kannada
-  viramas read as the Devanagari and Telugu ones (`ਸ੍` next to `म्`, Kannada `ಜಯ್` next to Telugu `జయ్`), and in the
-  visual key so do the Gurmukhi udaat and yakash, a hook under the letter where the virama is (`ਰਾਜੑ` next to `ਰਾਜ੍`;
-  the other keys drop them like a dot); a virama is
+  (EXP-372: `க்ஷை` next to `னக்ஷ`). Both visual keys are also taken from other readings of the name, each used or not
+  (`similarKeys`; two names only compare a reading with the same reading, and the name as typed is always one, so a
+  reading only adds matches): dead consonants typed with ZWJ read as the letter fonts draw, in one reading the
+  Malayalam chillus typed as before Unicode 5.1 (consonant + virama + ZWJ) as the atomic chillu, with the digits nine `൯` and four `൪`,
+  drawn exactly like chillu N and chillu RR (EXP-372: `അന്` + ZWJ + `വർ`, `അൻവർ` and `അ൯വർ` together), and in another
+  the Bengali khanda ta typed as before Unicode 4.1 (TA + hasanta + ZWJ) as `ৎ` (EXP-402: `উত্` + ZWJ + `সব` next to
+  `উৎসব`); as typed they read as consonant + virama, like a virama without ZWJ, never as the bare consonant (EXP-374:
+  `കമല്` + ZWJ stays apart from `കമല`). The Gurmukhi udaat and yakash, a hook under the letter where the virama is,
+  are dropped like a dot as typed and read as the virama in another reading (EXP-374, EXP-405: `ਰਾਜੑ` next to
+  `ਰਾਜ੍`, `৽ਕੑਸ` next to `॰ਕਸ`). Mongolian U and UE read as O and OE everywhere (EXP-376: the Unicode Standard
+  writes them alike); in another reading OE and UE past a word's first syllable read as O (not in words with Q or G,
+  drawn by the word's vowels), and D inside a word before a vowel other than EE as T (EXP-385: `ᠲᠣᠯᠥ` next to `ᠲᠣᠯᠣ`,
+  `urtu` next to `ordu`; measured with HarfBuzz on Noto Sans Mongolian, a word being a run of letters with nothing
+  next to it that joins or reshapes it). In both visual keys the Gurmukhi and Kannada viramas read as the Devanagari
+  and Telugu ones (`ਸ੍` next to `म्`, Kannada `ಜಯ್` next to Telugu `జయ్`); a virama is
   kept on a letter of its script or its sister script (Devanagari and Gurmukhi, Telugu and Kannada: `ਪ੍ਰੇਮ` stays
   apart from `ਪਰੇਮ`) and dropped on a letter read as another script's (`ഥ്` next to Tamil `ம்` and `ம`); the
   Devanagari, Bengali, Gurmukhi, Gujarati and Oriya viramas with no letter of their script after them (ending a word),

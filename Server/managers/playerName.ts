@@ -428,33 +428,38 @@ const readIndicLookalikes = (text: string) => replaceChars(
   INDIC_LOOKALIKES,
 ).replace(SINHALA_CANDRABINDU_ON_KOMBUVA, SINHALA_AL_LAKUNA);
 
-// Malayalam chillus typed as before Unicode 5.1, consonant + virama + zero-width joiner, which fonts draw as the
-// atomic chillu (EXP-372: "Anvar" with NA + virama + joiner like "Anvar" with chillu N), in a word or ending it
+// Dead consonants typed as before they had a letter of their own, consonant + virama + zero-width joiner, which fonts
+// draw as that letter: the Malayalam chillus before Unicode 5.1 (EXP-372: "Anvar" with NA + virama + joiner like
+// "Anvar" with chillu N), in a word or ending it, and the Bengali khanda ta before Unicode 4.1 (EXP-402: "Utsab" with
+// TA + hasanta + joiner like "উৎসব" in Noto Sans, Kohinoor, Bangla MN and Sangam MN), which names only hold before a
+// letter (SCRIPT_JOINER). Each is a reading the visual keys take besides the name as typed (similarKeys), where they
+// read as the consonant + virama, like a virama without a joiner ("Anvar" with NA + virama), so a name meets both
+// spellings; not the bare consonant, another name (EXP-374: "Kamal" and "Kamala")
 const LEGACY_CHILLU = new RegExp(`(${CHILLU_CONSONANT})\\u0D4D\\u200D`, "gu");
+const LEGACY_KHANDA_TA = /\u09A4\u09CD\u200D/gu;
+const KHANDA_TA = "\u09CE";
 // The Malayalam digits nine and four, drawn exactly like chillu N and chillu RR (Noto Sans and Sangam). UTS #39 spells
 // them NA and RA + virama (INDIC_CONFUSABLES), which meets the legacy chillu once the keys drop the joiner
 const DIGIT_DRAWN_AS_CHILLU: ReadonlyMap<string, string> = new Map([["\u0D6F", "\u0D7B"], ["\u0D6A", "\u0D7C"]]);
 
-/**
- * Visual key only: Malayalam chillus typed with a joiner, and the digits drawn like a chillu, read as the atomic chillu
- * (EXP-372). The letter visual key keeps reading them as the consonant + virama, like a virama without a joiner
- * ("Anvar" with NA + virama), so a name meets both spellings through one of its keys; not the bare consonant, another
- * name (EXP-374: "Kamal" and "Kamala").
- */
+/** Malayalam chillus typed with a joiner, and the digits drawn like a chillu, read as the atomic chillu (EXP-372). */
 const readChillusAsDrawn = (text: string) => replaceChars(
   text.replace(LEGACY_CHILLU, (_legacy, consonant: string) => ATOMIC_CHILLU_OF[consonant]),
   DIGIT_DRAWN_AS_CHILLU,
 );
 
+/** The Bengali khanda ta typed with a joiner read as the atomic letter (EXP-402). */
+const readKhandaTaAsDrawn = (text: string) => text.replace(LEGACY_KHANDA_TA, KHANDA_TA);
+
 // The Gurmukhi udaat and yakash, a hook under the letter where the virama draws its stroke (Gurmukhi MN and Sangam
-// MN: "ਰਾਜੑ" and "ਰਾਜੵ" like "ਰਾਜ੍")
+// MN: "ਰਾਜੑ" and "ਰਾਜੵ" like "ਰਾਜ੍"), or a dot under it (Noto Sans), which the keys drop
 const GURMUKHI_HOOK_BELOW = /[\u0A51\u0A75]/gu;
 const GURMUKHI_VIRAMA = "\u0A4D";
 
 /**
- * Visual key only (EXP-374): the Gurmukhi udaat and yakash read as the virama. The other keys drop them like a dot, so
- * a name with one meets both the virama ("ਕੑਸ" next to "ਕ੍ਸ") and the bare letter, also read as a sister
- * script's ("ਠੑਧ੍" next to "ठਧ੍" through the letter visual key).
+ * The Gurmukhi udaat and yakash read as the virama (EXP-374). The visual keys are taken with this reading and without
+ * it (similarKeys), so a name with one meets both the virama ("ਕੑਸ" next to "ਕ੍ਸ") and the bare letter, also read
+ * as a sister script's ("ਠੑਧ੍" next to "ठਧ੍"), with or without the symbol table (EXP-405: "৽ਕੑਸ" next to "॰ਕਸ").
  */
 const readGurmukhiHooksAsVirama = (text: string) => text.replace(GURMUKHI_HOOK_BELOW, GURMUKHI_VIRAMA);
 
@@ -467,8 +472,39 @@ const EMPTY_BOX = "\uE000";
 
 // Visual keys only (EXP-376): Mongolian vowels the Unicode Standard encodes apart for their sound but "written
 // identically in all positional forms" (chapter 13.2, Mongolian; so Noto Sans Mongolian draws them): U as O and UE as
-// OE. O and OE stay apart: they are drawn alike only outside a word's first syllable, which depends on the shaping
+// OE. O and OE are drawn alike only outside a word's first syllable (readMongolianWordsAsDrawn)
 const MONGOLIAN_LOOKALIKES: ReadonlyMap<string, string> = new Map([["\u1824", "\u1823"], ["\u1826", "\u1825"]]);
+
+// Visual keys only (EXP-385): Mongolian letters drawn alike in some places of a word, as Noto Sans Mongolian 3.002 (the
+// font iOS ships) shapes them: measured with HarfBuzz, Android's shaper, on 44,000 pairs of random words one or more of
+// these letters apart, the only pairs read alike but drawn apart hold the word "ᠤᠤ" or "ᠦᠦ", which the font draws on
+// its own (already read as O + O by MONGOLIAN_LOOKALIKES). A word is a run of the letters U+1820-U+1842 with nothing
+// next to it that could join it or change its shapes (MONGOLIAN_SHAPING): the Mongolian letters, the Sibe syllable
+// boundary marker, the nirugu, the variation selectors, the vowel separator, the joiners and any mark (measured so in
+// that font, but the Ali Gali signs U+1880-U+1884, the separator and the joiners, kept to be safe; names can't hold the
+// last three). Punctuation (the full stop "᠃", the Manchu "᠉") and digits ("᠑") join nothing: a word next to them is
+// read too
+const MONGOLIAN_SHAPING = "[\\u1807\\u180A-\\u180F\\u1820-\\u1878\\u1880-\\u18AA\\u200C\\u200D\\p{M}]";
+const MONGOLIAN_WORD = new RegExp(`(?<!${MONGOLIAN_SHAPING})[\\u1820-\\u1842]+(?!${MONGOLIAN_SHAPING})`, "gu");
+// OE and UE outside the first syllable, which Unicode (chapter 13.2) writes like O and U: after an earlier vowel of the
+// word ("ᠲᠣᠯᠥ" like "ᠲᠣᠯᠣ")
+const OE_UE_PAST_FIRST_SYLLABLE = /(?<=[\u1820-\u1827][\u1820-\u1842]*)[\u1825\u1826]/gu;
+// Q and G, drawn one way in a word with masculine vowels and another with feminine ones: there OE and O still differ
+const Q_OR_G = /[\u182C\u182D]/u;
+const MONGOLIAN_O = "\u1823";
+// D inside a word before a vowel but EE, drawn like T there (chapter 13.2: "urtu" and "ordu" are written alike)
+const MEDIAL_D_BEFORE_VOWEL = /(?<=[\u1820-\u1842])\u1833(?=[\u1820-\u1826])/gu;
+const MONGOLIAN_T = "\u1832";
+
+/**
+ * Mongolian `text` with OE and UE past a word's first syllable read as O, and D inside a word as T where alike: a
+ * reading the visual keys take besides the name as typed (similarKeys), so a word the bounds leave out in one name and
+ * not in the other still meets it as typed.
+ */
+const readMongolianWordsAsDrawn = (text: string) => text.replace(MONGOLIAN_WORD, (word) => {
+  const vowelsRead = Q_OR_G.test(word) ? word : word.replace(OE_UE_PAST_FIRST_SYLLABLE, MONGOLIAN_O);
+  return vowelsRead.replace(MEDIAL_D_BEFORE_VOWEL, MONGOLIAN_T);
+});
 
 // Visual keys only (EXP-374): the viramas of Devanagari, Bengali, Gurmukhi, Gujarati and Oriya with no letter of their
 // script after them, past marks (at the end of a word, before a space or punctuation), a tick under the letter the size
@@ -483,7 +519,7 @@ const TICK_VIRAMA_ENDING_WORD = new RegExp(
 
 /**
  * Visual keys only: Indic characters drawn like a vowel sign or a letter and a sign read as those, a tick virama
- * ending a word dropped, Mongolian vowels written alike as one, emoji newer than Unicode 15.1 as one box.
+ * ending a word dropped, Mongolian vowels written alike in all forms as one, emoji newer than Unicode 15.1 as one box.
  */
 const readDrawnAlike = (text: string) => replaceChars(
   readIndicLookalikes(text).replace(TICK_VIRAMA_ENDING_WORD, ""),
@@ -748,12 +784,10 @@ export function nameKey(name: string): string {
  * drawn like a letter and a vowel sign as those (EXP-356: "హరి" like "వారి", "चॉदनी" like "चाँदनी"), Indic letters
  * drawn like one of a sister script as it (EXP-375: Gurmukhi "ਟ" like Devanagari "ट"), Mongolian U as O and UE as OE
  * (EXP-376: "ᠪᠤᠯ" like "ᠪᠣᠯ"), and every emoji newer than Unicode 15.1 as the same empty box, as phones without it
- * draw it ("Ana 🫩" like "Ana 🫆").
- * Malayalam chillus typed with a joiner, and the digits drawn like a chillu, read as the atomic chillu first (EXP-372,
- * readChillusAsDrawn), and the Gurmukhi udaat and yakash as the virama (EXP-374, readGurmukhiHooksAsVirama).
+ * draw it ("Ana 🫩" like "Ana 🫆"). Names are also compared through other readings of them (similarKeys).
  */
 export function visualKey(name: string): string {
-  const voicingMarksClosed = composeHangul(readDrawnAlike(readGurmukhiHooksAsVirama(readChillusAsDrawn(name))))
+  const voicingMarksClosed = composeHangul(readDrawnAlike(name))
     .replace(SPACE_BEFORE_SPACING_VOICING_MARK, "");
   const symbols = foldSymbols(separateVoicing(voicingMarksClosed, SYMBOL_VOICING_STAND_INS));
   const skeletal = foldSymbols(splitVoicedKana(skeleton(symbols, SYMBOL_VOICING_STAND_INS)));
@@ -764,9 +798,9 @@ export function visualKey(name: string): string {
  * The visual key without the symbol table (EXP-285): the skeleton with only the letter groups that differ in some
  * fonts, the marks drawn like an Indic vowel sign, the Indic characters drawn like a letter and a vowel sign (EXP-356)
  * or a sister script's letter (EXP-375), the Mongolian vowels written alike (EXP-376) and the emoji newer than Unicode
- * 15.1 read alike. The symbol table reads small or circled o and zero as other symbols ("º", "ᵒ" and "⁰" as the
- * degree sign, which keeps "(º_º)" next to "(°_°)"); here NFKC reads them as the letter or digit they also look like,
- * so "b⁰b" and "b⓪b" still meet "bob", and "bºb" meets "b0b".
+ * 15.1 read alike. The symbol table reads small or circled o and zero as other symbols ("º", "ᵒ" and "⁰" as
+ * the degree sign, which keeps "(º_º)" next to "(°_°)"); here NFKC reads them as the letter or digit they also look
+ * like, so "b⁰b" and "b⓪b" still meet "bob", and "bºb" meets "b0b".
  */
 export function letterVisualKey(name: string): string {
   return readLetterLookalikes(skeleton(readDrawnAlike(name)));
@@ -780,11 +814,13 @@ function readLetterLookalikes(skeletal: string): string {
 
 // ── Comparing names ─────────────────────────────────
 
-/** The keys of a name read in one order. */
+/**
+ * The keys of a name read in one order: its nameKey, and its visual and letter visual keys for each of its readings
+ * (similarKeys), always in the same order, so that two names compare each reading with the same one.
+ */
 interface OrderKeys {
   readonly same: string;
-  readonly visual: string;
-  readonly letterVisual: string;
+  readonly similar: readonly string[];
 }
 
 /** The keys of a name as stored and as drawn on screen (right-to-left letters reversed, see displayOrder). */
@@ -796,11 +832,30 @@ export interface NameKeys {
 /** How a name compares with another: the same name, a different one that looks too alike, or distinct. */
 export type NameClash = "same" | "similar" | null;
 
-const orderKeys = (text: string): OrderKeys => ({
-  same: nameKey(text),
-  visual: visualKey(text),
-  letterVisual: letterVisualKey(text),
-});
+// Ways a name may also be drawn, each taken or not (EXP-374, EXP-385, EXP-402, EXP-405): a reading only adds keys, so
+// a name still meets everything it meets as typed, also where a reading changes one name and not the other
+const OPTIONAL_READINGS: ReadonlyArray<(text: string) => string> = [
+  readGurmukhiHooksAsVirama, readChillusAsDrawn, readKhandaTaAsDrawn, readMongolianWordsAsDrawn,
+];
+
+/** `text` read with each combination of OPTIONAL_READINGS, always in the same order (as typed first). */
+const readingsOf = (text: string) =>
+  OPTIONAL_READINGS.reduce((readings, read) => readings.flatMap((reading) => [reading, read(reading)]), [text]);
+
+/**
+ * The visual and letter visual keys of each reading of `text` (readingsOf), in order. A reading that changes nothing
+ * (most names) reuses the keys already taken.
+ */
+function similarKeys(text: string): readonly string[] {
+  const keysOf = new Map<string, readonly string[]>();
+  return readingsOf(text).flatMap((reading) => {
+    const keys = keysOf.get(reading) ?? [visualKey(reading), letterVisualKey(reading)];
+    keysOf.set(reading, keys);
+    return keys;
+  });
+}
+
+const orderKeys = (text: string): OrderKeys => ({ same: nameKey(text), similar: similarKeys(text) });
 
 /**
  * Keys of `name` (compute once per player: see RoomManager), only for a name isValidUsername accepted: the key regexes
@@ -811,16 +866,19 @@ export function nameKeys(name: string): NameKeys {
   return { stored: orderKeys(name), drawn: orderKeys(displayOrder(name)) };
 }
 
+/** Whether two names' keys in one order share a visual or letter visual key of the same reading (similarKeys). */
+const shareSimilarKey = (a: OrderKeys, b: OrderKeys) => a.similar.some((key, reading) => key === b.similar[reading]);
+
 /**
  * "same" when the names share a nameKey ("bob" and "BOB", "bob" with a Cyrillic o, "Milo" and "Mi" + Hebrew samekh
- * and vav, which draw as "lo"); "similar" when they only share a visualKey or a letterVisualKey ("Alice" and "AIice",
- * "Clara" and "Dara", "bob" and "b⁰b").
+ * and vav, which draw as "lo"); "similar" when they only share a visualKey or a letterVisualKey of the same reading
+ * (similarKeys: "Alice" and "AIice", "Clara" and "Dara", "bob" and "b⁰b", "ਕੑਸ" and "ਕ੍ਸ", "ᠲᠣᠯᠥ" and "ᠲᠣᠯᠣ").
  * Stored order is compared with stored order and drawn with drawn, so a right-to-left name never meets its reversal.
  */
 export function nameClash(a: NameKeys, b: NameKeys): NameClash {
-  const matches = (key: keyof OrderKeys) => a.stored[key] === b.stored[key] || a.drawn[key] === b.drawn[key];
-  if (matches("same")) return "same";
-  return matches("visual") || matches("letterVisual") ? "similar" : null;
+  const orders = [[a.stored, b.stored], [a.drawn, b.drawn]] as const;
+  if (orders.some(([keysA, keysB]) => keysA.same === keysB.same)) return "same";
+  return orders.some(([keysA, keysB]) => shareSimilarKey(keysA, keysB)) ? "similar" : null;
 }
 
 /** Whether two names are the same name (nameClash "same"). */

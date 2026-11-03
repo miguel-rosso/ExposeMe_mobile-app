@@ -537,3 +537,65 @@ describe("Viramas (EXP-374)", () => {
     expect(isValidUsername("\u0C95\u0CDD")).toBe(true);
   });
 });
+
+// EXP-402: before Unicode 4.1 the Bengali khanda ta was typed as TA + hasanta + zero-width joiner, which keyboards still
+// send and fonts draw as the letter (Noto Sans, Kohinoor, Bangla MN, Sangam MN)
+describe("Bengali khanda ta typed with a joiner (EXP-402)", () => {
+  it.each([
+    ["Utsab", "\u0989\u09A4\u09CD\u200D\u09B8\u09AC", "\u0989\u09CE\u09B8\u09AC"],
+    ["Satkar", "\u09B8\u09A4\u09CD\u200D\u0995\u09BE\u09B0", "\u09B8\u09CE\u0995\u09BE\u09B0"],
+  ])("%s with the legacy and the atomic khanda ta look too alike", (_label, a, b) => {
+    expectSimilar(a, b);
+  });
+
+  // The khanda ta reading is one more reading (similarKeys): as typed, the legacy spelling still meets TA + hasanta
+  // through the symbol table ("°" and "º")
+  it("still meets TA + hasanta as typed", () => {
+    expectSimilar("\u09A4\u09CD\u200D\u09B8\u00B0", "\u09A4\u09CD\u09B8\u00BA");
+  });
+
+  // The khanda ta and the Malayalam chillus are separate readings: a name with both still meets one that only differs
+  // by one of them
+  it.each([
+    ["\u09A4\u09CD\u200D\u09B8 \u0D15\u0D28\u0D4D\u200D", "\u09A4\u09CD\u09B8 \u0D15\u0D7B"],
+    ["\u0A15\u09A4\u09CD\u09B8\u0D6F", "\u0A15\u09A4\u09CD\u200D\u09B8\u0D7B"],
+    ["\u09CE\u09B8\u09A4\u09CD\u09B8\u1832\u1820\u0D6A", "\u09CE\u09B8\u09A4\u09CD\u200D\u09B8\u1832\u1820\u0D7C"],
+  ])("%s and %s, with a khanda ta and a chillu, still look too alike", (a, b) => {
+    expectSimilar(a, b);
+  });
+
+  it("keeps the khanda ta apart from TA", () => {
+    expectDistinct("\u0989\u09CE\u09B8\u09AC", "\u0989\u09A4\u09B8\u09AC");
+  });
+
+  it("refuses the legacy khanda ta ending a name, where the joiner joins nothing", () => {
+    expect(isValidUsername("\u09B8\u09A4\u09CD\u200D")).toBe(false);
+  });
+});
+
+// EXP-405: the visual key folds the abbreviation signs (all drawn as a small circle, "॰" like "৽"), the letter visual
+// key drops the Gurmukhi udaat and yakash; each is now also taken with the other reading of the hooks
+describe("Gurmukhi hooks next to symbols the symbol table reads (EXP-405)", () => {
+  const ABBREVIATION_SIGNS = ["\u0970", "\u09FD", "\u0AF0"];
+  const HOOKS = ["\u0A51", "\u0A75"];
+  const KA = "\u0A15";
+  const SA = "\u0A38";
+  const signPairs = ABBREVIATION_SIGNS.flatMap((sign) =>
+    ABBREVIATION_SIGNS.filter((other) => other !== sign).map((other) => [sign, other]));
+  const cases = signPairs.flatMap(([sign, other]) => HOOKS.flatMap((hook) =>
+    // The other name has the bare letter, the virama or the other hook there
+    ["", "\u0A4D", ...HOOKS.filter((otherHook) => otherHook !== hook)].map((otherMark): [string, string] =>
+      [`${sign}${KA}${hook}${SA}`, `${other}${KA}${otherMark}${SA}`])));
+
+  it("covers every pair of signs and hooks", () => {
+    expect(cases).toHaveLength(36);
+  });
+
+  it.each(cases)("%s and %s look too alike", (a, b) => {
+    expectSimilar(a, b);
+  });
+
+  it("reads the hooks as the virama without the symbol table too", () => {
+    expectSimilar(`b\u00BAb ${KA}\u0A51${SA}`, `b0b ${KA}\u0A4D${SA}`);
+  });
+});

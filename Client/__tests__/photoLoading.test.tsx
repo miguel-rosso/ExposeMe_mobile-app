@@ -3,7 +3,8 @@ import { ActivityIndicator, Image, Platform } from "react-native";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import { FakeSocket } from "../testUtils/fakeSocket";
 import { TEST_IDS } from "../app/utils/testIds";
-import { prefetchImage } from "../app/utils/image";
+import { downloadImageToMemory, prefetchImage } from "../app/utils/image";
+import { FakeXhr, installFakeXhr } from "../testUtils/fakeXhr";
 import PhotoComponent from "../app/components/PhotoComponent";
 // Loaded with the file (jest.mock calls below are hoisted above it): a cold transform must not hit the test timeout
 import GameScreen from "../app/screens/GameScreen";
@@ -13,6 +14,8 @@ import getEnvVars from "../config";
 // downloading as soon as its URL arrives, with the room credentials, and a loading indicator covers it until it loads.
 // EXP-131: on Android the blurred backdrop requested the same photo alongside the main one and showed up 1-2 s later:
 // it is drawn once the main photo has loaded, from the same source.
+// EXP-394: on iOS the main photo and the backdrop each downloaded the photo (no-store responses aren't cached there):
+// the photo is downloaded once into memory and both views draw that copy, the backdrop once the main photo has loaded.
 
 jest.mock("@react-native-async-storage/async-storage", () =>
   require("@react-native-async-storage/async-storage/jest/async-storage-mock")
@@ -48,21 +51,25 @@ jest.mock("@/app/components/ProgressBar", () => () => null);
 
 const HEADERS = { Authorization: "Bearer tok-123", "X-Game-Code": "123456" };
 const PHOTO_URL = "http://s/temp/a.jpg";
+const BLOB_URI = "blob:photo-1?offset=0&size=1024";
 const { SERVER_URL } = getEnvVars();
 
 const realOS = Platform.OS;
 const setOS = (os: typeof Platform.OS) => Object.defineProperty(Platform, "OS", { configurable: true, get: () => os });
 let getSizeWithHeaders: jest.SpyInstance;
+let restoreXhr: () => void;
 beforeAll(() => {
   jest.spyOn(console, "log").mockImplementation(() => {});
   jest.spyOn(console, "error").mockImplementation(() => {});
 });
 beforeEach(() => {
   getSizeWithHeaders = jest.spyOn(Image, "getSizeWithHeaders").mockResolvedValue({ width: 1600, height: 1200 } as never);
+  restoreXhr = installFakeXhr(BLOB_URI);
 });
 afterEach(() => {
   setOS(realOS);
   getSizeWithHeaders.mockRestore();
+  restoreXhr();
 });
 afterAll(() => jest.restoreAllMocks());
 
@@ -72,6 +79,22 @@ const loadingShown = (root: ReactTestInstance) =>
 const mainPhoto = (root: ReactTestInstance) =>
   root.find((n) => typeof n.props.onLoad === "function" && n.props.resizeMode === "contain" && !isHost(n));
 const backdrops = (root: ReactTestInstance) => root.findAll((n) => n.type === Image && n.props.blurRadius > 0);
+// Every native image view on screen, and those that would download the photo from the server
+const images = (root: ReactTestInstance) => root.findAll((n) => n.type === Image);
+const serverImages = (root: ReactTestInstance) => images(root).filter((n) => n.props.source?.uri === PHOTO_URL);
+const coverImages = (root: ReactTestInstance) => images(root).filter((n) => n.props.resizeMode === "cover");
+/** Answers the latest photo download (PhotoComponent starts one per server photo on iOS) */
+const finishDownload = async (status = 200) => {
+  const request = FakeXhr.requests[FakeXhr.requests.length - 1];
+  let blob!: ReturnType<FakeXhr["respond"]>;
+  await act(async () => { blob = request.respond(status); });
+  return blob;
+};
+const renderPhoto = async (photoUrl = PHOTO_URL) => {
+  let r!: TestRenderer.ReactTestRenderer;
+  await act(async () => { r = TestRenderer.create(<PhotoComponent photoUrl={photoUrl} headers={HEADERS} />); });
+  return r;
+};
 
 describe("prefetchImage (EXP-119)", () => {
   it("on Android fetches the photo into the image cache with the request headers", async () => {
@@ -97,9 +120,13 @@ describe("prefetchImage (EXP-119)", () => {
 });
 
 describe("PhotoComponent loading indicator (EXP-119)", () => {
+  // On iOS the main photo is mounted once its single download has finished (EXP-394)
   const render = async (photoUrl: string) => {
-    let r!: TestRenderer.ReactTestRenderer;
-    await act(async () => { r = TestRenderer.create(<PhotoComponent photoUrl={photoUrl} headers={HEADERS} />); });
+    const r = await renderPhoto(photoUrl);
+    if (Platform.OS === "ios") {
+      expect(loadingShown(r.root)).toBe(true); // also while it downloads
+      await finishDownload();
+    }
     return r;
   };
 
@@ -112,17 +139,171 @@ describe("PhotoComponent loading indicator (EXP-119)", () => {
     expect(loadingShown(r.root)).toBe(false);
   });
 
-  it("drops the indicator when the photo fails to load (no endless spinner)", async () => {
+  it.each(["ios", "android"] as const)("on %s drops the indicator when the photo fails to load", async (os) => {
+    setOS(os);
     const r = await render(PHOTO_URL);
+    // iOS first retries a failed in-memory copy from the photo URL (EXP-394)
+    if (os === "ios") act(() => mainPhoto(r.root).props.onError());
     act(() => mainPhoto(r.root).props.onError());
     expect(loadingShown(r.root)).toBe(false);
   });
 
-  it("shows it again for the next photo", async () => {
+  it.each(["ios", "android"] as const)("on %s shows it again for the next photo", async (os) => {
+    setOS(os);
     const r = await render(PHOTO_URL);
     act(() => mainPhoto(r.root).props.onLoad());
     await act(async () => { r.update(<PhotoComponent photoUrl="http://s/temp/b.jpg" headers={HEADERS} />); });
     expect(loadingShown(r.root)).toBe(true);
+  });
+});
+
+describe("PhotoComponent backdrop mount order (EXP-131, EXP-394)", () => {
+  it.each(["ios", "android"] as const)("on %s the backdrop is drawn after the main photo loads, same source", async (os) => {
+    setOS(os);
+    const r = await renderPhoto();
+    if (os === "ios") await finishDownload();
+    expect(images(r.root)).toHaveLength(1); // only the main photo
+    expect(coverImages(r.root)).toHaveLength(0);
+    expect(backdrops(r.root)).toHaveLength(0);
+    act(() => mainPhoto(r.root).props.onLoad());
+    const backdrop = os === "ios" ? coverImages(r.root) : backdrops(r.root);
+    expect(backdrop).toHaveLength(1);
+    expect(backdrop[0].props.source).toBe(mainPhoto(r.root).props.source);
+  });
+});
+
+describe("PhotoComponent on iOS downloads the photo once (EXP-394)", () => {
+  beforeEach(() => setOS("ios"));
+
+  it("one GET with the room credentials, and both views draw the in-memory copy", async () => {
+    const r = await renderPhoto();
+    expect(FakeXhr.requests).toHaveLength(1);
+    expect(FakeXhr.requests[0]).toMatchObject({
+      method: "GET", url: PHOTO_URL, responseType: "blob", headers: HEADERS, sent: true,
+    });
+    // While it downloads no view requests the photo
+    expect(images(r.root)).toHaveLength(0);
+    await finishDownload();
+    expect(images(r.root)).toHaveLength(1);
+    expect(mainPhoto(r.root).props.source).toEqual({ uri: BLOB_URI });
+    act(() => mainPhoto(r.root).props.onLoad());
+    expect(images(r.root)).toHaveLength(2);
+    expect(coverImages(r.root)[0].props.source).toEqual({ uri: BLOB_URI });
+    // No view ever loads the server URL itself: that would be a second download
+    expect(serverImages(r.root)).toHaveLength(0);
+    expect(FakeXhr.requests).toHaveLength(1);
+  });
+
+  it("frees the in-memory photo when the next photo replaces it, and downloads that one once", async () => {
+    const r = await renderPhoto();
+    const blob = await finishDownload();
+    act(() => mainPhoto(r.root).props.onLoad());
+    await act(async () => { r.update(<PhotoComponent photoUrl="http://s/temp/b.jpg" headers={HEADERS} />); });
+    expect(blob.close).toHaveBeenCalledTimes(1);
+    expect(FakeXhr.requests).toHaveLength(2);
+    expect(FakeXhr.requests[1].url).toBe("http://s/temp/b.jpg");
+    // The previous photo's copy is never drawn for the new one
+    expect(images(r.root)).toHaveLength(0);
+    expect(loadingShown(r.root)).toBe(true);
+  });
+
+  it("cancels a download still in flight when the photo changes or the view unmounts", async () => {
+    const r = await renderPhoto();
+    await act(async () => { r.update(<PhotoComponent photoUrl="http://s/temp/b.jpg" headers={HEADERS} />); });
+    expect(FakeXhr.requests[0].aborted).toBe(true);
+    act(() => r.unmount());
+    expect(FakeXhr.requests[1].aborted).toBe(true);
+  });
+
+  it.each([
+    ["a network error", () => act(async () => FakeXhr.requests[0].fail())],
+    ["an HTTP error", () => finishDownload(403)],
+  ])("after %s falls back to the photo URL, so the <Image> retries it and reports the error", async (_, failDownload) => {
+    const r = await renderPhoto();
+    await failDownload();
+    expect(mainPhoto(r.root).props.source).toEqual({ uri: PHOTO_URL, headers: HEADERS });
+    act(() => mainPhoto(r.root).props.onError());
+    expect(loadingShown(r.root)).toBe(false);
+  });
+
+  it("retries from the photo URL when the downloaded copy can't be drawn, and only then reports the error", async () => {
+    const r = await renderPhoto();
+    await finishDownload();
+    act(() => mainPhoto(r.root).props.onError());
+    expect(mainPhoto(r.root).props.source).toEqual({ uri: PHOTO_URL, headers: HEADERS });
+    expect(loadingShown(r.root)).toBe(true);
+    act(() => mainPhoto(r.root).props.onLoad());
+    expect(loadingShown(r.root)).toBe(false);
+    // The backdrop draws the same source as the main photo
+    expect(coverImages(r.root)[0].props.source).toBe(mainPhoto(r.root).props.source);
+  });
+
+  it("draws an on-device photo (own photos viewer) directly, without downloading it", async () => {
+    const r = await renderPhoto("ph://ABC-123");
+    expect(FakeXhr.requests).toHaveLength(0);
+    expect(mainPhoto(r.root).props.source).toEqual({ uri: "ph://ABC-123", headers: HEADERS });
+  });
+});
+
+describe("downloadImageToMemory (EXP-394)", () => {
+  it("resolves with a blob: URI of the photo and frees it once on release", async () => {
+    const download = downloadImageToMemory(PHOTO_URL, HEADERS);
+    const blob = FakeXhr.requests[0].respond();
+    await expect(download.uri).resolves.toBe(BLOB_URI);
+    expect(URL.createObjectURL).toHaveBeenCalledWith(blob);
+    download.release();
+    download.release();
+    expect(blob.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects on an HTTP error and frees the error response's blob", async () => {
+    const download = downloadImageToMemory(PHOTO_URL, HEADERS);
+    const blob = FakeXhr.requests[0].respond(403);
+    await expect(download.uri).rejects.toThrow("HTTP 403");
+    expect(blob.close).toHaveBeenCalledTimes(1);
+    download.release();
+    expect(blob.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("released once the response has arrived, lets it finish and frees its blob (an abort would leak it)", async () => {
+    const download = downloadImageToMemory(PHOTO_URL, HEADERS);
+    const request = FakeXhr.requests[0];
+    const blob = request.arrive();
+    download.release();
+    expect(request.aborted).toBe(false);
+    request.respond();
+    await expect(download.uri).rejects.toThrow("released");
+    expect(blob.close).toHaveBeenCalledTimes(1);
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+  });
+
+  it("rejects and frees the photo when no blob: URI can be made for it", async () => {
+    (URL.createObjectURL as jest.Mock).mockImplementation(() => { throw new Error("Cannot create URL for blob"); });
+    const download = downloadImageToMemory(PHOTO_URL, HEADERS);
+    const blob = FakeXhr.requests[0].respond();
+    await expect(download.uri).rejects.toThrow("Cannot create URL");
+    expect(blob.close).toHaveBeenCalledTimes(1);
+    download.release();
+    expect(blob.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("aborts a download released before it finishes", async () => {
+    const download = downloadImageToMemory(PHOTO_URL);
+    download.release();
+    expect(FakeXhr.requests[0].aborted).toBe(true);
+    await expect(download.uri).rejects.toThrow();
+  });
+
+  it("never throws, even without a native XMLHttpRequest", async () => {
+    const fakeXhr = globalThis.XMLHttpRequest;
+    (globalThis as { XMLHttpRequest?: unknown }).XMLHttpRequest = undefined;
+    try {
+      const download = downloadImageToMemory(PHOTO_URL);
+      await expect(download.uri).rejects.toThrow();
+      expect(() => download.release()).not.toThrow();
+    } finally {
+      globalThis.XMLHttpRequest = fakeXhr;
+    }
   });
 });
 

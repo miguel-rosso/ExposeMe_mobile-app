@@ -4,6 +4,7 @@ import { Image, Platform } from "react-native";
 import { photoAuthHeaders, resolvePhotoAuth } from "../app/utils/photoAuth";
 import { getImageSource } from "../app/utils/image";
 import PhotoComponent from "../app/components/PhotoComponent";
+import { FakeXhr, installFakeXhr } from "../testUtils/fakeXhr";
 
 // EXP-069: the server only serves a room's photos to its members, so the app sends the room code and the player's
 // rejoin token as headers on POST /upload and on every in-game <Image> of a server photo.
@@ -40,12 +41,15 @@ describe("PhotoComponent", () => {
   const sources = (r: TestRenderer.ReactTestRenderer) =>
     r.root.findAll((n) => n.type === Image || (n.props.source && typeof n.type !== "string"), { deep: true }).map((n) => n.props.source);
 
-  it("loads a server photo with the auth headers", async () => {
-    let r!: TestRenderer.ReactTestRenderer;
-    await act(async () => { r = TestRenderer.create(<PhotoComponent photoUrl="http://s/temp/a.jpg" headers={HEADERS} />); });
-    const srcs = sources(r).filter(Boolean);
-    expect(srcs.length).toBeGreaterThan(0);
-    for (const s of srcs) expect(s).toEqual({ uri: "http://s/temp/a.jpg", headers: HEADERS });
+  it("on iOS downloads a server photo with the auth headers (once, for every view: EXP-394)", async () => {
+    const restoreXhr = installFakeXhr();
+    try {
+      await act(async () => { TestRenderer.create(<PhotoComponent photoUrl="http://s/temp/a.jpg" headers={HEADERS} />); });
+      expect(FakeXhr.requests).toHaveLength(1);
+      expect(FakeXhr.requests[0]).toMatchObject({ url: "http://s/temp/a.jpg", headers: HEADERS });
+    } finally {
+      restoreXhr();
+    }
   });
 
   it("loads a local photo without headers", async () => {

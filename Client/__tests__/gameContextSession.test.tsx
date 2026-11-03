@@ -113,11 +113,11 @@ describe("GameContext socket lifecycle (EXP-063)", () => {
 describe("GameContext leaveRoom (EXP-254)", () => {
   afterEach(() => jest.useRealTimers());
 
-  /** The ack callback sent with the socket's leave-room. */
+  /** The ack callback sent with the socket's leave-room (its last argument, after the seat if one is named). */
   const leaveAck = (socket: MockSocket): (() => void) => {
     const call = socket.emit.mock.calls.find(([ev]: unknown[]) => ev === "leave-room");
     expect(call).toBeDefined();
-    return call![1] as () => void;
+    return call![call!.length - 1] as () => void;
   };
 
   it("sends leave-room, forgets the token and drops the socket at once, closing it only on the server's ack", async () => {
@@ -180,8 +180,9 @@ describe("GameContext leaveRoom (EXP-254)", () => {
   });
 
   // EXP-377: Exit while reconnecting. The token is forgotten at once (no screen can rejoin with it), but the old socket
-  // keeps it to rejoin and leave once it is back, so the server sees a leave, not a lost connection
-  it("while reconnecting, the old socket rejoins this room's seat once back, then leaves", async () => {
+  // keeps it to name this room's seat in its leave once it is back (EXP-387), so the server sees a leave, not a lost
+  // connection, and never a rejoin first
+  it("while reconnecting, the old socket leaves this room's seat once back, without rejoining it", async () => {
     jest.useFakeTimers();
     const r = mount();
     act(() => ctx.setGameCode("ABC123"));
@@ -195,8 +196,8 @@ describe("GameContext leaveRoom (EXP-254)", () => {
 
     const listener = (ev: string) => leaving.once.mock.calls.find(([e]: unknown[]) => e === ev)![1] as (d?: unknown) => void;
     listener("connect")();
-    expect(leaving.emit.mock.calls.map(([ev]: unknown[]) => ev)).toEqual(["join-create-game", "leave-room"]);
-    expect(leaving.emit).toHaveBeenCalledWith("join-create-game", { gameCode: "ABC123", username: "bob", rejoinToken: "tok-1" });
+    expect(leaving.emit.mock.calls.map(([ev]: unknown[]) => ev)).toEqual(["leave-room"]);
+    expect(leaving.emit).toHaveBeenCalledWith("leave-room", { gameCode: "ABC123", username: "bob", rejoinToken: "tok-1" }, expect.any(Function));
     expect(leaving.disconnect).not.toHaveBeenCalled();
     leaveAck(leaving)();
     expect(leaving.disconnect).toHaveBeenCalledTimes(1);

@@ -158,6 +158,16 @@ for good in "--leave-round 2" "--leave-round 2 --leave-owner" "--kick bot3" "--k
   [[ "$rc" != 2 ]] && ok "$good is accepted" || ko "$good is accepted" "$(cat "$TMP/err")"
 done
 [[ "$(node "$BOTS" --help)" == *"--leave-round R [--leave-owner]"* && "$(node "$BOTS" --help)" == *"--kick NAME "* ]] && ok "--help lists --leave-round, --leave-owner and --kick" || ko "--help lists --leave-round, --leave-owner and --kick"
+# --leave-offline-round R (EXP-387): the same bot as --leave-round leaves, offline first, naming its seat
+run 2 "--leave-offline-round abc exits 2" --bots 2 --host --leave-offline-round abc --timeout 1
+[[ "$err" == *'--leave-offline-round "abc" is not a round number'* ]] && ok "bad --leave-offline-round is named" || ko "bad --leave-offline-round is named" "$err"
+run 2 "--leave-offline-round beyond --rounds exits 2" --bots 2 --host --rounds 3 --leave-offline-round 4 --timeout 1
+run 2 "--leave-offline-round with --leave-round exits 2" --bots 3 --host --leave-round 2 --leave-offline-round 3 --timeout 1
+[[ "$err" == *"use --leave-round or --leave-offline-round, not both"* ]] && ok "--leave-offline-round with --leave-round is named" || ko "--leave-offline-round with --leave-round is named" "$err"
+SERVER_URL="$URL" node "$BOTS" --bots 2 --host --rounds 3 --leave-offline-round 2 --timeout 1 >/dev/null 2>"$TMP/err"; rc=$?
+[[ "$rc" != 2 ]] && ok "--leave-offline-round 2 is accepted" || ko "--leave-offline-round 2 is accepted" "$(cat "$TMP/err")"
+[[ "$(node "$BOTS" --help)" == *"--leave-offline-round R"* ]] && ok "--help lists --leave-offline-round" || ko "--help lists --leave-offline-round"
+mirrors managers/GameEngine.ts "$BOTS" PAUSE_MIN_DURATION PAUSE_MIN_DURATION
 # --kick-after-game D (EXP-346): the kick waits for the game to end, so it needs --kick and no second game
 run 2 "--kick-after-game without --kick exits 2" --bots 3 --host --rounds 3 --kick-after-game 30 --timeout 1
 [[ "$err" == *"--kick-after-game needs --kick NAME"* ]] && ok "--kick-after-game without --kick is named" || ko "--kick-after-game without --kick is named" "$err"
@@ -244,7 +254,7 @@ mirrors managers/GameEngine.ts "$ANALYSIS" MAX_HOLDS_PER_ROUND MAX_HOLDS_PER_ROU
 
 # ── --answer-right: the bots vote for the owner and end tied with points (EXP-348) ──
 # Options that make a bot miss or change a vote would break the tie, so they are refused with it
-for clash in "--no-answer" "--plant 1" "--chaos 0.1" "--drop-round 2" "--drop-rounds 2,3" "--leave-round 2" "--play-again-linger 5"; do
+for clash in "--no-answer" "--plant 1" "--chaos 0.1" "--drop-round 2" "--drop-rounds 2,3" "--leave-round 2" "--leave-offline-round 2" "--play-again-linger 5"; do
   # shellcheck disable=SC2086
   run 2 "--answer-right with $clash exits 2" --bots 3 --host --answer-right $clash --timeout 1
   [[ "$err" == *"--answer-right can't be combined with ${clash%% *}"* ]] && ok "--answer-right with $clash is named" || ko "--answer-right with $clash is named" "$err"

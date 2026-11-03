@@ -20,7 +20,7 @@
 //                           above 0 with at most one other player (qa/maestro/tie-game.yaml). Each game's final score must
 //                           show every bot on one point per revealed round whose owner it could tell, and more than 0 (a
 //                           game nobody scored has no result) ("consistency", "tie: ..."). Not with --no-answer,
-//                           --plant, --chaos, --drop-round(s), --leave-round or --play-again-linger; the other players
+//                           --plant, --chaos, --drop-round(s), --leave-(offline-)round or --play-again-linger; the other players
 //                           (devices) must play the whole game: the check counts them from game-started, so one leaving
 //                           would let the bots tell owners the check does not expect them to.
 //   node qa/lab/bots.mjs --bots 3 --host --rounds 3 --answer-right       # bot1, bot2 and bot3 tied on 3 points
@@ -116,6 +116,19 @@
 //                           round-scores, and a round where nobody did is reported ("consistency", EXP-301).
 //   node qa/lab/bots.mjs --bots 3 --host --rounds 3 --leave-round 2
 //   node qa/lab/bots.mjs --bots 4 --host --rounds 3 --leave-round 2 --leave-owner
+//            --leave-offline-round R  the last bot leaves at round R's round-start like the app's Exit pressed while
+//                           offline (EXP-377, EXP-387): its connection drops, and 4 s later (past the server's 2 s
+//                           minimum pause, when a rejoin would resume a paused game) it reconnects and sends leave-room
+//                           naming its seat { gameCode, username, rejoinToken }, never a rejoin, closing on the ack. The
+//                           same checks as --leave-round, and nobody may get game-resumed between that leave and its
+//                           player-left (with 2 bots the other one sees the pause end only with game-over). Not with
+//                           --leave-round. The leaver's run only ends once its seat leave is answered, and a leaver
+//                           whose seat leave was never sent or acked is an error, also when it is the only bot of its
+//                           process (Server/tests/botsOfflineLeave.integration.test.ts plays that shape).
+//   node qa/lab/bots.mjs --bots 2 --host --rounds 3 --leave-offline-round 2
+//                           With a device as the other player (one bot joins the device's room): the device shows
+//                           «Game paused» for 4 s, then the final screen at once, never the game resuming first.
+//   node qa/lab/bots.mjs --bots 1 --code K7MQ4X --leave-offline-round 1
 //            --kick NAME    the host bot removes NAME (remove-player, EXP-139) in the lobby 5 s after NAME is in; the
 //                           game then starts without it. The server only accepts it in the lobby (EXP-316), so there is
 //                           no mid-game form (NAME@R is refused). Every bot gets player-removed { NAME }; NAME is in no
@@ -198,7 +211,7 @@ const BOOL_FLAGS = new Set([
 const VALUE_FLAGS = new Set([
   "server", "bots", "rooms", "rounds", "wait-players", "code", "code-file", "photos", "out", "chaos", "upload-fail",
   "timeout", "no-ready", "drop-round", "drop-rounds", "drop-secs", "drop-bot", "photo-unavailable", "plant", "play-again-linger",
-  "play-again-linger-bot", "start-next-game", "name-prefix", "leave-round", "kick", "kick-after-game", "hold",
+  "play-again-linger-bot", "start-next-game", "name-prefix", "leave-round", "leave-offline-round", "kick", "kick-after-game", "hold",
 ]);
 const USAGE = `usage: node qa/lab/bots.mjs [options]
 
@@ -225,6 +238,8 @@ Headless ExposeMe players (see the header of qa/lab/bots.mjs for every scenario)
   --app-resync  --lobby-host-drop
   --leave-round R [--leave-owner]  the last bot (or, with --leave-owner, round R's photo owner) leaves the room
                              (leave-room) at round R's round-start
+  --leave-offline-round R    the last bot drops at round R's round-start and, back 4 s later, leaves naming its seat
+                             (the app's Exit while offline): nobody may see the game resume before its player-left
   --kick NAME                the host bot removes NAME (remove-player) in the lobby once NAME is in (lobby only)
   --kick-after-game D        with --kick: NAME plays the game and is removed D seconds after game-over instead
   --play-again-linger S [--play-again-linger-bot K] [--start-next-game D]
@@ -363,7 +378,7 @@ const NO_ANSWER = !!args["no-answer"];
 const ANSWER_RIGHT = !!args["answer-right"];
 // Options that make a bot miss or change a vote (or hide who sent the photo) would break that tie
 // (a bot lingering on the final screens sits the second game out)
-const TIE_BREAKING_OPTIONS = ["no-answer", "plant", "chaos", "drop-round", "drop-rounds", "leave-round", "play-again-linger"];
+const TIE_BREAKING_OPTIONS = ["no-answer", "plant", "chaos", "drop-round", "drop-rounds", "leave-round", "leave-offline-round", "play-again-linger"];
 const tieBreaker = ANSWER_RIGHT && TIE_BREAKING_OPTIONS.find((o) => args[o] !== undefined);
 if (tieBreaker) exitUsage(`--answer-right can't be combined with --${tieBreaker} (the bots would no longer tie)`);
 // Otherwise nobody is told whose photo it is, the owner included (EXP-252): every bot guesses at random among all
@@ -426,13 +441,13 @@ if (QUIT_AFTER_GAME_OVER) {
 const PLAYS_NEXT_GAME = PLAY_AGAIN_LINGER_S > 0 || QUIT_AFTER_GAME_OVER;
 
 // ── Players out of the room (EXP-139) ──
-/** --leave-round R: the round at whose round-start the last bot leaves (0: nobody leaves). */
-function plannedLeaveRound() {
-  const value = args["leave-round"];
+/** --leave-round R / --leave-offline-round R: the round at whose round-start the last bot leaves (0: nobody leaves). */
+function plannedLeaveRound(name) {
+  const value = args[name];
   if (value === undefined) return 0;
   const rounds = parseRoundList(value);
-  if (rounds?.length !== 1) exitUsage(`--leave-round "${value}" is not a round number`);
-  return withinHostedGame("--leave-round", rounds[0]);
+  if (rounds?.length !== 1) exitUsage(`--${name} "${value}" is not a round number`);
+  return withinHostedGame(`--${name}`, rounds[0]);
 }
 /** A planned exit at `round` must happen in the game: with --host the bots set its length (--rounds). */
 function withinHostedGame(option, round) {
@@ -456,8 +471,15 @@ function plannedKick() {
   if (name === botName(0, 0)) exitUsage(`--kick "${name}": the host can't remove itself`);
   return name;
 }
-const LEAVE_ROUND = plannedLeaveRound();
-const LEAVER = N_BOTS - 1; // the bot that leaves with --leave-round
+const LEAVE_ROUND = plannedLeaveRound("leave-round");
+const LEAVE_OFFLINE_ROUND = plannedLeaveRound("leave-offline-round");
+if (LEAVE_ROUND && LEAVE_OFFLINE_ROUND) exitUsage("use --leave-round or --leave-offline-round, not both (the same bot leaves)");
+const LEAVER = N_BOTS - 1; // the bot that leaves with --leave-round or --leave-offline-round
+// A pause lasts at least this long, as in Server/managers/GameEngine.ts (bots-cli.test.sh checks the copy)
+const PAUSE_MIN_DURATION = 2_000;
+// --leave-offline-round: offline this long before its leave, well past the minimum pause, so a rejoin first would
+// resume a 2-player game paused for it at once (EXP-387)
+const OFFLINE_LEAVE_AWAY_MS = 2 * PAUSE_MIN_DURATION;
 const LEAVE_OWNER = !!args["leave-owner"]; // --leave-owner: round LEAVE_ROUND's photo owner leaves instead
 if (LEAVE_OWNER && !LEAVE_ROUND) exitUsage("--leave-owner needs --leave-round");
 // Like the app (Client/app/utils/leaveRoom.ts): the leaver closes its socket once leave-room is acked, or after this
@@ -605,8 +627,23 @@ function runRoom(roomIdx, fixedCode) {
     const bots = [];
     const socketIds = new Set(); // every socket id of this room's bots (they change on reconnect)
     const spareSockets = []; // short-lived second connections of a bot (a holder rejoining on a new socket, --hold)
+    const offlineLeave = { sentAt: null }; // --leave-offline-round: when the leaver's seat leave was sent
+    /** --leave-offline-round (EXP-387): every bot that left offline sent its seat leave and the server acked it. */
+    const seatLeaveProblems = () => events.filter((e) => e.ev === "left-room" && e.payload?.offline).flatMap(({ bot }) => {
+      const sent = events.some((e) => e.bot === bot && e.ev === "seat-leave-sent");
+      const answer = events.find((e) => e.bot === bot && e.ev === "seat-leave-done");
+      if (!sent) return [`${bot}: left offline but never sent its seat leave`];
+      return answer?.payload.acked ? [] : [`${bot}: its seat leave was ${answer ? "not acked" : "still waiting for its ack"} when the run ended`];
+    });
 
+    let ended = false;
+    let deferredEnd = null; // the reason the run ended with while a seat leave was in flight (see leaveSeat)
     const done = (reason) => {
+      if (ended) return;
+      // --leave-offline-round: the others' game-over can arrive before the leaver's ack; that leave is answered first
+      if (reason !== "timeout" && bots.some((b) => b.seatLeave)) { deferredEnd = reason; return; }
+      ended = true;
+      errors.push(...seatLeaveProblems());
       clearTimeout(timer);
       [...bots.map((b) => b.socket), ...spareSockets].forEach((s) => s.disconnect());
       resolve({ code, events, errors, uploads, rateLimited, reason, players: bots.map((b) => b.name) });
@@ -661,6 +698,8 @@ function runRoom(roomIdx, fixedCode) {
       const join = () => socket.emit("join-create-game", joinPayload());
       bot.join = join;
       socket.on("connect", () => {
+        // --leave-offline-round: back from offline only to leave, naming the seat (never a rejoin)
+        if (bot.seatLeave === "offline") { leaveSeat(); return; }
         // Out of the room for good (left or kicked): a reconnect planned before that (--chaos) must not come back
         if (bot.gone) { socket.disconnect(); return; }
         socketIds.add(socket.id);
@@ -779,7 +818,8 @@ function runRoom(roomIdx, fixedCode) {
           rec("kicked-out", bot.round, { reason });
           comeBackAfterKick();
         }
-        if (bot.left || bot.kicked) endIfAllOut();
+        // A bot that left offline is not out until its seat leave is answered (leaveSeat ends the run then)
+        if ((bot.left && !bot.seatLeave) || bot.kicked) endIfAllOut();
       });
       // Like an app that was offline at the kick, missed player-removed and comes back with its stored token (EXP-337):
       // the server must refuse that join with its own reason, not let the kicked player in again as a new one
@@ -903,6 +943,7 @@ function runRoom(roomIdx, fixedCode) {
         bot.leavers = []; // a new round: its options are the players in the room
         const leaves = LEAVE_OWNER ? bot.photoRound === d.round : i === LEAVER;
         if (LEAVE_ROUND === d.round && leaves && !bot.gone) { leaveRoom(d.round); return; }
+        if (LEAVE_OFFLINE_ROUND === d.round && i === LEAVER && !bot.gone) { leaveOffline(d.round); return; }
         bot.guess = pickGuess(bot);
         // Photo access: the first two bots load the photo like the app's <Image> (with credentials), and check that
         // it is refused without them
@@ -933,6 +974,33 @@ function runRoom(roomIdx, fixedCode) {
         bot.left = true;
         rec("left-room", round, LEAVE_OWNER ? { owner: true } : undefined);
         socket.timeout(LEAVE_ACK_TIMEOUT_MS).emit("leave-room", () => socket.disconnect());
+      };
+      // --leave-offline-round (EXP-387): like the app's Exit pressed while offline (GameContext.leaveRoom ->
+      // leaveFromAnywhere): out of the game from the press; the socket comes back after OFFLINE_LEAVE_AWAY_MS and its
+      // leave-room names the seat with the token, closing on the ack. The others must get player-left with no
+      // game-resumed before it (see the game-resumed handler). bot.seatLeave: "offline" until the reconnection, "sent"
+      // until the ack (or its cap); the run can't end "all-out" before that (see endIfAllOut), or the seat leave would
+      // never be sent and the others would sit in the pause
+      const leaveOffline = (round) => {
+        bot.gone = true;
+        bot.left = true;
+        bot.seatLeave = "offline";
+        rec("left-room", round, { offline: true });
+        socket.disconnect();
+        setTimeout(() => { socket.connect(); }, OFFLINE_LEAVE_AWAY_MS);
+      };
+      const leaveSeat = () => {
+        bot.seatLeave = "sent";
+        offlineLeave.sentAt = now();
+        rec("seat-leave-sent", bot.round);
+        const seat = { gameCode: code, username: name, rejoinToken: bot.token };
+        socket.timeout(LEAVE_ACK_TIMEOUT_MS).emit("leave-room", seat, (err) => {
+          bot.seatLeave = null;
+          rec("seat-leave-done", bot.round, { acked: !err });
+          socket.disconnect();
+          if (deferredEnd) done(deferredEnd);
+          else endIfAllOut();
+        });
       };
       // Planned drop: offline for `secs`, then back on a new socket (rejoin + game-state snapshot)
       const dropFor = (secs, round, payload = {}) => {
@@ -1008,7 +1076,14 @@ function runRoom(roomIdx, fixedCode) {
         rec("game-paused", bot.round, { waitingFor: d.waitingFor, duration: d.duration, pause: d.pause, maxPauses: d.maxPauses });
         console.error(`[room ${roomIdx}] ${name}: game-paused ${d.pause}/${d.maxPauses} (${Math.round(d.duration / 1000)}s), waiting for ${d.waitingFor.join(", ")}`);
       });
-      socket.on("game-resumed", (d) => rec("game-resumed", bot.round, { phase: d.phase }));
+      socket.on("game-resumed", (d) => {
+        rec("game-resumed", bot.round, { phase: d.phase });
+        // --leave-offline-round (EXP-387): the leaver's seat is left, never rejoined, so its leave resumes nothing
+        const leaver = botName(roomIdx, LEAVER);
+        if (offlineLeave.sentAt !== null && bot.players.includes(leaver)) {
+          errors.push(`${name}: game-resumed after ${leaver}'s offline leave, before its player-left`);
+        }
+      });
       // ── Holding the scoreboard (--hold, EXP-303) ──
       // bot.hold: our own press, from hold-start sent until it is over ({ round, accepted }). Like the app's greyed out
       // button, no press once the server said the scoreboard is too short for a hold (bot.holdClosed, EXP-354)
@@ -1167,7 +1242,7 @@ function runRoom(roomIdx, fixedCode) {
       setTimeout(() => startGame(host), Math.max(0, wait));
     };
 
-    // Every bot of this process left (--leave-round with real devices playing on) or was kicked (by another bots
+    // Every bot of this process left (--leave-round / --leave-offline-round with real devices playing on) or was kicked (by another bots
     // process' host): nothing more for them to do
     const endIfAllOut = () => { if (bots.every((b) => b.gone)) done("all-out"); };
 
@@ -1216,7 +1291,7 @@ const results = await Promise.all(Array.from({ length: N_ROOMS }, (_, i) => runR
 const rooms = results.map((r) => analyseRoom(r, ANALYSIS_OPTS));
 // How a room may end and pass: at game-over, or on purpose before it, leaving only real devices behind
 const expectedEnd = (reason) => reason === "game-over" || (LOBBY_HOST_DROP && reason === "lobby-host-drop")
-  || (KICK !== null && reason === "lobby-kick") || (LEAVE_ROUND > 0 && reason === "all-out");
+  || (KICK !== null && reason === "lobby-kick") || ((LEAVE_ROUND > 0 || LEAVE_OFFLINE_ROUND > 0) && reason === "all-out");
 const summary = {
   server: SERVER,
   rooms: rooms.length,

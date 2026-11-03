@@ -157,7 +157,8 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
 
   // Exit (and Join on an invite link to another room): the server removes us and hands the host role over, and the rejoin
   // token for this room is forgotten. The app moves on at once; the old socket closes once the server confirms. Offline
-  // (reconnecting), the old socket keeps the token to rejoin and leave once it is back (leaveFromAnywhere, EXP-377).
+  // (reconnecting), the old socket keeps the token to name this seat in its leave once it is back (leaveFromAnywhere,
+  // EXP-377, EXP-387).
   const leaveRoom = () => {
     console.log("Leaving room");
     const stored = rejoinTokenRef.current;

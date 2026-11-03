@@ -44,9 +44,10 @@ describe("leaveAndClose (EXP-254)", () => {
   });
 });
 
-// EXP-377: Exit while reconnecting. The reconnection is a new server socket bound to no room, whose leave-room the
+// EXP-377: Exit while reconnecting. The reconnection is a new server socket bound to no room, whose bare leave-room the
 // server ignores: the others would wait for a lost connection (a paused game: up to 5 min). The leave waits for the
-// reconnection (bounded), rejoins the seat with its token and leaves right after.
+// reconnection (bounded) and then names the seat it gives up, with its token (EXP-387): never a rejoin first, which
+// would resume a paused game for the others one round trip before the leave ends it.
 describe("leaveFromAnywhere (EXP-377)", () => {
   const SEAT = { gameCode: "ABC123", username: "bob", rejoinToken: "tok-1" };
   const makeOfflineSocket = () => {
@@ -54,7 +55,7 @@ describe("leaveFromAnywhere (EXP-377)", () => {
     let ack: (() => void) | undefined;
     const socket = {
       connected: false,
-      emit: jest.fn((ev: string, ...args: unknown[]) => { if (ev === "leave-room") ack = args[0] as () => void; }),
+      emit: jest.fn((ev: string, ...args: unknown[]) => { if (ev === "leave-room") ack = args[args.length - 1] as () => void; }),
       disconnect: jest.fn(),
       once: jest.fn((ev: string, fn: (...args: unknown[]) => void) => { listeners.set(ev, fn); }),
       off: jest.fn((ev: string, fn: (...args: unknown[]) => void) => { if (listeners.get(ev) === fn) listeners.delete(ev); }),
@@ -77,16 +78,15 @@ describe("leaveFromAnywhere (EXP-377)", () => {
     expect(socket.disconnect).toHaveBeenCalledTimes(1);
   });
 
-  it("offline: sends nothing meanwhile; once back, rejoins with the token and leaves right after, closing on the ack", () => {
+  it("offline: sends nothing meanwhile; once back, leaves naming the seat (no rejoin), closing on the ack", () => {
     const { socket, fire, ack } = makeOfflineSocket();
     leaveFromAnywhere(socket, SEAT);
     expect(socket.emit).not.toHaveBeenCalled();
     expect(socket.disconnect).not.toHaveBeenCalled();
 
     fire("connect");
-    // In this order on the same socket: the server handles the rejoin before the leave (accepted or refused)
-    expect(socket.emit.mock.calls[0]).toEqual(["join-create-game", { gameCode: "ABC123", username: "bob", rejoinToken: "tok-1" }]);
-    expect(events(socket)).toEqual(["join-create-game", "leave-room"]);
+    expect(socket.emit).toHaveBeenCalledTimes(1);
+    expect(socket.emit).toHaveBeenCalledWith("leave-room", { gameCode: "ABC123", username: "bob", rejoinToken: "tok-1" }, expect.any(Function));
     expect(socket.disconnect).not.toHaveBeenCalled();
     ack();
     expect(socket.disconnect).toHaveBeenCalledTimes(1);
@@ -94,14 +94,13 @@ describe("leaveFromAnywhere (EXP-377)", () => {
     expect(socket.disconnect).toHaveBeenCalledTimes(1);
   });
 
-  // Never a bare close once the join is sent: the server would have rejoined me (resuming the game for the others), and
-  // the close would be a new lost connection (a new pause)
+  // Once the leave is sent only it closes the socket: a bare close could beat the leave to the server
   it("back just before the bound: the give-up timer can't close it, only the leave does (its ack or its cap)", () => {
     const { socket, fire } = makeOfflineSocket();
     leaveFromAnywhere(socket, SEAT);
     jest.advanceTimersByTime(OFFLINE_LEAVE_TIMEOUT_MS - 1);
     fire("connect");
-    expect(events(socket)).toEqual(["join-create-game", "leave-room"]);
+    expect(events(socket)).toEqual(["leave-room"]);
 
     jest.advanceTimersByTime(1); // past the bound: nothing
     expect(socket.disconnect).not.toHaveBeenCalled();
@@ -121,10 +120,10 @@ describe("leaveFromAnywhere (EXP-377)", () => {
     expect(socket.emit).not.toHaveBeenCalled();
   });
 
-  it("offline with no seat to rejoin (no token for this room): closes as before", () => {
+  it("offline with no seat to name (no token for this room): closes as before", () => {
     const { socket } = makeOfflineSocket();
     leaveFromAnywhere(socket, null);
-    expect(events(socket)).toEqual(["leave-room"]);
+    expect(socket.emit).toHaveBeenCalledWith("leave-room", expect.any(Function));
     jest.advanceTimersByTime(LEAVE_ACK_TIMEOUT_MS);
     expect(socket.disconnect).toHaveBeenCalledTimes(1);
   });

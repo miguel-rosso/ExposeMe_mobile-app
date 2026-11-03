@@ -189,6 +189,36 @@ function leaveCurrentRoom(socket: Socket): void {
   socket.data.username = null;
 }
 
+/** The seat a leave-room from a socket bound to no room gives up (see leaveSeat). */
+interface LeaveSeatData {
+  gameCode: string;
+  username: string;
+  rejoinToken: string;
+}
+
+function isLeaveSeat(value: unknown): value is LeaveSeatData {
+  const seat = value as Partial<Record<keyof LeaveSeatData, unknown>> | null | undefined;
+  return typeof seat?.gameCode === "string" && typeof seat.username === "string" && typeof seat.rejoinToken === "string";
+}
+
+/**
+ * Leave from a socket bound to no room, naming the seat to give up: the app leaving right after its reconnection
+ * (EXP-387). Only with that player's rejoin token (checked as a rejoin checks it) is the player removed, as a leave;
+ * the seat is never bound to this socket first, so a paused game is not resumed one round trip before it ends. Any
+ * socket still bound to that player (an old connection the server hasn't seen drop yet) is cut off. The sender is told
+ * nothing either way: whether the room, the player or the token exist, the ack is the same.
+ */
+function leaveSeat(seat: unknown): void {
+  if (!isLeaveSeat(seat)) return;
+  const { gameCode, username, rejoinToken } = seat;
+  const room = roomManager.getRoom(gameCode);
+  if (!room || !roomManager.canRejoin(gameCode, username, rejoinToken)) return;
+  releaseHoldOf(room, roomManager.getPlayer(gameCode, username)!.socketId);
+  gameEngine.removePlayer(room, username, "left", (left) => {
+    socketsOf(gameCode, left.username).forEach((old) => evictSocket(old, gameCode));
+  });
+}
+
 // Per-IP cap on concurrent connections. Counted per engine.io connection, whose "close" always fires (also when the
 // socket.io handshake never completes), and checked when the socket.io handshake arrives. Connections that never
 // complete one are closed by socket.io's connectTimeout.
@@ -352,13 +382,16 @@ io.on("connection", (socket: Socket) => {
     } catch (e) { console.error("disconnect error:", e); }
   });
 
-  // Explicit leave — player pressed the leave button. Acked once handled: the app closes the socket only then, since
+  // Explicit leave — player pressed the leave button. A bound socket sends no payload and leaves its binding; one bound
+  // to no room may name the seat it gives up (leaveSeat). Acked once handled: the app closes the socket only then, since
   // an event that socket.io dispatches after the disconnect is dropped (the leave would look like a lost connection)
-  socket.on("leave-room", (ack?: unknown) => {
+  socket.on("leave-room", (...args: unknown[]) => {
     try {
       if (!gameEvents.take("leave-room")) return;
+      const ack = args[args.length - 1];
       // A socket replaced by a rejoin only detaches itself; the live player stays
-      leaveCurrentRoom(socket);
+      if (socket.data.gameCode) leaveCurrentRoom(socket);
+      else leaveSeat(args[0]);
       if (typeof ack === "function") ack();
     } catch (e) { console.error("leave-room error:", e); }
   });

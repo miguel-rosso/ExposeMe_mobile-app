@@ -363,7 +363,8 @@ After last round: game-over
 - A successful join binds the socket to `(gameCode, username)` server-side. **Every other event uses that
   session**: `gameCode`/`username` fields in payloads are ignored (still accepted for compatibility).
   Events from sockets that never joined, or that were replaced by a rejoin on another socket, are ignored
-  (a replaced socket's `leave-room` only detaches that socket; the live player stays). After `leave-room`
+  (a replaced socket's `leave-room` only detaches that socket; the live player stays; an unbound socket's `leave-room`
+  may name a seat with its token, see "Leaving"). After `leave-room`
   the username is free again, so joining with it needs no token.
 - **Leaving** (Exit in the lobby, during a game or on the final screens, or Join on an invite link to another room;
   Cancel keeps the room, DEC-047): the app sends
@@ -372,13 +373,17 @@ After last round: game-over
   on at once. Closing in the same tick as the emit can lose the leave: socket.io dispatches an event on the next tick
   and drops it if the socket disconnected meanwhile, and the player would then be treated as a lost connection
   (lobby: shown as gone for 15 s with the name taken; mid-game: the game pauses for them instead of ending).
-  Leaving while the socket is **offline** (reconnecting): a leave-room on the reconnection would come from a socket
-  bound to no room and be ignored, so the old socket waits up to 10 s (`OFFLINE_LEAVE_TIMEOUT_MS`) to reconnect,
-  rejoins with the rejoin token (which the app has already forgotten for everything else) and sends `leave-room` as
-  above right after it: the server handles a socket's events in order and the join synchronously, so the leave always
-  follows the rejoin (a refused join leaves an unbound socket, whose leave is just acked). Once that join is sent the
-  socket is only closed by the leave (its ack or 1 s cap), never bare, which would be a new lost connection. If it
-  doesn't reconnect in time it is closed and the server goes by the lost connection; the token is dropped either way.
+  Leaving while the socket is **offline** (reconnecting): its reconnection is a socket bound to no room, whose bare
+  `leave-room` would be ignored, so the old socket waits up to 10 s (`OFFLINE_LEAVE_TIMEOUT_MS`) to reconnect and
+  then sends `leave-room` **naming the seat** it gives up, `{ gameCode, username, rejoinToken }` (the token the app has
+  already forgotten for everything else), with the same ack and 1 s cap (EXP-387). The server checks the token exactly
+  as a rejoin does (that player of that room, constant-time compare) and removes the player as any leave
+  (`player-left`, host handed over, the game goes on or ends; an old socket of that player it hasn't seen drop yet is
+  evicted), **without binding the socket to the seat first**: a paused game is never resumed (`game-resumed`,
+  `your-turn`) one round trip before the leave ends it. Anything else (no seat, a wrong token, another room's seat, a
+  seat already left) changes nothing, and the ack is the same either way, so it tells nothing about the room or its
+  players. A bound socket always leaves its own binding: a seat in its payload is ignored. If the socket doesn't
+  reconnect in time it is closed and the server goes by the lost connection; the token is dropped either way.
   In the lobby, Android's system back (key or gesture) is that same Exit, and the iOS back swipe is disabled (EXP-336).
   **During a game** (EXP-377, DEC-050 A) the Exit is on screen from the ready/loading phase to the round scores
   (hidden during a pause, a hold and after game over), and the pause modal and the blocking gallery notice (photo
@@ -724,7 +729,7 @@ All game events are **atomic** — each contains everything the client needs.
 | `set-rounds` | `{ rounds }` (10/15/20; 3 only with `ALLOW_QA_ROUNDS=1`, QA-only) | Host only, lobby only |
 | `start-game` | - (with an ack callback) | Host only, not while a game is running. Acked `{ ok: true }` or `{ ok: false, reason: "not-in-room" \| "not-host" \| "already-started" \| "not-enough-players", removed? }` (`removed` only with `"not-enough-players"`, see "Start acknowledgement"); not acked when dropped by the rate limit |
 | `remove-player` | `{ username }` | Host only, lobby only (ignored while a game is running): removes that player (not the host), evicts their sockets and revokes their rejoin token (a join with it gets `"Removed by host"`) |
-| `leave-room` | - (with an ack callback) | Explicit leave (Exit button): player removed, host handed over, `player-left` to the room; from a socket replaced by a rejoin it only detaches that socket. Acked (no data) once handled, also from a socket bound to no room; not acked when dropped by the rate limit |
+| `leave-room` | - (with an ack callback); from a socket bound to no room, optionally `{ gameCode, username, rejoinToken }` first | Explicit leave (Exit button): player removed, host handed over, `player-left` to the room; from a socket replaced by a rejoin it only detaches that socket. From a socket bound to no room, the named seat is removed the same way if the token is that player's (checked as a rejoin), never rebound first (see "Leaving"); anything else is a no-op. Acked (no data) once handled, in every case; not acked when dropped by the rate limit |
 | `im-ready` | - | Player ready to start (session player; payload ignored). Once the game is over: answered with `game-state` |
 | `photo-sent` | `{ photo }` | Photo uploaded; only from the current owner, `photo` must be a path the owner got from `/upload` in this room (`/temp/<32 hex>.jpg\|png\|webp`) for the photo awaited now (uploaded during this `waiting-photo`'s round as their turn photo; not a planted photo, not one from an earlier round) |
 | `photo-unavailable` | `{ round, attempt }` (from its `your-turn`) | The awaited owner has no photo to send (no access, no photos, upload failed): skip the round now |

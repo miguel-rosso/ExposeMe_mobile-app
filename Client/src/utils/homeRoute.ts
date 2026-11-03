@@ -5,3 +5,6 @@
 // room exit, the only way home closes the room's socket (a link to "/" pushes another home, which gives way: EXP-373).
 
 export const HOME_PATH = "/";
+
+/** Home's route name in the root stack's navigation state (what useRouteBelow reads) */
+export const HOME_ROUTE_NAME = "index";

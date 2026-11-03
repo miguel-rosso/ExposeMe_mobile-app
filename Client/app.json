@@ -40,7 +40,12 @@
       "es": "./locales/es.json"
     },
     "plugins": [
-      "expo-router",
+      [
+        "expo-router",
+        {
+          "sitemap": false
+        }
+      ],
       [
         "expo-splash-screen",
         {

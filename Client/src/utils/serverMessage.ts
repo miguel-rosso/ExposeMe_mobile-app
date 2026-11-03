@@ -11,10 +11,14 @@ export const KICKED_BY_HOST_MESSAGE = "Removed by host";
 /** We were kicked: our rejoin token is dead, so it is forgotten and joining again by hand enters as a new player. */
 export const isKickedByHost = (message?: string): boolean => message === KICKED_BY_HOST_MESSAGE;
 
+/** A link to a route the app doesn't have (mistyped or old): the not-found route passes it home, never the server. */
+export const UNKNOWN_LINK_MESSAGE = "Unknown link";
+
 /**
  * Exact error texts the server can send to a client that ends up on the home screen: `room-of-game` refusals
  * (socketRoutes / RoomManager) and the socket middleware's `connect_error`. The protocol stays plain English;
- * the client maps it to its own language here. KICKED_BY_HOST_MESSAGE is also passed home by the client itself.
+ * the client maps it to its own language here. KICKED_BY_HOST_MESSAGE is also passed home by the client itself, and
+ * UNKNOWN_LINK_MESSAGE only by the client.
  */
 const SERVER_MESSAGE_KEYS = {
   "Too many attempts": "serverErrorTooManyAttempts",
@@ -27,6 +31,7 @@ const SERVER_MESSAGE_KEYS = {
   "Room is full": "serverErrorRoomFull",
   "Server is busy": "serverErrorServerBusy",
   [KICKED_BY_HOST_MESSAGE]: "kickedByHost",
+  [UNKNOWN_LINK_MESSAGE]: "unknownLinkNotice",
 } as const satisfies Record<string, TranslationKey>;
 
 /** Every server text with its own translation (a parity test checks the server sends no others). */

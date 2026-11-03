@@ -74,6 +74,7 @@ export default {
   serverErrorServerBusy: "The server is busy. Try again in a moment.",
   serverErrorUnknown: "Something went wrong. Try again.",
   kickedByHost: "The host removed you from the room.",
+  unknownLinkNotice: "That link doesn't work: it may be mistyped or out of date.",
   serverNoticeTitle: "Notice",
   ok: "OK",
 

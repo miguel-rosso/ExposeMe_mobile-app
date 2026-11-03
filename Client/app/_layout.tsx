@@ -61,6 +61,8 @@ export default function RootLayout() {
             <Stack.Screen name="screens/InitialScreen" options={{ headerShown: false }} />
             <Stack.Screen name="screens/SettingsInstructionsScreen" options={{ headerShown: false }} />
             <Stack.Screen name="screens/GameScreen" options={{ headerShown: false, gestureEnabled: false }} />
+            {/* A link to a route the app doesn't have: gives way at once, so it neither slides in nor out (EXP-412) */}
+            <Stack.Screen name="+not-found" options={{ headerShown: false, animation: "none" }} />
           </Stack>
         </BackgroundProvider>
       </GameProvider>

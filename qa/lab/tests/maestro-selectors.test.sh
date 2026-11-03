@@ -116,7 +116,7 @@ unknown_ids() {
 }
 # Flows besides the boot ones whose ids are all checked against testIds.ts (EXP-176, EXP-348, EXP-346, EXP-354, EXP-339,
 # EXP-390)
-ID_CHECKED_FLOWS="tie-game.yaml hold-used-up.yaml hold-closed.yaml kicked-after-game.yaml kicked-while-offline.yaml join-room.yaml search-room.yaml kicked-notice.yaml device-host-start.yaml"
+ID_CHECKED_FLOWS="tie-game.yaml hold-used-up.yaml hold-closed.yaml kicked-after-game.yaml kicked-while-offline.yaml join-room.yaml search-room.yaml kicked-notice.yaml device-host-start.yaml unknown-link.yaml unknown-link-home.yaml"
 # Flows that read the host's removal notice, a system alert matched by its text (EXP-139, EXP-346)
 KICK_NOTICE_FLOWS="kicked-notice.yaml kicked-after-game.yaml kicked-while-offline.yaml"
 
@@ -238,6 +238,16 @@ for flow in $KICK_NOTICE_FLOWS; do
   stale="$(kick_notice_strays "$MAESTRO_DIR/$flow")"
   [ -z "$stale" ] && ok "$flow: every removal notice selector matches kickedByHost in en and es" \
     || ko "$flow: removal notice selectors miss kickedByHost" "$stale"
+done
+# EXP-412: the unknown-link notice is the same kind of alert, read (or asserted absent mid-game) in both languages
+for check in "unknown-link-home.yaml unknownLinkNotice serverNoticeTitle ok" "invite-link-mid-game.yaml unknownLinkNotice"; do
+  read -r flow keys <<<"$check"
+  text_selectors "$MAESTRO_DIR/$flow" | cut -f2 >"$TMP/notice-selectors"
+  for key in $keys; do
+    found=""
+    while IFS= read -r pattern; do matches_i18n "$pattern" "$key" && { found=$pattern; break; }; done <"$TMP/notice-selectors"
+    [ -n "$found" ] && ok "$flow: reads the alert's $key in en and es ($found)" || ko "$flow: no text selector matches $key in en and es"
+  done
 done
 # The bundle wait polls the app's testIDs in a loop bounded by a JS deadline: lab-play.test.sh checks lab.sh's
 # STUCK_ATTEMPT_S against the longest `timeout: <ms>` of dev-client-boot.yaml, so that must be the loop's

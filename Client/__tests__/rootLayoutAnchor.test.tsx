@@ -34,6 +34,7 @@ const appRoutes = () =>
       index: Screen,
       "screens/WaitingRoom": Screen,
       "screens/GameScreen": Screen,
+      "+not-found": Screen,
     }),
     { internal_stripLoadRoute: false, ignoreEntryPoints: true } as any,
   )!;
@@ -49,6 +50,15 @@ describe("root stack anchor (EXP-334)", () => {
     expect(stackOpenedAt([{ name: "screens/WaitingRoom", params: { code: "ABC234" } }])).toEqual({
       names: ["index", "screens/WaitingRoom"],
       focused: "screens/WaitingRoom",
+    });
+  });
+
+  // EXP-412: the app's not-found screen (a link to a route the app doesn't have) opens over home too, so it can give way
+  // to that home (router.back) instead of stacking one (Client/__tests__/notFoundRoute.test.tsx)
+  it("a cold link to a route the app doesn't have opens the not-found screen on top of home", () => {
+    expect(stackOpenedAt([{ name: "+not-found", params: { "not-found": ["i18n", "es"] } }])).toEqual({
+      names: ["index", "+not-found"],
+      focused: "+not-found",
     });
   });
 

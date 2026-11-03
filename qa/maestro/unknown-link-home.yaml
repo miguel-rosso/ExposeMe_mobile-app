@@ -1,0 +1,32 @@
+# EXP-412: opens ${LINK}, a link to a route the app doesn't have, while the app is on home (or in the background over
+# it): the app's own not-found screen gives way to that same home at once, which shows the translated notice. Never
+# expo-router's technical screen ("Unmatched Route", the URL and its "Sitemap" link) nor the sitemap's list of routes.
+# Used by unknown-link.yaml.
+# env: LINK (the deep link to open), CASE (screenshot name), USERNAME
+# App selectors are testIDs (Client/src/utils/testIds.ts); the notice is a system alert, matched by its text in both
+# UI languages (unknownLinkNotice, serverNoticeTitle and ok in Client/src/i18n), like kicked-notice.yaml's.
+appId: com.socketNull.ExposeMe
+---
+- openLink: "${LINK}"
+# iOS 26+/Xcode 27 simulators confirm custom-scheme links with a system alert
+- runFlow:
+    when:
+      platform: iOS
+      visible: "Open in Expose Me\\?|¿Abrir en Expose Me\\?"
+    commands:
+      - tapOn: "Open|Abrir"
+- extendedWaitUntil:
+    visible: "(That link doesn't work|Ese enlace no funciona).*"
+    timeout: 15000
+- assertVisible: "Notice|Aviso"
+- assertNotVisible: "Unmatched Route|Page could not be found.*|Sitemap|screens/WaitingRoom.*"
+- takeScreenshot: unknown-link-${CASE}-${USERNAME}
+- tapOn: "OK|Aceptar"
+# Home's form, with nothing of expo-router's screens on top
+- extendedWaitUntil:
+    visible:
+      id: "join-game-button"
+    timeout: 10000
+- assertVisible:
+    id: "create-game-button"
+- assertNotVisible: "Unmatched Route|Page could not be found.*|Sitemap|screens/WaitingRoom.*"

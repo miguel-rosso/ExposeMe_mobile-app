@@ -1,0 +1,49 @@
+# EXP-412: a link to a route the app doesn't have (exposeme://i18n/es, a module that used to live under app/; or a
+# mistyped or old link) used to open expo-router's technical "Unmatched Route" screen in English, with the URL and a
+# "Sitemap" link listing the app's routes. Now the app's own not-found screen (Client/app/+not-found.tsx) gives way to
+# the home under it, which shows a translated notice (unknown-link-home.yaml), and exposeme:///_sitemap is just another
+# unknown link (expo-router's plugin option sitemap: false in Client/app.json). Checked right after a fresh launch,
+# with the app in the background, and once more on that same home. Then Android Back leaves the app: no second home
+# was stacked (EXP-339).
+# A link that cold-starts the app can't be driven here: the dev client always starts on its own launch link (see
+# dev-client-boot.yaml) and drops the app's (as in invite-link-no-name.yaml). That the root layout anchors home under
+# a cold-start link is covered by Client/__tests__/rootLayoutAnchor.test.tsx, and what the not-found screen does
+# there by Client/__tests__/notFoundRoute.test.tsx. Mid-game, such a link keeps the game: invite-link-mid-game.yaml.
+# No server or bots needed:
+#   ~/.maestro/bin/maestro --device <id> test qa/maestro/unknown-link.yaml -e USERNAME=<label> -e METRO_URL=<url-encoded>
+# env: USERNAME, METRO_URL (url-encoded)
+# App selectors are testIDs (Client/src/utils/testIds.ts); the notice is a system alert, matched by its text.
+appId: com.socketNull.ExposeMe
+---
+- runFlow: open-app.yaml
+# Right after the launch, on home
+- runFlow:
+    file: unknown-link-home.yaml
+    env:
+      LINK: "exposeme://i18n/es"
+      CASE: "launch"
+# From the background: the link brings the app back to the foreground on top of home
+- pressKey: Home
+- waitForAnimationToEnd:
+    timeout: 2000
+- runFlow:
+    file: unknown-link-home.yaml
+    env:
+      LINK: "exposeme://i18n/es"
+      CASE: "background"
+# The sitemap that listed the app's routes is no screen of the app any more
+- runFlow:
+    file: unknown-link-home.yaml
+    env:
+      LINK: "exposeme:///_sitemap"
+      CASE: "sitemap"
+# Android: Back on that home leaves the app (to the background). A home stacked over another would pop to it instead
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - pressKey: Back
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - assertNotVisible:
+          id: "join-game-button|create-game-button"

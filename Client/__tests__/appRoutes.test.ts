@@ -3,6 +3,7 @@ import path from "path";
 import { requireContext } from "expo-router/build/testing-library/context-stubs";
 import { getRoutes } from "expo-router/build/getRoutes";
 import { getLinkingConfig } from "expo-router/build/getLinkingConfig";
+import { getConfig } from "@expo/config";
 
 // EXP-054: expo-router turns every module under app/ into a route. Components, providers, hooks, utils and the i18n
 // tables used to live there too, so Metro warned about each one ("missing the required default export") and a link
@@ -31,13 +32,34 @@ const fileRoutes = () => appRoutes().children.filter((route) => !route.generated
 const screensDeclaredByRootStack = () =>
   [...fs.readFileSync(ROOT_LAYOUT_FILE, "utf8").matchAll(STACK_SCREEN_NAME_RE)].map(([, name]) => name);
 
-/** The screen expo-router shows when the app is opened at `url` (e.g. from an exposeme:// link) */
+/**
+ * The app's expo-router options as the app reads them at run time (Constants.expoConfig.extra.router): the expo-router
+ * config plugin merges its options from app.json there
+ */
+const routerConfig = (): { sitemap?: boolean; notFound?: boolean; skipGenerated?: boolean } =>
+  getConfig(path.join(__dirname, ".."), { skipSDKVersionRequirement: true }).exp.extra?.router ?? {};
+
+/**
+ * The screen expo-router shows when the app is opened at `url` (e.g. from an exposeme:// link). Routes and linking are
+ * built as expo-router 58 builds them at run time (global-state/useStore useRouterConfig): the routes without the
+ * generated ones, and the linking config adding its own sitemap and not-found screens at the root unless the app's
+ * options turn them off.
+ */
 const screenOpenedAt = (url: string) => {
-  const linking = getLinkingConfig(appRoutes(), appContext(), {
+  const config = routerConfig();
+  const routes = getRoutes(appContext(), {
+    ...config,
+    skipGenerated: true,
+    ignoreEntryPoints: true,
+    platform: "ios",
+    preserveRedirectAndRewrites: true,
+    internal_stripLoadRoute: true,
+  })!;
+  const linking = getLinkingConfig(routes, appContext(), {
     metaOnly: false,
-    skipGenerated: false,
-    sitemap: true,
-    notFound: true,
+    skipGenerated: config.skipGenerated ?? false,
+    sitemap: config.sitemap ?? true,
+    notFound: config.notFound ?? true,
   });
   let state = linking.getStateFromPath(url, linking.config) as NavigationState | undefined;
   let name: string | undefined;
@@ -62,14 +84,35 @@ describe("app/ holds only routes (EXP-054)", () => {
     expect(withoutDefault).toEqual([]);
   });
 
-  it.each(["/i18n/es", "/components/modals/AlertModal", "/providers/PhotoContext", "/utils/image"])(
+  it.each(["/i18n/es", "/components/modals/AlertModal", "/providers/PhotoContext", "/utils/image", "/screens/Lobby"])(
     "a link to %s opens the not-found screen, not a module as a screen",
     (url) => {
       expect(screenOpenedAt(url)).toBe(NOT_FOUND_ROUTE);
     },
   );
 
-  it("a link to a screen still opens it", () => {
-    expect(screenOpenedAt("/screens/WaitingRoom")).toBe("screens/WaitingRoom");
+  it.each([
+    ["/screens/WaitingRoom", "screens/WaitingRoom"],
+    ["/screens/WaitingRoom?code=ABC234", "screens/WaitingRoom"],
+    ["/", "index"],
+  ])("a link to %s still opens its screen", (url, screen) => {
+    expect(screenOpenedAt(url)).toBe(screen);
+  });
+});
+
+// EXP-412: expo-router's own not-found screen showed the URL and a link to the list of the app's routes, in English.
+// The app has its own (app/+not-found.tsx), which takes the player back with a translated notice, and no sitemap.
+describe("unknown links open the app's own not-found screen (EXP-412)", () => {
+  it("the not-found route is app/+not-found.tsx, not the one expo-router generates", () => {
+    const notFound = appRoutes().children.find((route) => route.route === NOT_FOUND_ROUTE);
+    expect(notFound).toMatchObject({ contextKey: "./+not-found.tsx" });
+    expect(notFound?.generated).toBeFalsy();
+  });
+
+  // expo-router's sitemap lists every route of the app: the router config plugin's sitemap: false (app.json) leaves
+  // no such screen, so its link is just another unknown one
+  it("a link to the sitemap opens the not-found screen, not the list of the app's routes", () => {
+    expect(routerConfig().sitemap).toBe(false);
+    expect(screenOpenedAt("/_sitemap")).toBe(NOT_FOUND_ROUTE);
   });
 });

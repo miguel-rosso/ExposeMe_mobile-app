@@ -692,6 +692,8 @@ const WaitingRoom = () => {
                         onPress={() => handleSetRounds(rounds)}
                         // Fixed once Start is pressed: the game starts with the rounds the server has then
                         disabled={startRequest.starting}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${rounds} ${t.rounds}`}
                         accessibilityState={{ disabled: startRequest.starting, selected: roundsOfGame === rounds }}
                         style={[
                           tw`flex-1 py-2 rounded-full items-center ${startRequest.starting ? "opacity-70" : ""}`,
@@ -755,7 +757,7 @@ const WaitingRoom = () => {
         visible={dialogVisible}
         title={t.confirmRemovePlayer}
         message={t.areYouSureRemove}
-        highlightedText={`@${selectedPlayer?.username}`}
+        highlightedText={selectedPlayer ? `@${selectedPlayer.username}` : undefined}
         confirmText={t.remove}
         cancelText={t.cancel}
         onConfirm={() => {

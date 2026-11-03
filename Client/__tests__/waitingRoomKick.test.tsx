@@ -3,7 +3,8 @@ import TestRenderer, { act } from "react-test-renderer";
 import { FakeSocket } from "../testUtils/fakeSocket";
 // Loaded with the file (jest.mock calls below are hoisted above it), not inside a test
 import WaitingRoom from "../app/screens/WaitingRoom";
-import { lobbyPlayerId } from "../app/utils/testIds";
+import { lobbyPlayerId, roundsOptionId } from "../app/utils/testIds";
+import { ROUND_OPTIONS } from "../app/utils/protocolLimits";
 
 // EXP-027: the server never sends socket ids, so the host kicks a player by username.
 
@@ -75,6 +76,50 @@ describe("WaitingRoom: host removes a player", () => {
     mockSocket.emitted = [];
     act(() => mockAlertProps.current.onConfirm());
     expect(mockSocket.emitted).toEqual([["remove-player", { gameCode: "ABC123", username: "bob" }]]);
+    act(() => r.unmount());
+  });
+});
+
+// ── Lobby texts and screen reader (EXP-381, EXP-383) ──
+
+async function mountWith(roomPlayers: ReturnType<typeof player>[]) {
+  let r!: TestRenderer.ReactTestRenderer;
+  await act(async () => { r = TestRenderer.create(<WaitingRoom />); });
+  await act(async () => { await Promise.resolve(); });
+  act(() => mockSocket.fire("room-of-game", { success: true, room: { gameCode: "ABC123", players: roomPlayers, rounds: 10 }, rejoinToken: "tok-123" }));
+  return r;
+}
+
+describe("WaitingRoom: kick confirmation text (EXP-381)", () => {
+  it("hands the dialog the {name} template and the @name to highlight in it", async () => {
+    const r = await mountWith(players);
+    act(() => { r.root.findByProps({ testID: lobbyPlayerId("bob") }).props.onPress(); });
+    expect(mockAlertProps.current.title).toBe("Remove player");
+    expect(mockAlertProps.current.message).toBe("Are you sure you want to remove {name} from the room?");
+    expect(mockAlertProps.current.highlightedText).toBe("@bob");
+    act(() => r.unmount());
+  });
+
+  it("a guest waits «for the host»", async () => {
+    const r = await mountWith([player("bob", true), player("alice", false)]);
+    const texts = r.root.findAll((n) => typeof n.props.children === "string").map((n) => n.props.children);
+    expect(texts).toContain("Waiting for the host");
+    act(() => r.unmount());
+  });
+});
+
+describe("WaitingRoom: rounds pills for screen readers (EXP-383)", () => {
+  const pill = (r: TestRenderer.ReactTestRenderer, rounds: number) =>
+    r.root.findAll((n) => n.props.testID === roundsOptionId(rounds) && typeof n.props.onPress === "function")[0];
+
+  it("are buttons named with their round count that say which one is picked", async () => {
+    const r = await mountWith(players);
+    for (const rounds of ROUND_OPTIONS) {
+      const p = pill(r, rounds);
+      expect(p.props.accessibilityRole).toBe("button");
+      expect(p.props.accessibilityLabel).toBe(`${rounds} Rounds`);
+      expect(p.props.accessibilityState).toEqual({ disabled: false, selected: rounds === 10 });
+    }
     act(() => r.unmount());
   });
 });

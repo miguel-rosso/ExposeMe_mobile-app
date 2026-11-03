@@ -95,7 +95,12 @@ const OwnPhotos = () => {
           duration={500}
           style={tw`absolute bottom-22 left-0 right-0 flex-row justify-center`}
         >
-          <TouchableOpacity onPress={GetNextImage} style={tw`justify-center items-center bg-black/50 rounded-3xl`}>
+          <TouchableOpacity
+            onPress={GetNextImage}
+            accessibilityRole="button"
+            accessibilityLabel={t.next}
+            style={tw`justify-center items-center bg-black/50 rounded-3xl`}
+          >
             <LottieView
               ref={lottieRef}
               source={NextImageAnimation}

@@ -29,7 +29,7 @@ export default {
   startRefusedNotEnoughPlayers: "Hacen falta al menos 2 jugadores para empezar.",
   startGameFailed: "No se ha podido empezar la partida. Inténtalo de nuevo.",
   waitingForPlayers: "Esperando jugadores",
-  waitingHost: "Esperando al host",
+  waitingHost: "Esperando al anfitrión",
   sendCodeToFriends: "¡Envía el código a tus amigos para que se unan!",
   typeMessage: "Escribe un mensaje...",
   // Screen reader names of the lobby's icon-only buttons
@@ -37,8 +37,9 @@ export default {
   shareGameCode: "Compartir código de sala",
   sendMessage: "Enviar mensaje",
   leaveRoom: "Salir de la sala",
-  confirmRemovePlayer: "Confirmar Expulsión",
-  areYouSureRemove: "¿Estás seguro de que quieres expulsar a",
+  confirmRemovePlayer: "Expulsar jugador",
+  // {name}: the player, highlighted by the dialog
+  areYouSureRemove: "¿Seguro que quieres expulsar a {name} de la sala?",
   remove: "Expulsar",
   cancel: "Cancelar",
   loadingGameRoom: "Cargando sala...",

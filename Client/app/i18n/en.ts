@@ -29,7 +29,7 @@ export default {
   startRefusedNotEnoughPlayers: "At least 2 players are needed to start.",
   startGameFailed: "Couldn't start the game. Try again.",
   waitingForPlayers: "Waiting for players",
-  waitingHost: "Waiting host",
+  waitingHost: "Waiting for the host",
   sendCodeToFriends: "Send the game code to your friends so they can join!",
   typeMessage: "Type a message...",
   // Screen reader names of the lobby's icon-only buttons
@@ -37,8 +37,9 @@ export default {
   shareGameCode: "Share game code",
   sendMessage: "Send message",
   leaveRoom: "Leave room",
-  confirmRemovePlayer: "Confirm Remove Player",
-  areYouSureRemove: "Are you sure you want to remove",
+  confirmRemovePlayer: "Remove player",
+  // {name}: the player, highlighted by the dialog
+  areYouSureRemove: "Are you sure you want to remove {name} from the room?",
   remove: "Remove",
   cancel: "Cancel",
   loadingGameRoom: "Loading game room...",

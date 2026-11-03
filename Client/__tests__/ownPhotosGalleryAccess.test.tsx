@@ -109,6 +109,15 @@ describe("OwnPhotos back (EXP-243)", () => {
     expect(hardwareBackHandlers).toHaveLength(0);
   });
 
+  // EXP-383: the Next button is a Lottie animation, so a screen reader had no name to read for it
+  it("the Next animation button has a name and a button role for screen readers", async () => {
+    const r = await mount();
+    const next = r.root.findAll((n) => n.props.accessibilityLabel === "Next" && typeof n.props.onPress === "function", { deep: false });
+    expect(next).toHaveLength(1);
+    expect(next[0].props.accessibilityRole).toBe("button");
+    act(() => r.unmount());
+  });
+
   it("with nothing to go back to (opened directly), it goes home", async () => {
     mockCanGoBack = false;
     const r = await mount();

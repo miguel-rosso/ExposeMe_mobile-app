@@ -48,7 +48,8 @@ EOF
 # optional), then the failed one with that condition inside its failed parent runFlow. `--version` prints
 # STUB_MAESTRO_VERSION (default 2.11.0). A passing run with STUB_SCOREBOARD_PASSES ("SKIPPED COMPLETED ...") writes
 # the commands.json of play-rounds.yaml's round loop: one card-wait guard (STUB_SCOREBOARD_GUARD) per pass, and one
-# held-check guard (STUB_HELD_GUARD) per entry of STUB_HELD_PASSES
+# checks guard (STUB_CHECKED_GUARD) and held-check guard (STUB_HELD_GUARD) per entry of STUB_CHECKED_PASSES and
+# STUB_HELD_PASSES; with STUB_ROUND_LOOP_FAILED=1 it also lists a failed step and exits 1
 cat >"$TMP/bin/maestro" <<'EOF'
 #!/usr/bin/env bash
 [ "$1" = --version ] && { echo "${STUB_MAESTRO_VERSION:-2.11.0}"; exit 0; }
@@ -62,11 +63,13 @@ guards() { # CONDITION, statuses... -> one runFlow per status
 }
 pass_commands() { # the round loop's guards
   # shellcheck disable=SC2086 # status lists
-  { guards "$STUB_SCOREBOARD_GUARD" $STUB_SCOREBOARD_PASSES; guards "${STUB_HELD_GUARD:-}" ${STUB_HELD_PASSES:-}; } | jq -s .
+  { guards "$STUB_SCOREBOARD_GUARD" $STUB_SCOREBOARD_PASSES; guards "${STUB_CHECKED_GUARD:-}" ${STUB_CHECKED_PASSES:-}
+    guards "${STUB_HELD_GUARD:-}" ${STUB_HELD_PASSES:-}
+    [ -z "${STUB_ROUND_LOOP_FAILED:-}" ] || jq -n '{command: {runFlowCommand: {}}, metadata: {status: "FAILED"}}'; } | jq -s .
 }
 case " ${STUB_MAESTRO_FAIL:-} " in *" ${out##*/} "*) ;; *)
   if [ -n "${STUB_SCOREBOARD_PASSES:-}" ]; then mkdir -p "$out/2026-10-29_164852/play-game"; pass_commands >"$out/2026-10-29_164852/play-game/commands.json"; fi
-  exit 0;; esac
+  exit "${STUB_ROUND_LOOP_FAILED:-0}";; esac
 h="$out/2026-10-26_162536/play-game/screen-hierarchy"; mkdir -p "$h"
 printf '{"attributes" : {"text" : "%s"}}\n' "${STUB_EARLIER_SCREEN:-Join Game}" >"$h/step-009-tapOnElement-optional.json"
 printf '{"attributes" : {"text" : "%s"}}\n' "${STUB_LAST_SCREEN:-Downloading 55.0%…}" >"$h/step-${STUB_LAST_STEP:-011}-assertCondition.json"
@@ -348,22 +351,70 @@ done
 # ── play-rounds.yaml's checked scoreboards and the Maestro it was verified on (EXP-312) ──
 sed 's/^[[:space:]]*//' "$MAESTRO_DIR/play-rounds.yaml" | grep -qxF "true: $SCOREBOARD_GUARD" \
   && ok "play-rounds.yaml's card wait has lab.sh's SCOREBOARD_GUARD" || ko "play-rounds.yaml card-wait guard in sync with lab.sh"
+sed 's/^[[:space:]]*//' "$MAESTRO_DIR/play-rounds.yaml" | grep -qxF "true: $CHECKED_GUARD" \
+  && ok "play-rounds.yaml's checks have lab.sh's CHECKED_GUARD" || ko "play-rounds.yaml checks guard in sync with lab.sh"
 sed 's/^[[:space:]]*//' "$MAESTRO_DIR/play-rounds.yaml" | grep -qxF "true: $HELD_GUARD" \
   && ok "play-rounds.yaml's held check has lab.sh's HELD_GUARD" || ko "play-rounds.yaml held-check guard in sync with lab.sh"
+# Five passes (the first has no scoreboard), three card waits, two of which saw the card (EXP-353: the third left its
+# scoreboard unchecked)
 export STUB_SCOREBOARD_GUARD="$SCOREBOARD_GUARD" STUB_SCOREBOARD_PASSES="SKIPPED COMPLETED SKIPPED COMPLETED COMPLETED"
-export STUB_HELD_GUARD="$HELD_GUARD" STUB_HELD_PASSES="SKIPPED SKIPPED SKIPPED SKIPPED SKIPPED"
+export STUB_CHECKED_GUARD="$CHECKED_GUARD" STUB_CHECKED_PASSES="COMPLETED SKIPPED COMPLETED"
+export STUB_HELD_GUARD="$HELD_GUARD" STUB_HELD_PASSES="SKIPPED SKIPPED SKIPPED"
 play r30 --bots 2 --devices android-a
 rc=$?
-[ $rc = 0 ] && grep -q "android-a: 3/4 scoreboards checked, 0 held (play-rounds.yaml)" "$TMP/play.out" \
-  && ok "play prints each device's checked scoreboards (the loop's first pass has none)" \
+[ $rc = 0 ] && grep -q "android-a: 2/4 scoreboards checked, 0 held (play-rounds.yaml)$" "$TMP/play.out" \
+  && ok "play prints each device's checked scoreboards (the loop's first pass has none, a card wait that saw no card none)" \
   || ko "play prints checked scoreboards" "rc=$rc $(cat "$TMP/play.out")"
-# EXP-325: a pass whose card wait found the scoreboard held completes its guard too: it counts as held, not checked
-STUB_HELD_PASSES="SKIPPED SKIPPED SKIPPED COMPLETED SKIPPED" play r34 --bots 2 --devices android-a
+grep -q "android-a: 1 scoreboard(s) waited for without seeing the card or the held marker (unchecked" "$TMP/play.out" \
+  && ok "play warns about the scoreboards it waited for without seeing their card" \
+  || ko "play warns about unseen cards" "$(cat "$TMP/play.out")"
+# EXP-325: a card wait that found the scoreboard held completes the checks' guard too: it counts as held, not checked
+STUB_HELD_PASSES="SKIPPED SKIPPED COMPLETED" play r34 --bots 2 --devices android-a
 rc=$?
-[ $rc = 0 ] && grep -q "android-a: 2/4 scoreboards checked, 1 held (play-rounds.yaml)" "$TMP/play.out" \
+[ $rc = 0 ] && grep -q "android-a: 1/4 scoreboards checked, 1 held (play-rounds.yaml)$" "$TMP/play.out" \
   && ok "play prints each device's held scoreboards apart from the checked ones" \
   || ko "play prints held scoreboards" "rc=$rc $(cat "$TMP/play.out")"
-unset STUB_SCOREBOARD_PASSES STUB_HELD_PASSES
+# EXP-353: no scoreboard checked and none held is a card missing on every round: the run fails
+STUB_CHECKED_PASSES="SKIPPED SKIPPED SKIPPED" play r35 --bots 2 --devices android-a
+rc=$?
+[ $rc != 0 ] && grep -q "android-a: 0/4 scoreboards checked, 0 held (play-rounds.yaml)$" "$TMP/play.out" \
+  && grep -q "android-a: NONE CHECKED: no scoreboard showed its card: is the card missing?" "$TMP/play.out" \
+  && grep -q "had failures" "$TMP/play.out" \
+  && ok "play fails a device that checked no scoreboard and found none held" \
+  || ko "play fails a device that checked no scoreboard" "rc=$rc $(cat "$TMP/play.out")"
+# ...but with holds it only says so: their cards went unseen behind the photo
+STUB_CHECKED_PASSES="COMPLETED SKIPPED SKIPPED" STUB_HELD_PASSES="COMPLETED SKIPPED SKIPPED" play r36 --bots 2 --devices android-a
+rc=$?
+[ $rc = 0 ] && grep -q "android-a: no scoreboard checked, 1 found held: the photo owner held them" "$TMP/play.out" \
+  && ! grep -q "NONE CHECKED" "$TMP/play.out" \
+  && ok "play doesn't accuse a missing card when the scoreboards it reached were held" \
+  || ko "play with held scoreboards only" "rc=$rc $(cat "$TMP/play.out")"
+# ...nor when the card wait never ran (a phone too slow for its guard on every round): it checked nothing
+STUB_SCOREBOARD_PASSES="SKIPPED SKIPPED SKIPPED SKIPPED SKIPPED" STUB_CHECKED_PASSES="" STUB_HELD_PASSES="" \
+  play r37 --bots 2 --devices android-a
+rc=$?
+[ $rc = 0 ] && grep -q "android-a: 0/4 scoreboards checked, 0 held (play-rounds.yaml)$" "$TMP/play.out" \
+  && grep -q "android-a: no scoreboard reached in time: phone too slow to check" "$TMP/play.out" \
+  && ! grep -q "NONE CHECKED" "$TMP/play.out" \
+  && ok "play only warns when a device's card wait never ran (too slow to check)" \
+  || ko "play with no card wait run" "rc=$rc $(cat "$TMP/play.out")"
+# ...nor with fewer card waits than NONE_CHECKED_MIN_WAITS, all without their card: too few to tell
+STUB_SCOREBOARD_PASSES="SKIPPED COMPLETED SKIPPED SKIPPED SKIPPED" STUB_CHECKED_PASSES="SKIPPED" STUB_HELD_PASSES="SKIPPED" \
+  play r39 --bots 2 --devices android-a
+rc=$?
+[ "$NONE_CHECKED_MIN_WAITS" = 2 ] && [ $rc = 0 ] \
+  && grep -q "android-a: no scoreboard checked, 1 waited for: too few to tell a missing card from a phone too slow" "$TMP/play.out" \
+  && ! grep -q "NONE CHECKED" "$TMP/play.out" \
+  && ok "play only warns when a device's card waits are too few to tell a missing card" \
+  || ko "play with a single card wait unseen" "rc=$rc min=${NONE_CHECKED_MIN_WAITS:-unset} $(cat "$TMP/play.out")"
+# ...nor when Maestro already failed that device: its failure says why
+STUB_CHECKED_PASSES="SKIPPED SKIPPED SKIPPED" STUB_ROUND_LOOP_FAILED=1 play r38 --bots 2 --devices android-a
+rc=$?
+[ $rc != 0 ] && grep -q "android-a: 0/4 scoreboards checked, 0 held (play-rounds.yaml)$" "$TMP/play.out" \
+  && ! grep -q "NONE CHECKED" "$TMP/play.out" \
+  && ok "play doesn't add NONE CHECKED to a device Maestro already failed" \
+  || ko "play with a failed round loop" "rc=$rc $(cat "$TMP/play.out")"
+unset STUB_SCOREBOARD_PASSES STUB_CHECKED_PASSES STUB_HELD_PASSES
 play r31 --bots 2 --devices android-a
 ! grep -q "scoreboards checked" "$TMP/play.out" && ok "a flow without the round loop prints no scoreboard count" \
   || ko "no scoreboard count without play-rounds.yaml" "$(cat "$TMP/play.out")"

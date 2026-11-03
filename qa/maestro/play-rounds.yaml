@@ -5,51 +5,60 @@
 # server shows the options for 8.5 s (answering) + 3 s (reveal) and the scoreboard for 5 s. So each phase gets a few cheap
 # steps, the one that matters first: the guess as soon as the options show, the score card as soon as the
 # scoreboard opens. No settle waits (the progress bar never settles) and no `when: visible` before a timed check (a
-# false condition costs up to 7 s). The steps between `timed:` markers are budgeted by qa/lab/tests/maestro-timing.test.sh,
-# and qa/lab/tests/maestro-sim.mjs (scenario `rounds`) plays the flow on a fake game with slow screen reads.
+# false condition costs up to 7 s) but in the card wait's poll loop (EXP-353). The steps between `timed:` markers are
+# budgeted by qa/lab/tests/maestro-timing.test.sh, and qa/lab/tests/maestro-sim.mjs (scenario `rounds`) plays the flow
+# on a fake game with slow screen reads.
 # EXP-312: each pass of the loop checks the last round's scoreboard, then plays the next round up to its reveal, so the
 # loop's own screen read (is the game over?) falls between the guess and the scoreboard, not between the scoreboard and
 # the next guess. EXP-326, EXP-322: that read ends each pass (the loop's condition is only a script), so nothing reads
 # the screen between the lobby and round 1's first look for the options, and it also checks the round photo loaded, so
 # the chain from seeing the options to the scoreboard has one read less. The wait for the options notes when a look
 # last found none (`hiddenFrom`), so the round's scoreboard is known to close after `closesAfter` (that look + the three
-# phases) and before `closesBy` (the options seen + the same). The scoreboard steps only start before `closesAfter`: a
-# late one could see no scoreboard (passing without checking anything, or failing the card wait on the next round) and
-# would push the next guess past its answering phase (it136). When the options were already up at the first look, the
+# phases, were the options painted on time) and before `closesBy` (the options seen + the same). The scoreboard steps
+# only start before `closesAfter`: a late one could see no scoreboard (passing without checking anything) and would
+# push the next guess past its answering phase (it136). When the options were already up at the first look, the
 # round has no `closesAfter` and its scoreboard isn't checked: Maestro's commands.json shows those steps as SKIPPED.
+# EXP-353: no step fails unless the app is surely wrong. A screen read sees the screen anywhere along it and a phone
+# may paint the options late (EXP-349), so a scoreboard can slip past every read: the card wait fails only when some
+# look surely read a scoreboard without its card, and a scoreboard it can't tell goes unchecked.
 # The looks are conditions (`runFlow` with `when: visible/notVisible`): Maestro waits up to 7 s for one to come true,
 # minus the time since the last command that may have acted on the device (the tap, and any evalScript): 7 s after it,
 # a look is a single screen read (Orchestra.adjustedToLatestInteraction; evalScriptCommand always reports a change,
 # assertTrue doesn't). So their bookkeeping is in the loops' scripts and in assertTrue steps whose value is always
 # true. Verified in Maestro 2.11.0's bytecode: lab.sh play and doctor warn on any other Maestro version.
-# Skipping is never silent: lab.sh play prints how many scoreboards each device checked, and the flow fails if fewer
-# than half of them (the last aside: the winner modal follows it) were (`minCheckedShare`).
+# Skipping is never silent: lab.sh play prints how many scoreboards each device checked and flags a run that checked
+# none: a card missing on every round, or a phone too slow to tell (EXP-353: failing then would fail it by mistake).
 # EXP-325: the photo owner may hold the scoreboard (bots: `lab.sh play --bot-args "--hold 0.5"`), hiding it behind the
 # photo for up to 30 s. The card wait also ends on the held marker, and a look for the marker once the scoreboard
 # should have closed counts the hold as held (printed by lab.sh play next to the checked ones) and waits it out; no
 # step fails on a hold (with --test-output-dir a failed or warned step also costs Maestro a screen dump).
-# maestro-sim.mjs plays the flow with bot holds, and with screen reads that see the screen as they start, as they end or
-# anywhere along them (EXP-322).
+# maestro-sim.mjs plays the flow with bot holds (up to three a round, EXP-355), with screen reads that see the screen as
+# they start, as they end or anywhere along them (EXP-322) and with the phases painted late (EXP-349).
 appId: com.socketNull.ExposeMe
 ---
 - runFlow: wait-game-start.yaml
 # The server's phase lengths (Server/managers/GameEngine.ts: ANSWER_TIME, REVEAL_TIME, SCORE_DISPLAY_TIME, checked by
 # maestro-timing.test.sh); how long to wait for round 1's options after the lobby (EXP-143) and for the next round's
-# after the scoreboard (up to 3 photo waits of 15 s in a row, skips, end the game); the share of scoreboards that must
-# be checked; the most a photo owner can hold a round's scoreboard (HOLD_BUDGET_PER_ROUND, also checked) and how late
-# its end may show on the phone; how long after a scoreboard's latest close without a hold the next options may still
-# be missing without one (a bot's photo upload and a screen read: before that, a look for the held marker would often
-# cost the next guess a read, see maestro-sim.mjs)
-- evalScript: "${output.timing = { answeringMs: 8500, revealMs: 3000, scoresMs: 5000, gameStartWaitMs: 180000, optionsWaitMs: 90000, minCheckedShare: 0.5, holdBudgetMs: 30000, holdEndSlackMs: 5000, heldLookDelayMs: 2000 }}"
+# after the scoreboard (up to 3 photo waits of 15 s in a row, skips, end the game); the most a photo owner can hold a
+# round's scoreboard (HOLD_BUDGET_PER_ROUND, also checked) and how late its end may show on the phone; how long after
+# a scoreboard's latest close without a hold the next options may still be missing without one (a bot's photo upload
+# and a screen read: before that, a look for the held marker would often cost the next guess a read, see
+# maestro-sim.mjs); how late the phone may paint the options after the server starts the answering phase, and any
+# other phase (EXP-349: it166's render telemetry, answering up to 2.2 s, the scoreboard up to 0.5 s; modelled by
+# maestro-sim.mjs); how long a condition waits for its element right after a command that acted on the device
+# (Maestro 2.11: 7 s, less the time since that command)
+- evalScript: "${output.timing = { answeringMs: 8500, revealMs: 3000, scoresMs: 5000, gameStartWaitMs: 180000, optionsWaitMs: 90000, holdBudgetMs: 30000, holdEndSlackMs: 5000, heldLookDelayMs: 2000, optionsLagMs: 2500, phaseLagMs: 500, conditionWaitMs: 7000 }}"
 - evalScript: ${output.timing.roundMs = output.timing.answeringMs + output.timing.revealMs + output.timing.scoresMs}
+# The least a scoreboard stays on screen (painted up to phaseLagMs late, the next phase maybe on time)
+- evalScript: ${output.timing.scoresShownMs = output.timing.scoresMs - output.timing.phaseLagMs}
 # No round played yet: no scoreboard to check, no options of its own on screen. Scoreboards counted: those shown
-# (every pass after the first), those whose card was checked and those found held instead
-- evalScript: "${output.round = { closesAfter: 0, closesBy: 0, optionsGoneBy: 0, readMs: 0 }}"
-- evalScript: "${output.scoreboards = { shown: 0, checked: 0, held: 0 }}"
+# (every pass after the first), those waited for, those whose card was checked and those found held instead
+- evalScript: "${output.round = { closesAfter: 0, closesBy: 0, opensBy: 0, readMs: 0 }}"
+- evalScript: "${output.scoreboards = { shown: 0, waited: 0, checked: 0, held: 0 }}"
 # Round 1's options are waited for by the loop's own wait, so a device that leaves the lobby late taps right after its
 # first look that sees them (EXP-326: a wait for the game screen and the loop's read before that look cost the slow
 # Android its round 1 guess)
-- evalScript: "${output.options = { shown: false, seenAt: 0, hiddenFrom: 0, lookFrom: 0, goneLookFrom: 0, giveUpAt: Date.now() + output.timing.gameStartWaitMs }}"
+- evalScript: "${output.options = { shown: false, seenAt: 0, hiddenFrom: 0, lookFrom: 0, goneLookFrom: 0, slowestMs: 0, giveUpAt: Date.now() + output.timing.gameStartWaitMs }}"
 # The look that ends each pass: when it started and the last one that found the game still on (none yet: the first
 # pass runs)
 - evalScript: "${output.game = { lookFrom: 0, playingFrom: 0 }}"
@@ -59,55 +68,106 @@ appId: com.socketNull.ExposeMe
     commands:
       # EXP-252: the scoreboard opens with the card saying whose photo it was ("It was your photo!" on the owner's
       # phone). Waited for directly, so it is checked in the same screen read that sees the scoreboard, until the
-      # scoreboard has surely closed, so a scoreboard without the card fails here instead of passing on a later one.
-      # It only starts while its first read would still see this scoreboard: before `closesAfter` by half the length of
-      # the look that saw the options (`readMs`; a read sees the screen somewhere along it, and the whole length makes
-      # slow phones skip most cards, see maestro-sim.mjs `rounds`). Only the last round's card goes unchecked if it is
-      # missing: the winner modal follows its scoreboard.
-      # EXP-322: a read may see the screen anywhere along it, so on slow reads the scoreboard can still slip between
+      # scoreboard has surely closed (`closesBy`), so a scoreboard without the card fails on its own round instead of
+      # passing on a later one. The wait only starts while its first read would still see this scoreboard: before
+      # `closesAfter` by half the length of the look that saw the options (`readMs`; a read sees the screen somewhere
+      # along it, and the whole length makes slow phones skip most cards, see maestro-sim.mjs `rounds`).
+      # EXP-322, EXP-353: a read may see the screen anywhere along it, so on slow reads the scoreboard can slip between
       # two polls (a read seen as it starts, the next as it ends: more than its 5 s apart) or close before the first
-      # one sees it; maestro-sim.mjs counts those false failures over many games. A wait that only fails when its reads
-      # surely saw the scoreboard never does, but it can't tell on most slow-phone scoreboards: the options' edge it
-      # starts from is two reads wide (see maestro-sim.mjs for the numbers).
-      # Each card wait passed is counted (an assertTrue: always true, and no action on the device).
+      # one sees it. So the wait polls with looks whose start and end it notes, and fails only when the card is surely
+      # missing: when wherever the scoreboard opened (after `opensAfter`, by `opensBy`), some look that saw neither the
+      # card nor the held marker read the screen entirely while it was up (`coveredTo`: every scoreboard opening up to
+      # then had one). Otherwise a scoreboard whose card no look saw goes unchecked, like one the wait started too late
+      # for (maestro-sim.mjs counts both, and how many missing cards still fail).
+      # EXP-349: the options may be painted up to optionsLagMs late, so the scoreboard may open that much earlier than
+      # they tell, while the reveal is painted about on time like the scoreboard. So first the wait looks for the
+      # round's answering still on screen (its options under its progress bar: drawn together only while answering),
+      # and the last look that saw it bounds where the scoreboard opened: after the reveal, less phaseLagMs. A look
+      # that comes true is a single screen read, but one that doesn't is a read the card wait loses, and waits up to
+      # conditionWaitMs after the tap (see above). So looks for the answering only start on a phone whose scoreboard
+      # fits two of its reads (`slowestReadMs`: a slower one can't tell a missing card anyway, see maestro-sim.mjs)
+      # and, until that wait is over, only if a look for the card after it would still start a read before the
+      # scoreboard closes.
       # EXP-325: while the photo owner holds the scoreboard the app shows only the photo and the `game-held` marker, and
-      # the scoreboard stays up past `closesBy`. So the card wait also ends on the marker (never failing on a hold: a
-      # failed step would also cost Maestro a screen dump), and the look for the marker in the wait for the next
-      # options tells a held scoreboard apart. A held scoreboard's card is not checked.
+      # the scoreboard stays up past `closesBy`. So the card wait also ends on the marker (a look that saw it read no
+      # scoreboard without its card), and the look for the marker in the wait for the next options tells a held
+      # scoreboard apart. A held scoreboard's card is not checked.
+      # The bookkeeping is in assertTrue steps (always true) and the looks' scripts, which don't act on the device, so
+      # the looks stay single reads. A card wait that ended on the card (or the marker) is counted by its checks' guard,
+      # which lab.sh counts too. The looks before it saw no scoreboard (it shows its card), so it closes at least its
+      # least length after the last one started, which may let the checks start later than `closesAfter`, and it saw
+      # no options: the next round's show after it started.
       # ── timed: scores ──
       - runFlow:
           when:
             true: ${Date.now() + output.round.readMs / 2 < output.round.closesAfter}
           commands:
-            - extendedWaitUntil:
-                visible:
-                  id: "score-answer-card|game-held|winner-modal|final-score-modal"
-                timeout: ${output.round.closesBy - Date.now()}
-            - assertTrue: ${output.round.cardWaited = ++output.scoreboards.checked}
-            # EXP-290: the card never shows this phone's own name: on the owner's phone it says "It was your photo!" /
-            # "¡Era tu foto!" instead (its other branch, PhotoOwnerCard.tsx). Filtered by the player name, not a UI
-            # string, so it works in any language; the short timeout fails while the card shows it.
+            - assertTrue: ${++output.scoreboards.waited}
+            - repeat:
+                while:
+                  true: ${!output.round.cardWaited && output.round.coveredTo < output.round.opensBy && Date.now() < output.round.closesBy && !(output.round.answeringSeen = false)}
+                commands:
+                  - runFlow:
+                      when:
+                        true: ${output.round.answering && 2 * output.round.slowestReadMs < output.timing.scoresShownMs && Date.now() + output.round.slowestReadMs < output.round.actedAt + output.timing.conditionWaitMs && (output.round.lookFrom = Date.now())}
+                        visible:
+                          id: "player-option-.*"
+                      commands:
+                        # This round's answering only if the look ended before the next round's can show (one that
+                        # missed waits for its element)
+                        - assertTrue: ${(output.round.answeringSeen = Date.now() < output.round.opensAfter + output.timing.scoresShownMs), true}
+                        - assertTrue: ${!output.round.answeringSeen || (output.round.opensAfter = Math.max(output.round.opensAfter, output.round.lookFrom))}
+                  # No look for the answering, or one that found it over: from now on the card. The scoreboard opens
+                  # after the reveal that followed the last look that saw it
+                  - assertTrue: ${!output.round.answering || output.round.answeringSeen || (output.round.coveredTo = output.round.opensAfter, !(output.round.answering = false))}
+                  - runFlow:
+                      when:
+                        true: ${!output.round.answering && (output.round.lookFrom = Date.now())}
+                        visible:
+                          id: "score-answer-card|game-held"
+                      commands:
+                        - assertTrue: ${output.round.cardWaited = true}
+                  # A look that found neither the card nor the marker read the scoreboard, were it up all along, for
+                  # every opening from its end less the scoreboard's least length to its start
+                  - assertTrue: ${output.round.answering || output.round.cardWaited || (output.round.missFrom = output.round.lookFrom, Date.now() - output.timing.scoresShownMs > output.round.coveredTo || (output.round.coveredTo = Math.max(output.round.coveredTo, output.round.lookFrom)), true)}
+            - assertTrue:
+                condition: ${output.round.cardWaited || output.round.coveredTo < output.round.opensBy}
+                label: "Every scoreboard a look surely read showed the card saying whose photo it was (score-answer-card)"
+            # The scoreboard closes its least length after it opened (`closesFrom`): after `opensAfter`, and after the last
+            # look that saw neither the card nor the marker when a later one saw it (that look then saw no scoreboard).
+            # The next round's options show after that, and after the look that saw the card (it saw no options); the
+            # checks may start until then
+            - assertTrue: ${(output.round.closesFrom = Math.max(output.round.opensAfter, output.round.cardWaited && output.round.missFrom) + output.timing.scoresShownMs), true}
+            - assertTrue: ${(output.options.hiddenFrom = Math.max(output.options.hiddenFrom, output.round.closesFrom, output.round.cardWaited && output.round.lookFrom)), true}
+            - assertTrue: ${(output.round.closesAfter = Math.max(output.round.closesAfter, output.round.closesFrom)), true}
             - runFlow:
                 when:
-                  true: ${Date.now() < output.round.closesAfter}
+                  true: ${output.round.cardWaited && ++output.scoreboards.checked}
                 commands:
-                  - extendedWaitUntil:
-                      notVisible:
-                        id: "score-answer-name"
-                        text: "${USERNAME}"
-                      timeout: 1000
-            # EXP-141: the scoreboard is drawn alone, with no answer options under it. `below` the scoreboard's title
-            # ties both to the same screen read, and the short timeout fails while both are drawn.
-            - runFlow:
-                when:
-                  true: ${Date.now() < output.round.closesAfter}
-                commands:
-                  - extendedWaitUntil:
-                      notVisible:
-                        id: "player-option-.*"
-                        below:
-                          id: "score-round-title"
-                      timeout: 1000
+                  # EXP-290: the card never shows this phone's own name: on the owner's phone it says "It was your
+                  # photo!" / "¡Era tu foto!" instead (its other branch, PhotoOwnerCard.tsx). Filtered by the player
+                  # name, not a UI string, so it works in any language; the short timeout fails while the card shows it.
+                  - runFlow:
+                      when:
+                        true: ${Date.now() < output.round.closesAfter}
+                      commands:
+                        - extendedWaitUntil:
+                            notVisible:
+                              id: "score-answer-name"
+                              text: "${USERNAME}"
+                            timeout: 1000
+                  # EXP-141: the scoreboard is drawn alone, with no answer options under it. `below` the scoreboard's
+                  # title ties both to the same screen read, and the short timeout fails while both are drawn.
+                  - runFlow:
+                      when:
+                        true: ${Date.now() + output.round.slowestReadMs < output.round.closesAfter}
+                      commands:
+                        - extendedWaitUntil:
+                            notVisible:
+                              id: "player-option-.*"
+                              below:
+                                id: "score-round-title"
+                            timeout: 1000
       # ── end timed ──
       # This round's options stay up through its reveal, so until a look finds them gone (or they surely are), options
       # on screen are not the next round's. That look is the first known to come before the next round's options. It
@@ -115,7 +175,7 @@ appId: com.socketNull.ExposeMe
       # device, so the looks for the next round's options stay single reads.
       - repeat:
           while:
-            true: ${!output.options.hiddenFrom && (output.options.goneLookFrom = Date.now()) < output.round.optionsGoneBy}
+            true: ${!output.options.hiddenFrom && (output.options.goneLookFrom = Date.now()) < output.round.opensBy}
           commands:
             - runFlow:
                 when:
@@ -136,6 +196,9 @@ appId: com.socketNull.ExposeMe
                 commands:
                   - evalScript: ${output.options.seenAt = Date.now()}
                   - evalScript: ${output.options.shown = true}
+            # The slowest single screen read of this wait (`slowestMs`): a look that started conditionWaitMs after the
+            # last tap (EXP-353: one that started earlier may have waited for its element)
+            - assertTrue: ${!output.round.actedAt || output.options.lookFrom < output.round.actedAt + output.timing.conditionWaitMs || (output.options.slowestMs = Math.max(output.options.slowestMs, Date.now() - output.options.lookFrom)), true}
             # EXP-325: after a card wait, the first time a look finds no options well after the scoreboard would have
             # closed without a hold (`closesBy` + `heldLookDelayMs`), a look for the held marker. Earlier, the next
             # options are often about to show and the look would cost the guess a screen read; by then only a hold (or
@@ -161,18 +224,30 @@ appId: com.socketNull.ExposeMe
           label: "Round 1's options showed within 180 s of the lobby, a later round's within 90 s of the scoreboard and its hold, or the game over did"
       # The last round's scoreboard has shown by now (if there was a round)
       - evalScript: "${output.scoreboards.shown += output.round.closesBy ? 1 : 0}"
-      - evalScript: "${output.round = { closesAfter: output.options.hiddenFrom && output.options.hiddenFrom + output.timing.roundMs, closesBy: output.options.seenAt + output.timing.roundMs, readMs: output.options.seenAt - output.options.lookFrom }}"
-      # Options seen after this are the next round's
-      - evalScript: ${output.round.optionsGoneBy = output.round.closesBy - output.timing.scoresMs}
+      # This round's scoreboard on screen, from the options' edge (the last look that found none, the one that saw
+      # them) and the phases' lengths: it closes after `closesAfter` if the options were painted on time (the
+      # scoreboard steps only start before it), and by `closesBy`, any phase painted up to phaseLagMs late (EXP-349).
+      # It opens by `opensBy` (options seen after that are the next round's) and, the options painted up to
+      # optionsLagMs late, after `opensAfter`, where the card wait's coverage of where it may have opened starts
+      # (`coveredTo`). The card wait first looks for the answering still on screen (`answering`, `answeringSeen` by
+      # this pass's look), moving `opensAfter` to where its last look that saw it started, and notes when its current
+      # look started (`lookFrom`) and the last one that saw neither the card nor the held marker (`missFrom`)
+      - evalScript: "${output.round = { closesAfter: output.options.hiddenFrom && output.options.hiddenFrom + output.timing.roundMs, closesBy: output.options.seenAt + output.timing.roundMs + output.timing.phaseLagMs, readMs: output.options.seenAt - output.options.lookFrom, answering: true, lookFrom: 0, missFrom: 0 }}"
+      # How long this phone's screen reads take now (`slowestReadMs`): the slowest single read of the wait for these
+      # options, or the look that saw them when none was one (round 1's wait follows the flow's first scripts)
+      - evalScript: ${output.round.slowestReadMs = output.options.slowestMs || output.round.readMs}
+      - evalScript: ${output.round.opensBy = output.round.closesBy - output.timing.scoresMs}
+      - evalScript: ${output.round.coveredTo = output.round.opensAfter = output.round.closesAfter - output.timing.scoresMs - output.timing.optionsLagMs}
       # The next wait for the options starts after this round's scoreboard, which closes by closesBy, or a hold budget
       # later if it is held
-      - evalScript: "${output.options = { shown: false, seenAt: 0, hiddenFrom: 0, lookFrom: 0, goneLookFrom: 0, giveUpAt: output.round.closesBy + output.timing.holdBudgetMs + output.timing.optionsWaitMs }}"
+      - evalScript: "${output.options = { shown: false, seenAt: 0, hiddenFrom: 0, lookFrom: 0, goneLookFrom: 0, slowestMs: 0, giveUpAt: output.round.closesBy + output.timing.holdBudgetMs + output.timing.optionsWaitMs }}"
       # ── timed: answering ──
       - tapOn:
           id: "player-option-bot1"
           optional: true
           waitToSettleTimeoutMs: 500
-      - evalScript: ${output.shot = (output.shot || 0) + 1}
+      # The last command that acts on the device before the scoreboard (`actedAt`: the card wait's looks wait less after it)
+      - evalScript: ${output.round.actedAt = Date.now(), output.shot = (output.shot || 0) + 1}
       - takeScreenshot: round-${USERNAME}-${output.shot}
       # ── end timed ──
       # Is the game over? This look ends the pass (EXP-312, EXP-326) and goes on only when it finds neither the game
@@ -192,11 +267,6 @@ appId: com.socketNull.ExposeMe
       id: "winner-modal|final-score-modal"
     timeout: 5000
     label: "The round loop ended on the game over, not on a round photo still loading (photo-loading)"
-# Too few scoreboards checked (the device was late for most of them) fails rather than passing unchecked. A scoreboard
-# found held was reached in time too, though its card was not checked. lab.sh play prints both counts per device
-- assertTrue:
-    condition: ${output.scoreboards.checked + output.scoreboards.held >= Math.floor(output.timing.minCheckedShare * (output.scoreboards.shown - 1))}
-    label: "At least half the scoreboards (the last aside) had their card checked or were found held"
 - takeScreenshot: final-${USERNAME}
 # "Tap anywhere to continue" only renders once the winner animation is tappable
 - runFlow:

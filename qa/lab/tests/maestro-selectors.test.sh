@@ -116,7 +116,7 @@ unknown_ids() {
 }
 # Flows besides the boot ones whose ids are all checked against testIds.ts (EXP-176, EXP-348, EXP-346, EXP-354, EXP-339,
 # EXP-390)
-ID_CHECKED_FLOWS="tie-game.yaml hold-used-up.yaml hold-closed.yaml kicked-after-game.yaml kicked-while-offline.yaml join-room.yaml search-room.yaml kicked-notice.yaml device-host-start.yaml unknown-link.yaml unknown-link-home.yaml"
+ID_CHECKED_FLOWS="tie-game.yaml hold-used-up.yaml hold-closed.yaml kicked-after-game.yaml kicked-while-offline.yaml join-room.yaml search-room.yaml kicked-notice.yaml device-host-start.yaml unknown-link.yaml unknown-link-home.yaml server-unreachable.yaml"
 # Flows that read the host's removal notice, a system alert matched by its text (EXP-139, EXP-346)
 KICK_NOTICE_FLOWS="kicked-notice.yaml kicked-after-game.yaml kicked-while-offline.yaml"
 
@@ -249,6 +249,11 @@ for check in "unknown-link-home.yaml unknownLinkNotice serverNoticeTitle ok" "in
     [ -n "$found" ] && ok "$flow: reads the alert's $key in en and es ($found)" || ko "$flow: no text selector matches $key in en and es"
   done
 done
+# EXP-417: server-unreachable.yaml's only text is the lobby's connection message, read in both languages
+unreachable_texts="$(text_selectors "$MAESTRO_DIR/server-unreachable.yaml" | cut -f2)" stray=""
+while IFS= read -r pattern; do matches_i18n "$pattern" serverUnreachable || stray+="$pattern;"; done <<<"$unreachable_texts"
+[ -n "$unreachable_texts" ] && [ -z "$stray" ] && ok "server-unreachable.yaml: reads serverUnreachable in en and es" \
+  || ko "server-unreachable.yaml: every text selector matches serverUnreachable in en and es" "${stray:-no text selector}"
 # The bundle wait polls the app's testIDs in a loop bounded by a JS deadline: lab-play.test.sh checks lab.sh's
 # STUCK_ATTEMPT_S against the longest `timeout: <ms>` of dev-client-boot.yaml, so that must be the loop's
 loop_ms="$(grep -oE 'devClientBoot = \{ timeout: [0-9]+' "$BOOT" | grep -oE '[0-9]+$')"

@@ -21,6 +21,7 @@ import { useStartGame } from "@/src/hooks/useStartGame";
 import { Ionicons } from "@expo/vector-icons";
 import { LobbyChatFooter, LobbyChatMessages } from "@/src/components/LobbyChat";
 import BusyOverlay from "@/src/components/BusyOverlay";
+import ServerUnreachableOverlay from "@/src/components/ServerUnreachableOverlay";
 import SuccessAlert from "@/src/components/SuccessAlert";
 import PlantPhotoButton from "@/src/components/PlantPhotoButton";
 import { BRAND_RED } from "@/src/theme/brand";
@@ -41,6 +42,7 @@ import { GAME_SCREEN_ROUTE_NAME, gameScreenAtStart, RESYNC_GAME_SCREEN } from ".
 import { HOME_PATH } from "../../src/utils/homeRoute";
 import { useGoHome } from "../../src/hooks/useGoHome";
 import { useRouteBelow } from "../../src/hooks/useRouteBelow";
+import { useServerUnreachable } from "../../src/hooks/useServerUnreachable";
 import { useBackHandler } from "@react-native-community/hooks";
 import { gameWentBySince } from "../../src/utils/plantedPhoto";
 
@@ -506,6 +508,13 @@ const WaitingRoom = () => {
    */
   const handleClose = () => (invitedCodeRef.current ? declineInvite() : handleLeaveGame());
 
+  // The loading overlay waits for a socket that may never connect (no network, server down or cold-starting): after a
+  // while it says so, with Try again and Back, while socket.io keeps retrying (EXP-417). Back goes home keeping the
+  // seat (sendHome: no leave-room, the rejoin token stays), so Home's Join can still reclaim e.g. a game in progress
+  // once the network is back; the close button stays the explicit Exit. Not while the invite dialog asks: the socket
+  // then may be the room's screen's, and nothing waits for it here.
+  const serverReach = useServerUnreachable(socket, isLoading && !invitedCode);
+
   // Android back (the key and the back gesture) is Exit too: popping the lobby would only close the socket, keeping
   // this player in the room as a lost connection (EXP-336). With the chat keyboard open it only closes the keyboard
   // (EXP-064), and with the remove-player confirmation open (an overlay, not a native modal) it only closes that.
@@ -618,7 +627,9 @@ const WaitingRoom = () => {
       <CloseButton onPress={handleClose} accessibilityLabel={invitedCode ? t.cancel : t.leaveRoom} />
 
       {/* Loading overlay and notifications */}
-      {isLoading && <BusyOverlay testID={TEST_IDS.lobbyLoading} title={t.loadingGameRoom} subtitle={t.pleaseWait} />}
+      {isLoading && (serverReach.unreachable
+        ? <ServerUnreachableOverlay onRetry={serverReach.retry} onBack={sendHome} />
+        : <BusyOverlay testID={TEST_IDS.lobbyLoading} title={t.loadingGameRoom} subtitle={t.pleaseWait} />)}
 
       {/* Copy notification overlay - centered on screen */}
       {showCopyMessage && <SuccessAlert text={t.gameCodeCopied} />}

@@ -31,6 +31,10 @@ export const TEST_IDS = {
   lobbyWaiting: "lobby-waiting",
   lobbyHostHint: "lobby-host-hint", // host only, while Start isn't offered: "send the code to your friends"
   lobbyLoading: "lobby-loading", // shown until the join answer says this is a lobby (a started game opens the game)
+  // Replaces lobbyLoading when the socket doesn't connect in time (EXP-417)
+  serverUnreachable: "server-unreachable",
+  serverUnreachableRetry: "server-unreachable-retry",
+  serverUnreachableBack: "server-unreachable-back",
   chatInput: "chat-input",
   chatSendButton: "chat-send-button",
   lobbyChatMessages: "lobby-chat-messages", // the chat bubbles' area, from under the room code down to the chat input

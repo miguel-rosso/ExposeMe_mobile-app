@@ -44,6 +44,8 @@ export default {
   cancel: "Cancel",
   loadingGameRoom: "Loading game room...",
   pleaseWait: "Please wait a moment",
+  // Shown instead of the loading spinner when the server doesn't answer (EXP-417): its buttons are tryAgain and back
+  serverUnreachable: "Can't connect to the server. Check your connection.",
   gameCodeCopied: "Game code copied",
   photoSelectedForGame: "Photo selected for the game!",
   selectingPhoto: "Selecting your photo...",

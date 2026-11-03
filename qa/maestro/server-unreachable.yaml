@@ -1,0 +1,46 @@
+# EXP-417: with the server out of reach (no network, server down, Render cold-starting) the lobby's loading overlay
+# never spins for ever. The device taps Create game; after SERVER_UNREACHABLE_AFTER_MS (12 s,
+# Client/src/hooks/useServerUnreachable.ts) without a connection the "Loading game room..." spinner gives way to "Can't
+# connect to the server. Check your connection." / "No se puede conectar con el servidor. Comprueba tu conexión.", with
+# Try again and Back. Back goes home (the one under the lobby, EXP-339), keeping the player's seat if they had one.
+# Needs the lab SERVER STOPPED (Metro stays up: the app still loads its bundle), so no bots: run it directly, never
+# through `lab.sh play`, then start the server again for the other flows:
+#   qa/lab/lab.sh server --stop --port 3000
+#   ~/.maestro/bin/maestro --device <id> test qa/maestro/server-unreachable.yaml -e USERNAME=<label> -e METRO_URL=<url-encoded>
+#   qa/lab/lab.sh server
+# env: USERNAME, METRO_URL (url-encoded)
+# Selectors are testIDs (Client/src/utils/testIds.ts) except the message, matched in both UI languages
+# (serverUnreachable in Client/src/i18n, checked by qa/lab/tests/maestro-selectors.test.sh).
+# lab: one device (it needs the lab server stopped, which every other device's flow and the bots need up)
+appId: com.socketNull.ExposeMe
+---
+- runFlow: open-app.yaml
+# Clear a previously saved name before typing
+- tapOn:
+    id: "username-clear-button"
+    optional: true
+- tapOn:
+    id: "username-input"
+- inputText: ${USERNAME}
+- hideKeyboard
+- tapOn:
+    id: "create-game-button"
+# The spinner first, then the connection message once the wait is over (12 s from the lobby opening, plus slack)
+- extendedWaitUntil:
+    visible:
+      id: "server-unreachable"
+    timeout: 20000
+- assertVisible: "(Can't connect to the server|No se puede conectar con el servidor).*"
+- assertNotVisible:
+    id: "lobby-loading"
+- assertVisible:
+    id: "server-unreachable-retry"
+- takeScreenshot: server-unreachable-${USERNAME}
+- tapOn:
+    id: "server-unreachable-back"
+- extendedWaitUntil:
+    visible:
+      id: "join-game-button"
+    timeout: 10000
+- assertNotVisible:
+    id: "server-unreachable"

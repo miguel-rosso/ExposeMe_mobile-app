@@ -199,7 +199,7 @@ describe("Lobby -> game with the server's events (EXP-187)", () => {
     expect(mockSocket.listenerCount("room-of-game")).toBe(1); // the game screen's own (rejoin answers)
     expect(mockSocket.listenerCount("waiting-photo")).toBe(1);
     expect(mockSocket.listenerCount("round-start")).toBe(1);
-    expect(mockSocket.emittedPayloads("im-ready")).toEqual([{ gameCode: ROOM_CODE, username: "bob" }]);
+    expect(mockSocket.emitted.filter(([ev]) => ev === "im-ready")).toEqual([["im-ready"]]); // no payload (EXP-332)
     expect(mockSocket.emittedPayloads("join-create-game")).toHaveLength(1);
 
     // First phase: someone is choosing a photo, with the room's rounds from the lobby and the server's wait

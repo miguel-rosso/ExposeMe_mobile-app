@@ -35,21 +35,21 @@ describe("socket flow", () => {
 
     // Start
     const started = [alice, bob, carol].map((c) => once<unknown[]>(c, "game-started"));
-    alice.emit("start-game", { gameCode });
+    alice.emit("start-game");
     await Promise.all(started);
 
     // Ready → exactly one player gets your-turn
     const turn = new Promise<{ name: string; data: { round: number } }>((resolve) => {
       for (const [name, sock] of Object.entries(byName)) sock.once("your-turn", (data) => resolve({ name, data }));
     });
-    for (const [name, sock] of Object.entries(byName)) sock.emit("im-ready", { gameCode, username: name });
+    for (const sock of Object.values(byName)) sock.emit("im-ready");
     const { name: owner, data: turnData } = await turn;
     expect(turnData).toEqual({ round: 1, attempt: 1 });
 
     // Photo → round-start broadcast to everyone
     const roundStarts = [alice, bob, carol].map((c) => once<Record<string, unknown>>(c, "round-start"));
     registerTurnUpload(gameCode, owner, PHOTO, 1); // as if the owner had uploaded it (photo-sent takes only own uploads)
-    byName[owner].emit("photo-sent", { photo: PHOTO, gameCode });
+    byName[owner].emit("photo-sent", { photo: PHOTO });
     const payloads = await Promise.all(roundStarts);
     // Same payload for everyone, owner included: nobody is told whose photo it is (EXP-128, EXP-252)
     payloads.forEach((p) => expect(p).toEqual({ photo: PHOTO, round: 1, duration: ANSWER_TIME - ANSWER_GRACE }));

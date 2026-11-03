@@ -219,19 +219,19 @@ describe("POST /upload", () => {
       tokens[name] = j.rejoinToken;
     }
     const started = [alice, bob, carol].map((c) => once(c, "game-started"));
-    alice.emit("start-game", { gameCode });
+    alice.emit("start-game");
     await Promise.all(started);
 
     const turn = new Promise<string>((resolve) => {
       for (const [name, sock] of Object.entries(byName)) sock.once("your-turn", () => resolve(name));
     });
-    for (const [name, sock] of Object.entries(byName)) sock.emit("im-ready", { gameCode, username: name });
+    for (const sock of Object.values(byName)) sock.emit("im-ready");
     const owner = await turn;
     const ownerAuth = { Authorization: `Bearer ${tokens[owner]}`, "X-Game-Code": gameCode };
     const { path: photo } = await fetchUploaded(await uploadFile(await gpsJpeg(), LEAKY_NAME, "image/jpeg", ownerAuth), ownerAuth);
 
     const roundStart = once<{ photo: string }>(alice, "round-start");
-    byName[owner].emit("photo-sent", { photo, gameCode });
+    byName[owner].emit("photo-sent", { photo });
     expect(await roundStart).toMatchObject({ photo });
 
     for (const c of [alice, bob, carol]) c.emit("leave-room");

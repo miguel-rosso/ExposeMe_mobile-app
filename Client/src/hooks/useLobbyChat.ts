@@ -48,7 +48,7 @@ export const useLobbyChat = (socket: Socket | null, gameCode: string | null, use
       return false;
     }
     // Offline it is not sent (nor shown): the text stays in the input to send once back
-    const sent = !!gameCode && emitWhileConnected(socket, "chat-message", { gameCode, username, message });
+    const sent = !!gameCode && emitWhileConnected(socket, "chat-message", { message });
     if (!sent) return false;
     // The server doesn't echo it back to me: show it here
     show(newChatMessage(username || "You", message));

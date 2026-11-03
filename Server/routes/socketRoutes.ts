@@ -124,7 +124,7 @@ function startGame(socket: Socket): StartGameAck {
 
 /**
  * Room and player bound to this socket by a successful join-create-game.
- * Identity always comes from here, never from payload fields (gameCode/username in payloads are ignored).
+ * Identity always comes from here: payloads carry none, and a gameCode/username field in one is ignored.
  * Returns null for sockets that never joined or were superseded by a rejoin on another socket.
  */
 function session(socket: Socket): { room: Room; player: Player } | null {
@@ -397,7 +397,7 @@ io.on("connection", (socket: Socket) => {
     } catch (e) { console.error("leave-room error:", e); }
   });
 
-  // Payload gameCode is ignored: host-only, applies to the host's own room
+  // Host-only, applies to the host's own room
   socket.on("set-rounds", (data: { rounds: number }) => {
     try {
       if (!gameEvents.take("set-rounds")) return;
@@ -487,7 +487,7 @@ io.on("connection", (socket: Socket) => {
 
   // ── Social ─────────────────────────────────────────
 
-  // Social events: payload gameCode/username are ignored, the session decides room and sender
+  // Social events: the session decides room and sender
 
   // Only the emojis the app offers (ALLOWED_EMOJIS), token bucket per socket; anything else is dropped silently
   const emojiBucket = createTokenBucket(EMOJI_BURST, EMOJI_RATE_PER_S);

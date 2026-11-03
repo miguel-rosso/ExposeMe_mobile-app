@@ -90,7 +90,7 @@ describe("GameScreen: server phases drawn with the received duration (EXP-063)",
   afterEach(() => act(() => r.unmount()));
 
   it("says im-ready once on mount and waits on the ready screen until the first round", () => {
-    expect(emitted("im-ready")).toHaveLength(1);
+    expect(emitted("im-ready")).toEqual([["im-ready"]]); // once, with no payload (EXP-332)
     expect(has(r.root, TEST_IDS.gameWaitingReady)).toBe(true);
     expect(bar(r.root)).toBeNull();
   });

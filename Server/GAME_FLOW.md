@@ -394,7 +394,7 @@ After last round: game-over
   still bound to that player in the room (the replaced one, if still alive) is **evicted**: removed from the
   socket.io room, session cleared and disconnected, so it receives no more room events (e.g. photo URLs).
 - A successful join binds the socket to `(gameCode, username)` server-side. **Every other event uses that
-  session**: `gameCode`/`username` fields in payloads are ignored (still accepted for compatibility).
+  session**: their payloads carry no identity (a `gameCode`/`username` field in one is ignored).
   Events from sockets that never joined, or that were replaced by a rejoin on another socket, are ignored
   (a replaced socket's `leave-room` only detaches that socket; the live player stays; an unbound socket's `leave-room`
   may name a seat with its token, see "Leaving"). After `leave-room`
@@ -777,7 +777,7 @@ All game events are **atomic** — each contains everything the client needs.
 | `qa-ack` | `{ phase, round, at, platform, handledAt? }` (`phase` one of the four round phases, `round` integer, `at` device clock in ms when the phase was painted, `platform` `ios` or `android`, optional `handledAt` device clock in ms when the socket handler of the event that started it ran) | **Dev/QA only**, handled only when the server runs with `QA_TELEMETRY=1` (see "QA render telemetry"); otherwise not even registered |
 | `qa-photo-shown` | `{ phase, round, at, platform, failed? }` (`phase`/`round` the round phase the game screen had painted, `at` device clock in ms when the main round photo first drew, `platform` `ios` or `android`, `failed: true` when it could not be drawn at all) | **Dev/QA only**, like `qa-ack` (see "QA render telemetry") |
 
-Payload `gameCode`/`username` fields are ignored for all of the above; identity comes from the session.
+Apart from `join-create-game` and an unbound socket's `leave-room` seat (see "Leaving"), payloads carry no identity: room and sender come from the session, and a `gameCode`/`username` field is ignored (`remove-player`'s `username` is the player to remove, not the sender).
 
 ## Per-socket event limits
 

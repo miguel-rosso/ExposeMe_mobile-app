@@ -65,7 +65,7 @@ beforeEach(() => {
 });
 
 describe("WaitingRoom: host removes a player", () => {
-  it("emits remove-player with the player's username", async () => {
+  it("emits remove-player with only the player's username (EXP-332: no identity)", async () => {
     let r!: TestRenderer.ReactTestRenderer;
     await act(async () => { r = TestRenderer.create(<WaitingRoom />); });
     await act(async () => { await Promise.resolve(); });
@@ -75,7 +75,7 @@ describe("WaitingRoom: host removes a player", () => {
     expect(mockAlertProps.current.visible).toBe(true);
     mockSocket.emitted = [];
     act(() => mockAlertProps.current.onConfirm());
-    expect(mockSocket.emitted).toEqual([["remove-player", { gameCode: "ABC123", username: "bob" }]]);
+    expect(mockSocket.emitted).toEqual([["remove-player", { username: "bob" }]]);
     act(() => r.unmount());
   });
 });

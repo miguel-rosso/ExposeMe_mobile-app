@@ -845,7 +845,7 @@ function runRoom(roomIdx, fixedCode) {
           if (args["code-file"]) fs.writeFileSync(args["code-file"], code);
           console.log(`[room ${roomIdx}] code ${code}`);
           // 3 is QA-only: the server accepts it only with ALLOW_QA_ROUNDS=1 (qa/lab/lab.sh server sets it)
-          socket.emit("set-rounds", { gameCode: code, rounds: ROUNDS });
+          socket.emit("set-rounds", { rounds: ROUNDS });
           bots.filter((b) => !b.isHost).forEach((b) => b.socket.connected && b.join());
         }
         // Like the app picking a photo to plant in the lobby: uploaded and planted at once
@@ -950,7 +950,7 @@ function runRoom(roomIdx, fixedCode) {
         bot.players = players.map((p) => p.username);
         rec("game-started", 0, { rounds, players: [...bot.players], gameNumber });
         if (i >= N_BOTS - NO_READY) { rec("im-ready-skipped-on-purpose", 0); return; }
-        socket.emit("im-ready", { gameCode: code, username: name });
+        socket.emit("im-ready");
       });
       socket.on("your-turn", async (d) => {
         // On the final screens the app answers at once that it has no photo (EXP-172), so nobody waits for it

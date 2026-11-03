@@ -178,7 +178,7 @@ describe("WaitingRoom: player list and host controls (EXP-063)", () => {
   it("the host starts the game and picks the rounds; rounds-updated from the server is applied", async () => {
     const r = await mount([player("alice", true), player("bob")]);
     pressId(r, roundsOptionId(20));
-    expect(emitted("set-rounds")).toEqual([{ gameCode: "K7MQ4X", rounds: 20 }]);
+    expect(emitted("set-rounds")).toEqual([{ rounds: 20 }]); // no identity: the server takes it from the session (EXP-332)
     expect(mockCtx.setRoundsOfGame).toHaveBeenLastCalledWith(20);
 
     pressId(r, TEST_IDS.startGameButton);

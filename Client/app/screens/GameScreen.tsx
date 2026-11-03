@@ -74,7 +74,6 @@ const GameScreen = () => {
     takeInviteOverRoomScreen, leaveRoom,
   } = useGameContext();
   const safeUsername = username ?? "";
-  const safeGameCode = gameCode ?? "";
   const { pickGamePhoto, resetUsedPhotos } = usePhotoContext();
   // One game screen per game (reconnects stay on it): a new screen is a new game, earlier photos may come up again.
   // Optional call: screen tests mock the photo context with only what their flow needs.
@@ -450,7 +449,7 @@ const GameScreen = () => {
         const result = gameStateFollowUps(snap);
         setPause(result.pause);
         if (result.gameOver) showGameOver(snap.scores);
-        if (result.sendReady) socket.emit("im-ready");
+        if (result.sendReady) emitWhileConnected(socket, "im-ready");
         if (result.resendGuess) pickSender.resendAfterRejoin();
       },
     };
@@ -499,7 +498,7 @@ const GameScreen = () => {
   // rejoin's snapshot of the ready phase sends im-ready instead
   useEffect(() => {
     if (!isReady || !socket) return;
-    const sent = emitWhileConnected(socket, "im-ready", { gameCode: safeGameCode, username: safeUsername });
+    const sent = emitWhileConnected(socket, "im-ready");
     console.log(sent ? "Emitting im-ready" : "im-ready deferred to the rejoin snapshot");
     if (plantedPhotoUri && !plantedPhotoSent) plantPhoto();
   }, [isReady]);

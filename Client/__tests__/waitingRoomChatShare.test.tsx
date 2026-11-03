@@ -109,7 +109,7 @@ describe("WaitingRoom: lobby chat (EXP-186)", () => {
     expect(byId(r, TEST_IDS.chatSendButton).props.accessibilityState?.disabled).toBeFalsy();
 
     await sendChat(r);
-    expect(mockSocket.emittedPayloads("chat-message")).toEqual([{ gameCode: ROOM_CODE, username: "alice", message: "hola a todos" }]);
+    expect(mockSocket.emittedPayloads("chat-message")).toEqual([{ message: "hola a todos" }]);
     expect(chatShown(r)).toEqual([{ username: "alice", message: "hola a todos" }]);
     expect(byId(r, TEST_IDS.chatInput).props.value).toBe("");
     expect(dismissSpy).toHaveBeenCalledTimes(1);
@@ -121,7 +121,7 @@ describe("WaitingRoom: lobby chat (EXP-186)", () => {
     const r = await mount();
     await typeChat(r, "hola");
     act(() => { byId(r, TEST_IDS.chatInput).props.onSubmitEditing({ nativeEvent: { text: "hola" } }); });
-    expect(mockSocket.emittedPayloads("chat-message")).toEqual([{ gameCode: ROOM_CODE, username: "alice", message: "hola" }]);
+    expect(mockSocket.emittedPayloads("chat-message")).toEqual([{ message: "hola" }]);
     expect(chatShown(r)).toEqual([{ username: "alice", message: "hola" }]);
     expect(byId(r, TEST_IDS.chatInput).props.value).toBe("");
     expect(dismissSpy).not.toHaveBeenCalled();

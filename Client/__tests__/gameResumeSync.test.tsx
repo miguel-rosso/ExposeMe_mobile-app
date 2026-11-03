@@ -161,7 +161,7 @@ describe("GameScreen emits nothing while offline (EXP-081)", () => {
     expect(mockSocket.emittedPayloads("im-ready")).toEqual([]);
     mockSocket.connected = true;
     act(() => mockSocket.fire("game-state", snapshot({ phase: null, photo: null })));
-    expect(mockSocket.emitted.filter(([ev]) => ev === "im-ready")).toHaveLength(1);
+    expect(mockSocket.emitted.filter(([ev]) => ev === "im-ready")).toEqual([["im-ready"]]); // no payload (EXP-332)
     act(() => r.unmount());
   });
 });

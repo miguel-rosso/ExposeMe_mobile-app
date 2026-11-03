@@ -125,6 +125,32 @@ describe("host-only actions", () => {
     expect(await updated).toBe(15);
   });
 
+  // Payloads carry no identity (EXP-332): a gameCode in them, even another live room's, changes nothing
+  it("applies set-rounds, chat and remove-player to the session's room, never to a payload gameCode's", async () => {
+    const mine = await lobby();
+    const other = await lobby();
+    const otherRoomQuiet = [other.alice, other.bob].flatMap((c) => [
+      silent(c, "rounds-updated", 1_000), silent(c, "chat-message", 1_000), silent(c, "player-removed", 1_000),
+    ]);
+
+    const updated = once<number>(mine.bob, "rounds-updated");
+    mine.alice.emit("set-rounds", { gameCode: other.gameCode, rounds: 15 });
+    expect(await updated).toBe(15);
+
+    const chat = once<{ username: string; message: string }>(mine.bob, "chat-message");
+    mine.alice.emit("chat-message", { gameCode: other.gameCode, username: "bob", message: "hi" });
+    expect(await chat).toEqual({ username: "alice", message: "hi" });
+
+    const removed = once<{ username: string }>(mine.alice, "player-removed");
+    mine.alice.emit("remove-player", { gameCode: other.gameCode, username: "bob" });
+    expect((await removed).username).toBe("bob");
+
+    expect(await Promise.all(otherRoomQuiet)).toEqual(otherRoomQuiet.map(() => true));
+    expect(other.bob.connected).toBe(true);
+    expect(roomManager.getRoom(other.gameCode)!.players.map((p) => p.username)).toEqual(["alice", "bob"]);
+    expect(roomManager.getRoom(other.gameCode)!.rounds).not.toBe(15);
+  });
+
   it("ignores start-game from non-hosts and outsiders", async () => {
     const { gameCode, alice, bob } = await lobby();
     const outsider = await newClient();

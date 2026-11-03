@@ -523,13 +523,13 @@ const WaitingRoom = () => {
   const handleSetRounds = (rounds: number) => {
     setRoundsOfGame(rounds);
     if (socket) {
-      socket.emit("set-rounds", { gameCode, rounds });
+      socket.emit("set-rounds", { rounds });
     }
   };
 
   const handleRemovePlayer = (target: string) => {
     if (socket) {
-      socket.emit("remove-player", { gameCode, username: target });
+      socket.emit("remove-player", { username: target });
     }
   };
 

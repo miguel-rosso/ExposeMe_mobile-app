@@ -2,8 +2,7 @@ import React from "react";
 import { View } from "react-native";
 import tw from "twrnc";
 import EmojiReaction from "./EmojiReaction";
-
-export interface EmojiReactionData { id: string; username: string; emoji: string }
+import type { RoomReaction } from "../../utils/reactions";
 
 // Breathing room between the lane and the answer buttons below it
 export const REACTION_LANE_GAP = 8;
@@ -11,12 +10,13 @@ export const REACTION_LANE_GAP = 8;
 export const REACTION_PILL_HEIGHT = 48;
 
 interface EmojiReactionLaneProps {
-  reactions: EmojiReactionData[];
+  reactions: RoomReaction[];
   // Lane start (px from the top of the game screen): just below the round progress bar
   top: number;
   // Top edge of the answer buttons, once measured: the lane stops above it and clips the oldest reactions
   answersTop: number | null;
   screenshotLabel: string;
+  // Keep it stable: every pill gets it as is, so the ones already shown don't re-render (EXP-393)
   onReactionEnd: (id: string) => void;
 }
 
@@ -33,10 +33,11 @@ const EmojiReactionLane: React.FC<EmojiReactionLaneProps> = ({ reactions, top, a
       {newestFirst.map((r) => (
         <EmojiReaction
           key={r.id}
+          id={r.id}
           username={r.username}
           emoji={r.emoji}
           screenshotLabel={screenshotLabel}
-          onAnimationEnd={() => onReactionEnd(r.id)}
+          onAnimationEnd={onReactionEnd}
         />
       ))}
     </View>

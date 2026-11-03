@@ -20,7 +20,7 @@ import ProgressBar from "@/app/components/ProgressBar";
 import FinalScoreModal from "@/app/components/modals/FinalScoreModal";
 import WinnerModal from "@/app/components/modals/WinnerModal";
 import { getWinners, hasResult } from "@/app/utils/ranking";
-import EmojiReactionLane, { EmojiReactionData } from "@/app/components/IngameComunication/EmojiReactionLane";
+import RoomReactionLane from "@/app/components/IngameComunication/RoomReactionLane";
 import EmojisButton from "@/app/components/IngameComunication/EmojisButtons";
 import AnswerOption, { answerOptionState } from "@/app/components/AnswerOption";
 import AnswerOptionsGrid from "@/app/components/AnswerOptionsGrid";
@@ -48,7 +48,6 @@ import GalleryAccessModal from "@/app/components/modals/GalleryAccessModal";
 import { useGalleryAccessGuard } from "@/app/hooks/useGalleryAccessGuard";
 import { useQaRenderAck } from "../hooks/useQaRenderAck";
 import { useScreenshotReaction } from "../hooks/useScreenshotReaction";
-import { appendCapped, isAllowedReaction, MAX_VISIBLE_REACTIONS } from "../utils/reactions";
 import { answerOptionsLayout } from "../utils/answerOptionsLayout";
 import { usePlayerColors } from "../hooks/usePlayerColors";
 import { useReduceMotion } from "../hooks/useReduceMotion";
@@ -65,7 +64,6 @@ import { isKickedByHost, KICKED_BY_HOST_MESSAGE } from "../utils/serverMessage";
 const { SERVER_URL } = getEnvVars();
 // Rows over the photo (see safeAreaRows; the progress bar strip is in progressBarRow, the bottom ones in gameRows)
 const RECONNECTING_BANNER = { top: 8, margin: 8 } as const;
-const NO_REACTIONS: EmojiReactionData[] = [];
 const NO_SCORES: ScoreRound[] = [];
 
 const GameScreen = () => {
@@ -113,9 +111,6 @@ const GameScreen = () => {
     if (roundRef.current.phaseKey !== previousPhaseKey) setPhaseStartedAt(Date.now());
     const { photo: currentPhoto } = roundRef.current;
     if (currentPhoto === previousPhoto) return;
-    // Reactions belong to the photo they were sent on: dropped in the same render that changes it (waiting-photo,
-    // resume, snapshot), not in an extra one after it
-    setEmojiReactions(NO_REACTIONS);
     // A new round photo (round-start, snapshot) starts downloading now, while the screen renders and mounts (EXP-119)
     if (currentPhoto && photoHeadersRef.current) prefetchImage(currentPhoto, photoHeadersRef.current);
   };
@@ -170,7 +165,6 @@ const GameScreen = () => {
   const gameOverRef = useRef(false);
 
   // ── Other ────────────────────────────────────────────
-  const [emojiReactions, setEmojiReactions] = useState<EmojiReactionData[]>(NO_REACTIONS);
   const [isReady, setIsReady] = useState(false);
 
   // ── Derived ──────────────────────────────────────────
@@ -460,13 +454,6 @@ const GameScreen = () => {
         if (result.sendReady) socket.emit("im-ready");
         if (result.resendGuess) pickSender.resendAfterRejoin();
       },
-
-      // Only the picker's emojis (and the screenshot one), only while a photo is shown, at most a few on screen
-      "emoji-reaction": (data: { username: string; emoji: string }) => {
-        if (!roundRef.current.photo || !isAllowedReaction(data?.emoji) || typeof data.username !== "string") return;
-        const reaction = { id: `${Date.now()}-${Math.random()}`, username: data.username, emoji: data.emoji };
-        setEmojiReactions((c) => appendCapped(c, reaction, MAX_VISIBLE_REACTIONS));
-      },
     };
 
     // Someone left or was kicked: out of the room (a disconnected player stays, they may come back). During a round
@@ -519,7 +506,8 @@ const GameScreen = () => {
   }, [isReady]);
 
   const handleWinnerEnd = () => { setShowWinner(false); setShowFinalScore(true); };
-  const removeEmoji = (id: string) => setEmojiReactions((c) => c.filter((r) => r.id !== id));
+  // The photo of the latest round event, for the reaction lane (stable: the lane is memoised)
+  const latestPhoto = useCallback(() => roundRef.current.photo, []);
   // Top edge of the answer buttons (measured): the reaction lane ends above it
   const [answersTop, setAnswersTop] = useState<number | null>(null);
   const onAnswersLayout = useCallback((e: LayoutChangeEvent) => setAnswersTop(e.nativeEvent.layout.y), []);
@@ -532,7 +520,7 @@ const GameScreen = () => {
   );
 
   // ── Render helpers ───────────────────────────────────
-  // Stable props for the memoised scoreboard: the game screen re-renders during scores (reactions, hold)
+  // Stable props for the memoised scoreboard: the game screen re-renders during scores (hold)
   const scoreRounds = useMemo(() => ({ round, roundsOfGame: totalRounds }), [round, totalRounds]);
   // The options are drawn while answering and in the reveal (not in scores: the scoreboard covers the photo)
   const isReveal = phase === "reveal";
@@ -608,6 +596,19 @@ const GameScreen = () => {
       )}
 
       <View style={tw`flex-1 bg-black`}>
+        {/* Emoji reactions over the photo: own lane between the progress bar and the answer buttons, with its own
+            state and listener (a reaction never re-renders this screen), mounted for the whole game. First child:
+            the emoji picker (same zIndex) stays drawn above it */}
+        <RoomReactionLane
+          socket={socket}
+          listening={!finalScore}
+          photo={photo}
+          latestPhoto={latestPhoto}
+          top={progressBarAreaBottom(insets)}
+          answersTop={answersTop}
+          screenshotLabel={t.tookScreenshot}
+        />
+
         {phase === "waiting-photo" ? (
           <View testID={TEST_IDS.gameWaitingPhoto} style={tw`flex-1 justify-center items-center px-6`}>
             {round > 0 && totalRounds > 0 && (
@@ -635,15 +636,6 @@ const GameScreen = () => {
           <>
             {/* Server photos need the room credentials: never request one without them (black until ready) */}
             {photoHeaders && <PhotoComponent photoUrl={photo} headers={photoHeaders} />}
-
-            {/* Emoji reactions: own lane between the progress bar and the answer buttons */}
-            <EmojiReactionLane
-              reactions={emojiReactions}
-              top={progressBarAreaBottom(insets)}
-              answersTop={answersTop}
-              screenshotLabel={t.tookScreenshot}
-              onReactionEnd={removeEmoji}
-            />
 
             {/* Held marker for the device flows (qa/maestro/play-rounds.yaml): invisible and untouchable; kept out of
                 view flattening so it reaches the native view tree */}

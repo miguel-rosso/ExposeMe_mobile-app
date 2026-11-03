@@ -1,17 +1,20 @@
-import React, { useEffect, useRef } from "react";
+import React, { memo, useEffect, useRef } from "react";
 import { Text, Animated } from "react-native";
 import tw from "twrnc";
 import { SCREENSHOT_EMOJI } from "../../utils/reactions";
 
 interface EmojiReactionProps {
+  id: string;
   username: string;
   emoji: string;
   // Translated text shown after the screenshot emoji ("took a screenshot")
   screenshotLabel?: string;
-  onAnimationEnd: () => void;
+  // Called with `id` when the pill's animation ends, which may be after newer reactions pushed it out of the lane:
+  // one stable handler for every pill
+  onAnimationEnd: (id: string) => void;
 }
 
-const EmojiReaction: React.FC<EmojiReactionProps> = ({ username, emoji, screenshotLabel, onAnimationEnd }) => {
+const EmojiReaction: React.FC<EmojiReactionProps> = ({ id, username, emoji, screenshotLabel, onAnimationEnd }) => {
   const opacity = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(-10)).current;
   const isScreenshot = emoji === SCREENSHOT_EMOJI;
@@ -45,7 +48,7 @@ const EmojiReaction: React.FC<EmojiReactionProps> = ({ username, emoji, screensh
         }),
       ]),
     ]).start(() => {
-      onAnimationEnd();
+      onAnimationEnd(id);
     });
   }, []);
 
@@ -62,4 +65,5 @@ const EmojiReaction: React.FC<EmojiReactionProps> = ({ username, emoji, screensh
   );
 };
 
-export default EmojiReaction;
+// Memoised: a pill already on screen does not re-render when others arrive or leave the lane (EXP-393)
+export default memo(EmojiReaction);

@@ -52,7 +52,7 @@ beforeAll(() => { jest.spyOn(console, "log").mockImplementation(() => {}); });
 afterAll(() => jest.restoreAllMocks());
 
 const snapshot = (over: Partial<GameStateSnapshot> = {}): GameStateSnapshot => ({
-  started: true, phase: "answering", round: 3, totalRounds: 10, photo: "/temp/1-a.jpg", correctAnswer: null, yourGuess: null,
+  started: true, gameNumber: 1, phase: "answering", round: 3, totalRounds: 10, photo: "/temp/1-a.jpg", correctAnswer: null, yourGuess: null,
   duration: 4_000, phaseTotal: 8_000, held: false, holdsLeft: 3, pause: null, scores: [], players: mockPlayers, roundOptions: [], ...over,
 });
 const ROUND_START = { photo: "/temp/1-a.jpg", round: 3, duration: 8_000 };
@@ -99,7 +99,7 @@ describe("GameScreen round bar after a resume or reconnect (EXP-080)", () => {
     act(() => mockSocket.fire("game-state", snapshot({ duration: 6_000 })));
     expect(bar(r.root)).toEqual({ duration: 6_000, elapsed: 0.25 });
 
-    act(() => mockSocket.fire("waiting-photo", { round: 4, duration: 15_000 }));
+    act(() => mockSocket.fire("waiting-photo", { round: 4, duration: 15_000, gameNumber: 1 }));
     act(() => mockSocket.fire("game-state", snapshot({ phase: "waiting-photo", photo: null, duration: 3_000, phaseTotal: 15_000 })));
     expect(r.root.findAll((n) => n.props.testID === TEST_IDS.gameWaitingPhoto).length).toBeGreaterThan(0);
     expect(bar(r.root)).toEqual({ duration: 3_000, elapsed: 0.8 });

@@ -154,7 +154,8 @@
 //   node qa/lab/bots.mjs --bots 3 --host --rounds 3 --hold 1
 //   node qa/lab/bots.mjs --bots 3 --host --rounds 10 --hold 0.5 --chaos 0.3
 //   Checks and metrics of each room: qa/lab/bots-analysis.mjs (tested on recorded events by qa/lab/tests/bots-analysis.test.sh).
-//   Every bot records waiting-photo { round, duration } (room-wide, owner secret): same payload for all, skew measured.
+//   Every bot records waiting-photo { round, duration, gameNumber } (room-wide, owner secret; exactly WAITING_PHOTO_KEYS
+//   in bots-analysis.mjs, see GAME_FLOW.md «Game number»): same payload for all, skew measured.
 //   Photos: uploads send the room code + the bot's rejoin token (X-Game-Code / Authorization: Bearer), like the app;
 //   on each round-start one non-owner bot GETs the photo with them (must be 200) and without (must be 401): "photo-access".
 //   Payload privacy (EXP-017/EXP-027/EXP-126): every event a bot receives is scanned; no socketId / rejoinToken /
@@ -817,12 +818,14 @@ function runRoom(roomIdx, fixedCode) {
           errors.push(`${name} planted upload: ${e.message}`);
         }
       };
-      socket.on("game-started", (players, rounds) => {
+      socket.on("game-started", (players, rounds, gameNumber) => {
         if (PLAYS_NEXT_GAME && bot.playAgainDone !== undefined) bot.game2 = true;
+        // The room's number of this game (EXP-318): bots-analysis checkGameNumbers compares the game's events with it
+        if (!Number.isInteger(gameNumber) || gameNumber < 1) errors.push(`${name}: game-started without a positive integer game number`);
         if (bot.lingering) {
           // Like the app's final screens (EXP-184): join the next game at once, the way "Play again" does: re-join on
           // the same socket (lobby hand-over); its game-state snapshot (ready phase) makes us send im-ready
-          rec("game-started-while-lingering", 0);
+          rec("game-started-while-lingering", 0, { gameNumber });
           clearTimeout(bot.lingerTimer);
           bot.lingering = false;
           bot.inGame = true;
@@ -833,7 +836,7 @@ function runRoom(roomIdx, fixedCode) {
         }
         bot.inGame = true;
         bot.players = players.map((p) => p.username);
-        rec("game-started", 0, { rounds, players: [...bot.players] });
+        rec("game-started", 0, { rounds, players: [...bot.players], gameNumber });
         if (i >= N_BOTS - NO_READY) { rec("im-ready-skipped-on-purpose", 0); return; }
         socket.emit("im-ready", { gameCode: code, username: name });
       });
@@ -970,6 +973,7 @@ function runRoom(roomIdx, fixedCode) {
       socket.on("game-state", (d) => {
         rec("game-state", d.round, {
           phase: d.phase, paused: !!d.pause, pause: d.pause?.pause, maxPauses: d.pause?.maxPauses, started: d.started,
+          gameNumber: d.gameNumber, // bots-analysis checkGameNumbers
           duration: d.duration, // a missed waiting-photo's remaining wait (bots-analysis isTimeoutSkip)
           yourGuess: d.yourGuess ?? null,
           holdsLeft: d.holdsLeft ?? null, // null if missing, so bots-analysis checkHoldsLeft reports it

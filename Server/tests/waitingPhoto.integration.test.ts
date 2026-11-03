@@ -17,7 +17,7 @@ async function gameWaitingForPhoto(names: string[]) {
     await joinAs(socks[n], gameCode, n);
   }
   const turns = names.map((n) => once<Turn>(socks[n], "your-turn").then((turn) => ({ n, turn })).catch(() => null));
-  const waiting = names.map((n) => once<{ round: number; duration: number }>(socks[n], "waiting-photo"));
+  const waiting = names.map((n) => once<{ round: number; duration: number; gameNumber: number }>(socks[n], "waiting-photo"));
   const started = names.map((n) => once(socks[n], "game-started"));
   socks[names[0]].emit("start-game");
   await Promise.all(started);
@@ -33,7 +33,7 @@ describe("waiting for the chosen player's photo", () => {
   it("every player gets the same waiting-photo; the owner's photo-unavailable skips at once, others' are ignored", async () => {
     const names = ["wa", "wb", "wc"];
     const { socks, owner, turn, payloads } = await gameWaitingForPhoto(names);
-    payloads.forEach((p) => expect(p).toEqual({ round: 1, duration: 15_000 }));
+    payloads.forEach((p) => expect(p).toEqual({ round: 1, duration: 15_000, gameNumber: 1 }));
     expect(turn).toEqual({ round: 1, attempt: 1 });
 
     // A non-owner can't skip someone else's turn, even echoing the right request
@@ -58,7 +58,7 @@ describe("waiting for the chosen player's photo", () => {
     const received = await Promise.all(skipped);
     names.forEach((n, i) => expect(received[i]).toEqual(n === owner ? { round: 1, reason: "unavailable" } : { round: 1 }));
     expect(Date.now() - t0).toBeLessThan(1_500);
-    (await Promise.all(again)).forEach((w) => expect(w).toEqual({ round: 1, duration: 15_000 }));
+    (await Promise.all(again)).forEach((w) => expect(w).toEqual({ round: 1, duration: 15_000, gameNumber: 1 }));
     expect(await ownerTurnAgain).toBe(true);
     // One copy each: the owner is left out of the room-wide one
     expect(await silent(socks[other], "round-skipped", 300)).toBe(true);

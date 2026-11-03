@@ -46,10 +46,14 @@ export interface PlayerId {
 
 export type RoundPhase = "waiting-photo" | "answering" | "reveal" | "scores";
 
-/** `waiting-photo` (room-wide): round `round`'s photo is awaited for up to `duration` ms; never names the owner */
+/**
+ * `waiting-photo` (room-wide): round `round` of game `gameNumber` (Room.gameNumber) awaits its photo for up to
+ * `duration` ms; never names the owner
+ */
 export interface WaitingPhotoData {
   round: number;
   duration: number;
+  gameNumber: number;
 }
 
 /**
@@ -81,6 +85,11 @@ export interface Room {
   players: Player[];
   rounds: number;
   started: boolean;
+  /**
+   * The room's current or last game: 0 before its first one, +1 on every game started. Sent in game-started,
+   * waiting-photo and game-state, so a client tells a snapshot of the next game from one of the game it showed
+   */
+  gameNumber: number;
   currentPlayer: Player | null;
   round: number;
   plantedPhotosShown: number;
@@ -213,6 +222,8 @@ export interface HoldEndData {
  */
 export interface RoomStateSnapshot {
   started: boolean;
+  /** The room's current game, or the last one when not started (Room.gameNumber) */
+  gameNumber: number;
   phase: RoundPhase | null;
   round: number;
   totalRounds: number;

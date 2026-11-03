@@ -404,9 +404,9 @@ const GameScreen = () => {
       // Snapshot after a rejoin: render whatever phase the server is in
       "game-state": (snap: GameStateSnapshot) => {
         console.log(`[GAME] game-state: ${snap.phase} round ${snap.round}, paused=${!!snap.pause}`);
-        // This game ended while I was away and the next one already started (EXP-302): its game-over and final scores
-        // are lost, so join the new game as the final screens would
-        if (isAnotherGame(roundRef.current, snap, SERVER_URL)) {
+        // This game ended while I was away and the next one (another game number) already started (EXP-302, EXP-318):
+        // its game-over and final scores are lost, so join the new game as the final screens would
+        if (isAnotherGame(roundRef.current, snap)) {
           turnRequest.endTurn();
           joinNextGame();
           return;

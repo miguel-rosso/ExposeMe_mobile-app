@@ -86,7 +86,7 @@ describe("planted photos stay anonymous", () => {
     room = plantedRoundOne();
     // Same room-wide waiting-photo as a normal round
     expect(events("waiting-photo")).toEqual([
-      { target: room.gameCode, event: "waiting-photo", args: [{ round: 1, duration: PHOTO_WAIT_TIMEOUT }] },
+      { target: room.gameCode, event: "waiting-photo", args: [{ round: 1, duration: PHOTO_WAIT_TIMEOUT, gameNumber: 1 }] },
     ]);
     expect(room.phase).toBe("waiting-photo");
     expect(events("your-turn")).toHaveLength(0);
@@ -203,7 +203,7 @@ describe("planted photos stay anonymous", () => {
     const shape = (seq: { event: string; args: unknown[] }[]) => seq.map((e) => e.event === "game-started" ? e.event : JSON.stringify(e));
     expect(shape(planted)).toEqual(shape(normal));
     expect(planted.map((e) => e.event)).toEqual(["game-started", "waiting-photo", "waiting-photo"]);
-    expect(planted[2].args[0]).toEqual({ round: 1, duration: PHOTO_WAIT_TIMEOUT });
+    expect(planted[2].args[0]).toEqual({ round: 1, duration: PHOTO_WAIT_TIMEOUT, gameNumber: 1 });
     expect(times.planted[0]).toBe(times.normal[0]);
     expect(times.normal[0]).toBe(0);
   });

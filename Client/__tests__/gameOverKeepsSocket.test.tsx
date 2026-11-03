@@ -146,24 +146,33 @@ describe("GameScreen final screens when the next game starts (EXP-184)", () => {
   });
 });
 
-// EXP-302: my socket was down when the game ended (game-over lost) and the host started the next game before I came
-// back. The rejoin's snapshot is of that new game: this screen hands over to it like the final screens do, instead of
-// playing it on with the old game's used photos and round count.
-describe("GameScreen when the rejoin snapshot is of the next game (EXP-302)", () => {
+// EXP-302 / EXP-318: my socket was down when the game ended (game-over lost) and the host started the next game before
+// I came back. The rejoin's snapshot is of that new game (the room's next game number): this screen hands over to it
+// like the final screens do, instead of playing it on with the old game's used photos and round count.
+describe("GameScreen when the rejoin snapshot is of the next game (EXP-302, EXP-318)", () => {
   const roundScores = (round: number, totalRounds: number) => ({ scores: finalScore, round, totalRounds, duration: 5000 });
   const newGame = {
-    started: true, phase: null, round: 0, totalRounds: 10, photo: null, correctAnswer: null, yourGuess: null,
-    duration: 0, phaseTotal: 0, held: false, pause: null, scores: [], players: [], roundOptions: [],
+    started: true, gameNumber: 2, phase: null, round: 0, totalRounds: 10, photo: null, correctAnswer: null,
+    yourGuess: null, duration: 0, phaseTotal: 0, held: false, pause: null, scores: [], players: [], roundOptions: [],
   };
-  const waitingSnapshot = (round: number, totalRounds: number) =>
-    ({ ...newGame, phase: "waiting-photo", round, totalRounds, duration: 9000, phaseTotal: 15000 });
+  const waitingSnapshot = (round: number, totalRounds: number, gameNumber = 2) =>
+    ({ ...newGame, gameNumber, phase: "waiting-photo", round, totalRounds, duration: 9000, phaseTotal: 15000 });
   const texts = (r: TestRenderer.ReactTestRenderer) =>
     r.root.findAll((n) => typeof n.type === "string" && n.props.children !== undefined).map((n) => n.props.children).flat();
 
-  async function mountAtLastScores() {
+  /** Game 1 on screen, at its first photo wait */
+  async function mountAtFirstWait() {
     let r!: TestRenderer.ReactTestRenderer;
     await act(async () => { r = TestRenderer.create(<GameScreen />); });
     await flush();
+    act(() => mockSocket.fire("waiting-photo", { round: 1, duration: 15000, gameNumber: 1 }));
+    mockSocket.emitted = [];
+    return r;
+  }
+
+  /** Game 1 on screen, at its last scores */
+  async function mountAtLastScores() {
+    const r = await mountAtFirstWait();
     act(() => {
       mockSocket.fire("round-start", { photo: "/temp/9-z.jpg", round: 10, duration: 7700 });
       mockSocket.fire("round-scores", roundScores(10, 10));
@@ -171,6 +180,23 @@ describe("GameScreen when the rejoin snapshot is of the next game (EXP-302)", ()
     mockSocket.emitted = [];
     return r;
   }
+
+  // What the round-progress heuristic could not tell (EXP-318): game 1 ended early and game 2, with the same number of
+  // rounds, is at the very photo wait where game 1 stopped
+  it("joins the next game also when it is at the point where this one ended early", async () => {
+    const r = await mountAtFirstWait();
+    act(() => mockSocket.fire("game-state", waitingSnapshot(0, 10)));
+    expect(mockReplace).toHaveBeenCalledWith("/screens/WaitingRoom");
+    act(() => r.unmount());
+  });
+
+  it("a snapshot of this game's photo wait does not leave it", async () => {
+    const r = await mountAtFirstWait();
+    act(() => mockSocket.fire("game-state", waitingSnapshot(0, 10, 1)));
+    expect(mockReplace).not.toHaveBeenCalled();
+    expect(texts(r)).toContain("Round 1 of 10");
+    act(() => r.unmount());
+  });
 
   it("joins the next game through the lobby at once, and stops driving this one", async () => {
     const r = await mountAtLastScores();
@@ -191,7 +217,7 @@ describe("GameScreen when the rejoin snapshot is of the next game (EXP-302)", ()
 
   it("a snapshot of this game going on does not leave it", async () => {
     const r = await mountAtLastScores();
-    act(() => mockSocket.fire("game-state", { ...newGame, phase: "scores", round: 10, photo: "/temp/9-z.jpg", scores: finalScore }));
+    act(() => mockSocket.fire("game-state", { ...newGame, gameNumber: 1, phase: "scores", round: 10, photo: "/temp/9-z.jpg", scores: finalScore }));
     expect(mockReplace).not.toHaveBeenCalled();
     act(() => r.unmount());
   });

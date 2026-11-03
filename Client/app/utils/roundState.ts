@@ -45,11 +45,20 @@ export interface RoundView {
   leavers: readonly RoundLeaver[];
   /** The game's number of rounds as the server sent it (round-scores, snapshot); 0 until then */
   totalRounds: number;
+  /**
+   * The server's number of the game this screen shows (waiting-photo, snapshot of a started game); NO_GAME_NUMBER
+   * until then (the ready phase of a game opened from game-started)
+   */
+  gameNumber: number;
 }
+
+/** No game number seen yet; the server's numbers start at 1 */
+const NO_GAME_NUMBER = 0;
 
 export const initialRoundView: RoundView = {
   photo: null, round: 0, phase: null, phaseDuration: 0, phaseTotal: 0, phaseKey: 0, correctAnswer: "", scores: null,
   mySelection: "", gameHeld: false, pressing: false, noHoldsLeft: false, leavers: [], totalRounds: 0,
+  gameNumber: NO_GAME_NUMBER,
 };
 
 /**
@@ -138,6 +147,7 @@ const applySnapshot = (state: RoundView, snap: GameStateSnapshot, serverUrl: str
   if (!snap.started) return { ...state, pressing: false, gameHeld: false };
   const held = {
     ...state, pressing: false, gameHeld: snap.held, noHoldsLeft: snap.holdsLeft === 0, totalRounds: snap.totalRounds,
+    gameNumber: snap.gameNumber,
   };
 
   if (showsRound(snap)) {
@@ -159,42 +169,21 @@ const applySnapshot = (state: RoundView, snap: GameStateSnapshot, serverUrl: str
   return { ...held, ...PER_ROUND_RESET, gameHeld: snap.held, photo: null, phase: null };
 };
 
-// ── A snapshot of the next game (EXP-302) ──
-// The game this screen shows ended while I was away (its game-over was lost) and the host already started the next
-// one: the snapshot is of that new game. A game only moves forward (the ready phase, then each round's photo wait,
-// answering, reveal and scores) and keeps its number of rounds, so a snapshot behind what this screen already showed,
-// with another photo for the same round, or with another number of rounds is not this game. (A new game already past
-// the point where this one stopped, with the same number of rounds, can't be told apart without a game id.)
+// ── A snapshot of the next game (EXP-302, EXP-318) ──
 
-/** The steps of a round, in order: the ready phase (null) comes before every round */
-// Exhaustive on purpose: a new ServerPhase must get its step here, or tsc fails
-const PHASE_STEP: Record<ServerPhase, number> = { "waiting-photo": 1, answering: 2, reveal: 3, scores: 4 };
-
-/** Where a game is: the round its phase belongs to (a photo wait's is the awaited round) and the phase's step in it */
-interface GameProgress { round: number; step: number }
-
-const progressOf = (round: number, phase: ServerPhase | null): GameProgress => ({ round, step: phase === null ? 0 : PHASE_STEP[phase] });
-
-const isBehind = (a: GameProgress, b: GameProgress) => a.round < b.round || (a.round === b.round && a.step < b.step);
-
-/** The snapshot's progress: in `waiting-photo` its `round` is the last played one, the awaited one is the next */
-const snapshotProgress = (snap: GameStateSnapshot): GameProgress =>
-  progressOf(snap.phase === "waiting-photo" ? snap.round + 1 : snap.round, snap.phase);
-
-/** The `game-state` snapshot is of another game than the one this screen shows: the next one, started meanwhile */
-export const isAnotherGame = (state: RoundView, snap: GameStateSnapshot, serverUrl: string): boolean => {
-  if (!snap.started) return false; // the game ended while I was away: its final scores
-  if (state.totalRounds > 0 && snap.totalRounds !== state.totalRounds) return true;
-  if (isBehind(snapshotProgress(snap), progressOf(state.round, state.phase))) return true;
-  const otherPhotoSameRound = showsRound(snap) && inRoundPhase(state.phase) && !!state.photo
-    && snap.round === state.round && `${serverUrl}${snap.photo}` !== state.photo;
-  return otherPhotoSameRound;
-};
+/**
+ * The `game-state` snapshot is of another game than the one this screen shows: the game shown ended while I was away
+ * (its game-over was lost) and the host already started the next one, which has the room's next game number. A
+ * not-started snapshot is the end of a game (its final scores); a screen that saw no game number yet takes the
+ * snapshot's game as its own.
+ */
+export const isAnotherGame = (state: RoundView, snap: GameStateSnapshot): boolean =>
+  snap.started && state.gameNumber !== NO_GAME_NUMBER && snap.gameNumber !== state.gameNumber;
 
 export const roundReducer = (state: RoundView, action: RoundAction): RoundView => {
   switch (action.type) {
     case "waiting-photo":
-      return waitForPhoto(state, action.data.round, action.data.duration);
+      return { ...waitForPhoto(state, action.data.round, action.data.duration), gameNumber: action.data.gameNumber };
     case "your-turn":
       return { ...state, round: action.round };
     // New round: its photo and answer phase, nothing left of the previous round

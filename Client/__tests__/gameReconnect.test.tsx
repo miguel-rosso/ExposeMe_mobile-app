@@ -27,6 +27,7 @@ const flush = () => act(async () => { await Promise.resolve(); });
 
 const snapshot = (over: Partial<GameStateSnapshot> = {}): GameStateSnapshot => ({
   started: true,
+  gameNumber: 1,
   phase: "answering",
   round: 3,
   totalRounds: 10,

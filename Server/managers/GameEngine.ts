@@ -163,6 +163,7 @@ export class GameEngine {
       return false;
     }
     room.started = true;
+    room.gameNumber++;
     room.round = 0;
     room.currentPlayer = null;
     room.currentPhoto = null;
@@ -174,7 +175,7 @@ export class GameEngine {
     // "Play again" reuses the room: drop scores and answers from the previous game
     room.players.forEach((p) => { p.points = 0; p.lastGuess = ""; p.lastAnswerCorrect = false; });
     console.log(`[${room.gameCode}] Game started`);
-    this.io.to(room.gameCode).emit("game-started", this.roomManager.publicPlayers(room), room.rounds);
+    this.io.to(room.gameCode).emit("game-started", this.roomManager.publicPlayers(room), room.rounds, room.gameNumber);
     // Don't wait forever for a player who backgrounds the app or drops before GameScreen mounts
     this.armPhaseTimer(room, READY_TIMEOUT, () => {
       if (!room.started || room.phase !== null) return;
@@ -315,7 +316,7 @@ export class GameEngine {
     room.phase = "waiting-photo";
     this.roomManager.clearShownPhoto(room);
     this.turnAttempts.set(room, (this.turnAttempts.get(room) ?? 0) + 1); // new photo request, planted or not
-    const waiting: WaitingPhotoData = { round: room.round + 1, duration: PHOTO_WAIT_TIMEOUT };
+    const waiting: WaitingPhotoData = { round: room.round + 1, duration: PHOTO_WAIT_TIMEOUT, gameNumber: room.gameNumber };
     this.markPhaseEmitted(room, waiting.round);
     this.io.to(room.gameCode).emit("waiting-photo", waiting);
   }
@@ -544,6 +545,7 @@ export class GameEngine {
     const roundOptions = inRound ? (this.run(room).answerOptions ?? []).map((p) => this.publicRoundOption(room, p)) : [];
     return {
       started: room.started,
+      gameNumber: room.gameNumber,
       phase: room.phase,
       round: room.round,
       totalRounds: room.rounds,

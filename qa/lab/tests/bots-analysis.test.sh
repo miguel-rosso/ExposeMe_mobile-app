@@ -11,6 +11,8 @@
 #   photo owner leaving during their round (--leave-owner, EXP-301 / DEC-038): still the answer, voters score.
 # - holds of the scoreboard (--hold, EXP-303): everyone let go within 1 s of the holder releasing or going away, and
 #   every hold-end tells the holds left (EXP-176).
+# - game numbers (EXP-318): every photo wait and snapshot of a game carries its game-started number, and the next
+#   game's is higher.
 # Run: qa/lab/tests/bots-analysis.test.sh
 # A change meant to alter the summary: UPDATE_FIXTURES=1 qa/lab/tests/bots-analysis.test.sh rewrites every fixture's
 # `expected` with the current output; review the diff (only the intended fields may change) before committing it.
@@ -592,5 +594,71 @@ got="$(tie_room ios-a ios-a,bot2,ios-a bot1:3,bot2:3,ios-a:0 bot1,ios-a bot1:2,b
 got="$(tie_room ios-a ios-a,bot2,ios-a bot1:3,bot2:3,ios-a:0 bot1,ios-a bot1:3,bot2:3,ios-a:0)"
 [ "$got" = "second game: tie: the bots should all have 2 points, one per round they could tell (bot1 3, bot2 3)" ] \
   && ok "second game: a wrong count is reported as the second game's" || ko "second game wrong count reported" "$got"
+
+# ── Game numbers (EXP-318) ──
+# bot1 (host) and bot2 play game 1 (number 1), which ends in round 1; they play again (game 2) and bot2 rejoins with a
+# snapshot of it. The mutation breaks the numbering. Prints checkGameNumbers' errors (the run's only ones), one per line.
+game_numbers() { # mutation: none | legacy (no numbers recorded) | same-number | wait-of-old-game | no-number-in-wait | snapshot-of-old-game
+  node --input-type=module -e '
+    const { analyseRoom } = await import(process.argv[1]);
+    const mutation = process.argv[2];
+    const players = ["bot1", "bot2"];
+    const events = [];
+    let t = 0;
+    const all = (ev, round, payload) => players.forEach((bot) => events.push({ bot, ev, round, t: (t += 10), payload }));
+    const numbered = (payload, gameNumber) => (mutation === "legacy" ? payload : { ...payload, gameNumber });
+    const scores = players.map((u) => ({ username: u, points: 0, lastGuess: "", lastAnswerCorrect: false }));
+    all("game-started", 0, numbered({ rounds: 1, players }, 1));
+    all("waiting-photo", 1, numbered({ round: 1, duration: 15000 }, 1));
+    all("game-over", 1, { finalScore: scores });
+    all("g2-game-started", 0, numbered({ rounds: 1, players }, mutation === "same-number" ? 1 : 2));
+    const wait = numbered({ round: 1, duration: 15000 }, mutation === "wait-of-old-game" ? 1 : 2);
+    if (mutation === "no-number-in-wait") delete wait.gameNumber;
+    all("g2-waiting-photo", 1, wait);
+    const snapNumber = mutation === "snapshot-of-old-game" ? 1 : 2;
+    events.push({ bot: "bot2", ev: "g2-game-state", round: 0, t: (t += 10), payload: numbered({ phase: "waiting-photo", started: true, paused: false, duration: 9000 }, snapNumber) });
+    const r = { code: "QAROOM", reason: "game-over", players, errors: [], uploads: [], rateLimited: 0, events };
+    const opts = { host: true, rounds: 1, playAgainLingerS: 0, lingerBot: 0, startNextGameS: 0 };
+    console.log(analyseRoom(r, opts).consistency_errors.filter((e) => e.includes("game number")).join("\n"));
+  ' "$ANALYSIS" "$1"
+}
+game_number_case() { # label, mutation, expected error text ("" = none)
+  local got; got="$(game_numbers "$2")"
+  if [ -z "$3" ]; then [ -z "$got" ] && ok "$1" || ko "$1" "$got"
+  else [[ "$got" == *"$3"* ]] && ok "$1" || ko "$1" "expected [$3] in [$got]"; fi
+}
+game_number_case "game numbers: each game's waits and snapshots carry its game-started number" none ""
+game_number_case "game numbers: a run recorded before they existed is not checked" legacy ""
+game_number_case "game numbers: the next game reuses the number" same-number "bot1: g2-game-started has game number 1, not above the previous game's 1"
+game_number_case "game numbers: a wait with the previous game's number" wait-of-old-game "bot2: g2-waiting-photo of round 1 has game number 1, its game-started 2"
+game_number_case "game numbers: a wait without one" no-number-in-wait "bot1: g2-waiting-photo of round 1 has game number undefined, its game-started 2"
+game_number_case "game numbers: a snapshot with the previous game's number" snapshot-of-old-game "bot2: g2-game-state of round 0 has game number 1, its game-started 2"
+# waiting-photo must be exactly { round, duration, gameNumber }: an extra key leaks, a missing one is reported too
+# (a run with no game number anywhere was recorded before EXP-318 and is held to { round, duration })
+waiting_photo_keys() { # mutation: none | owner | no-round | no-duration | no-game-number | legacy
+  node --input-type=module -e '
+    const { analyseRoom } = await import(process.argv[1]);
+    const mutation = process.argv[2];
+    const payload = { round: 1, duration: 15000, gameNumber: 1 };
+    if (mutation === "owner") payload.owner = "bot1";
+    const dropped = { "no-round": "round", "no-duration": "duration", "no-game-number": "gameNumber", legacy: "gameNumber" }[mutation];
+    if (dropped) delete payload[dropped];
+    const events = [{ bot: "bot1", ev: "waiting-photo", round: 1, t: 1, payload }];
+    // A numbered game start, so only the waiting-photo itself can be missing its number
+    if (mutation !== "legacy") events.unshift({ bot: "bot1", ev: "game-started", round: 0, t: 0, payload: { rounds: 1, players: ["bot1"], gameNumber: 1 } });
+    const r = { code: "QAROOM", reason: "game-over", players: ["bot1"], errors: [], uploads: [], rateLimited: 0, events };
+    console.log(analyseRoom(r, { host: true, rounds: 1, playAgainLingerS: 0, lingerBot: 0, startNextGameS: 0 }).consistency_errors.filter((e) => e.includes("waiting-photo payload")).join("\n"));
+  ' "$ANALYSIS" "$1"
+}
+waiting_photo_keys_case() { # label, mutation, expected output ("" = no error)
+  local got; got="$(waiting_photo_keys "$2")"
+  [ "$got" = "$3" ] && ok "$1" || ko "$1" "expected [$3], got [$got]"
+}
+waiting_photo_keys_case "waiting-photo keys: round, duration and game number are allowed" none ""
+waiting_photo_keys_case "waiting-photo keys: an owner leaks" owner "bot1: waiting-photo payload has keys [duration,gameNumber,owner,round] (owner must stay secret)"
+waiting_photo_keys_case "waiting-photo keys: a missing round is reported" no-round "bot1: waiting-photo payload of round 1 lacks [round]"
+waiting_photo_keys_case "waiting-photo keys: a missing duration is reported" no-duration "bot1: waiting-photo payload of round 1 lacks [duration]"
+waiting_photo_keys_case "waiting-photo keys: a missing game number is reported" no-game-number "bot1: waiting-photo payload of round 1 lacks [gameNumber]"
+waiting_photo_keys_case "waiting-photo keys: a run from before game numbers needs only round and duration" legacy ""
 echo "# $pass passed, $fail failed"
 [ "$fail" = 0 ]

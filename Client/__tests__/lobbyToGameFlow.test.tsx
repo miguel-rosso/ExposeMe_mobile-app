@@ -238,7 +238,7 @@ describe("Lobby -> game with the server's events (EXP-187)", () => {
 describe("Lobby -> game in progress (EXP-289)", () => {
   const startedRoomOfGame = { ...roomOfGame, room: { ...roomOfGame.room, started: true } };
   const snapshot = (over: Partial<GameStateSnapshot> = {}): GameStateSnapshot => ({
-    started: true, phase: "answering", round: 3, totalRounds: ROOM_ROUNDS, photo: FIRST_PHOTO, correctAnswer: null,
+    started: true, gameNumber: 1, phase: "answering", round: 3, totalRounds: ROOM_ROUNDS, photo: FIRST_PHOTO, correctAnswer: null,
     yourGuess: null, duration: ANSWERING_MS, phaseTotal: ANSWERING_MS, held: false, holdsLeft: 3, pause: null, scores: [],
     players: LOBBY_PLAYERS, roundOptions: [], ...over,
   });

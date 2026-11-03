@@ -74,7 +74,7 @@ const NEXT_WAIT = { round: 2, duration: 15_000 };
 const NEXT_START = { photo: "/temp/y.jpg", round: 2, duration: 8_000 };
 // Rejoin snapshot of round 1 in answering: carol, one of its options, has left the room
 const roundSnapshot = (over: Partial<GameStateSnapshot> = {}): GameStateSnapshot => ({
-  started: true, phase: "answering", round: 1, totalRounds: 10, photo: START.photo, correctAnswer: null,
+  started: true, gameNumber: 1, phase: "answering", round: 1, totalRounds: 10, photo: START.photo, correctAnswer: null,
   yourGuess: null, duration: 4_000, phaseTotal: 7_700, held: false, holdsLeft: 3, pause: null, scores: [],
   players: mockPlayers.slice(0, 2), roundOptions: mockPlayers, ...over,
 });

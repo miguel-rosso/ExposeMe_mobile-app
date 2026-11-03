@@ -88,10 +88,14 @@ export interface GameResumedData extends ResyncTiming {
   phase: ServerPhase | null;
 }
 
-/** `waiting-photo`: the whole room waits up to `duration` ms for round `round`'s photo (owner not revealed) */
+/**
+ * `waiting-photo`: the whole room waits up to `duration` ms for the photo of round `round` of the room's game
+ * `gameNumber` (owner not revealed)
+ */
 export interface WaitingPhotoData {
   round: number;
   duration: number;
+  gameNumber: number;
 }
 
 /**
@@ -157,6 +161,8 @@ export interface RoundSkippedData {
 /** `game-state`: snapshot sent to a player who rejoins (see Server/GAME_FLOW.md) */
 export interface GameStateSnapshot extends ResyncTiming {
   started: boolean;
+  /** The room's game in play, or the last one when not started (1, 2, ... per game started in the room; 0 for none) */
+  gameNumber: number;
   phase: ServerPhase | null;
   round: number;
   totalRounds: number;

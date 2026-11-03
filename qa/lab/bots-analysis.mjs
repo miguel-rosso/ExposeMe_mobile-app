@@ -38,6 +38,10 @@ const MAX_HOLDS_PER_ROUND = 3;
 // Phase events every player receives (keyed by round), and the events that ended a bot's stay in the room
 const SYNCED_EVENTS = ["round-start", "round-reveal", "round-scores", "game-over", "game-started"];
 const OFFLINE_EVENTS = ["chaos-disconnect", "planned-disconnect", "hold-drop", "hold-rejoin"];
+// waiting-photo's keys, all required (GAME_FLOW.md «Game number»): anything else may tell whose turn it is. Runs
+// recorded before EXP-318 (no game-started or waiting-photo with a gameNumber) are held to LEGACY_WAITING_PHOTO_KEYS
+const WAITING_PHOTO_KEYS = ["duration", "gameNumber", "round"];
+const LEGACY_WAITING_PHOTO_KEYS = WAITING_PHOTO_KEYS.filter((k) => k !== "gameNumber");
 // Game events a removed player must no longer receive
 const GAME_EVENTS = ["game-started", "waiting-photo", "your-turn", "round-start", "round-reveal", "round-scores", "game-state"];
 
@@ -145,12 +149,56 @@ function checkRequestedRounds(r, opts) {
   return [`game-started with ${gs.payload?.rounds} rounds, asked for ${opts.rounds}${opts.rounds === 3 ? " (3 needs ALLOW_QA_ROUNDS=1 on the server)" : ""}`];
 }
 
-/** waiting-photo is room-wide: { round, duration } only, so the owner stays secret. */
+/**
+ * waiting-photo is room-wide: exactly { round, duration, gameNumber }, so the owner stays secret. An extra key may
+ * tell whose turn it is; a missing one is a broken payload.
+ */
 function checkWaitingPhotoPayloads(r) {
   const out = [];
+  const expected = runNumbersGames(r) ? WAITING_PHOTO_KEYS : LEGACY_WAITING_PHOTO_KEYS;
   for (const e of r.events.filter((x) => x.ev === "waiting-photo")) {
-    const keys = Object.keys(e.payload || {}).sort().join(",");
-    if (keys !== "duration,round") out.push(`${e.bot}: waiting-photo payload has keys [${keys}] (owner must stay secret)`);
+    const keys = Object.keys(e.payload || {}).sort();
+    if (keys.some((k) => !expected.includes(k))) {
+      out.push(`${e.bot}: waiting-photo payload has keys [${keys.join(",")}] (owner must stay secret)`);
+    }
+    const missing = expected.filter((k) => !keys.includes(k));
+    if (missing.length) out.push(`${e.bot}: waiting-photo payload of round ${e.round} lacks [${missing.join(",")}]`);
+  }
+  return out;
+}
+
+// ── Game numbers (EXP-318) ──
+/** A bot's game starts: as a player, or while still on the final screens of the previous game (with any prefix) */
+const GAME_START_EVENTS = ["game-started", "game-started-while-lingering"];
+const withoutGamePrefix = (ev) => ev.replace(/^g2-/, "");
+/** Whether the server of this run numbered its games (EXP-318): any game start or photo wait carries a gameNumber */
+const runNumbersGames = (r) =>
+  r.events.some((e) => ["game-started", "waiting-photo"].includes(withoutGamePrefix(e.ev)) && e.payload?.gameNumber !== undefined);
+/** The events of a game that carry its number: its photo waits and the snapshots of it in play */
+const carriesGameNumber = (e) => {
+  const ev = withoutGamePrefix(e.ev);
+  return ev === "waiting-photo" || (ev === "game-state" && e.payload?.started === true);
+};
+
+/**
+ * Game numbers (EXP-318): each game a bot starts has a higher number than its previous one, and every photo wait and
+ * snapshot of a game in play it gets until the next start carries the number of its game-started. Events before a
+ * game-started with a number (runs recorded before the server numbered its games) are not checked.
+ */
+function checkGameNumbers(r) {
+  const out = [];
+  for (const n of r.players) {
+    let current;
+    for (const e of r.events.filter((x) => x.bot === n)) {
+      if (GAME_START_EVENTS.includes(withoutGamePrefix(e.ev))) {
+        const number = e.payload?.gameNumber;
+        if (number === undefined) continue;
+        if (current !== undefined && !(number > current)) out.push(`${n}: ${e.ev} has game number ${number}, not above the previous game's ${current}`);
+        current = number;
+      } else if (current !== undefined && carriesGameNumber(e) && e.payload?.gameNumber !== current) {
+        out.push(`${n}: ${e.ev} of round ${e.round} has game number ${e.payload?.gameNumber}, its game-started ${current}`);
+      }
+    }
   }
   return out;
 }
@@ -831,6 +879,7 @@ export function analyseRoom(r, opts) {
   const consistency = [
     ...checkRequestedRounds(r, opts),
     ...checkWaitingPhotoPayloads(r),
+    ...checkGameNumbers(r),
     ...unavailable.errors,
     ...sync.errors,
     ...checkScoredLikeEveryone(r, ctx),

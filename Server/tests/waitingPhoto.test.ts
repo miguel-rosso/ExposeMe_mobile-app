@@ -5,7 +5,7 @@ import { Room } from "../models/interfaces";
 import { CapturedEmit, createFakeIo } from "./helpers";
 
 // EXP-039 / EXP-040: while the server waits for the chosen player's photo the whole room gets
-// `waiting-photo { round, duration }` (owner kept secret), skips are announced (`round-skipped { round }`, the reason
+// `waiting-photo { round, duration, gameNumber }` (owner kept secret), skips are announced (`round-skipped { round }`, the reason
 // only in the owner's own copy, EXP-110), and the owner can report `photo-unavailable` to skip at once instead of
 // making everyone wait 15 s.
 
@@ -61,7 +61,7 @@ describe("waiting-photo broadcast (EXP-039)", () => {
   it("tells the whole room a photo is awaited, with the round and the server's wait time, before your-turn", () => {
     vi.advanceTimersByTime(GAME_START_DELAY);
     const ev = last("waiting-photo")!;
-    expect(ev).toEqual({ target: room.gameCode, event: "waiting-photo", args: [{ round: 1, duration: PHOTO_WAIT_TIMEOUT }] });
+    expect(ev).toEqual({ target: room.gameCode, event: "waiting-photo", args: [{ round: 1, duration: PHOTO_WAIT_TIMEOUT, gameNumber: 1 }] });
     // Room-wide and before the owner's own your-turn
     const idxWaiting = emits.indexOf(ev);
     const idxTurn = emits.indexOf(last("your-turn")!);
@@ -80,7 +80,7 @@ describe("waiting-photo broadcast (EXP-039)", () => {
     engine.onPhotoReceived(room, PHOTO, owner().username);
     vi.advanceTimersByTime(ANSWER_TIME + REVEAL_TIME + SCORE_DISPLAY_TIME);
     expect(events("waiting-photo")).toHaveLength(2);
-    expect(last("waiting-photo")!.args[0]).toEqual({ round: 2, duration: PHOTO_WAIT_TIMEOUT });
+    expect(last("waiting-photo")!.args[0]).toEqual({ round: 2, duration: PHOTO_WAIT_TIMEOUT, gameNumber: 1 });
   });
 
   it("a timed-out round is announced with its number (the reason only to its owner), then the round is awaited again", () => {
@@ -90,7 +90,7 @@ describe("waiting-photo broadcast (EXP-039)", () => {
     expect(skips()).toEqual([{ target: room.gameCode, except: timedOut.socketId, event: "round-skipped", args: [{ round: 1 }] }]);
     expect(last("round-skipped")!).toEqual({ target: timedOut.socketId, event: "round-skipped", args: [{ round: 1, reason: "timeout" }] });
     expect(events("waiting-photo")).toHaveLength(2);
-    expect(last("waiting-photo")!.args[0]).toEqual({ round: 1, duration: PHOTO_WAIT_TIMEOUT });
+    expect(last("waiting-photo")!.args[0]).toEqual({ round: 1, duration: PHOTO_WAIT_TIMEOUT, gameNumber: 1 });
   });
 
   it("the game-state snapshot carries the waiting-photo phase with the remaining wait and no owner", () => {

@@ -24,10 +24,11 @@ After last round: game-over
 
 ## Waiting for the photo
 
-- When a player is picked to send the photo, the server emits **`waiting-photo { round, duration }`** to the
-  **whole room** (owner included, identical payload, so it never tells who was picked), and then
+- When a player is picked to send the photo, the server emits **`waiting-photo { round, duration, gameNumber }`** to
+  the **whole room** (owner included, identical payload, so it never tells who was picked), and then
   **`your-turn { round, attempt }`** to the picked player only. `round` is the round about to be played
-  (`room.round + 1`), `duration` the wait (`PHOTO_WAIT_TIMEOUT`, 15 s). `attempt` identifies this photo request: a
+  (`room.round + 1`), `duration` the wait (`PHOTO_WAIT_TIMEOUT`, 15 s), `gameNumber` the game it belongs to (see
+  "Game number"). `attempt` identifies this photo request: a
   new integer for every `waiting-photo` in the room, planted ones included (so it counts exactly the photo waits and
   never tells whether an earlier wait was planted; it changes even when the round number repeats after a skip or an
   owner change, also if the same player is picked again); re-sends of the same request (rejoin, resume) carry the same
@@ -460,6 +461,13 @@ After last round: game-over
   (lobby only, also between games: ignored while a game is running; by username, socket ids are never sent to
   clients; the host can't remove itself; evicts every socket bound to the removed player in that room, like a
   rejoin evicts the replaced one, and revokes their token: see "Kicked" above).
+- **Game number.** Every game run in a room gets the next integer (`room.gameNumber`: 0 before the first game, +1 on
+  every accepted `start-game`; a refused start uses none). It is the third argument of `game-started`, and is in
+  every `waiting-photo` and `game-state` (in a not-started snapshot, the number of the last game, 0 if none was
+  played). The game screen keeps the number of the game it shows (from its first `waiting-photo` or `game-state`):
+  a rejoin snapshot of a started game with another number is the next game, started while the player was away and
+  missed the `game-over` of theirs, so the screen hands over to it as the final screens do (see below), however early
+  its own game ended. A screen that has seen no number yet (still in the ready phase) takes the snapshot's.
 - `im-ready` only counts between `game-started` and the first round (`started && phase === null`).
   The first round is scheduled (after `GAME_START_DELAY`, 1 s) as soon as **at least 2 players are connected
   and all connected players are ready** (checked on `im-ready` and when a player disconnects or leaves during
@@ -553,8 +561,8 @@ and, once the game screen listens, re-sends `join-create-game` on the **same** s
 fresh snapshot (and `your-turn` for an awaited photo), which the game screen renders like any reconnect. Events
 that reached the lobby screen in between are covered by that snapshot.
 
-- **`game-state`** = `{ started, phase, round, totalRounds, photo, correctAnswer, yourGuess, duration, phaseTotal, held,
-  holdsLeft, pause, scores, players, roundOptions }`, the same for every recipient except `yourGuess`: the recipient's own recorded answer,
+- **`game-state`** = `{ started, gameNumber, phase, round, totalRounds, photo, correctAnswer, yourGuess, duration,
+  phaseTotal, held, holdsLeft, pause, scores, players, roundOptions }` (`gameNumber`: see "Game number"), the same for every recipient except `yourGuess`: the recipient's own recorded answer,
   only in `reveal`/`scores` (as in their `round-reveal`; `""` = no guess), else `null`. `duration` is the remaining
   time of the current phase (frozen while paused/held), `phaseTotal` its full duration (see "Phase totals in resync payloads"). `photo` is only set in `answering`/`reveal`/`scores` (the owner's name is never in it before
   the reveal: `correctAnswer` carries it from `reveal` on);
@@ -666,8 +674,8 @@ All game events are **atomic** — each contains everything the client needs.
 | `player-left` | any | `username` (string) | A player left (`leave-room`, a join to another room, or removed as gone at game start) |
 | `player-removed` | any | public player | The host removed this player (`remove-player`); to the kicked player too, whose token is then revoked (see "Kicked") |
 | `rounds-updated` | lobby | `rounds` (number) | The host changed the number of rounds |
-| `game-started` | - | `players, rounds` | Navigate to game screen (public player data only, see "Public player data") |
-| `waiting-photo` | waiting-photo | `{ round, duration }` | Whole room: a photo is awaited (owner not revealed), show wait bar |
+| `game-started` | - | `players, rounds, gameNumber` | Navigate to game screen (public player data only, see "Public player data"; `gameNumber`: see "Game number") |
+| `waiting-photo` | waiting-photo | `{ round, duration, gameNumber }` | Whole room: a photo is awaited (owner not revealed), show wait bar |
 | `your-turn` | waiting-photo | `{ round, attempt }` | Only the picked player: pick and upload a photo (or send `photo-unavailable`) |
 | `round-start` | answering | `{ photo, round, duration }` | Show photo, start answer timer (`duration` = 7.7 s: 800 ms grace before answers freeze, at 8.5 s). Same payload for the whole room, owner included (never tells whose photo it is) |
 | `round-reveal` | reveal | `{ correctAnswer, duration, yourGuess }` | Show correct answer. One per player: `yourGuess` is the recipient's own recorded answer (`""` = none), which the app colours |

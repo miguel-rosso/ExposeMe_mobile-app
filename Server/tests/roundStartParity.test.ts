@@ -94,7 +94,7 @@ describe("normal and planted rounds start the same way (EXP-249)", () => {
       expect(room.phase).toBe("waiting-photo");
       expect(room.currentPhoto).toBeNull();
       expect(roomWideTimeline()).toEqual([
-        { event: "waiting-photo", args: [{ round: 1, duration: PHOTO_WAIT_TIMEOUT }], after: 0 },
+        { event: "waiting-photo", args: [{ round: 1, duration: PHOTO_WAIT_TIMEOUT, gameNumber: 1 }], after: 0 },
       ]);
       expect(engine.phaseEmittedAt(room, "waiting-photo", 1)).toBe(startedAt);
       // Nobody is told whose turn it is in a planted round; a normal owner alone gets your-turn
@@ -118,7 +118,7 @@ describe("normal and planted rounds start the same way (EXP-249)", () => {
       expect(room.phase).toBe("reveal");
 
       expect(roomWideTimeline()).toEqual([
-        { event: "waiting-photo", args: [{ round: 1, duration: PHOTO_WAIT_TIMEOUT }], after: 0 },
+        { event: "waiting-photo", args: [{ round: 1, duration: PHOTO_WAIT_TIMEOUT, gameNumber: 1 }], after: 0 },
         { event: "round-start", args: [{ photo: "<photo>", round: 1, duration: ANSWER_TIME - ANSWER_GRACE }], after: PLANTED_DELAY },
       ]);
       // round-reveal goes to each player (their own recorded guess, none here), the same for both kinds of round

@@ -59,6 +59,7 @@ export class RoomManager {
       gameCode,
       rounds: 10,
       started: false,
+      gameNumber: 0,
       players: [this.createPlayer(username, socketId, true)],
       currentPlayer: null,
       round: 0,

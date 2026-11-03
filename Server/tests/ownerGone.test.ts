@@ -94,7 +94,7 @@ describe("the awaited photo owner goes away (EXP-029, DEC-035)", () => {
     vi.advanceTimersByTime(1);
     // A fresh photo wait for round 1, the normal events: no round-skipped, the new owner gets a new request
     expect(events("round-skipped")).toHaveLength(0);
-    expect(waits()).toEqual([{ round: 1, duration: PHOTO_WAIT_TIMEOUT }, { round: 1, duration: PHOTO_WAIT_TIMEOUT }]);
+    expect(waits()).toEqual([{ round: 1, duration: PHOTO_WAIT_TIMEOUT, gameNumber: 1 }, { round: 1, duration: PHOTO_WAIT_TIMEOUT, gameNumber: 1 }]);
     const newOwner = room.currentPlayer!;
     expect(newOwner).not.toBe(owner);
     expect(newOwner.connected).toBe(true);
@@ -152,7 +152,7 @@ describe("the awaited photo owner goes away (EXP-029, DEC-035)", () => {
     vi.advanceTimersByTime(2_000);
     leave(owner.username);
     expect(events("round-skipped")).toHaveLength(0);
-    expect(waits()).toEqual([{ round: 1, duration: PHOTO_WAIT_TIMEOUT }, { round: 1, duration: PHOTO_WAIT_TIMEOUT }]);
+    expect(waits()).toEqual([{ round: 1, duration: PHOTO_WAIT_TIMEOUT, gameNumber: 1 }, { round: 1, duration: PHOTO_WAIT_TIMEOUT, gameNumber: 1 }]);
     expect(room.players).toContain(room.currentPlayer);
     expect(room.currentPlayer).not.toBe(owner);
   });

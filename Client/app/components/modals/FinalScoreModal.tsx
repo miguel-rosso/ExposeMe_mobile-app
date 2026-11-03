@@ -11,7 +11,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useI18n } from "../../i18n";
 import { TEST_IDS, finalRankId, finalWinnerId } from "@/app/utils/testIds";
 import { Ranked, hasResult, rankScores } from "@/app/utils/ranking";
-import { HOME_PATH } from "@/app/utils/homeRoute";
+import { useGoHome } from "@/app/hooks/useGoHome";
 
 interface FinalScoreModalProps {
   visible: boolean;
@@ -31,6 +31,7 @@ const FinalScoreModal: React.FC<FinalScoreModalProps> = ({ visible, finalScore }
   const { t } = useI18n();
   const navigation = useRouter();
   const { setRoundsOfGame, setPlayersProvider, leaveRoom, setPlantedPhotoUri } = useGameContext();
+  const goHome = useGoHome();
   const slideAnim = useRef(new Animated.Value(300)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const confettiRef = useRef<LottieView>(null);
@@ -67,12 +68,13 @@ const FinalScoreModal: React.FC<FinalScoreModalProps> = ({ visible, finalScore }
   }, [visible]);
 
   // Exit leaves the room for good (the socket stayed open through game over, so the others see it at once); "play
-  // again" keeps the rejoin token to rejoin the same room. Exit goes back to the home under the game (see homeRoute).
+  // again" keeps the rejoin token to rejoin the same room. Exit is the room's own way out: back to the home under the
+  // game (useGoHome).
   const onClose = () => {
     leaveRoom();
     setRoundsOfGame(0);
     setPlayersProvider([]);
-    navigation.dismissTo(HOME_PATH);
+    goHome();
   };
 
   // Same socket, same room: the lobby rejoins it as a no-op. A planted photo was for the game that just ended.

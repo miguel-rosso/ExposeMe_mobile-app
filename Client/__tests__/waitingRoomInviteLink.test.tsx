@@ -103,6 +103,7 @@ jest.mock("../app/providers/GameContext", () => {
       return {
         socket: state.socket, gameCode: state.gameCode, username: "bob", usernameLoaded: true, roundsOfGame: 10,
         startSocket, endSocket, leaveRoom, saveUsername: jest.fn(),
+        markRoomExit: jest.fn(), setInviteOverRoomScreen: jest.fn(),
         setGameCode: (gameCode: string | null) => mockStore.set({ gameCode }),
         setPlayersProvider: jest.fn(), setRoundsOfGame: jest.fn(), setPlantedPhotoUri: jest.fn(), plantPhoto: jest.fn(),
         saveRejoinToken: (gameCode: string, _name: string, token: string) => mockStore.set({ token: { gameCode, token } }),

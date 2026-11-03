@@ -45,6 +45,7 @@ export const stackRouter = {
     routerCalls.push("back");
     setStack(stack.slice(0, -1));
   },
+  canGoBack: () => stack.length > 1,
   dismiss: () => {
     routerCalls.push("dismiss");
     setStack(stack.slice(0, -1));
@@ -72,7 +73,11 @@ export const resetStack = () => {
 /** The stack's routes, bottom to top. */
 export const stackPaths = () => stack.map((e) => e.path);
 
-/** An invite deep link to `path` with `params`, as expo-router's NAVIGATE: the top screen's params, or a push. */
+/**
+ * A deep link to `path` with `params`, as expo-router's NAVIGATE: the top screen's params, or a push (the root layout's
+ * stack never pops to an earlier route for a link, see expo-router's resolveNavigationDestination shouldPopTo: a link
+ * to "/" during a game pushes a second home).
+ */
 export const openDeepLink = (path: string, params: Params) => {
   const top = stack[stack.length - 1];
   if (top?.path === path) setStack(withTop({ ...top, params }));

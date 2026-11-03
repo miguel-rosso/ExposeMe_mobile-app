@@ -170,6 +170,9 @@ export default {
   inviteJoinTitle: "Join this room?",
   inviteNameLabel: "Your name",
   inviteJoin: "Join",
+  // GameScreen: the invite dialog closed because the host started the next game (DEC-049)
+  inviteClosedTitle: "Invite closed",
+  inviteClosedByNextGame: "The invite to {room} was closed because another game started.",
 
   // WaitingRoom: player gone (disconnected past the server's grace)
   playerDisconnected: "disconnected",

@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import {
   View, Text, TouchableOpacity, StatusBar, BackHandler, LayoutChangeEvent, useWindowDimensions, ActivityIndicator,
+  Alert,
 } from "react-native";
 import { useFocusEffect, useLocalSearchParams, type Href } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -68,6 +69,7 @@ const GameScreen = () => {
   const {
     username, gameCode, socket, playersProvider, setPlayersProvider, roundsOfGame, plantedPhotoUri,
     plantedPhotoSent, plantPhoto, getRejoinToken, saveRejoinToken, clearRejoinToken, setPlantedPhotoUri,
+    takeInviteOverRoomScreen,
   } = useGameContext();
   const safeUsername = username ?? "";
   const safeGameCode = gameCode ?? "";
@@ -174,14 +176,21 @@ const GameScreen = () => {
   const phaseBarElapsed = phaseElapsed(roundView);
 
   // ── Photo access (room members only: room code + rejoin token) ─
+  // The room this screen plays in: the first one it is given. An invite link's Join switches the app to the linked
+  // room while this screen is still on its way out (EXP-369): that room's session is its own lobby's business, never
+  // looked up nor uploaded with here. Leaving the game forgets the room (EXP-342): no session either.
+  const screenRoomRef = useRef<string | null>(null);
+  if (gameCode) screenRoomRef.current ??= gameCode;
+  /** The room code while the app is still in this screen's room, else null */
+  const ownRoomCode = gameCode === screenRoomRef.current ? gameCode : null;
   const uploadImage = async (uri: string): Promise<string> =>
-    uploadPhoto(SERVER_URL, uri, await resolvePhotoAuth(getRejoinToken, gameCode, username));
+    uploadPhoto(SERVER_URL, uri, await resolvePhotoAuth(getRejoinToken, ownRoomCode, username));
   const [photoHeaders, setPhotoHeaders] = useState<Record<string, string> | undefined>(undefined);
   useEffect(() => {
-    // Leaving the game forgets the room (EXP-342): no session to look up, nothing to warn about
-    if (!gameCode) return;
+    // Out of this screen's room: no session to look up, nothing to warn about
+    if (!ownRoomCode) return;
     let live = true;
-    resolvePhotoAuth(getRejoinToken, gameCode, username)
+    resolvePhotoAuth(getRejoinToken, ownRoomCode, username)
       .then((auth) => {
         if (!live) return;
         photoHeadersRef.current = photoAuthHeaders(auth);
@@ -189,7 +198,7 @@ const GameScreen = () => {
       })
       .catch(() => console.warn("[GAME] no session token: room photos can't be loaded"));
     return () => { live = false; };
-  }, [gameCode, username]);
+  }, [ownRoomCode, username]);
 
   // ── Block back button ────────────────────────────────
   useFocusEffect(useCallback(() => {
@@ -258,7 +267,12 @@ const GameScreen = () => {
     console.log("[GAME] next game started — joining it");
     detachGameHandlers.current?.();
     setPlantedPhotoUri(null); // planted for the game that ended
+    const closedInvite = takeInviteOverRoomScreen();
     replaceThisScreen("/screens/WaitingRoom");
+    // An invite link's dialog asking over this screen closes with it: the player is told why (DEC-049)
+    if (closedInvite) {
+      Alert.alert(t.inviteClosedTitle, t.inviteClosedByNextGame.replace("{room}", closedInvite), [{ text: t.ok }]);
+    }
   };
 
   const showGameOver = (finalScore: ScoreRound[]) => {

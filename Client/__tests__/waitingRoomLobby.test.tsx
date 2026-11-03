@@ -20,6 +20,7 @@ const mockCtx = {
   setRoundsOfGame: jest.fn(), setPlantedPhotoUri: jest.fn(), plantPhoto: jest.fn(), saveRejoinToken: jest.fn(),
   getRejoinToken: jest.fn(async (..._a: unknown[]) => "tok-123" as string | null), clearRejoinToken: jest.fn(),
   saveUsername: jest.fn(), setJoinCodeDraft: jest.fn(), takeNewRoomRequest: jest.fn(() => false), setHomeNotice: jest.fn(),
+  markRoomExit: jest.fn(),
 };
 const mockClose: { onPress?: () => void } = {};
 /** Last props of the remove-player confirmation (AlertModal) */

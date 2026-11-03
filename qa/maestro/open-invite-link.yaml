@@ -1,5 +1,5 @@
 # Open the invite deep link of room ${NEW_CODE} and wait for the invite dialog asking for it, the saved name filled in
-# (used by invite-link-after-game.yaml and invite-link-mid-game.yaml).
+# (used by invite-link-after-game.yaml, invite-link-mid-game.yaml and invite-closed-next-game.yaml).
 appId: com.socketNull.ExposeMe
 ---
 # The invite link the server's /join/<code> page redirects to (Server/routes/uploadRoutes.ts)

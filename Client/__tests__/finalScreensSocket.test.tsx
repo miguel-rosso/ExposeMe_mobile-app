@@ -15,6 +15,7 @@ const mockEndSocket = jest.fn();
 const mockSetPlanted = jest.fn();
 const mockClearToken = jest.fn();
 const mockLeaveRoom = jest.fn();
+const mockMarkRoomExit = jest.fn();
 const mockSocket = { emit: jest.fn(), disconnect: jest.fn() };
 jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/en").default }) }));
 jest.mock("lottie-react-native", () => "LottieView");
@@ -25,6 +26,7 @@ jest.mock("../app/providers/GameContext", () => ({
   useGameContext: () => ({
     socket: mockSocket, endSocket: mockEndSocket, setRoundsOfGame: jest.fn(), setPlayersProvider: jest.fn(),
     clearRejoinToken: mockClearToken, setPlantedPhotoUri: mockSetPlanted, leaveRoom: mockLeaveRoom,
+    markRoomExit: mockMarkRoomExit, setHomeNotice: jest.fn(),
   }),
 }));
 
@@ -39,7 +41,7 @@ const press = (root: ReactTestInstance, id: string) =>
   act(() => root.find((n) => n.props.testID === id && typeof n.props.onPress === "function").props.onPress());
 
 beforeEach(() => {
-  [mockReplace, mockDismissTo, mockEndSocket, mockSetPlanted, mockClearToken, mockLeaveRoom, mockSocket.emit, mockSocket.disconnect].forEach((m) => m.mockClear());
+  [mockReplace, mockDismissTo, mockEndSocket, mockSetPlanted, mockClearToken, mockLeaveRoom, mockMarkRoomExit, mockSocket.emit, mockSocket.disconnect].forEach((m) => m.mockClear());
 });
 
 describe("final screens keep the socket (EXP-172)", () => {
@@ -64,6 +66,7 @@ describe("final screens keep the socket (EXP-172)", () => {
     expect(mockEndSocket).not.toHaveBeenCalled();
     expect(mockClearToken).not.toHaveBeenCalled();
     expect(mockLeaveRoom).not.toHaveBeenCalled();
+    expect(mockMarkRoomExit).not.toHaveBeenCalled();
     expect(mockSocket.emit).not.toHaveBeenCalledWith("leave-room");
     act(() => r.unmount());
   });
@@ -76,6 +79,8 @@ describe("final screens keep the socket (EXP-172)", () => {
     expect(mockEndSocket).not.toHaveBeenCalled();
     expect(mockSocket.disconnect).not.toHaveBeenCalled();
     expect(mockDismissTo).toHaveBeenCalledWith("/");
+    // The room's own way out (EXP-373): home may close what is left of the room's connection
+    expect(mockMarkRoomExit).toHaveBeenCalledTimes(1);
     act(() => r.unmount());
   });
 });

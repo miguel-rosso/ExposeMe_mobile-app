@@ -85,8 +85,10 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
 
   const startSocket = () => {
     // A room's lobby starts: a home notice still pending (home never got focus, e.g. a kick and an invite link in the
-    // same navigation) is about the room left before, and must not show when the player leaves this one
+    // same navigation) is about the room left before, and must not show when the player leaves this one. The same for a
+    // room exit home never took.
     homeNoticeRef.current = null;
+    roomExitRef.current = false;
 
     // If we already have a connected socket, reuse it
     if (socketRef.current?.connected) {
@@ -212,6 +214,39 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     return notice;
   };
 
+  // ── Room exit ──
+
+  // In memory only, like the home notice: a room screen (lobby, game) going home on its own (Exit, kicked, refused)
+  // marks it, and home then closes the room's socket. Home reached any other way (a link to "/" during a room) leaves
+  // the room as it is (EXP-373).
+  const roomExitRef = useRef(false);
+
+  const markRoomExit = () => {
+    roomExitRef.current = true;
+  };
+
+  const takeRoomExit = (): boolean => {
+    const exited = roomExitRef.current;
+    roomExitRef.current = false;
+    return exited;
+  };
+
+  // ── Invite asking over the room's screen ──
+
+  // The room an invite link's dialog asks about over the room's own screen (the game), or null. That screen closes the
+  // dialog when the next game starts, and tells the player so (DEC-049).
+  const inviteOverRoomScreenRef = useRef<string | null>(null);
+
+  const setInviteOverRoomScreen = (code: string | null) => {
+    inviteOverRoomScreenRef.current = code;
+  };
+
+  const takeInviteOverRoomScreen = (): string | null => {
+    const code = inviteOverRoomScreenRef.current;
+    inviteOverRoomScreenRef.current = null;
+    return code;
+  };
+
   // Handle app going to background/foreground
   useEffect(() => {
     const sub = AppState.addEventListener("change", (state) => {
@@ -318,6 +353,10 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
         takeNewRoomRequest,
         setHomeNotice,
         takeHomeNotice,
+        markRoomExit,
+        takeRoomExit,
+        setInviteOverRoomScreen,
+        takeInviteOverRoomScreen,
         playersProvider,
         roundsOfGame,
         startSocket,

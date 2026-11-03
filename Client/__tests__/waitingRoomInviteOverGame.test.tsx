@@ -1,6 +1,6 @@
 import React from "react";
 import TestRenderer, { act } from "react-test-renderer";
-import { AppState } from "react-native";
+import { Alert, AppState } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 // Loaded with the file (jest.mock calls below are hoisted above it), not inside a test
 import WaitingRoom from "../app/screens/WaitingRoom";
@@ -10,6 +10,7 @@ import type { FakeSocket } from "../testUtils/fakeSocket";
 import { openDeepLink, resetStack, routerCalls, StackScreens, stackPaths, stackRouter } from "../testUtils/stackRouter";
 import { pressInviteCancel, pressInviteJoin, showsInviteDialog } from "../testUtils/inviteConfirm";
 import { TEST_IDS } from "../app/utils/testIds";
+import en from "../app/i18n/en";
 
 // EXP-358 / EXP-360 / EXP-359: an invite link opened during a game pushes the waiting room over the game screen, which
 // stays mounted underneath (a native stack). While the invite dialog asks, the game is the player's: Cancel goes back
@@ -72,10 +73,12 @@ jest.mock("@/app/components/IngameComunication/EmojisButtons", () => () => null)
 jest.mock("@/app/components/ProgressBar", () => () => null);
 jest.mock("@react-native-community/hooks", () => ({ useBackHandler: () => {} }));
 
+let alertSpy: jest.SpyInstance;
 beforeAll(() => {
   jest.spyOn(console, "log").mockImplementation(() => {});
   jest.spyOn(console, "warn").mockImplementation(() => {});
   jest.spyOn(AppState, "addEventListener").mockImplementation((() => ({ remove: () => {} })) as unknown as typeof AppState.addEventListener);
+  alertSpy = jest.spyOn(Alert, "alert").mockImplementation(() => {});
 });
 afterAll(() => { jest.restoreAllMocks(); });
 
@@ -158,6 +161,7 @@ beforeEach(async () => {
   mockSockets.length = 0;
   mockCheckGalleryAccess.mockClear();
   mockPickGamePhoto.mockReset();
+  alertSpy.mockClear();
   resetStack();
 });
 afterEach(() => {
@@ -263,9 +267,11 @@ describe("Invite link over a running game (EXP-358)", () => {
 });
 
 describe("The game screen navigates while the invite dialog asks over it (EXP-360)", () => {
-  // Current behaviour: the dialog closes without a notice. Whether the player should be told is a pending decision
-  // (EXP-360); this test pins the stack, not that design.
-  it("the next game currently closes the dialog silently: one lobby on top of home, no game screen left", async () => {
+  const INVITE_CLOSED_NOTICE = [en.inviteClosedTitle, en.inviteClosedByNextGame.replace("{room}", LINKED_ROOM)];
+  const noticesShown = () => alertSpy.mock.calls.map(([title, message]) => [title, message]);
+
+  // DEC-049 A: the player stays in their room (DEC-047) and is told why the invite went away
+  it("the next game closes the dialog and says so: one lobby on top of home, no game screen left", async () => {
     const socket = await inMyGame();
     await fire(socket, "game-over", { finalScore: [] });
     const r = await openLink(LINKED_ROOM);
@@ -275,11 +281,25 @@ describe("The game screen navigates while the invite dialog asks over it (EXP-36
 
     expect(stackPaths()).toEqual([HOME, LOBBY]);
     expect(showsInviteDialog(r)).toBe(false);
+    expect(noticesShown()).toEqual([INVITE_CLOSED_NOTICE]);
     expect(socket.emittedPayloads("leave-room")).toEqual([]);
     expect(socket.emittedPayloads("join-create-game").at(-1)).toMatchObject({ gameCode: MY_ROOM, username: "bob" });
   });
 
-  it("out of the room (kicked) closes the dialog and goes home", async () => {
+  it("the next game after the invite was cancelled: no notice", async () => {
+    const socket = await inMyGame();
+    await fire(socket, "game-over", { finalScore: [] });
+    const r = await openLink(LINKED_ROOM);
+    await pressInviteCancel(r);
+    await flush();
+
+    await fire(socket, "game-started", [player("alice", true), player("bob")]);
+
+    expect(stackPaths()).toEqual([HOME, LOBBY]);
+    expect(noticesShown()).toEqual([]);
+  });
+
+  it("out of the room (kicked) closes the dialog and goes home, with no invite notice for a later game", async () => {
     const socket = await inMyGame();
     const r = await openLink(LINKED_ROOM);
 
@@ -289,6 +309,7 @@ describe("The game screen navigates while the invite dialog asks over it (EXP-36
     expect(stackPaths()).toEqual([HOME]);
     expect(showsInviteDialog(r)).toBe(false);
     expect(routerCalls.at(-1)).toBe(`dismissTo ${HOME}`);
+    expect(ctx.takeInviteOverRoomScreen()).toBeNull();
   });
 
   // expo-router queues the link's push and the game screen's navigation together: the game screen still believes it

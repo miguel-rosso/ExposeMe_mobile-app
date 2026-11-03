@@ -3,7 +3,9 @@
 # The old bug rejoined the room from the game's socket and left a second game screen listening under the first; on
 # screen that second one looks like the game going on, so only the jest suite can see it
 # (Client/__tests__/waitingRoomInviteOverGame.test.tsx counts the game screen's listeners). This flow checks what the
-# player sees: the game, no lobby, no invite dialog and no reconnection. Used by invite-link-mid-game.yaml.
+# player sees: the game, no lobby, no invite dialog and no reconnection. EXP-373: a link to the home screen keeps the
+# game the same way (the home it pushes over the game gives way to it, without closing the game's socket). Used by
+# invite-link-mid-game.yaml.
 # env: LINK (the deep link to open), USERNAME
 appId: com.socketNull.ExposeMe
 ---

@@ -28,6 +28,7 @@ jest.mock("../app/providers/GameContext", () => ({
     setPlayersProvider: mockSetPlayersProvider, socket: mockSocket, username: "bob",
     setRoundsOfGame: mockSetRoundsOfGame, roundsOfGame: 10, setPlantedPhotoUri: jest.fn(),
     saveRejoinToken: mockSaveRejoinToken, getRejoinToken: async () => "tok-123", clearRejoinToken: jest.fn(),
+    markRoomExit: jest.fn(),
   }),
 }));
 jest.mock("../app/providers/BackgroundContext", () => ({ useBackgroundContext: () => ({ backgroundImage: null }) }));

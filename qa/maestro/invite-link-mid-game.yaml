@@ -2,7 +2,7 @@
 # device joins room A and its game starts; then it opens the invite deep link of room B: Cancel returns to A's game,
 # still connected (the game went on meanwhile), and the same link then asks again; Join leaves A for good and lands
 # in B's lobby, with no game screen left behind it. Before that, waiting room links without a valid code and without
-# any keep A's game (EXP-363, stray-link-keeps-game.yaml).
+# any keep A's game (EXP-363, stray-link-keeps-game.yaml), and so does a link to the home screen (EXP-373).
 # Room A has 2 bots and room B 3 (bot names repeat across bots.mjs processes, but each room is separate on the
 # server): lobby-player-bot3 only exists in B. A's bots go on playing without the device once it leaves.
 # Run from the repo root against the lab server (never production), one device at a time:
@@ -33,6 +33,11 @@ appId: com.socketNull.ExposeMe
     file: stray-link-keeps-game.yaml
     env:
       LINK: "exposeme://screens/WaitingRoom"
+# EXP-373: a link to the home screen (pushed over the game) gives way to the game at once, still in the room
+- runFlow:
+    file: stray-link-keeps-game.yaml
+    env:
+      LINK: "exposeme:///"
 - takeScreenshot: invite-mid-game-stray-links-${USERNAME}
 # Asked over the game: B's code, the saved name filled in
 - runFlow: open-invite-link.yaml

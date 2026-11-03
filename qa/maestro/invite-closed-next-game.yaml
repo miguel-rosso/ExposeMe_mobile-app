@@ -1,0 +1,76 @@
+# EXP-360 (DEC-049 A): an invite link's dialog asking over the final screens closes when the host starts the next
+# game, and the player is told why. The device plays a game in room A and stays on its final screens; then it opens
+# the invite deep link of room B, and while the dialog asks, A's bot host starts the next game (30 s after game over):
+# the dialog goes away, the notice "Invite closed" / "Invitación cerrada" says the invite to B was closed because
+# another game started, and the device is still in room A (DEC-047), taken into its new game, which it plays to the
+# end. Before the fix the dialog vanished without a word.
+# Room A has 2 bots and room B 3 (bot names repeat across bots.mjs processes, but each room is separate on the
+# server): lobby-player-bot3 only exists in B.
+# Run from the repo root against the lab server (never production), one device at a time:
+#   qa/lab/lab.sh play --devices <label> --bots 2 --rounds 3 --flow invite-closed-next-game \
+#     --bot-args "--play-again-linger 1 --play-again-linger-bot 0 --start-next-game 30" \
+#     --second-room "--bots 3 --host --wait-players 5 --timeout 900"
+# Room A is the main play room (2 bots + the device; after game over every bot plays again at once and the host
+# starts the second game 30 s after game over, while the device lingers). Room B is the --second-room: 3 bots that
+# only wait in the lobby (5 players never arrive, so it never starts); lab.sh passes its code as NEW_CODE.
+# Game 1 runs the round loop inline (as play-again-auto-join.yaml) without play-rounds.yaml's final winner-continue
+# tap: the device must stay on the final screens.
+# env: GAME_CODE (room A), NEW_CODE (room B), USERNAME, METRO_URL (url-encoded)
+# Selectors are testIDs (Client/app/utils/testIds.ts), except the system alert's texts, matched in both UI languages.
+appId: com.socketNull.ExposeMe
+---
+- runFlow: open-app.yaml
+- runFlow: join-room.yaml
+- extendedWaitUntil:
+    visible:
+      id: "game-waiting-ready|game-waiting-photo|player-option-.*|score-modal"
+    timeout: 60000
+- repeat:
+    while:
+      notVisible:
+        id: "winner-modal|final-score-modal"
+    commands:
+      - tapOn:
+          id: "player-option-bot1"
+          optional: true
+          waitToSettleTimeoutMs: 500
+      - waitForAnimationToEnd:
+          timeout: 4000
+- takeScreenshot: invite-closed-results-${USERNAME}
+# On A's final screens: B's invite dialog asks over them
+- runFlow: open-invite-link.yaml
+- takeScreenshot: invite-closed-confirm-${USERNAME}
+# No tap: the host starts A's next game, which closes the dialog and tells why
+- extendedWaitUntil:
+    visible: "Invite closed|Invitación cerrada"
+    timeout: 45000
+- assertVisible: "The invite to ${NEW_CODE} was closed.*|La invitación a ${NEW_CODE} se cerró.*"
+- takeScreenshot: invite-closed-notice-${USERNAME}
+- tapOn: "OK|Aceptar"
+- assertNotVisible:
+    id: "invite-confirm-modal"
+- assertNotVisible:
+    id: "invite-room-code"
+# Still in room A: its lobby on the way (if it is still on screen, A's code) or already its new game; nothing of B
+- extendedWaitUntil:
+    visible:
+      id: "lobby-game-code|game-waiting-ready|game-waiting-photo|player-option-.*"
+    timeout: 20000
+- runFlow:
+    when:
+      visible:
+        id: "lobby-game-code"
+    commands:
+      - assertVisible:
+          id: "lobby-game-code"
+          text: "${GAME_CODE}"
+- assertNotVisible:
+    id: "lobby-player-bot3"
+- takeScreenshot: invite-closed-room-a-${USERNAME}
+# A's second game is played to the end like any other
+- extendedWaitUntil:
+    visible:
+      id: "game-waiting-ready|game-waiting-photo|player-option-.*"
+    timeout: 20000
+- runFlow: play-rounds.yaml
+- takeScreenshot: invite-closed-second-results-${USERNAME}

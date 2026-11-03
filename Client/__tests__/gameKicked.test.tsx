@@ -30,6 +30,7 @@ jest.mock("../app/providers/GameContext", () => ({
     playersProvider: mockPlayers, setPlayersProvider: jest.fn(), roundsOfGame: 10, plantedPhotoUri: null,
     plantedPhotoSent: false, plantPhoto: jest.fn(), getRejoinToken: async () => "tok-123", saveRejoinToken: jest.fn(),
     clearRejoinToken: mockClearRejoinToken, setPlantedPhotoUri: jest.fn(), setHomeNotice: mockSetHomeNotice,
+    markRoomExit: jest.fn(),
   }),
 }));
 jest.mock("../app/providers/PhotoContext", () => ({

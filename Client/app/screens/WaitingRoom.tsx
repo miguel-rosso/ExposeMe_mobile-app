@@ -89,6 +89,7 @@ const WaitingRoom = () => {
     saveRejoinToken,
     getRejoinToken,
     clearRejoinToken,
+    setInviteOverRoomScreen,
   } = useGameContext();
   const [players, setPlayers] = useState<Player[]>([]);
   const { backgroundImage } = useBackgroundContext();
@@ -224,6 +225,14 @@ const WaitingRoom = () => {
     setInviteGalleryChecked(false);
   };
 
+  // While the dialog asks over the room's own screen (e.g. the game's final screens), that screen knows which room it
+  // asks about: it closes the dialog if it navigates on its own (the next game) and tells the player why (DEC-049)
+  useEffect(() => {
+    if (!invitedCode || modeRef.current !== "overRoomScreen") return;
+    setInviteOverRoomScreen(invitedCode);
+    return () => setInviteOverRoomScreen(null);
+  }, [invitedCode]);
+
   // Unmounted (replaced, or closed by the room's screen): e.g. a Join still waiting for the gallery must do nothing
   useEffect(() => () => { modeRef.current = "left"; }, []);
 
@@ -257,7 +266,9 @@ const WaitingRoom = () => {
   /**
    * Join over the room's screen (e.g. the game): that screen and this one give way to a new lobby, opened over home
    * like home's Search room (the linked room's code is already set). The room's screen is gone before the linked room's
-   * socket exists, so it never drives it (re-joins, im-ready, turn photos: EXP-359).
+   * socket exists, so it never drives it (re-joins, im-ready, turn photos: EXP-359). Not a room exit (no useGoHome):
+   * the room was already left (releaseCurrentRoom), home is never focused on the way, and the new lobby's startSocket
+   * clears any exit mark still pending.
    */
   const openLinkedLobbyOverHome = () => {
     modeRef.current = "left";

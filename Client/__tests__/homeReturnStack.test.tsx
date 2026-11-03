@@ -325,3 +325,54 @@ describe("Home's notice comes only from the screens over it (EXP-339)", () => {
     expect(noticesShown()).toEqual([]);
   });
 });
+
+// EXP-373: a link to "/" (from another app or the web) pushes a second home over the lobby or the game. Only a room
+// screen's own way out leaves its room: that home gives way to the room's screen, which keeps its room and socket.
+describe("A link to home during a room (EXP-373)", () => {
+  const expectStillInRoom = (socket: FakeSocket) => {
+    expect(socket.disconnect).not.toHaveBeenCalled();
+    expect(socket.emittedPayloads("leave-room")).toEqual([]);
+    expect(ctx.socket).toBe(socket);
+    expect(ctx.gameCode).toBe(ROOM);
+  };
+  const openHomeLink = async () => {
+    await act(async () => { openDeepLink(HOME, {}); });
+    await flush();
+  };
+
+  it("in the lobby: back to the lobby, still in the room", async () => {
+    await startApp();
+    const socket = await inLobby();
+
+    await openHomeLink();
+
+    expect(stackPaths()).toEqual([HOME, LOBBY]);
+    expectStillInRoom(socket);
+  });
+
+  it("mid-game: back to the game, still in the room and driving it", async () => {
+    await startApp();
+    const socket = await inLobby();
+    await fire(socket, "game-started", [player("alice", true), player("bob")]);
+    const gameListeners = socket.listenerCount("round-start");
+    expect(gameListeners).toBeGreaterThan(0);
+
+    await openHomeLink();
+
+    expect(stackPaths()).toEqual([HOME, GAME]);
+    expectStillInRoom(socket);
+    expect(socket.listenerCount("round-start")).toBe(gameListeners);
+  });
+
+  it("the lobby's own Exit afterwards still leaves the room and closes its socket", async () => {
+    await startApp();
+    const socket = await inLobby();
+    await openHomeLink();
+
+    await pressExit();
+
+    expect(stackPaths()).toEqual([HOME]);
+    expect(socket.emittedPayloads("leave-room")).toHaveLength(1);
+    expect(ctx.socket).toBeNull();
+  });
+});

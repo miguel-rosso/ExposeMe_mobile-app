@@ -205,6 +205,14 @@ export interface GameContextProps {
   setHomeNotice: (notice: string) => void;
   /** The home notice set since the last call, or null (home takes it once, when focused) */
   takeHomeNotice: () => string | null;
+  /** A room screen is going home on its own (Exit, kicked, refused): home closes the room's socket on its next focus */
+  markRoomExit: () => void;
+  /** Whether a room exit was marked since the last call (home takes it once, when focused) */
+  takeRoomExit: () => boolean;
+  /** The room an invite dialog asks about over the room's own screen (the game), or null when none asks there */
+  setInviteOverRoomScreen: (code: string | null) => void;
+  /** That room since the last call, or null (the room's screen takes it when it navigates on its own) */
+  takeInviteOverRoomScreen: () => string | null;
   playersProvider: Player[];
   roundsOfGame: number;
   setGameCode: (code: string | null) => void;

@@ -26,7 +26,7 @@ jest.mock("../app/providers/GameContext", () => ({
     username: "bob", gameCode: "123456", socket: mockSocket, endSocket: mockEndSocket,
     playersProvider: [], setPlayersProvider: jest.fn(), roundsOfGame: 10, plantedPhotoUri: null,
     plantedPhotoSent: false, plantPhoto: jest.fn(), getRejoinToken: async () => "tok-123", saveRejoinToken: jest.fn(),
-    setPlantedPhotoUri: mockSetPlanted,
+    setPlantedPhotoUri: mockSetPlanted, takeInviteOverRoomScreen: () => null,
   }),
 }));
 jest.mock("../app/providers/PhotoContext", () => ({

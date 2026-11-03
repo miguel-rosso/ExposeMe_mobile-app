@@ -75,6 +75,7 @@ const Index = () => {
     endSocket,
     requestNewRoom,
     takeHomeNotice,
+    takeRoomExit,
   } = useGameContext();
   const { backgroundImage } = useBackgroundContext();
   const [isJoiningGame, setIsJoiningGame] = useState(false);
@@ -139,13 +140,18 @@ const Index = () => {
     }, [takeHomeNotice, t])
   );
 
-  // Home never keeps a game connection: close the one left over from the last room whenever home is focused
+  // Home never keeps a game connection, but only a room screen's own way out (useGoHome) leaves its room: then home
+  // closes the connection it left over. Reached any other way while in a room (a link to "/" pushes another home over
+  // the lobby or the game, EXP-373), home gives way to that room's screen, which keeps its room. With no room screen
+  // under it, nothing can use the connection any more: closed too. Once per focus (and socket): the context's
+  // functions are stable in what they do (they only touch refs and state setters).
   useFocusEffect(
     useCallback(() => {
-      if (socket) {
-        endSocket();
-      }
-    }, [socket, endSocket])
+      const leftRoom = takeRoomExit();
+      if (!socket) return;
+      if (leftRoom || !router.canGoBack()) endSocket();
+      else router.back();
+    }, [socket])
   );
 
   // When the join panel closes, the home form comes back: the name bounces up and Join game bounces down

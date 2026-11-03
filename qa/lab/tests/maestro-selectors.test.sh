@@ -272,7 +272,7 @@ for name in hold-used-up.yaml hold-closed.yaml; do # their ids are checked with 
   hold_texts="$(sed -nE 's/^[[:space:]]*text: "(.*)"$/\1/p' "$HOLD_FLOW" | sort -u)"
   # The only text filter, on the line after the hold button's id (the same selector)
   [ -n "$hold_texts" ] && [ "$hold_texts" = "$no_holds_left" ] \
-    && grep -B1 -F "text: \"$no_holds_left\"" "$HOLD_FLOW" | grep -qF 'id: "hold-button"' \
+    && grep -qF 'id: "hold-button"' <<<"$(grep -B1 -F "text: \"$no_holds_left\"" "$HOLD_FLOW")" \
     && ok "$name: the hold button's text filter is noHoldsLeft in en and es ($no_holds_left)" \
     || ko "$name: text filter is the hold button's noHoldsLeft in en|es" "app: $no_holds_left; flow: $(tr '\n' ';' <<<"$hold_texts")"
 done

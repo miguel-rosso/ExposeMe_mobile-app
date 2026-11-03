@@ -35,7 +35,9 @@
 #                               "Downloading N%", or dev-client-boot.yaml's loaded check failed: launcher, ANR dialog,
 #                               "There was a problem loading the project") is force-stopped and runs the flow once
 #                               more (maestro/<device>-retry); a flow whose header says "# lab: one device (<why>)"
-#                               is refused on more than one device before any bots start (pick one: --devices <label>)
+#                               is refused on more than one device before any bots start (pick one: --devices <label>),
+#                               and one whose header says "# lab: holds used up (<why>)" passes only when the bots heard
+#                               each device use up its holds on a round of its photo (hold-used-up.yaml, EXP-371)
 #        [--second-room "<bots.mjs args>"]  also start a 2nd bots room; its code reaches the flows as NEW_CODE
 #        [--maestro-env KEY=VALUE]          extra Maestro variable for every device (repeatable)
 #        [--server http://localhost:P | --port P]  bots and render telemetry use that lab server (e.g. a worktree's
@@ -907,6 +909,34 @@ flow_one_device_reason() { # flow file: prints why it runs on one device only (e
     index($0, marker) == 1 { print substr($0, length(marker) + 1); found = 1; exit } END { exit !found }' "$1"
 }
 
+# ── Holds used up, as the bots heard them (EXP-371) ──
+# A flow whose device must use up its holds on a scoreboard of its own photo says so in its header:
+# "# lab: holds used up (<why>)". Its Maestro can't always read the screen before the scoreboard's hold window closes
+# (hold-used-up.yaml: slow emulators, iOS), but every bot hears each hold the server counts, so after the run play
+# checks the bots' summary (holds_used_up, qa/lab/bots-analysis.mjs) for a round of each device's photo with its holds
+# used up. A 4th hold the server took after that is already a consistency error of the bots
+HOLDS_USED_UP_MARKER='# lab: holds used up'
+flow_checks_holds_used_up() { # flow file: exit 0 when its header (the comments before `appId`) carries the marker
+  [ -f "$1" ] && awk -v marker="$HOLDS_USED_UP_MARKER" '/^appId:/ { exit }
+    index($0, marker) == 1 { found = 1; exit } END { exit !found }' "$1"
+}
+check_holds_used_up() { # bots.json, device labels...: logs the rounds each device used its holds up on; fails (exit 1)
+  # when the bots heard none for one of them
+  local summary=$1 label rounds missing=0; shift
+  for label in "$@"; do
+    rounds="$(jq -r --arg owner "$label" \
+      '[.summary.rooms_detail[]?.holds_used_up[]? | select(.owner == $owner) | .round] | map(tostring) | join(", ")' \
+      "$summary" 2>/dev/null)"
+    if [ -n "$rounds" ]; then
+      log "$label: holds used up on round(s) $rounds of its photo (the bots heard its 3 holds and the hold-end with 0 left)"
+    else
+      warn "$label: NO HOLDS USED UP: the bots heard no round of its photo get its 3 holds (taps too late? see the flow's header)"
+      missing=1
+    fi
+  done
+  [ $missing = 0 ]
+}
+
 # ── Device-hosted rooms (play --device-host, EXP-390) ──
 # The device creates the room, so its code is only on its screen: the flow reads it and POSTs it with Maestro's http
 # (run by the Maestro CLI on this machine) to a listener on loopback, which writes the first one it gets where a bots
@@ -1073,6 +1103,11 @@ cmd_play() {
   forget_bots_pid "$bots_pid"
   stop_play_bots
   node -e 'const r=require(process.argv[1]);console.log(JSON.stringify(r.summary,null,2))' "$dir/bots.json" 2>/dev/null || true
+  if [ "$n_dev" -gt 0 ] && flow_checks_holds_used_up "$QA/maestro/$flow.yaml"; then
+    local labels; labels="$(devices | jq -r "$sel | .label")"
+    # shellcheck disable=SC2086 # one device label per word
+    check_holds_used_up "$dir/bots.json" $labels || fail=1
+  fi
   print_render_skew "$dir" "$code" "$server_port"
   print_scoreboards_checked "$dir/maestro" || fail=1
   save_game_telemetry "$dir" "$code" "$server_port"

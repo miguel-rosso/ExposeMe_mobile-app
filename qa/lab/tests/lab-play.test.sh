@@ -6,7 +6,8 @@
 # (EXP-346: '--kick <device label> --kick-after-game 120'), and the one retry of a device whose dev client got stuck
 # downloading the JS bundle (EXP-256) or whose dev-client-boot.yaml loaded check failed: its bundle wait ran out
 # (EXP-297) or it gave up at once on "There was a problem loading the project" (EXP-304); the scoreboards each device
-# checked in play-rounds.yaml and the Maestro version warning (EXP-312).
+# checked in play-rounds.yaml and the Maestro version warning (EXP-312), and the holds each device of a hold-used-up.yaml
+# run used up, from the bots' summary (EXP-371).
 # Run: qa/lab/tests/lab-play.test.sh
 set -uo pipefail
 
@@ -26,7 +27,8 @@ RUNS="$TMP/runs"; DEVICES_JSON="$TMP/devices.json"; QA="$TMP/qa"
 mkdir -p "$TMP/bin" "$QA/lab"
 echo '[{"id":"FAKE-1","label":"ios-a","platform":"ios"},{"id":"emulator-5554","label":"android-a","platform":"android"}]' >"$DEVICES_JSON"
 # node stub: `node bots.mjs ...` logs its argv, writes a room code (ROOM<--bots>) to --code-file and an empty
-# summary to --out; a room started with --wait-players 99 (the "second room") then lingers like a lobby-only room.
+# summary to --out (STUB_BOTS_OUT instead, when set); a room started with --wait-players 99 (the "second room") then
+# lingers like a lobby-only room.
 cat >"$TMP/bin/node" <<'EOF'
 #!/usr/bin/env bash
 [ "$1" = -e ] && { echo "SUMMARY $(cat "$3")"; exit 0; }   # the summary print at the end of play
@@ -37,7 +39,8 @@ while [ $# -gt 0 ]; do case $1 in
   --bots) bots=$2; shift;; --code-file) code_file=$2; shift;; --out) out=$2; shift;;
   --wait-players) [ "$2" = 99 ] && linger=1; shift;; esac; shift; done
 [ "${STUB_NO_CODE:-}" = "$bots" ] || echo "ROOM$bots" >"$code_file"
-echo '{"summary":{"pass":true}}' >"$out"
+passed='{"summary":{"pass":true}}'
+echo "${STUB_BOTS_OUT:-$passed}" >"$out"
 if [ $linger = 1 ]; then echo $$ >"$STUB_LOG/linger.pid"; exec sleep 30; fi
 echo $$ >"$STUB_LOG/main.pid"
 EOF
@@ -189,6 +192,33 @@ for flow in leave-paused-game lobby-host-drop kicked-notice kicked-after-game ki
 done
 ! flow_one_device_reason "$MAESTRO_DIR/play-game.yaml" >/dev/null && ok "play-game.yaml is not marked for one device" \
   || ko "play-game.yaml is not marked for one device"
+
+# ── Holds used up, from the bots' summary (EXP-371) ──
+# A flow marked HOLDS_USED_UP_MARKER passes only when the bots heard every device use up its holds on a round of its
+# photo (holds_used_up); other flows ignore it
+flow_checks_holds_used_up "$MAESTRO_DIR/hold-used-up.yaml" && ! flow_checks_holds_used_up "$MAESTRO_DIR/hold-closed.yaml" \
+  && ! flow_checks_holds_used_up "$MAESTRO_DIR/play-game.yaml" \
+  && ok "hold-used-up.yaml (only) is marked for the bots' holds check" || ko "hold-used-up.yaml is marked for the holds check"
+mkdir -p "$QA/maestro"
+cp "$MAESTRO_DIR/hold-used-up.yaml" "$MAESTRO_DIR/play-game.yaml" "$QA/maestro/"
+used_up_out() { # owner of round 4's used up holds -> a bots summary
+  printf '{"summary":{"pass":true,"rooms_detail":[{"holds_used_up":[{"owner":"bot1","round":2},{"owner":"%s","round":4}]}]}}' "$1"
+}
+STUB_BOTS_OUT="$(used_up_out android-a)" play r-holds --bots 2 --rounds 10 --devices android-a --flow hold-used-up
+rc=$?
+[ $rc = 0 ] && completed r-holds && grep -q "android-a: holds used up on round(s) 4 of its photo" "$TMP/play.out" \
+  && ok "hold-used-up: the bots heard the device use up its holds: the run passes, naming the round" \
+  || ko "hold-used-up with the device's holds used up" "rc=$rc $(cat "$TMP/play.out")"
+STUB_BOTS_OUT="$(used_up_out ios-a)" play r-holds-none --bots 2 --rounds 10 --devices android-a --flow hold-used-up
+rc=$?
+[ $rc != 0 ] && grep -q "android-a: NO HOLDS USED UP" "$TMP/play.out" && grep -q "RUN r-holds-none had failures" "$TMP/play.out" \
+  && ok "hold-used-up: no round of the device's own with its holds used up fails the run" \
+  || ko "hold-used-up without the device's holds used up" "rc=$rc $(cat "$TMP/play.out")"
+STUB_BOTS_OUT="$(used_up_out ios-a)" play r-holds-other --bots 2 --rounds 10 --devices android-a --flow play-game
+rc=$?
+[ $rc = 0 ] && ! grep -qi "holds used up" "$TMP/play.out" \
+  && ok "a flow without the marker doesn't check the holds" || ko "unmarked flow ignores the holds" "rc=$rc $(cat "$TMP/play.out")"
+rm -rf "$QA/maestro"
 
 # Second room never publishes a code: fail loudly, nothing left running, no device run
 STUB_NO_CODE=3 LAB_ROOM_CODE_TIMEOUT=1 play r3 --bots 2 --devices ios-a --second-room "--bots 3 --host --wait-players 99"
@@ -373,25 +403,28 @@ for f in play-rounds many-players no-result-game waiting-photo tie-game hold-use
 done
 # Flows whose game starts inside play-rounds.yaml (its lobby wait, checked above), right after joining
 for f in kicked-after-game kicked-while-offline; do
-  grep -A1 -x -- "- runFlow: join-room.yaml" "$MAESTRO_DIR/$f.yaml" | grep -qx -- "- runFlow: play-rounds.yaml" \
+  grep -qx -- "- runFlow: play-rounds.yaml" <<<"$(grep -A1 -x -- "- runFlow: join-room.yaml" "$MAESTRO_DIR/$f.yaml")" \
     && ok "$f.yaml waits in the lobby with the budget (play-rounds.yaml)" || ko "$f.yaml plays its game through play-rounds.yaml after joining"
 done
 
 # ── play-rounds.yaml's checked scoreboards and the Maestro it was verified on (EXP-312) ──
-sed 's/^[[:space:]]*//' "$MAESTRO_DIR/play-rounds.yaml" | grep -qxF "true: $SCOREBOARD_GUARD" \
+# The flow's lines without their indentation, in a file: grep -q stops at its first match, so fed by a pipe it could
+# fail the pipe under pipefail with the writer's SIGPIPE (EXP-408)
+sed 's/^[[:space:]]*//' "$MAESTRO_DIR/play-rounds.yaml" >"$TMP/play-rounds-lines"
+grep -qxF "true: $SCOREBOARD_GUARD" "$TMP/play-rounds-lines" \
   && ok "play-rounds.yaml's card wait has lab.sh's SCOREBOARD_GUARD" || ko "play-rounds.yaml card-wait guard in sync with lab.sh"
-sed 's/^[[:space:]]*//' "$MAESTRO_DIR/play-rounds.yaml" | grep -qxF "true: $SEEN_GUARD" \
+grep -qxF "true: $SEEN_GUARD" "$TMP/play-rounds-lines" \
   && ok "play-rounds.yaml's checks have lab.sh's SEEN_GUARD" || ko "play-rounds.yaml checks guard in sync with lab.sh"
-sed 's/^[[:space:]]*//' "$MAESTRO_DIR/play-rounds.yaml" | grep -qxF "true: $CHECKED_GUARD" \
+grep -qxF "true: $CHECKED_GUARD" "$TMP/play-rounds-lines" \
   && ok "play-rounds.yaml's proof look has lab.sh's CHECKED_GUARD" || ko "play-rounds.yaml proof-look guard in sync with lab.sh"
-sed 's/^[[:space:]]*//' "$MAESTRO_DIR/play-rounds.yaml" | grep -qxF "true: $HELD_GUARD" \
+grep -qxF "true: $HELD_GUARD" "$TMP/play-rounds-lines" \
   && ok "play-rounds.yaml's held check has lab.sh's HELD_GUARD" || ko "play-rounds.yaml held-check guard in sync with lab.sh"
 # EXP-350: the proof look is the only step that counts a scoreboard as checked, and a positive look (it can't pass on a
 # held screen): no other step adds to the checked count
 # shellcheck disable=SC2016 # a Maestro expression
-checked_steps="$(sed 's/^[[:space:]]*//' "$MAESTRO_DIR/play-rounds.yaml" | grep -F 'output.scoreboards.checked')"
-sed 's/^[[:space:]]*//' "$MAESTRO_DIR/play-rounds.yaml" | grep -A6 -xF "true: $CHECKED_GUARD" \
-  | grep -qxF -- '- assertTrue: ${++output.scoreboards.checked}' \
+checked_steps="$(grep -F 'output.scoreboards.checked' "$TMP/play-rounds-lines")"
+# shellcheck disable=SC2016 # a Maestro expression
+grep -qxF -- '- assertTrue: ${++output.scoreboards.checked}' <<<"$(grep -A6 -xF "true: $CHECKED_GUARD" "$TMP/play-rounds-lines")" \
   && [ "$checked_steps" = '- assertTrue: ${++output.scoreboards.checked}' ] \
   && ok "play-rounds.yaml counts a scoreboard checked only in its proof look" \
   || ko "play-rounds.yaml counts checked only in the proof look" "steps naming the count: $checked_steps"

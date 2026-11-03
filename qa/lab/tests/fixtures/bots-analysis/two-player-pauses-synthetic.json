@@ -49,6 +49,7 @@
  "hold_release_ms": {
   "max": null
  },
+ "holds_used_up": [],
  "linger_turns_reported": 0,
  "second_game_rounds": 0,
  "second_game_ready_ms": null,

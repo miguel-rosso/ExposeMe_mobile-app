@@ -62,9 +62,12 @@
 //                           joining (im-ready never waits for it). Planted rounds must look like any other (EXP-126):
 //                           every bot gets waiting-photo before round-start, nobody gets your-turn for them
 //                           ("consistency"), and no payload says who planted or who is ready ("payload-leak"; only a
-//                           bot's own room-of-game has its own planted mark, and it must be true after planting).
+//                           bot's own room-of-game has its own planted mark, and it must be true after planting, until
+//                           game-over deletes the planted photos: EXP-406).
 //                           plant-photo must be acked { ok: true } within PLANT_ACK_TIMEOUT_MS (EXP-152).
 //   node qa/lab/bots.mjs --bots 3 --host --plant 2
+//   node qa/lab/bots.mjs --bots 3 --host --rounds 3 --plant 2 --play-again-linger 3 --play-again-linger-bot 2   # then
+//                           a second game, back in the lobby with no planted mark (EXP-406)
 //            --lobby-host-drop  once everyone joined, the host bot drops in the lobby and never comes back (EXP-157):
 //                           after the 15 s disconnect grace (not before) every other bot gets player-connection
 //                           { host, connected: false } and new-host for the second bot, which then starts the game; the
@@ -163,7 +166,8 @@
 //                           must carry holdsLeft (at most 3 minus the round's holds so far), and the server must accept
 //                           no hold in a round after saying none are left (a hold-end with 0, or hold-closed), whose
 //                           scoreboard snapshots then say 0 too ("consistency"); summary: holds,
-//                           hold_release_ms.
+//                           hold_release_ms, and holds_used_up: the rounds whose owner, a device too, used up its holds
+//                           (lab.sh play checks a device's from it, qa/maestro/hold-used-up.yaml, EXP-371).
 //                           play-rounds.yaml's simulator (qa/lab/tests/maestro-sim.mjs) models a single hold per round,
 //                           not these presses again (EXP-355 will extend it).
 //   node qa/lab/bots.mjs --bots 3 --host --rounds 3 --hold 1
@@ -1217,6 +1221,8 @@ function runRoom(roomIdx, fixedCode) {
       // game-over, received or learnt from a rejoin snapshot
       const onGameOver = () => {
         bot.inGame = false;
+        // The server deletes the planted photos at game-over (EXP-406): back in the lobby our mark is gone too
+        bot.plantedAt = null;
         if (PLAYS_NEXT_GAME && !bot.gone) {
           if (bot.game2) {
             // The second game (started while someone lingered, or after the quitter was gone) ends the run

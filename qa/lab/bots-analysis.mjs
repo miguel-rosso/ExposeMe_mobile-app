@@ -828,6 +828,27 @@ function checkHoldsLeft(r) {
   return errors;
 }
 
+/**
+ * The rounds whose photo owner used up its holds (EXP-371): a bot saw MAX_HOLDS_PER_ROUND holds start in the round,
+ * then a hold-end saying none are left. -> [{ owner, round }] by round, the owner as that bot's round-reveal named it.
+ * Only the first game's events (a second one's are recorded as "g2-<event>"). lab.sh play checks a device's holds
+ * with it (qa/maestro/hold-used-up.yaml): Maestro can't always read the screen before the scoreboard's hold window
+ * closes, the bots hear every hold the server counts.
+ */
+function usedUpHolds(r) {
+  const byRound = new Map();
+  for (const name of r.players) {
+    const started = new Map(); // round -> hold-starts this bot got
+    for (const e of r.events.filter((x) => x.bot === name)) {
+      if (e.ev === "hold-start") started.set(e.round, (started.get(e.round) ?? 0) + 1);
+      if (e.ev !== "hold-end" || e.payload?.holdsLeft !== 0 || (started.get(e.round) ?? 0) < MAX_HOLDS_PER_ROUND) continue;
+      const reveal = r.events.find((x) => x.bot === name && x.ev === "round-reveal" && x.round === e.round);
+      if (reveal?.payload?.correctAnswer) byRound.set(e.round, { owner: reveal.payload.correctAnswer, round: e.round });
+    }
+  }
+  return [...byRound.values()].sort((a, b) => a.round - b.round);
+}
+
 /** Round numbers run 1, 2, 3… with no gap. */
 const checkRoundNumbering = (ctx) => ctx.roundsSeen.flatMap((n, i) => (n !== i + 1 ? [`round numbering gap: expected ${i + 1}, got ${n}`] : []));
 
@@ -939,6 +960,8 @@ export function analyseRoom(r, opts) {
     // Holds of the scoreboard by bots (--hold) and, per player, how long after the holder let go / went away it was let go
     holds: holds.length,
     hold_release_ms: spread(holdChecks.lags),
+    // Rounds whose owner (a bot or a device) used up its holds: [{ owner, round }] (lab.sh play, EXP-371)
+    holds_used_up: usedUpHolds(r),
     linger_turns_reported: countOf(r, ["g2-linger-photo-unavailable"]),
     // Second game (started while someone lingered on the final screens, EXP-184): rounds played and ready-phase length
     second_game_rounds: new Set(r.events.filter((e) => e.ev === "g2-round-start").map((e) => e.round)).size,

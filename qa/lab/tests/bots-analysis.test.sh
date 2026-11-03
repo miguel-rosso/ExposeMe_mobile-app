@@ -10,7 +10,7 @@
 #   (--kick-after-game, EXP-346) checks on small synthetic games, and the
 #   photo owner leaving during their round (--leave-owner, EXP-301 / DEC-038): still the answer, voters score.
 # - holds of the scoreboard (--hold, EXP-303): everyone let go within 1 s of the holder releasing or going away, and
-#   every hold-end tells the holds left (EXP-176).
+#   every hold-end tells the holds left (EXP-176), and the rounds whose owner used up its holds (EXP-371).
 # - game numbers (EXP-318): every photo wait and snapshot of a game carries its game-started number, and the next
 #   game's is higher.
 # Run: qa/lab/tests/bots-analysis.test.sh
@@ -539,6 +539,56 @@ got="$(server_ended_hold server-ended)"
 [ "$got" = "$want" ] && ok "hold ended by the server without hold-resume: reported in its own round, each hold counted once" || ko "server-ended hold" "expected [$want] got [$got]"
 got="$(server_ended_hold paused)"
 [ "$got" = "holds=2 lag_max=21.0" ] && ok "hold ended by a pause: hold-end only, no hold-resume due" || ko "pause-ended hold" "$got"
+
+# ── holds_used_up: the rounds whose owner used up its holds, as the bots heard them (EXP-371) ──
+# A 2-round game of bot1 and bot2 with the device ios-a, whose photo is round 1's (bot1's round 2's): ios-a holds round
+# 1 three times, each hold-end telling the holds left (2, 1, 0), and bot1 holds round 2 once. Variants: two-holds (ios-a
+# holds twice and the second hold-end says 0, as when the hold budget runs out), missed (bot2 was away for the first
+# hold: bot1 still heard all three), second-game (the same holds, recorded as a second game's "g2-" events). Prints the
+# summary's holds_used_up.
+used_up() { # variant (three-holds|two-holds|missed|second-game)
+  node --input-type=module -e '
+    const { analyseRoom } = await import(process.argv[1]);
+    const variant = process.argv[2];
+    const bots = ["bot1", "bot2"];
+    const events = [];
+    const g = variant === "second-game" ? "g2-" : "";
+    const at = (bot, ev, round, t, payload) => events.push({ bot, ev: g + ev, round, t, ...(payload !== undefined ? { payload } : {}) });
+    const all = (ev, round, t, payload, names = bots) => names.forEach((b) => at(b, ev, round, t, payload));
+    all("game-started", 0, 0, { rounds: 2, players: [...bots, "ios-a"] });
+    const scoreboard = (round, owner, t0) => {
+      all("round-start", round, t0, { photo: `/temp/p${round}.jpg`, duration: 7700 });
+      all("round-reveal", round, t0 + 8000, { correctAnswer: owner, yourGuess: "" });
+      all("round-scores", round, t0 + 11000, { round, scores: [] });
+    };
+    scoreboard(1, "ios-a", 0);
+    const holdsLeft = variant === "two-holds" ? [2, 0] : [2, 1, 0];
+    holdsLeft.forEach((left, i) => {
+      const heard = variant === "missed" && i === 0 ? ["bot1"] : bots;
+      all("hold-start", 1, 11100 + i * 100, undefined, heard);
+      all("hold-end", 1, 11150 + i * 100, { holdsLeft: left }, heard);
+    });
+    scoreboard(2, "bot1", 20000);
+    at("bot1", "hold-sent", 2, 31050);
+    all("hold-start", 2, 31100);
+    at("bot1", "holding", 2, 31101);
+    at("bot1", "hold-release-sent", 2, 31150);
+    all("hold-resume", 2, 31160, { phase: "scores", duration: 4000, phaseTotal: 5000 });
+    all("hold-end", 2, 31161, { holdsLeft: 2 });
+    all("game-over", 2, 40000, { finalScore: [] });
+    const r = { code: "QAROOM", reason: "game-over", players: bots, errors: [], uploads: [], rateLimited: 0, events };
+    console.log(JSON.stringify(analyseRoom(r, { host: true, rounds: 2 }).holds_used_up));
+  ' "$ANALYSIS" "$1"
+}
+got="$(used_up three-holds)"
+[ "$got" = '[{"owner":"ios-a","round":1}]' ] && ok "holds_used_up: the device's round after its 3 holds, not a bot's round held once" \
+  || ko "holds_used_up after 3 holds" "$got"
+got="$(used_up two-holds)"
+[ "$got" = '[]' ] && ok "holds_used_up: a hold-end saying 0 after fewer holds doesn't count" || ko "holds_used_up after 2 holds" "$got"
+got="$(used_up missed)"
+[ "$got" = '[{"owner":"ios-a","round":1}]' ] && ok "holds_used_up: one bot that heard all 3 holds is enough" || ko "holds_used_up, a bot away" "$got"
+got="$(used_up second-game)"
+[ "$got" = '[]' ] && ok "holds_used_up: only the first game's rounds" || ko "holds_used_up in a second game" "$got"
 
 # ── Tie with points (--answer-right, EXP-348) ──
 # A synthetic game of our bots bot1 and bot2 plus the players in OTHERS (devices), one round per owner in OWNERS

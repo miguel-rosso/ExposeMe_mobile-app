@@ -483,8 +483,8 @@ function game({
 // app: "correct"; "holdsUncounted", whose button greys out only at hold-closed (a check that took that for the 3
 // holds would pass by mistake); or "fourthHolds", whose greyed out button still sends presses that the server holds
 // FOURTH_HOLD_MS (a release that never comes). Records each read that saw the greyed out button while looking for it
-// (`usedUpReads`: the holds its round had and whether they greyed it out before hold-closed was painted). startAt:
-// when the flow starts, from the game's start.
+// (`usedUpReads`: the holds its round had and whether they greyed it out before hold-closed was painted), and what the
+// bots heard of the device's holds (`botsHeard()`). startAt: when the flow starts, from the game's start.
 const QUICK_HOLD_MS = 60;
 const FOURTH_HOLD_MS = 5000;
 const NO_HOLDS_LEFT = "No holds left";
@@ -535,6 +535,12 @@ function holdGame({ rounds, ownedRounds, readMs, seesAt, upLatency, paintLag = (
     return [{ id: "winner-modal" }];
   };
   const holdButton = (t) => screen(t).find(({ id }) => id === "hold-button");
+  // What the bots hear (EXP-371, lab.sh play's check): a round of the device's photo whose 3 holds the server counted,
+  // and a hold it took after those (bots.mjs reports it as a consistency error)
+  state.botsHeard = () => ({
+    usedUp: ownedRounds.some((round) => holds[round].length >= rules.maxHolds),
+    heldAfter: ownedRounds.some((round) => holds[round].length > rules.maxHolds),
+  });
   let lastArrival = -Infinity;
   const d = device(
     "android",
@@ -1087,23 +1093,29 @@ function roundsScenarios(flow) {
   }
 }
 
-// ── hold-used-up.yaml (EXP-361) ──
-// The device owns about a third of the rounds of a 10-round game (2 bots, as its header runs it). Played with reads
-// seen as they start, as they end and anywhere along them (those also with the device's scoreboard events painted up
-// to it166's 0.5 s late, or on time or that late), on fixed and random screen reads from a fast phone's to the slow
-// emulator's 4 s: the flow never passes on an app whose button greys out only at hold-closed or whose 4th press holds
-// the game, every pass on the correct app saw the button greyed out by the 3 holds before hold-closed was painted, and
-// the correct app fails only for want of an own scoreboard reached in time (its last assert, counted `late`). Each line
-// states the pass rate; a fast phone's must stay high (MIN_FAST_PASSES).
+// ── hold-used-up.yaml (EXP-361, EXP-371) ──
+// The device owns about a third of the rounds of a 10-round game (2 bots, as its header runs it), on Android (the
+// flow's iOS branch, a tap by point, is not simulated). Played with reads seen as they start, as they end and anywhere
+// along them (those also with the device's scoreboard events painted up to it166's 0.5 s late, or on time or that
+// late), on fixed and random screen reads from a fast phone's to the slow emulator's 4 s: the flow never checks on screen an app whose button greys out only at hold-closed or whose 4th press
+// holds the game, every check on the correct app saw the button greyed out by the 3 holds before hold-closed was
+// painted, and the correct app fails only for want of an own scoreboard tapped on (its last assert). Each run is also
+// judged like lab.sh play (EXP-371): the flow passed and the bots heard a round of the device's photo get its 3 holds
+// and no hold after them. Each line states both pass rates: a fast phone's on-screen checks must stay high
+// (MIN_FAST_PASSES), and so must the bots' check with reads up to BOTS_CHECK_READ_MS.
 function holdScenarios(flow) {
   const ROUNDS = 10;
   const OWN_SHARE = 1 / 3;
   const UP_LATENCY_MS = [50, 300]; // a tap reaching the server: adb's input and the local socket
   const PAINT_LAG_MS = 500; // it166: the scoreboard and the other phases painted up to 0.5 s late
-  const UNCHECKED = /A scoreboard of the device's photo had its holds used up and checked/;
+  const UNTAPPED = /A scoreboard of the device's photo got the hold presses/;
   const options = { skippableSubflows: ["open-app.yaml", "join-room.yaml", "wait-game-start.yaml"] };
   const FAST_READS = { name: "fixed 0.3 s", range: [300, 300] };
   const MIN_FAST_PASSES = 0.75;
+  // EXP-371: with reads up to 1 s the bots' check passes nearly every correct game (39-40 of 40 in every read-point and
+  // paint-delay profile), though the flow can check the button on screen only with reads of 0.4 s or less
+  const BOTS_CHECK_READ_MS = 1000;
+  const MIN_BOTS_CHECK_PASSES = 0.9;
   const fixedReads = (ms) => ({ name: `fixed ${ms / 1000} s`, range: [ms, ms] });
   const READS = [FAST_READS, ...[400, 500, 1000, 2000, 3000, 4000].map(fixedReads),
     { name: "random 1-4 s", range: [1000, 4000] }];
@@ -1125,31 +1137,48 @@ function holdScenarios(flow) {
       seesAt: see.seesAt(seed), upLatency: () => between(latency, UP_LATENCY_MS), paintLag: lag.paintLag(seed), app });
     return { state, ...runFlow(flow, d, { ...options, env }) };
   };
-  // A pass on the correct app is proven when the read that ended its wait saw the button greyed out by the 3 holds
+  // The flow checked the button on screen: it passed with a scoreboard proven (the flow's own `checked`)
+  const checkedOnScreen = ({ failure, output }) => !failure && output.hold?.checked === true;
+  // ...proven when the read that ended its wait saw the button greyed out by the 3 holds
   const proven = ({ state }) => state.usedUpReads.at(-1)?.byHolds === true;
+  // The run as lab.sh play judges it (EXP-371): the flow passed, the bots heard a round of the device's photo get its 3
+  // holds, and no hold after them
+  const labPasses = (run) => {
+    const { usedUp, heldAfter } = run.state.botsHeard();
+    return !run.failure && usedUp && !heldAfter;
+  };
   for (const reads of READS) {
     for (const see of SEE_POINTS) {
       for (const lag of see.varies ? LAGS : LAGS.slice(0, 1)) {
-        let passed = 0, late = 0;
+        let checked = 0, passed = 0, late = 0;
+        const brokenPasses = { holdsUncounted: 0, fourthHolds: 0 };
         const problems = [];
         for (let seed = 1; seed <= RANDOM_GAMES; seed++) {
           const run = play(seed, reads, see, lag, "correct");
           late += run.output.hold?.late ?? 0;
-          if (!run.failure) passed++;
-          if (!run.failure && !proven(run)) {
-            problems.push(`seed ${seed}: passed unproven ${JSON.stringify(run.state.usedUpReads.at(-1))}`);
+          if (checkedOnScreen(run)) checked++;
+          if (labPasses(run)) passed++;
+          if (checkedOnScreen(run) && !proven(run)) {
+            problems.push(`seed ${seed}: checked unproven ${JSON.stringify(run.state.usedUpReads.at(-1))}`);
           }
-          if (run.failure && !UNCHECKED.test(run.failure)) problems.push(`seed ${seed}: ${run.failure}`);
-          for (const app of ["holdsUncounted", "fourthHolds"]) {
-            if (!play(seed, reads, see, lag, app).failure) problems.push(`seed ${seed}: passed on the ${app} app`);
+          if (checkedOnScreen(run) && !labPasses(run)) problems.push(`seed ${seed}: checked, but the bots heard no 3 holds`);
+          if (run.failure && !UNTAPPED.test(run.failure)) problems.push(`seed ${seed}: ${run.failure}`);
+          for (const app of Object.keys(brokenPasses)) {
+            const broken = play(seed, reads, see, lag, app);
+            if (checkedOnScreen(broken)) problems.push(`seed ${seed}: checked on the ${app} app`);
+            if (labPasses(broken)) brokenPasses[app]++;
           }
         }
-        const minPasses = reads === FAST_READS && !see.varies ? MIN_FAST_PASSES : 0;
-        report(`${RANDOM_GAMES} games with ${reads.name} screen reads ${see.name}${lag.name}: passes ${passed} `
-          + `(${late} own scoreboards reached too late)${minPasses ? `, at least ${minPasses * 100}%` : ""}, `
-          + "each one proven; never passes when the holds don't grey the button out or a 4th press holds, never fails "
-          + "but unchecked",
-        problems.length === 0 && passed >= minPasses * RANDOM_GAMES, problems.slice(0, 3).join("; "));
+        const minChecked = reads === FAST_READS && !see.varies ? MIN_FAST_PASSES : 0;
+        const minPassed = reads.range[1] <= BOTS_CHECK_READ_MS ? MIN_BOTS_CHECK_PASSES : 0;
+        report(`${RANDOM_GAMES} games with ${reads.name} screen reads ${see.name}${lag.name}: checked on screen ${checked}`
+          + `${minChecked ? ` (at least ${minChecked * 100}%)` : ""}, each one proven, and passes ${passed} with the bots' `
+          + `check${minPassed ? ` (at least ${minPassed * 100}%)` : ""} (${late} own scoreboards reached too late on `
+          + `screen); never checks on screen the apps whose holds don't grey the button out or whose 4th press holds `
+          + `(the bots' check passes ${brokenPasses.holdsUncounted} and ${brokenPasses.fourthHolds} of them), never `
+          + "fails but untapped",
+        problems.length === 0 && checked >= minChecked * RANDOM_GAMES && passed >= minPassed * RANDOM_GAMES,
+        problems.slice(0, 3).join("; "));
       }
     }
   }
@@ -1158,9 +1187,9 @@ function holdScenarios(flow) {
   // The device's scoreboard painted LATE_SCOREBOARD_MS late and hold-closed on time: hold-closed greys the button out
   // that much sooner after the scoreboard shows than the flow would think without phaseLagMs in closingFrom. Without
   // it, the look for the greyed out button can take hold-closed's grey for the 3 holds when one of its polls sees it
-  // and ends before that later bound: an app that doesn't count them then passes. Played on a fast phone (the only
+  // and ends before that later bound: an app that doesn't count them is then checked. Played on a fast phone (the only
   // one that reaches its check) over a grid of read lengths, read points and flow starts, which sets where the polls
-  // fall: the flow as it is never passes on a broken app, and the one without phaseLagMs must pass on some
+  // fall: the flow as it is never checks a broken app on screen, and the one without phaseLagMs must check some
   const LATE_SCOREBOARD_MS = 500;
   const OWN_ROUND = 2;
   const grid = (from, step, count) => Array.from({ length: count }, (_, i) => from + step * i);
@@ -1172,20 +1201,21 @@ function holdScenarios(flow) {
   if (!flowText.includes(LAG_IN_CLOSING_FROM)) throw new Error("hold-used-up.yaml: closingFrom without phaseLagMs");
   const withoutLag = JSON.parse(flowText.replace(LAG_IN_CLOSING_FROM, "output.look.hiddenFrom + "));
   const BROKEN_APPS = ["holdsUncounted", "fourthHolds"];
-  const skewedPasses = (steps) => SKEW_READS_MS.flatMap((readMs) => SKEW_SEES_AT.flatMap((seesAt) =>
+  const skewedChecks = (steps) => SKEW_READS_MS.flatMap((readMs) => SKEW_SEES_AT.flatMap((seesAt) =>
     SKEW_STARTS_MS.flatMap((startAt) => BROKEN_APPS.filter((app) => {
       const { d, env } = holdGame({ rounds: 4, ownedRounds: [OWN_ROUND], readMs: () => readMs, seesAt: () => seesAt,
         upLatency: () => UP_LATENCY_MS[0], paintLag: (round, event) => (event === "scores" ? LATE_SCOREBOARD_MS : 0),
         app, startAt });
-      return !runFlow(steps, d, { ...options, env }).failure;
+      return checkedOnScreen(runFlow(steps, d, { ...options, env }));
     }).map((app) => `${app} at ${readMs} ms seen at ${seesAt}, from ${startAt} ms`))));
-  const flowPasses = skewedPasses(flow);
-  const mutantPasses = skewedPasses(withoutLag);
+  const flowChecks = skewedChecks(flow);
+  const mutantChecks = skewedChecks(withoutLag);
   const plays = SKEW_READS_MS.length * SKEW_SEES_AT.length * SKEW_STARTS_MS.length * BROKEN_APPS.length;
   report(`the scoreboard painted ${LATE_SCOREBOARD_MS / 1000} s late and hold-closed on time, ${plays} plays on broken `
-    + `apps with 0.1-0.3 s reads: the flow never passes, without phaseLagMs in closingFrom it would (${mutantPasses.length})`,
-  flowPasses.length === 0 && mutantPasses.length > 0,
-  `flow passed: ${flowPasses.slice(0, 3).join(", ") || "none"}; without phaseLagMs: ${mutantPasses.slice(0, 3).join(", ")}`);
+    + `apps with 0.1-0.3 s reads: the flow never checks them on screen, without phaseLagMs in closingFrom it would `
+    + `(${mutantChecks.length})`,
+  flowChecks.length === 0 && mutantChecks.length > 0,
+  `flow checked: ${flowChecks.slice(0, 3).join(", ") || "none"}; without phaseLagMs: ${mutantChecks.slice(0, 3).join(", ")}`);
 }
 
 // lab.sh's NONE_CHECKED_MIN_WAITS: the fewest card waits, all without a card, that fail a run checking none

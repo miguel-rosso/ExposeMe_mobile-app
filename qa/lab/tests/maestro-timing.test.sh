@@ -2,7 +2,8 @@
 # Step budget of the Maestro flows inside the server's timed phases (EXP-238, EXP-257, EXP-267, EXP-312). On a slow
 # Android emulator every step that reads the screen takes 1-4 s, while the options are up for 8.5 s (answering) + 3 s
 # (reveal) and the scoreboard for 5 s, so the steps between `# ── timed: <phase> ──` and `# ── end timed ──` must be few
-# and cheap: no settle waits, no conditional reads (a `runFlow` whose `when` is only a `true:` script reads nothing),
+# and cheap: no settle waits, no conditional reads (a `runFlow` whose `when` is only a `true:` script or `platform:`
+# reads nothing),
 # no text search (a testID filtered by an env variable, like `text: "${USERNAME}"`, or by any text but one, like
 # `text: "(?!${USERNAME}$).+"`, is no UI string, and one filtered by an app string in every language, `"<en>|<es>"` of
 # one Client/src/i18n key, works in either: all are allowed).
@@ -99,8 +100,10 @@ timed_blocks() {
     when_indent && poll_indent && /^[ \t]*platform:/ {
       err_at(when_line, "platform condition inside a poll loop (its looks must read the screen every pass)")
     }
-    when_indent && !poll_indent && /^[ \t]*(visible|notVisible|platform):/ {
-      err_at(when_line, "conditional step reading the screen inside a timed phase (a false condition costs up to 7 s; only `true:` scripts)")
+    # A `platform:` condition reads nothing (Maestro 2.11: Orchestra.evaluateCondition compares the lazily cached
+    # Maestro.cachedDeviceInfo, EXP-371)
+    when_indent && !poll_indent && /^[ \t]*(visible|notVisible):/ {
+      err_at(when_line, "conditional step reading the screen inside a timed phase (a false condition costs up to 7 s; only `true:` scripts and `platform:`)")
     }
     /^[ \t]*- [A-Za-z]+(:|$)/ {
       close_step()
@@ -218,7 +221,8 @@ done
 [ "$(grep -c '^ERR' "$TMP/slow.out")" = 9 ] && ok "checker reports every broken rule once (9)" || ko "checker reports every broken rule once" "$(cat "$TMP/slow.out")"
 grep -q "^BLOCK answering [0-9]* 8 tapOn$" "$TMP/slow.out" \
   && ok "checker counts nested steps, not the runFlow around them (8)" || ko "checker counts nested steps" "$(cat "$TMP/slow.out")"
-# A runFlow whose only condition is a script reads nothing (EXP-312); a subflow file or a screen condition does
+# A runFlow whose only condition is a script reads nothing (EXP-312), nor one on the platform (EXP-371: Maestro caches
+# the device info); a subflow file hides its steps, and a screen condition reads it
 cat >"$TMP/script-when.yaml" <<'EOF'
 # ── timed: scores ──
 - runFlow:
@@ -233,19 +237,26 @@ cat >"$TMP/script-when.yaml" <<'EOF'
 - runFlow:
     when:
       platform: Android
+      true: ${output.known}
     commands:
       - extendedWaitUntil:
           notVisible:
             id: "player-option-.*"
           timeout: 1000
+- runFlow:
+    when:
+      visible:
+        id: "score-modal"
+    commands:
+      - assertTrue: ${true}
 # ── end timed ──
 EOF
 timed_blocks "$TMP/script-when.yaml" >"$TMP/script-when.out"
-! grep -qE "^ERR [2-9]:" "$TMP/script-when.out" && grep -q "^BLOCK scores 1 2 extendedWaitUntil$" "$TMP/script-when.out" \
-  && ok "checker allows a runFlow conditioned on a script only, counting its steps" \
-  || ko "checker allows a script-only runFlow" "$(cat "$TMP/script-when.out")"
-grep -q "^ERR 10: runFlow of a subflow file" "$TMP/script-when.out" && grep -q "^ERR 12: conditional step reading the screen" "$TMP/script-when.out" \
-  && ok "checker flags a subflow file and a platform condition" || ko "checker flags a subflow file and a platform condition" "$(cat "$TMP/script-when.out")"
+! grep -qE "^ERR ([2-9]|1[1-9]):" "$TMP/script-when.out" && grep -q "^BLOCK scores 1 2 extendedWaitUntil$" "$TMP/script-when.out" \
+  && ok "checker allows a runFlow conditioned on a script or the platform only, counting its steps" \
+  || ko "checker allows a script-only or platform runFlow" "$(cat "$TMP/script-when.out")"
+grep -q "^ERR 10: runFlow of a subflow file" "$TMP/script-when.out" && grep -q "^ERR 21: conditional step reading the screen" "$TMP/script-when.out" \
+  && ok "checker flags a subflow file and a screen condition" || ko "checker flags a subflow file and a screen condition" "$(cat "$TMP/script-when.out")"
 ( check_flow "$TMP/slow.yaml" ) >"$TMP/out" 2>&1 # subshell: its expected failures must not count
 grep -q "^warn - slow.yaml: 28: optional step" "$TMP/out" && ok "optional steps are a warning" || ko "optional steps are a warning" "$(cat "$TMP/out")"
 cat >"$TMP/settle.yaml" <<'EOF'
@@ -261,12 +272,14 @@ cat >"$TMP/settle.yaml" <<'EOF'
 # ── timed: reveal ──
 # ── end timed ──
 EOF
-timed_blocks "$TMP/settle.yaml" | grep -q "swipe settles for 3000 ms" && ok "checker flags a long settle wait" || ko "checker flags a long settle wait"
-timed_blocks "$TMP/settle.yaml" | grep -q "^BLOCK scores [0-9]* 1 swipe$" && ok "evalScript and assertTrue are not counted" || ko "evalScript and assertTrue are not counted"
+timed_blocks "$TMP/settle.yaml" >"$TMP/settle.out"
+grep -q "swipe settles for 3000 ms" "$TMP/settle.out" && ok "checker flags a long settle wait" || ko "checker flags a long settle wait"
+grep -q "^BLOCK scores [0-9]* 1 swipe$" "$TMP/settle.out" && ok "evalScript and assertTrue are not counted" || ko "evalScript and assertTrue are not counted"
 ( check_flow "$TMP/settle.yaml" ) >"$TMP/out" 2>&1 # subshell: its expected failures must not count
 grep -q "unknown timed phase 'reveal'" "$TMP/out" && ok "checker rejects a phase with no budget" || ko "checker rejects a phase with no budget" "$(cat "$TMP/out")"
 printf -- '# ── timed: answering ──\n- tapOn:\n    id: "x"\n    waitToSettleTimeoutMs: 500\n' >"$TMP/open.yaml"
-timed_blocks "$TMP/open.yaml" | grep -q "never closed" && ok "checker flags an unclosed block" || ko "checker flags an unclosed block"
+timed_blocks "$TMP/open.yaml" >"$TMP/open.out"
+grep -q "never closed" "$TMP/open.out" && ok "checker flags an unclosed block" || ko "checker flags an unclosed block"
 cat >"$TMP/env-text.yaml" <<'EOF'
 # ── timed: scores ──
 - extendedWaitUntil:
@@ -404,8 +417,10 @@ answer="$(engine_ms ANSWER_TIME)" reveal="$(engine_ms REVEAL_TIME)" scores="$(en
 # The flow's own copy: `- evalScript: "${output.timing = { answeringMs: 8500, ... }}"`
 flow_timing="$(sed -nE 's/^- evalScript: "\$\{output\.timing = \{ (.*) \}\}"$/\1/p' "$ROUNDS")"
 flow_ms() { tr ',' '\n' <<<"$flow_timing" | sed -nE "s/^ *$1: ([0-9]+) *$/\1/p"; } # KEY -> its value in the flow
-# flow_has LINE: exit 0 if the flow has that exact line (leading spaces aside)
-flow_has() { sed -E 's/^[[:space:]]*//' "$ROUNDS" | grep -qxF -- "$1"; }
+# flow_has LINE: exit 0 if the flow has that exact line (leading spaces aside). It greps a file, not a pipe: grep -q
+# stops at the first match, and under pipefail sed's SIGPIPE would then fail the pipe (EXP-408)
+sed -E 's/^[[:space:]]*//' "$ROUNDS" >"$TMP/rounds-lines"
+flow_has() { grep -qxF -- "$1" "$TMP/rounds-lines"; }
 if [ -z "$answer" ] || [ -z "$reveal" ] || [ -z "$scores" ]; then
   ko "phase durations read from GameEngine.ts" "answer=$answer reveal=$reveal scores=$scores"
 else
@@ -483,7 +498,9 @@ HOLD_FLOW="$MAESTRO_DIR/hold-used-up.yaml"
 hold_timing="$(sed -nE 's/^- evalScript: "\$\{output\.timing = \{ (.*) \}\}"$/\1/p' "$HOLD_FLOW")"
 hold_ms() { tr ',' '\n' <<<"$hold_timing" | sed -nE "s/^ *$1: ([0-9]+) *$/\1/p"; } # KEY -> its value in the flow
 hold_min="$(engine_ms HOLD_MIN_REMAINING)" max_holds="$(engine_ms MAX_HOLDS_PER_ROUND)" hold_budget="$(engine_ms HOLD_BUDGET_PER_ROUND)"
-hold_taps="$(awk '/^[ \t]*- tapOn:/ { tap = 1; next } tap && /^[ \t]*repeat:/ { print $2; exit } /^[ \t]*- / { tap = 0 }' "$HOLD_FLOW")"
+# Every tapOn's repeat (Android's on the element, iOS's by point, EXP-371): the same count on both
+hold_taps="$(awk '/^[ \t]*- tapOn:/ { tap = 1; next } tap && /^[ \t]*repeat:/ { print $2 } /^[ \t]*- / { tap = 0 }' "$HOLD_FLOW" \
+  | sort -u | tr '\n' ' ' | sed 's/ $//')"
 [ -n "$hold_min" ] && [ -n "$max_holds" ] && [ -n "$hold_budget" ] && [ -n "$scores" ] \
   && [ "$(hold_ms scoresMs)" = "$scores" ] && [ "$(hold_ms holdMinMs)" = "$hold_min" ] \
   && [ "$(hold_ms holdBudgetMs)" = "$hold_budget" ] && [ "$hold_taps" = "$((max_holds + 1))" ] \
@@ -618,10 +635,11 @@ else
   ko "play-rounds.yaml: the simulator runs the flow" "$(tr '\n' ' ' <<<"$out")"
 fi
 
-# ── hold-used-up.yaml on a fake game of its own (EXP-361) ──
-# With reads of 0.3 to 4 s seen anywhere along them and its scoreboard's events painted late: it never passes on an app
-# whose button greys out only at hold-closed or whose 4th press holds, every pass on the correct app is proven, and it
-# fails there only for want of an own scoreboard reached in time; each line states the pass rate
+# ── hold-used-up.yaml on a fake game of its own (EXP-361, EXP-371) ──
+# With reads of 0.3 to 4 s seen anywhere along them and its scoreboard's events painted late: it never checks on screen
+# an app whose button greys out only at hold-closed or whose 4th press holds, every check on the correct app is proven,
+# and it fails there only for want of an own scoreboard tapped on; each line states how often the flow checked the
+# button and how often the run passes lab.sh's check from the bots (holds used up)
 if out="$(node "$HERE/maestro-sim.mjs" hold "$HOLD_FLOW" "$CLIENT_APP" 2>&1)"; then
   while IFS=$'\t' read -r name verdict detail; do
     [ "$verdict" = ok ] && ok "hold-used-up.yaml: $name" || ko "hold-used-up.yaml: $name" "$detail"

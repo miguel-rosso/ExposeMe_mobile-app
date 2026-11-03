@@ -91,7 +91,8 @@ check_after "next game's final ranking without $ghost" "$(line_of "$GHOST_FLOW" 
   && ok "only the next game runs play-rounds.yaml" || ko "only the next game runs play-rounds.yaml"
 retry="$(awk '/^- repeat:/ { r = NR } r && /id: "play-again-button"/ { print r; exit }' "$GHOST_FLOW")"
 check_after "play again retried in a loop before the next game's checks" "$retry" "$next_game"
-grep -A3 'id: "play-again-button"' "$GHOST_FLOW" | grep -q 'optional: true' && grep -A3 'id: "winner-continue"' "$GHOST_FLOW" | grep -q 'optional: true' \
+grep -q 'optional: true' <<<"$(grep -A3 'id: "play-again-button"' "$GHOST_FLOW")" \
+  && grep -q 'optional: true' <<<"$(grep -A3 'id: "winner-continue"' "$GHOST_FLOW")" \
   && ok "the play-again taps are optional (the next game can take the device in first)" \
   || ko "the play-again taps are optional (the next game can take the device in first)"
 

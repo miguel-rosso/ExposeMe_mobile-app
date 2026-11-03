@@ -3,19 +3,26 @@
 # taps the hold button 4 times (MAX_HOLDS_PER_ROUND and one more; a quick tap is a hold of a few ms), checks the button
 # is disabled with that text and that the game is not held (`game-held`).
 # Which rounds are the device's is the server's random pick, so the flow waits for its scoreboards until one has been
-# checked, and fails if the game ends first. Bots never hold (no --hold); with 2 bots the device owns about a third of
-# the rounds:
-#   qa/lab/lab.sh play --flow hold-used-up --bots 2 --rounds 10 --devices <android label>   (not iOS: see Timing)
+# checked, or the game ends. Bots never hold (no --hold); with 2 bots the device owns about a third of the rounds:
+#   qa/lab/lab.sh play --flow hold-used-up --bots 2 --rounds 10 --devices <label>
+# EXP-371: a phone often can't read the screen in time to check its button (slow Android emulators, and iOS: see
+# Timing), but the bots hear every hold the server counts. So lab.sh play (the marker below) passes the run only when
+# the bots heard a round of the device's photo get its 3 holds and then a hold-end saying none are left, and bots.mjs
+# fails a hold the server took after that. The flow itself fails on a held game after a 4th press it saw the holds used
+# up for, or when the game ended before it tapped on any scoreboard of the device's photo (a tap cycle whose look may
+# have seen the game over instead is not counted: so the device's only own scoreboard being the last round, with the
+# game over seen right after its taps, fails too; with 2 bots under 1% of 10-round games have no earlier one).
+# lab: holds used up (the bots' hold-end events tell whether the device's holds counted, EXP-371)
 # env: GAME_CODE, USERNAME, METRO_URL (url-encoded), LOBBY_WAIT_MS (optional; lab.sh play passes them)
 # Selectors are testIDs (Client/src/utils/testIds.ts). The button's text is filtered by noHoldsLeft in both languages
 # (Client/src/i18n, kept in sync by qa/lab/tests/maestro-selectors.test.sh): the hold button is one accessibility
 # element whose label is its text (iOS label, Android content description), and `enabled: false` is its disabled state.
 #
 # Timing: a hold needs more than 1.5 s of the 5 s scoreboard left (HOLD_MIN_REMAINING) and a quick one freezes it
-# for a few ms, so the taps must reach the server within 3.5 s of the scoreboard opening. They are one tapOn (one
-# screen read to find the button, then 4 taps `delay` ms apart, then the tap's settle wait, a screen read too) right
-# after the look that saw the button: the 4th press reaches the server after the 3 holds (the app's events come in
-# order), and the app sends it unless it has greyed the button out by then; either way it must hold nothing (EXP-361:
+# for a few ms, so the taps must reach the server within 3.5 s of the scoreboard opening. They are one tapOn (on
+# Android one screen read to find the button, then 4 taps `delay` ms apart, then the tap's settle wait, a screen read
+# too; on iOS a tap by point, see below) right after the look that saw the button: the 4th press reaches the server
+# after the 3 holds (the app's events come in order), and the app sends it unless it has greyed the button out by then; either way it must hold nothing (EXP-361:
 # a 4th tapOn of its own cost a read and the tap's latency more, which no phone with reads of 0.5 s had left). The look
 # loop notes when the last look that found none started (`hiddenFrom`): the scoreboard opened on the phone after it.
 # EXP-354: at the 1.5 s mark the server greys the button out by itself (hold-closed: same text, disabled), so the
@@ -24,27 +31,35 @@
 # scoreboard (phaseLagMs, EXP-349: up to 0.5 s in it166's telemetry). So the check runs only when the 4 taps reached the
 # server before closingFrom, as a look for the greyed out button (one that comes true right after the taps, or polls
 # like a wait) that proves the holds only when it ended before closingFrom, so it read the screen before hold-closed
-# whatever its length. A scoreboard not proven so is counted (`late`) and the flow waits for the device's next one: it
-# fails only on a held game after the 4th press, or when no own scoreboard was checked by the game's end.
-# hold-closed.yaml checks that greying out.
+# whatever its length. A scoreboard not proven so is counted (`late`) and the flow waits for the device's next one,
+# tapping on it too: it fails only on a held game after the 4th press, or when it tapped on no own scoreboard by the
+# game's end (`tapped`). hold-closed.yaml checks that greying out.
 # qa/lab/tests/maestro-sim.mjs (scenario `hold`) plays the flow with screen reads of 0.3 to 4 s and the scoreboard's
-# events painted late, and on apps that don't grey the button out on the holds or whose 4th press holds: it never
-# passes on those, and on the correct app it passes only with reads of 0.4 s or less (none at 0.5 s; it states how
-# often). On a slow Android emulator (screen reads of 1-4 s) every own scoreboard is late: the flow can't tell there
-# whether the holds were counted (EXP-371 proposes checking it from the bots' hold-end events instead). The steps
-# between `timed:` markers are budgeted by qa/lab/tests/maestro-timing.test.sh, which also checks the copy of the
-# server's times below against Server/managers/GameEngine.ts and the closingFrom bound.
+# events painted late, and on apps that don't grey the button out on the holds or whose 4th press holds, judging each
+# run like lab.sh play: the flow passed and the bots heard a round of the device's get its 3 holds. The flow never
+# checks the button on those apps. Judged by the bots, the run passes on the one that doesn't grey out (the bots tell
+# the holds counted, not how the button looks), and on the one whose 4th press holds only when that press reached the
+# server after the hold window (reads of 2 s or more: nothing to tell then). On the correct app the flow checks the
+# button only with reads of 0.4 s or less (none at 0.5 s), and the bots' check passes nearly every game with reads up to
+# 1 s, some at 2 s and none at 3-4 s (EXP-371: the simulator states how often each passes). The steps between
+# `timed:` markers are budgeted by qa/lab/tests/maestro-timing.test.sh, which also checks the copy of the server's
+# times below against Server/managers/GameEngine.ts and the closingFrom bound.
 # iOS (Maestro 2.11, EXP-354 smoke it188: qa/runs/it188-smoke-hold-ios/.../hold-used-up/logs/maestro.log and
 # device-xctest.log; read from maestro-client.jar): a tap on an element first waits for the screen to settle, which the
 # iOS driver does by polling for a static screen for up to 3 s whatever waitToSettleTimeoutMs says
 # (IOSDriver.waitForAppToSettle -> waitUntilScreenIsStatic(3000)); the iOS driver lacks FAST_HIERARCHY, so the touches go
 # through Maestro.screenshotBasedTap, which settles the same way again after them, with no timeout passed. The
 # scoreboard's progress bar never lets the screen settle: the tapOn took 8.1 s (GET /isScreenStatic polled from 20.94 to
-# 24.09, touches at 24.57, 24.91 and 25.27, polled again from 25.62 to 28.71). A tap by point (tapOn point) skips only
-# the first wait, so the holds would count, but the second one still ends the command about 3 s after the taps, past
-# closingFrom, where the greyed out button no longer tells the holds apart from hold-closed; no Maestro 2.11 tap or
-# swipe skips it. So on iOS every own scoreboard is counted late and the flow fails at the end: run it on Android,
-# whose driver passes waitToSettleTimeoutMs on. hold-closed.yaml taps nothing and runs on both.
+# 24.09, touches at 24.57, 24.91 and 25.27, polled again from 25.62 to 28.71), and the server took none of its presses
+# (that run's bots.json has no hold-start). A tap by point (tapOn point) skips only the first wait, so on iOS the flow
+# taps by point (EXP-371): the presses reach the server in time and the bots hear the holds. The second wait still ends
+# the command about 3 s after the taps, past closingFrom, where the greyed out button no longer tells the holds apart
+# from hold-closed (no Maestro 2.11 tap or swipe skips it), so on iOS the flow never checks the button: lab.sh's check
+# from the bots is the proof there. The point is the hold button's middle, insets.bottom + HOLD_BUTTON_BOTTOM +
+# HOLD_BUTTON_HEIGHT / 2 = 162 pt above the bottom edge (Client/src/utils/gameRows.ts): 82% down is inside the button
+# on lab.sh's IOS_MODELS iPhones (17, 16e and 17 Pro Max: on all three it spans 79.7-84.6% at least). The iPad mini's
+# sits lower (84-90%): the taps miss it there, and lab.sh fails the run. Android taps the element: its driver passes
+# waitToSettleTimeoutMs on. hold-closed.yaml taps nothing and runs on both.
 # The 4th tap's press and release are a few ms apart, so a hold it started may be over before the look for it reads
 # the screen: the look surely catches a hold that stays on. The server tests (Server/tests/holdsLeft.test.ts) refuse
 # the 4th hold itself, and the app's disabled button is checked by `enabled: false`.
@@ -59,10 +74,10 @@ appId: com.socketNull.ExposeMe
 # how long a hold may outlast its budget on the phone; how long to wait for the device's next scoreboard (several
 # rounds and their photo waits) and for the game over once one was checked
 - evalScript: "${output.timing = { scoresMs: 5000, holdMinMs: 1500, holdBudgetMs: 30000, phaseLagMs: 500, tapLatencyMs: 500, holdEndSlackMs: 5000, scoreboardWaitMs: 300000, gameOverWaitMs: 600000 }}"
-# Own scoreboards not checked (`late`; of them, those whose look in time for the greyed out button saw none,
-# `notGreyed`, and those it saw greyed out only after closingFrom, `greyedLate`), one checked, the game over (or no
-# scoreboard of the device's in time)
-- evalScript: "${output.hold = { late: 0, notGreyed: 0, greyedLate: 0, checked: false, over: false }}"
+# Own scoreboards tapped on (`tapped`; see the game over below), not checked (`late`; of them, those whose look in time
+# for the greyed out button saw none, `notGreyed`, and those it saw greyed out only after closingFrom, `greyedLate`),
+# one checked, the game over (or no scoreboard of the device's in time)
+- evalScript: "${output.hold = { tapped: 0, late: 0, notGreyed: 0, greyedLate: 0, checked: false, over: false }}"
 - repeat:
     while:
       true: ${!output.hold.checked && !output.hold.over}
@@ -96,14 +111,30 @@ appId: com.socketNull.ExposeMe
           when:
             true: ${output.round.known}
           commands:
-            - tapOn:
-                id: "hold-button"
-                repeat: 4
-                delay: 250
-                retryTapIfNoChange: false
-                waitToSettleTimeoutMs: 200
-                optional: true
+            - runFlow:
+                when:
+                  platform: Android
+                commands:
+                  - tapOn:
+                      id: "hold-button"
+                      repeat: 4
+                      delay: 250
+                      retryTapIfNoChange: false
+                      waitToSettleTimeoutMs: 200
+                      optional: true
+            # The hold button's middle on the lab's iPhones (see the header: an element tap comes too late there)
+            - runFlow:
+                when:
+                  platform: iOS
+                commands:
+                  - tapOn:
+                      point: "50%,82%"
+                      repeat: 4
+                      delay: 250
+                      retryTapIfNoChange: false
+                      waitToSettleTimeoutMs: 200
             - assertTrue: ${output.round.tappedBy = Date.now()}
+            - assertTrue: ${++output.hold.tapped}
             # All 4 presses reached the server before its hold window closed, and a read can still end before
             # hold-closed could grey the button out: one look for the greyed out button (right after the taps, so a
             # false one polls up to conditionWaitMs), which proves the holds used up only if it ended before then
@@ -144,12 +175,17 @@ appId: com.socketNull.ExposeMe
                 condition: ${!output.round.heldAfter}
                 label: "A 4th press once the holds are used up does not hold the game"
             - assertTrue: ${output.hold.checked = true}
+      # The game over. If this cycle tapped and the button wasn't seen used up, its look may have seen the game over
+      # instead of the button (it matches both), so its count is undone: those taps went to the winner modal (on iOS
+      # the point taps may move it on to the final ranking, which the wait after the loop accepts). A device whose only
+      # own scoreboard is the game's last one and the game over already showed by now is then not counted either
       - runFlow:
           when:
             visible:
               id: "winner-modal|final-score-modal"
           commands:
             - assertTrue: ${output.hold.over = true}
+            - assertTrue: ${(output.round.known && !output.round.usedUp && output.hold.tapped--), true}
       # No scoreboard of the device's within the wait: the assert after the loop fails
       - evalScript: ${output.hold.over = output.hold.over || !output.look.shown}
       # A scoreboard of the device's that was not checked: wait for it to close, so the next look doesn't find it again
@@ -163,9 +199,11 @@ appId: com.socketNull.ExposeMe
                   id: "hold-button"
                 timeout: ${output.timing.holdBudgetMs + output.timing.holdEndSlackMs}
                 label: "The device's scoreboard closed within the hold budget"
+# Tapped on, checked on screen or not (a cycle whose look may have seen the game over is not counted, see above):
+# lab.sh play then checks from the bots that the server counted the holds
 - assertTrue:
-    condition: ${output.hold.checked}
-    label: "A scoreboard of the device's photo had its holds used up and checked before the game ended (${output.hold.late} unchecked: ${output.hold.notGreyed} looked at in time whose button didn't grey out after the 3 holds, ${output.hold.greyedLate} greyed out only after hold-closed could, the rest reached too late; on iOS all are late, see the header)"
+    condition: ${output.hold.tapped > 0}
+    label: "A scoreboard of the device's photo got the hold presses before the game ended (${output.hold.tapped} tapped on, not counting one the game over may have been seen in instead, ${output.hold.late} not checked on screen: ${output.hold.notGreyed} looked at in time whose button didn't grey out after the 3 holds, ${output.hold.greyedLate} greyed out only after hold-closed could, the rest reached too late; on iOS all are late, see the header)"
 - extendedWaitUntil:
     visible:
       id: "winner-modal|final-score-modal"

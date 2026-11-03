@@ -52,6 +52,16 @@ const SCRIPT_JOINER = new RegExp(
   `(?<=${JOINER_SCRIPT_LETTER}\\p{M}*)[\\u200C\\u200D](?=${JOINER_SCRIPT_LETTER})`,
   "gv",
 );
+// The Malayalam consonants with a chillu, each with its atomic chillu. Typed as before Unicode 5.1, a chillu is the
+// consonant + virama + zero-width joiner (EXP-372), which old keyboards still send, also at the end of a word ("Kamal"
+// with LA + virama + joiner): there the joiner is allowed with nothing after it, as the chillu it draws is visible
+// whatever follows. Not before a mark, which would draw on the chillu, nor before a letter: there only SCRIPT_JOINER
+// allows it, as in a cursive script outside JOINER_SCRIPTS (Adlam, N'Ko, Mongolian) the joiner would shape the letter.
+const ATOMIC_CHILLU_OF: Readonly<Record<string, string>> = {
+  "\u0D23": "\u0D7A", "\u0D28": "\u0D7B", "\u0D30": "\u0D7C", "\u0D32": "\u0D7D", "\u0D33": "\u0D7E", "\u0D15": "\u0D7F",
+};
+const CHILLU_CONSONANT = `[${Object.keys(ATOMIC_CHILLU_OF).join("")}]`;
+const LEGACY_CHILLU_JOINER = new RegExp(`(?<=${CHILLU_CONSONANT}\\u0D4D)\\u200D(?![\\p{M}\\p{L}])`, "gu");
 
 // Controls, format characters (zero-width, bidi overrides, BOM, tags), private-use/surrogate code points,
 // line/paragraph separators, default-ignorable characters (fillers, variation selectors, combining grapheme joiner),
@@ -75,12 +85,17 @@ const TRAILING_MARK = /\u0020\p{M}+$/u;
 const MAX_MARKS_IN_A_ROW = 4;
 const MARK_PILE = new RegExp(`\\p{M}{${MAX_MARKS_IN_A_ROW + 1},}`, "u");
 
-/** `text` without the format characters allowed where they belong (inside an emoji, between joining letters). */
+/**
+ * `text` without the format characters allowed where they belong: inside an emoji, between two joining letters, and the
+ * joiner of a Malayalam chillu typed as consonant + virama + joiner when no mark or letter follows it, e.g. at the end
+ * of a word (LEGACY_CHILLU_JOINER, whose consonants come from ATOMIC_CHILLU_OF: a chillu added there is allowed here).
+ */
 const withoutAllowedFormatChars = (text: string) => text
   .replace(EMOJI_JOINER, "")
   .replace(EMOJI_PRESENTATION, "")
   .replace(EMOJI_TAG_SEQUENCE, "")
-  .replace(SCRIPT_JOINER, "");
+  .replace(SCRIPT_JOINER, "")
+  .replace(LEGACY_CHILLU_JOINER, "");
 
 /**
  * A name the server accepts: a string of 1–15 UTF-16 units (at most 60 after NFKC), not blank, with no invisible
@@ -324,11 +339,8 @@ const readIndicLookalikes = (text: string) =>
   replaceChars(tamilAiWhereDrawn(text.replace(INDIC_CHAR, (char) => char.normalize("NFD"))), INDIC_LOOKALIKES);
 
 // Malayalam chillus typed as before Unicode 5.1, consonant + virama + zero-width joiner, which fonts draw as the
-// atomic chillu (EXP-372: "Anvar" with NA + virama + joiner like "Anvar" with chillu N), each consonant with its chillu
-const LEGACY_CHILLU = /([\u0D15\u0D23\u0D28\u0D30\u0D32\u0D33])\u0D4D\u200D/gu;
-const ATOMIC_CHILLU_OF: Readonly<Record<string, string>> = {
-  "\u0D23": "\u0D7A", "\u0D28": "\u0D7B", "\u0D30": "\u0D7C", "\u0D32": "\u0D7D", "\u0D33": "\u0D7E", "\u0D15": "\u0D7F",
-};
+// atomic chillu (EXP-372: "Anvar" with NA + virama + joiner like "Anvar" with chillu N), in a word or ending it
+const LEGACY_CHILLU = new RegExp(`(${CHILLU_CONSONANT})\\u0D4D\\u200D`, "gu");
 // The Malayalam digits nine and four, drawn exactly like chillu N and chillu RR (Noto Sans and Sangam). UTS #39 spells
 // them NA and RA + virama (INDIC_CONFUSABLES), which meets the legacy chillu once the keys drop the virama and joiner
 const DIGIT_DRAWN_AS_CHILLU: ReadonlyMap<string, string> = new Map([["\u0D6F", "\u0D7B"], ["\u0D6A", "\u0D7C"]]);

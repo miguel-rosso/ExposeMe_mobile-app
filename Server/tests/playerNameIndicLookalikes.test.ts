@@ -314,4 +314,36 @@ describe("Malayalam chillus typed with a joiner (EXP-372)", () => {
   ])("%s stay different names", (_label, a, b) => {
     expectDistinct(a, b);
   });
+
+  // Old keyboards type the chillu that ends a word this way too, with nothing after the joiner
+  it.each([
+    ["Kamal", "\u0D15\u0D2E\u0D7D", "\u0D15\u0D2E\u0D32\u0D4D\u200D"],
+    ["Arjun", "\u0D05\u0D7C\u0D1C\u0D41\u0D7B", "\u0D05\u0D30\u0D4D\u200D\u0D1C\u0D41\u0D28\u0D4D\u200D"],
+    ["Kamal Das, chillu before a space", "\u0D15\u0D2E\u0D7D \u0D26\u0D3E\u0D38\u0D4D", "\u0D15\u0D2E\u0D32\u0D4D\u200D \u0D26\u0D3E\u0D38\u0D4D"],
+    ["chillu K before a digit", "\u0D35\u0D3E\u0D7F7", "\u0D35\u0D3E\u0D15\u0D4D\u200D7"],
+    ["Kamal!, chillu before punctuation", "\u0D15\u0D2E\u0D7D!", "\u0D15\u0D2E\u0D32\u0D4D\u200D!"],
+    ["Kamal with an emoji after the chillu", "\u0D15\u0D2E\u0D7D\u{1F60A}", "\u0D15\u0D2E\u0D32\u0D4D\u200D\u{1F60A}"],
+  ])("%s with a chillu ending a word, atomic and with a joiner, look too alike", (_label, atomic, withJoiner) => {
+    expectSimilar(atomic, withJoiner);
+  });
+
+  it.each([
+    ["a joiner after a letter", "\u0D15\u0D2E\u0D32\u200D"],
+    ["a joiner after a virama on a consonant with no chillu", "\u0D15\u0D2E\u0D4D\u200D"],
+    ["a joiner after an atomic chillu", "\u0D15\u0D2E\u0D7D\u200D"],
+    ["two joiners after the virama", "\u0D15\u0D2E\u0D32\u0D4D\u200D\u200D"],
+    ["a joiner and a non-joiner after the virama", "\u0D15\u0D2E\u0D32\u0D4D\u200D\u200C"],
+    ["a vowel sign after the joiner", "\u0D15\u0D2E\u0D32\u0D4D\u200D\u0D3F"],
+    ["a joiner after a Tamil virama", "\u0B95\u0BAE\u0BB2\u0BCD\u200D"],
+    ["a joiner after a Devanagari virama", "\u0915\u092E\u0932\u094D\u200D"],
+    ["a joiner after a virama with no letter", "\u0D4D\u200D"],
+    ["a joiner after a Latin letter and a Malayalam virama", "a\u0D4D\u200D"],
+    // Before a letter only SCRIPT_JOINER allows the joiner: in a cursive script it would shape the next letter
+    ["a legacy chillu joiner before an Adlam letter", "\u0D32\u0D4D\u200D\u{1E900}"],
+    ["a legacy chillu joiner before a Mongolian letter", "\u0D32\u0D4D\u200D\u1820"],
+    ["a legacy chillu joiner before an N'Ko letter", "\u0D32\u0D4D\u200D\u07CA"],
+    ["a legacy chillu joiner before a Latin letter", "\u0D32\u0D4D\u200Da"],
+  ])("%s is refused", (_label, name) => {
+    expect(isValidUsername(name)).toBe(false);
+  });
 });

@@ -215,7 +215,9 @@ After last round: game-over
   subdivision flag (England), "emoji" meaning the Extended_Pictographic code points of Unicode 15.1, a fixed list
   (`EXTENDED_PICTOGRAPHIC_RANGES`), as Unicode 17 took some out (`★` + emoji selector is fine on every Node); the
   zero-width joiner and non-joiner between two letters of Arabic, Syriac or the Indic
-  scripts and Sinhala (Persian half-space, Sinhala "Sri"). Letters that read as Latin (Latin ones, and those of other
+  scripts and Sinhala (Persian half-space, Sinhala "Sri"); and the zero-width joiner after a Malayalam chillu
+  consonant + virama (a chillu typed as before Unicode 5.1) when no mark or letter follows it, e.g. at the end of a
+  word ("Kamal" typed with LA + virama + joiner). Letters that read as Latin (Latin ones, and those of other
   scripts listed in the confusables table below), with their accents dropped, may not come from two of the
   Latin-lookalike scripts (Latin, Greek, Cyrillic, Armenian, Cherokee, Lisu, Coptic), so `Dave` with a Greek nu,
   `Mike` with a Cyrillic small ka, `Dave` with a Greek alpha with tonos or a Greek alpha with a Cyrillic be is

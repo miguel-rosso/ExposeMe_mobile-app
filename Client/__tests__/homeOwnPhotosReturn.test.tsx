@@ -76,7 +76,8 @@ import Index from "../app/index";
 import en from "../src/i18n/en";
 import { SCREEN_EXIT_ANIMATION_MS } from "../src/hooks/useExitAnimationNavigation";
 
-const HOME_ANIMATED_ELEMENTS = 6; // logo, username, create, join, explorer button and its label
+// logo, username, create, join, explorer button and its label, and the privacy policy link (EXP-426)
+const HOME_ANIMATED_ELEMENTS = 7;
 
 beforeAll(() => { jest.spyOn(console, "log").mockImplementation(() => {}); });
 afterAll(() => jest.restoreAllMocks());

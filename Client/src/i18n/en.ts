@@ -173,6 +173,10 @@ export default {
   iosConfirmFullAccess: 'If you choose "Full Access", confirm with "Allow Full Access".',
   back: "Back",
   openSettings: "Open Settings",
+  // Settings and home: the privacy policy page and the contact address (EXP-426)
+  privacyPolicy: "Privacy policy",
+  privacy: "Privacy", // home: the short text of the same link (its screen reader name is privacyPolicy)
+  contactUs: "Contact",
 
   // OwnPhotos
   next: "Next",

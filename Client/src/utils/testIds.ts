@@ -17,6 +17,7 @@ export const TEST_IDS = {
   ownPhotosButton: "own-photos-button",
   homeLimitedBanner: "home-limited-banner", // only part of the gallery is shared
   homeLimitedAddMore: "home-limited-add-more",
+  homePrivacyLink: "home-privacy-link",
   // ── Waiting room ──
   closeButton: "close-button",
   lobbyCodeBlock: "lobby-code-block", // the "Room code" title and the code with its copy and share buttons
@@ -79,6 +80,8 @@ export const TEST_IDS = {
   settingsInstructionsScreen: "settings-instructions-screen",
   settingsInstructionsOpenSettings: "settings-instructions-open-settings",
   settingsInstructionsBack: "settings-instructions-back",
+  settingsPrivacyLink: "settings-privacy-link",
+  settingsContactLink: "settings-contact-link", // only when the build has a contact address (EXPO_PUBLIC_CONTACT_EMAIL)
   // ── Modals ──
   alertModal: "alert-modal",
   alertModalConfirm: "alert-modal-confirm",

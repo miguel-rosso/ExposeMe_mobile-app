@@ -47,6 +47,7 @@ import { isRoomCode, sanitizeRoomCodeInput } from "../src/utils/roomCode";
 import { translateServerMessage } from "../src/utils/serverMessage";
 import { MAX_USERNAME_INPUT_LENGTH } from "../src/utils/protocolLimits";
 import { normalizeUsername } from "../src/utils/username";
+import { openExternalLink, privacyPolicyUrl } from "../src/utils/legalLinks";
 import {
   HOME_TOP_ROW_HEIGHT,
   HOME_TOP_ROW_TOP,
@@ -54,6 +55,14 @@ import {
   LOGO_EMOJI_BOX_PERCENT,
   LOGO_EMOJI_TOP,
   logoEmojiScale,
+  PHOTO_EXPLORER_BUTTON_BOTTOM,
+  PHOTO_EXPLORER_ICON_SIZE,
+  PHOTO_EXPLORER_LABEL_BOTTOM,
+  PRIVACY_LINK_BOTTOM,
+  PRIVACY_LINK_HIT_SLOP,
+  PRIVACY_LINK_MAX_FONT_SCALE,
+  PRIVACY_LINK_MAX_LINES,
+  privacyLinkMaxWidth,
 } from "../src/utils/homeLayout";
 
 SplashScreen.preventAutoHideAsync();
@@ -92,7 +101,8 @@ const Index = () => {
   const buttonRef = useRef<Animatable.View & View>(null);
   const textRef = useRef<Animatable.View & View>(null);
   const topLogoRef = useRef<Animatable.View & View>(null);
-  const { t } = useI18n();
+  const privacyLinkRef = useRef<Animatable.View & View>(null);
+  const { t, lang } = useI18n();
   // Playing needs photo access (full or limited) and at least one photo: checked on Create / Search room
   const galleryGuard = useGalleryAccessGuard({ watch: false });
   const ensureGalleryAccess = async () => (await galleryGuard.check({ ask: true }))?.status === "ok";
@@ -110,6 +120,9 @@ const Index = () => {
 
   // The logo's font size follows the screen width
   const { width } = Dimensions.get('window');
+  // The privacy link fits beside the Photo Explorer label, as laid out (null = not yet: the link waits for it)
+  const [photoExplorerLabelWidth, setPhotoExplorerLabelWidth] = useState<number | null>(null);
+  const handlePhotoExplorerLabelLayout = (e: LayoutChangeEvent) => setPhotoExplorerLabelWidth(e.nativeEvent.layout.width);
   const getTitleFontSize = () => {
     // Base size for standard screens (adjust these thresholds as needed)
     if (width >= 400) {
@@ -265,9 +278,13 @@ const Index = () => {
     { ref: createGameButtonRef, exit: "fadeOut", enter: "fadeIn" },
     { ref: JoingameButtonRef, exit: "fadeOut", enter: "fadeIn" },
     { ref: topLogoRef, exit: "slideOutUpFar", enter: "slideInDownFar" },
+    { ref: privacyLinkRef, exit: "fadeOut", enter: "fadeIn" },
   ]);
   // Both the dice button and its "Photo Explorer" label open it
   const openPhotoExplorer = () => navigateWithExit("/screens/OwnPhotos");
+
+  // The privacy policy opens in the browser (EXP-426): an external page, not a route
+  const openPrivacyPolicy = () => openExternalLink(privacyPolicyUrl(lang));
 
   // Closes the join panel (tap outside it, or Android back); the home form animates back in (effect above)
   const handleCancelJoinGame = () => {
@@ -462,7 +479,12 @@ const Index = () => {
           )}
         </View>
         {/* Photo explorer button */}
-        <Animatable.View ref={buttonRef} animation="slideInUp" duration={HOME_ANIMATION_MS} style={tw`absolute bottom-22 items-center`}>
+        <Animatable.View
+          ref={buttonRef}
+          animation="slideInUp"
+          duration={HOME_ANIMATION_MS}
+          style={[tw`absolute items-center`, { bottom: PHOTO_EXPLORER_BUTTON_BOTTOM }]}
+        >
           <TouchableOpacity
             testID={TEST_IDS.ownPhotosButton}
             accessibilityRole="button"
@@ -470,14 +492,40 @@ const Index = () => {
             style={tw`bg-white/50 p-3  rounded-3xl`}
             onPress={openPhotoExplorer}
           >
-            <Ionicons name="dice" size={44} color="white" />
+            <Ionicons name="dice" size={PHOTO_EXPLORER_ICON_SIZE} color="white" />
           </TouchableOpacity>
         </Animatable.View>
-        <Animatable.View ref={textRef} animation="slideInUp" duration={HOME_ANIMATION_MS} style={tw`absolute bottom-15`}>
+        <Animatable.View
+          ref={textRef}
+          animation="slideInUp"
+          duration={HOME_ANIMATION_MS}
+          style={[tw`absolute`, { bottom: PHOTO_EXPLORER_LABEL_BOTTOM }]}
+        >
           {/* Tappable for sighted users; hidden from screen readers, which already get the dice button (EXP-283) */}
-          <TouchableOpacity accessible={false} aria-hidden onPress={openPhotoExplorer}>
+          <TouchableOpacity accessible={false} aria-hidden onPress={openPhotoExplorer} onLayout={handlePhotoExplorerLabelLayout}>
             <Text style={tw`text-white font-bold`}>{t.photoExplorer}</Text>
           </TouchableOpacity>
+        </Animatable.View>
+        {/* Privacy policy: a small link on the Photo Explorer label's row, in the strip right of it */}
+        <Animatable.View ref={privacyLinkRef} style={[tw`absolute right-2`, { bottom: PRIVACY_LINK_BOTTOM }]}>
+          {photoExplorerLabelWidth !== null && (
+            <TouchableOpacity
+              testID={TEST_IDS.homePrivacyLink}
+              accessibilityRole="link"
+              accessibilityLabel={t.privacyPolicy}
+              style={[tw`py-1`, { maxWidth: privacyLinkMaxWidth(width, photoExplorerLabelWidth) }]}
+              hitSlop={PRIVACY_LINK_HIT_SLOP}
+              onPress={openPrivacyPolicy}
+            >
+              <Text
+                style={tw`text-white/70 text-xs text-right underline`}
+                numberOfLines={PRIVACY_LINK_MAX_LINES}
+                maxFontSizeMultiplier={PRIVACY_LINK_MAX_FONT_SCALE}
+              >
+                {t.privacy}
+              </Text>
+            </TouchableOpacity>
+          )}
         </Animatable.View>
       </View>
       <GalleryAccessModal

@@ -5,6 +5,14 @@ import {
   LOGO_EMOJI_SIZE,
   LOGO_EMOJI_TOP,
   logoEmojiScale,
+  PHOTO_EXPLORER_BUTTON_BOTTOM,
+  PHOTO_EXPLORER_BUTTON_SIZE,
+  PHOTO_EXPLORER_LABEL_BOTTOM,
+  PRIVACY_LINK_BOTTOM,
+  PRIVACY_LINK_HIT_SLOP,
+  PRIVACY_LINK_MAX_HEIGHT,
+  PRIVACY_LINK_RIGHT,
+  privacyLinkMaxWidth,
 } from "../src/utils/homeLayout";
 
 // EXP-281: with limited access the banner pill touched the logo emoji. The emoji now shrinks towards its bottom edge
@@ -43,5 +51,55 @@ describe("logoEmojiScale (EXP-281)", () => {
     expect(scale).toBeLessThan(1);
     expect(scale).toBeGreaterThan(0);
     expect(faceTop(logoTop, scale)).toBeCloseTo(bannerBottom + LOGO_EMOJI_BANNER_CLEARANCE);
+  });
+});
+
+// EXP-426: the privacy link shares the Photo Explorer label's row, in the strip right of the centred label and dice
+// button, and is never taller than what fits below the dice button's top; the Photo Explorer group doesn't move.
+
+/** Generous width of the 14-character bold label ("Photo Explorer" / "Explorar Fotos", 14 pt: ~0.6 em a glyph) */
+const labelWidthAt = (fontScale: number) => 14 * 0.6 * 14 * fontScale;
+
+/** The phones the reviewer measured: 360 pt Android with 3-button navigation, 375 pt iPhone with a home indicator */
+const PHONES = [
+  { name: "360 pt, 48 pt inset, font 1.3", width: 360, bottomInset: 48, fontScale: 1.3 },
+  { name: "360 pt, 48 pt inset, font 1", width: 360, bottomInset: 48, fontScale: 1 },
+  { name: "375 pt, 34 pt inset, font 1", width: 375, bottomInset: 34, fontScale: 1 },
+  { name: "375 pt, 34 pt inset, font 1.3", width: 375, bottomInset: 34, fontScale: 1.3 },
+];
+
+describe("privacy link beside Photo Explorer (EXP-426)", () => {
+  it("the Photo Explorer group stays where it was (label bottom-15, dice bottom-22)", () => {
+    expect(PHOTO_EXPLORER_LABEL_BOTTOM).toBe(60);
+    expect(PHOTO_EXPLORER_BUTTON_BOTTOM).toBe(88);
+  });
+
+  it.each(PHONES)("$name: the link never reaches the label or the dice", ({ width, fontScale }) => {
+    const labelWidth = labelWidthAt(fontScale);
+    const linkRight = width - PRIVACY_LINK_RIGHT;
+    const linkLeft = linkRight - privacyLinkMaxWidth(width, labelWidth);
+    const centreColumnRight = width / 2 + Math.max(labelWidth, PHOTO_EXPLORER_BUTTON_SIZE) / 2;
+
+    expect(privacyLinkMaxWidth(width, labelWidth)).toBeGreaterThan(0);
+    expect(linkLeft).toBeGreaterThan(centreColumnRight);
+  });
+
+  it.each(PHONES)("$name: the link clears the bottom inset and stays below the dice button's top", ({ bottomInset }) => {
+    expect(PRIVACY_LINK_BOTTOM).toBeGreaterThan(bottomInset);
+    expect(PRIVACY_LINK_BOTTOM + PRIVACY_LINK_MAX_HEIGHT + PRIVACY_LINK_HIT_SLOP.top).toBeLessThanOrEqual(
+      PHOTO_EXPLORER_BUTTON_BOTTOM + PHOTO_EXPLORER_BUTTON_SIZE
+    );
+  });
+
+  it("holds for any label width, even one wider than the screen", () => {
+    for (const width of [320, 360, 375, 414]) {
+      for (const labelWidth of [0, 40, 120, 200, width, width + 100]) {
+        const maxWidth = privacyLinkMaxWidth(width, labelWidth);
+        expect(maxWidth).toBeGreaterThanOrEqual(0);
+        if (maxWidth > 0) {
+          expect(width - PRIVACY_LINK_RIGHT - maxWidth).toBeGreaterThan(width / 2 + Math.max(labelWidth, PHOTO_EXPLORER_BUTTON_SIZE) / 2);
+        }
+      }
+    }
   });
 });

@@ -5,6 +5,7 @@ import {
   TouchableOpacity,
   Image,
   Linking,
+  Alert,
   Dimensions,
   ScrollView,
   StyleSheet,
@@ -23,13 +24,14 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import { useI18n } from "../../src/i18n";
 import { TEST_IDS, settingsStepId } from "../../src/utils/testIds";
 import { HOME_PATH } from "../../src/utils/homeRoute";
+import { contactEmail, contactMailtoUrl, openExternalLink, privacyPolicyUrl } from "../../src/utils/legalLinks";
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get("window");
 // Gap kept between the buttons and the bottom inset (same as the p-4 padding on the other edges)
 const FOOTER_BOTTOM_GAP = 16;
 
 const SettingsInstructionsScreen: React.FC = () => {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const router = useRouter();
   const carouselRef = useRef<any>(null);
   // The buttons live in a fixed footer outside the ScrollView, padded by the bottom inset (Android gesture bar /
@@ -50,6 +52,15 @@ const SettingsInstructionsScreen: React.FC = () => {
   ];
 
   const images = Platform.OS === "ios" ? iosImages : androidImages;
+
+  // ── Privacy policy and contact (EXP-426) ──
+  // No contact row when the build has no (valid) contact address
+  const email = contactEmail();
+  const openPrivacyPolicy = () => openExternalLink(privacyPolicyUrl(lang));
+  // Without a mail app the address is shown instead, so it can still be written to
+  const openContact = async (address: string) => {
+    if (!(await openExternalLink(contactMailtoUrl(address)))) Alert.alert(t.contactUs, address);
+  };
 
   // Calculate fixed dimensions for images
   const imageContainerWidth = screenWidth * 0.75;
@@ -108,6 +119,33 @@ const SettingsInstructionsScreen: React.FC = () => {
                 snapToInterval={screenWidth * 0.8}
               />
             </View>
+          </View>
+
+          {/* Privacy policy and contact */}
+          <View style={tw`bg-gray-800 rounded-xl border border-gray-700 w-full mb-2`}>
+            <TouchableOpacity
+              testID={TEST_IDS.settingsPrivacyLink}
+              accessibilityRole="link"
+              accessibilityLabel={t.privacyPolicy}
+              style={tw`px-4 py-3`}
+              onPress={openPrivacyPolicy}
+              activeOpacity={0.7}
+            >
+              <Text style={tw`text-base text-gray-100`}>{t.privacyPolicy}</Text>
+            </TouchableOpacity>
+            {email && (
+              <TouchableOpacity
+                testID={TEST_IDS.settingsContactLink}
+                accessibilityRole="link"
+                accessibilityLabel={`${t.contactUs}: ${email}`}
+                style={tw`px-4 py-3 border-t border-gray-700`}
+                onPress={() => openContact(email)}
+                activeOpacity={0.7}
+              >
+                <Text style={tw`text-base text-gray-100`}>{t.contactUs}</Text>
+                <Text style={tw`text-sm text-gray-400`}>{email}</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       </ScrollView>

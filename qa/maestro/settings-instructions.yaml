@@ -2,7 +2,8 @@
 # SettingsInstructionsScreen. Its first step matches the platform (Android: App info → "Permissions"; iOS: this app's
 # own Settings page → "Photos", or from the Settings root via "Apps" > "Expose Me"), and "Open Settings" leaves the
 # app for that system page (Linking.openSettings(), never a private App-Prefs URL). The bottom-inset layout is covered by
-# Client/__tests__/settingsInstructionsScreen.test.tsx; here the fixed footer button is tapped without scrolling.
+# Client/__tests__/settingsInstructionsScreen.test.tsx; here the fixed footer button is checked before any scrolling.
+# EXP-426: home shows its privacy policy link, and the screen its privacy policy row (neither is opened).
 # Cold-starts with photos denied (any later flow that needs access must run open-app.yaml, which grants it again).
 # No server or bots needed:
 #   ~/.maestro/bin/maestro --device <id> test qa/maestro/settings-instructions.yaml -e USERNAME=<label> -e METRO_URL=<url-encoded>
@@ -39,6 +40,9 @@ appId: com.socketNull.ExposeMe
     visible:
       id: "join-game-button"
     timeout: 30000
+# EXP-426: home links the privacy policy (not opened here: it leaves the app for the browser)
+- assertVisible:
+    id: "home-privacy-link"
 # Creating a game runs the gallery gate (no server or room involved while access is missing)
 - tapOn:
     id: "username-input"
@@ -97,6 +101,13 @@ appId: com.socketNull.ExposeMe
 # still counts as "visible" and the tap lands on the gesture bar.)
 - assertVisible:
     id: "settings-instructions-open-settings"
+# EXP-426: the privacy policy row sits under the steps (only checked after the footer, so the scroll hides nothing).
+# Not opened: it leaves the app for the browser. The contact row depends on the build's EXPO_PUBLIC_CONTACT_EMAIL.
+- scrollUntilVisible:
+    element:
+      id: "settings-privacy-link"
+    direction: DOWN
+    timeout: 10000
 - tapOn:
     id: "settings-instructions-open-settings"
 # The app goes to the background: the system Settings page of this app is in front

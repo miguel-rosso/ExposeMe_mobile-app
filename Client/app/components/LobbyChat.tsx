@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { Animated, Keyboard, TextInput, TouchableOpacity, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import tw from "twrnc";
@@ -31,18 +31,26 @@ export const LobbyChatMessages = ({ chat }: LobbyChatProps) => (
  * The chat input and its send button, kept above the keyboard. The keyboard's return key ("send") sends too and keeps
  * the keyboard up to go on chatting; with nothing typed it closes the keyboard. The button closes it once the message
  * is out. Those are the lobby's ways back to the room on iOS, which has no back key for the keyboard. A refused send
- * (cooldown, offline) leaves the keyboard up with the text still in it.
+ * (cooldown, offline) leaves the keyboard up with the text still in it. The text being typed is this footer's own
+ * state: a keystroke re-renders only the footer, not the whole lobby (EXP-396).
  */
 export const LobbyChatFooter = ({ chat }: LobbyChatProps) => {
   const { t } = useI18n();
   const keyboardPadding = useKeyboardPadding();
-  const blank = !chat.draft.trim();
+  const [draft, setDraft] = useState<string>("");
+  const blank = !draft.trim();
+  /** Sends the draft and empties the input once it went out; true when it did */
+  const sendDraft = (): boolean => {
+    if (!chat.send(draft)) return false;
+    setDraft("");
+    return true;
+  };
   const sendAndCloseKeyboard = () => {
-    if (chat.send()) Keyboard.dismiss();
+    if (sendDraft()) Keyboard.dismiss();
   };
   const handleReturnKey = () => {
     if (blank) Keyboard.dismiss();
-    else chat.send();
+    else sendDraft();
   };
 
   return (
@@ -50,8 +58,8 @@ export const LobbyChatFooter = ({ chat }: LobbyChatProps) => {
       <View style={tw`px-2 py-2 flex-row items-center max-w-[500px] w-full self-center`}>
         <TextInput
           testID={TEST_IDS.chatInput}
-          value={chat.draft}
-          onChangeText={chat.setDraft}
+          value={draft}
+          onChangeText={setDraft}
           placeholder={t.typeMessage}
           placeholderTextColor="#999"
           style={tw`flex-1 bg-gray-800/90 text-white px-4 py-3 rounded-full mr-2`}

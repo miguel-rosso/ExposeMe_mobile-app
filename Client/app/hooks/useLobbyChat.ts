@@ -26,21 +26,21 @@ const newChatMessage = (username: string, message: string): LobbyChatMessage => 
 });
 
 /**
- * The lobby chat: the message being typed (the draft), the messages on screen (the newest MAX_CHAT_MESSAGES, each one
- * removed once its bubble fades out) and sending, at most one message per CHAT_COOLDOWN_MS. Other players' messages
- * come in through `receive`, which the screen attaches with the rest of its socket handlers.
+ * The lobby chat: the messages on screen (the newest MAX_CHAT_MESSAGES, each one removed once its bubble fades out) and
+ * sending, at most one message per CHAT_COOLDOWN_MS. Other players' messages come in through `receive`, which the
+ * screen attaches with the rest of its socket handlers. The message being typed is the chat footer's own state, so
+ * typing never re-renders the screen holding this hook (EXP-396).
  */
 export const useLobbyChat = (socket: Socket | null, gameCode: string | null, username: string | null) => {
   const { t } = useI18n();
-  const [draft, setDraft] = useState<string>("");
   const [messages, setMessages] = useState<LobbyChatMessage[]>([]);
   const [lastSentTime, setLastSentTime] = useState<number>(0);
 
   const show = (msg: LobbyChatMessage) => setMessages((prev) => appendCapped(prev, msg, MAX_CHAT_MESSAGES));
 
-  /** Sends the draft; true when it went out (false: blank, within the cooldown, or offline) */
-  const send = (): boolean => {
-    const message = draft.trim();
+  /** Sends the typed text; true when it went out (false: blank, within the cooldown, or offline) */
+  const send = (text: string): boolean => {
+    const message = text.trim();
     if (!message) return false;
     const now = Date.now();
     if (now - lastSentTime < CHAT_COOLDOWN_MS) {
@@ -52,7 +52,6 @@ export const useLobbyChat = (socket: Socket | null, gameCode: string | null, use
     if (!sent) return false;
     // The server doesn't echo it back to me: show it here
     show(newChatMessage(username || "You", message));
-    setDraft("");
     setLastSentTime(now);
     return true;
   };
@@ -65,7 +64,7 @@ export const useLobbyChat = (socket: Socket | null, gameCode: string | null, use
 
   const clear = () => setMessages([]);
 
-  return { draft, setDraft, messages, send, receive, remove, clear };
+  return { messages, send, receive, remove, clear };
 };
 
 export type LobbyChat = ReturnType<typeof useLobbyChat>;

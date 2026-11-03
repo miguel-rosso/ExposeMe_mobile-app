@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useCallback, useEffect, useState, useRef } from "react";
 import { View, Text, FlatList, StatusBar, TouchableOpacity, Alert, Keyboard, Share, Image, TextStyle, ActivityIndicator } from "react-native";
 import tw from "twrnc";
 import { useGameContext } from "@/app/providers/GameContext";
@@ -62,6 +62,9 @@ const HINT_SHADOW: TextStyle = {
   textShadowOffset: { width: 1, height: 1 },
   textShadowRadius: 3,
 };
+
+/** A row of the player list: names are unique in a room */
+const playerKey = (player: Player) => player.username;
 
 const WaitingRoom = () => {
   const { t } = useI18n();
@@ -517,10 +520,11 @@ const WaitingRoom = () => {
     }
   };
 
-  const confirmRemovePlayer = (player: Player) => {
+  // Only state setters: the same function on every render, for the memoized player rows
+  const confirmRemovePlayer = useCallback((player: Player) => {
     setSelectedPlayer(player);
     setDialogVisible(true);
-  };
+  }, []);
 
   const shareGameCode = async () => {
     if (!gameCode) return;
@@ -543,7 +547,13 @@ const WaitingRoom = () => {
     }
   };
 
-  const renderPlayer = ({ item }: { item: Player }) => {
+  const isHost = isHostIn(players, username);
+  // Gone players don't count: the server removes them at the start (EXP-379)
+  const canStart = canOfferStart(players);
+
+  // Memoized: the player list (a PureComponent) only re-renders its rows when the players or the host change, not on
+  // every other lobby update (chat bubbles, notices: EXP-396)
+  const renderPlayer = useCallback(({ item }: { item: Player }) => {
     const isMe = item.username === username;
     const offline = item.connected === false;
     return (
@@ -583,11 +593,7 @@ const WaitingRoom = () => {
         {isMe && <Text style={tw`text-white/40 text-xs`}>{t.you}</Text>}
       </TouchableOpacity>
     );
-  };
-
-  const isHost = isHostIn(players, username);
-  // Gone players don't count: the server removes them at the start (EXP-379)
-  const canStart = canOfferStart(players);
+  }, [username, isHost, t, confirmRemovePlayer]);
 
   return (
     <View style={tw`flex-1`}>
@@ -670,7 +676,7 @@ const WaitingRoom = () => {
             <FlatList
               data={players}
               renderItem={renderPlayer}
-              keyExtractor={(item) => item.username}
+              keyExtractor={playerKey}
               style={tw`w-full flex-1`}
               contentContainerStyle={tw`pb-2`}
             />

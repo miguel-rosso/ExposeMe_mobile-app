@@ -66,6 +66,8 @@ describe("Sinhala long E and long O (EXP-357)", () => {
     ["Devi / short E", "\u0DAF\u0DDA\u0DC0\u0DD2", "\u0DAF\u0DD9\u0DC0\u0DD2"],
     ["Soma / short O", "\u0DC3\u0DDD\u0DB8\u0DCF", "\u0DC3\u0DDC\u0DB8\u0DCF"],
     ["kee / ke", "\u0D9A\u0DDA", "\u0D9A\u0DD9"],
+    // The ASCII table reads the anusvara before the sign as "o" first (EXP-374)
+    ["kee / ke after an anusvara", "\u0D9A\u0D82\u0DDA", "\u0D9A\u0D82\u0DD9"],
   ])("%s are different names", (_label, a, b) => {
     expectDistinct(a, b);
   });
@@ -73,12 +75,18 @@ describe("Sinhala long E and long O (EXP-357)", () => {
   it.each([
     ["long E typed as kombuva + al-lakuna", "\u0D9A\u0DD9\u0DCA", "\u0D9A\u0DDA"],
     ["long O typed as kombuva + aela-pilla + al-lakuna", "\u0D9A\u0DD9\u0DCF\u0DCA", "\u0D9A\u0DDD"],
-    // The al-lakuna on a consonant still doesn't make another name
-    ["al-lakuna on a consonant", "\u0D9A\u0DCA", "\u0D9A"],
-    ["al-lakuna after the aela-pilla alone", "\u0D9A\u0DCF\u0DCA", "\u0D9A\u0DCF"],
   ])("%s is the same name", (_label, a, b) => {
     expect(isValidUsername(a)).toBe(true);
     expect(clash(a, b)).toBe("same");
+  });
+
+  // EXP-374: the keys keep the al-lakuna elsewhere too, a hook drawn on the letter
+  it("reads an al-lakuna on a consonant as another name", () => {
+    expectDistinct("\u0D9A\u0DCA", "\u0D9A");
+  });
+
+  it("refuses an al-lakuna after the aela-pilla alone (EXP-374)", () => {
+    expect(isValidUsername("\u0D9A\u0DCF\u0DCA")).toBe(false);
   });
 
   // Android draws the candrabindu over a kombuva where the al-lakuna of the long vowel goes
@@ -90,9 +98,13 @@ describe("Sinhala long E and long O (EXP-357)", () => {
     expectSimilar(a, b);
   });
 
-  it("still reads a candrabindu on a bare letter as no mark", () => {
-    expect(isValidUsername("\u0D9A\u0D81\u0DB8")).toBe(true);
-    expect(clash("\u0D9A\u0D81\u0DB8", "\u0D9A\u0DB8")).toBe("same");
+  // EXP-374: on a bare letter it is drawn like the al-lakuna with a dot, which the keys can't tell from either
+  it.each([
+    ["Kamal with a candrabindu for the al-lakuna", "\u0D9A\u0DB8\u0DBD\u0D81"],
+    ["a candrabindu before a letter", "\u0D9A\u0D81\u0DB8"],
+    ["a candrabindu after the long E", "\u0D9A\u0DDA\u0D81"],
+  ])("refuses %s", (_label, name) => {
+    expect(isValidUsername(name)).toBe(false);
   });
 });
 
@@ -198,13 +210,18 @@ describe("Indic characters drawn like another spelling of their script (EXP-364)
     expectSimilar(a, b);
   });
 
-  // The keys drop viramas and Latin-style dots, so letters UTS #39 draws with one would read as the bare letters
+  // Letters UTS #39 writes with a virama or a Latin-style dot, drawn apart from those spellings (EXP-374): chillu L as
+  // LA + virama (a chandrakkala over LA), Telugu BHA as BA + dot below (a ring under BA with the Telugu nukta), Devanagari
+  // II as RA + virama + I (Kohinoor draws RA with its virama before I, no reph)
   it.each([
     ["Malayalam Kamal / Kamala (chillu L)", "\u0D15\u0D2E\u0D7D", "\u0D15\u0D2E\u0D32"],
     ["Malayalam Nandan / Nandana (chillu N)", "\u0D28\u0D28\u0D4D\u0D26\u0D7B", "\u0D28\u0D28\u0D4D\u0D26\u0D28"],
     ["Telugu Bhanu / Banu", "\u0C2D\u0C3E\u0C28\u0C41", "\u0C2C\u0C3E\u0C28\u0C41"],
     ["Devanagari Isha / RA + I", "\u0908\u0936\u093E", "\u0930\u0907\u0936\u093E"],
     ["Sinhala EE / E", "\u0D92\u0D9A", "\u0D91\u0D9A"],
+    ["Malayalam Kamal, chillu L / LA + virama", "\u0D15\u0D2E\u0D7D", "\u0D15\u0D2E\u0D32\u0D4D"],
+    ["Telugu Bhanu / BA + Telugu nukta", "\u0C2D\u0C3E\u0C28\u0C41", "\u0C2C\u0C3C\u0C3E\u0C28\u0C41"],
+    ["Devanagari Isha / RA + virama + I", "\u0908\u0936\u093E", "\u0930\u094D\u0907\u0936\u093E"],
   ])("%s stay different names", (_label, a, b) => {
     expectDistinct(a, b);
   });
@@ -398,5 +415,125 @@ describe("Malayalam chillus typed with a joiner (EXP-372)", () => {
     ["a legacy chillu joiner before a Latin letter", "\u0D32\u0D4D\u200Da"],
   ])("%s is refused", (_label, name) => {
     expect(isValidUsername(name)).toBe(false);
+  });
+});
+
+// EXP-374: the keys keep the viramas drawn as a stroke or hook on the letter, so a dead consonant, a conjunct or a
+// legacy chillu is another name than the bare letters. The Tamil pulli and the nuktas, dots, are still dropped like
+// Latin dots; across sister scripts a virama still meets its twin. A virama goes last on a letter, after maybe a nukta.
+describe("Viramas (EXP-374)", () => {
+  it.each([
+    ["Malayalam Kamal (LA + virama) / Kamala", "\u0D15\u0D2E\u0D32\u0D4D", "\u0D15\u0D2E\u0D32"],
+    ["Malayalam Kamal (legacy chillu) / Kamala", "\u0D15\u0D2E\u0D32\u0D4D\u200D", "\u0D15\u0D2E\u0D32"],
+    ["Malayalam digit nine / NA", "\u0D05\u0D6F\u0D35\u0D7C", "\u0D05\u0D28\u0D35\u0D7C"],
+    ["Malayalam digit six / NA + NA", "\u0D2A\u0D4D\u0D30\u0D38\u0D6C", "\u0D2A\u0D4D\u0D30\u0D38\u0D28\u0D28"],
+    ["Devanagari KSSA / KA + SSA", "\u0915\u094D\u0937", "\u0915\u0937"],
+    ["Bengali Rabindra / no conjuncts", "\u09B0\u09AC\u09BF\u09A8\u09CD\u09A6\u09CD\u09B0", "\u09B0\u09AC\u09BF\u09A8\u09A6\u09B0"],
+    ["Telugu Kamal / Kamala", "\u0C15\u0C2E\u0C32\u0C4D", "\u0C15\u0C2E\u0C32"],
+    ["Kannada Kamal / Kamala", "\u0C95\u0CAE\u0CB2\u0CCD", "\u0C95\u0CAE\u0CB2"],
+    ["Sinhala Nimal / Nimala", "\u0DB1\u0DD2\u0DB8\u0DBD\u0DCA", "\u0DB1\u0DD2\u0DB8\u0DBD"],
+    // Mid-word the tick viramas make a conjunct
+    ["Bengali Prem / Porem", "\u09AA\u09CD\u09B0\u09C7\u09AE", "\u09AA\u09B0\u09C7\u09AE"],
+    ["Bengali Krishna / no conjunct", "\u0995\u09C3\u09B7\u09CD\u09A3", "\u0995\u09C3\u09B7\u09A3"],
+    ["Gurmukhi Prem / Parem", "\u0A2A\u0A4D\u0A30\u0A47\u0A2E", "\u0A2A\u0A30\u0A47\u0A2E"],
+  ])("%s are different names", (_label, a, b) => {
+    expectDistinct(a, b);
+  });
+
+  it.each([
+    // A dot over the letter, dropped like a Latin dot above
+    ["Tamil Kamal with and without the pulli", "\u0B95\u0BAE\u0BB2\u0BCD", "\u0B95\u0BAE\u0BB2"],
+    // A dot under the letter
+    ["Devanagari Zainab with and without nukta", "\u091C\u093C\u0948\u0928\u092C", "\u091C\u0948\u0928\u092C"],
+    ["Devanagari Fred with and without nukta", "\u092B\u093C\u094D\u0930\u0947\u0921", "\u092B\u094D\u0930\u0947\u0921"],
+    // The joiners only choose how the conjunct is drawn, also a legacy chillu
+    ["Devanagari KSSA / half KA + SSA", "\u0915\u094D\u0937", "\u0915\u094D\u200D\u0937"],
+    ["Malayalam Anvar, legacy chillu / NA + virama", "\u0D05\u0D28\u0D4D\u200D\u0D35\u0D7C", "\u0D05\u0D28\u0D4D\u0D35\u0D7C"],
+  ])("%s are still the same name", (_label, a, b) => {
+    expect(isValidUsername(a)).toBe(true);
+    expect(isValidUsername(b)).toBe(true);
+    expect(clash(a, b)).toBe("same");
+  });
+
+  it.each([
+    // A virama ending a Devanagari, Bengali, Gurmukhi, Gujarati or Oriya word is a tick the size of a nukta
+    ["Devanagari Raj / Raj with a virama", "\u0930\u093E\u091C", "\u0930\u093E\u091C\u094D"],
+    ["Devanagari Rajan with and without the virama", "\u0930\u093E\u091C\u0928\u094D", "\u0930\u093E\u091C\u0928"],
+    ["Devanagari Hanuman with and without the virama", "\u0939\u0928\u0941\u092E\u093E\u0928\u094D", "\u0939\u0928\u0941\u092E\u093E\u0928"],
+    ["Bengali Raj with a virama before a space", "\u09B0\u09BE\u099C\u09CD" + " 1", "\u09B0\u09BE\u099C" + " 1"],
+    ["Gujarati Raj with and without the virama", "\u0AB0\u0ABE\u0A9C\u0ACD", "\u0AB0\u0ABE\u0A9C"],
+    ["Oriya Raj with and without the virama", "\u0B30\u0B3E\u0B1C\u0B4D", "\u0B30\u0B3E\u0B1C"],
+    // The Gurmukhi udaat and yakash, a hook under the letter where the virama is
+    ["Gurmukhi Raj with a virama / udaat", "\u0A30\u0A3E\u0A1C\u0A4D", "\u0A30\u0A3E\u0A1C\u0A51"],
+    ["Gurmukhi KA + virama + SA / KA + yakash + SA", "\u0A15\u0A4D\u0A38", "\u0A15\u0A75\u0A38"],
+    // ... which the letter visual key drops like a dot, so they still meet a letter read as a sister script's
+    ["Gurmukhi TTHA + udaat / Devanagari TTHA", "\u0A20\u0A51\u0A27\u0A4D", "\u0920\u0A27\u0A4D"],
+    // A nukta typed after the virama still leaves it ending the word
+    ["Devanagari Raj with a virama and a nukta typed after it", "\u0930\u093E\u091C\u094D\u093C", "\u0930\u093E\u091C"],
+    // The letter visual key reads the digit drawn like chillu N as NA + virama (UTS #39)
+    ["Malayalam digit nine / NA + virama", "\u0D15\u0D6F", "\u0D15\u0D28\u0D4D"],
+    // Across sister scripts: Gurmukhi SA drawn like Devanagari MA, with their viramas, also after a nukta
+    ["Gurmukhi SA + virama / Devanagari MA + virama", "\u0A38\u0A4D", "\u092E\u094D"],
+    ["Gurmukhi SHA + virama / Devanagari MA + virama", "\u0A38\u0A3C\u0A4D", "\u092E\u094D"],
+    ["Kannada and Telugu Jay", "\u0C9C\u0CAF\u0CCD", "\u0C1C\u0C2F\u0C4D"],
+    // Malayalam THA and KHA read as Tamil MA and VA, whose pulli is dropped: with or without one
+    ["Malayalam THA + virama / Tamil MA + pulli", "\u0D25\u0D4D", "\u0BAE\u0BCD"],
+    ["Malayalam THA + virama / Tamil MA", "\u0D25\u0D4D", "\u0BAE"],
+    ["Malayalam KHA + virama / Tamil VA + pulli", "\u0D16\u0D4D", "\u0BB5\u0BCD"],
+  ])("%s look too alike", (_label, a, b) => {
+    expectSimilar(a, b);
+  });
+
+  it("drops a virama on a letter the visual keys read as another script's", () => {
+    expect(visualKey("\u0D25\u0D4D")).toBe(visualKey("\u0BAE"));
+    // Not a name (a mark before the virama is refused), but the keys don't rely on that
+    expect(letterVisualKey("\u0D16\u0D01\u0D4D")).toBe(letterVisualKey("\u0BB5"));
+  });
+
+  it.each([
+    ["Fred, nukta + virama", "\u092B\u093C\u094D\u0930\u0947\u0921"],
+    ["Bengali Shri with a joiner", "\u09B6\u09CD\u200D\u09B0\u09C0"],
+    ["Sinhala Sri", "\u0DC1\u0DCA\u200D\u0DBB\u0DD3"],
+    ["Tamil Shri", "\u0BB6\u0BCD\u0BB0\u0BC0"],
+    ["Malayalam Kamal, legacy chillu", "\u0D15\u0D2E\u0D32\u0D4D\u200D"],
+  ])("%s is accepted", (_label, name) => {
+    expect(isValidUsername(name)).toBe(true);
+  });
+
+  it.each([
+    ["on a digit", "\u0AEA\u0ACD"],
+    ["on a Devanagari digit", "\u0915\u096A\u094D"],
+    ["on an avagraha", "\u0ABD\u0ACD\u0937"],
+    ["on punctuation", "\u0915)\u094D"],
+    ["on a space", "\u0915 \u094D\u0937"],
+    ["on an om sign", "\u0950\u094D"],
+    ["on the Tamil visarga", "\u0B95\u0B83\u0BCD"],
+    ["on a Malayalam chillu", "\u0D15\u0D2E\u0D7D\u0D4D"],
+    ["on the Bengali khanda ta", "\u09B0\u09CE\u09CD"],
+    ["after a vowel sign", "\u0915\u093E\u094D"],
+    ["after an anusvara", "\u0915\u0902\u094D"],
+    ["before a vowel sign", "\u0915\u094D\u093E"],
+    ["before a vowel sign drawn as a letter (Telugu VA + AA like HA)", "\u0C35\u0C4D\u0C3E\u0C30\u0C3F"],
+    ["two in a row", "\u0915\u094D\u094D\u0937"],
+    ["Malayalam vertical bar virama", "\u0D15\u0D2E\u0D32\u0D3B"],
+    ["Malayalam circular virama", "\u0D15\u0D2E\u0D32\u0D3C"],
+    ["on the Telugu nakaara pollu", "\u0C15\u0C5D\u0C4D"],
+    ["on the Kannada nakaara pollu", "\u0C95\u0CDD\u0CCD"],
+  ])("a virama %s is refused", (_label, name) => {
+    expect(isValidUsername(name)).toBe(false);
+  });
+
+  // Drawn like the chandrakkala with a dot, or as a ring where it goes: the keys would drop them
+  it.each([
+    ["Kamal with a candrabindu for the chandrakkala", "\u0D15\u0D2E\u0D32\u0D01"],
+    ["Arun with a candrabindu", "\u0D05\u0D30\u0D41\u0D23\u0D01"],
+    ["Kamal with the combining anusvara above", "\u0D15\u0D2E\u0D32\u0D00"],
+  ])("Malayalam %s is refused", (_label, name) => {
+    expect(isValidUsername(name)).toBe(false);
+  });
+
+  it("still accepts the nakaara pollu, already a dead consonant", () => {
+    expect(isValidUsername("\u0C15\u0C5D")).toBe(true);
+    expect(isValidUsername("\u0C95\u0CDD")).toBe(true);
   });
 });

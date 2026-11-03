@@ -105,8 +105,9 @@ const withoutAllowedFormatChars = (text: string) => text
  * the voicing mark it takes (marksKanaOddly), no mix of Latin-lookalike scripts (see mixesLookalikeScripts), no Hangul
  * block of jamo that don't make one syllable (splitsHangulBlock), no vowel sign or virama on an Indic independent vowel
  * (marksIndependentVowelOddly) and no Indic vowel sign but one on a letter of its script, which carries only marks of
- * that script, no length mark left alone and no rare mark hiding a vowel sign (marksIndicLetterOddly). Emoji, symbols,
- * punctuation and digits are free: a name may be made only of them.
+ * that script, no length mark left alone, no rare mark hiding a vowel sign and no virama but one ending the marks of a
+ * letter, after nothing but a nukta, nor an archaic Malayalam one (marksIndicLetterOddly). Emoji, symbols, punctuation
+ * and digits are free: a name may be made only of them.
  */
 export function isValidUsername(value: unknown): value is string {
   if (typeof value !== "string" || !value.trim() || value.length > MAX_USERNAME_LENGTH) return false;
@@ -233,19 +234,63 @@ const indicBlockOf = (char: string) => Math.floor(char.codePointAt(0)! / INDIC_B
 const isOwnMark = (letter: string, mark: string) =>
   indicBlockOf(mark) === indicBlockOf(letter) && !INHERITED_MARK.test(mark);
 
+const VIRAMA_MARK = new RegExp(`^${VIRAMA}$`, "u");
+// The nuktas, which come before the virama on a letter (canonical order): "फ़्रेड" (Fred)
+const NUKTA = /^[\u093C\u09BC\u0A3C\u0ABC\u0B3C\u0C3C\u0CBC]$/u;
+// Indic letters with no vowel for a virama to kill: avagrahas, om signs, the Bengali anji, the Tamil visarga, the
+// Kannada spacing candrabindu, jihvamuliya and upadhmaniya, the Vedic anusvaras, the Devanagari high spacing dot, and
+// the dead consonants (Bengali khanda ta, Telugu and Kannada nakaara pollu, Malayalam dot reph and chillus)
+const TAKES_NO_VIRAMA = new RegExp(`^[${[
+  "\\u093D\\u0950\\u0971", // Devanagari
+  "\\u0980\\u09BD\\u09CE\\u09FC", // Bengali
+  "\\u0A74", // Gurmukhi
+  "\\u0ABD\\u0AD0", // Gujarati
+  "\\u0B3D", // Oriya
+  "\\u0B83\\u0BD0", // Tamil
+  "\\u0C3D\\u0C5D", // Telugu
+  "\\u0C80\\u0CBD\\u0CDD\\u0CF1\\u0CF2", // Kannada
+  "\\u0D04\\u0D3D\\u0D4E\\u0D54-\\u0D56\\u0D7A-\\u0D7F", // Malayalam
+].join("")}]$`, "u");
+
+// The archaic Malayalam viramas, vertical bar and circle, which no keyboard types: a tick or ring where the
+// chandrakkala draws its stroke, so a font draws them like it or like a dot
+const ARCHAIC_MALAYALAM_VIRAMA = /^[\u0D3B\u0D3C]$/u;
+// Marks the keys drop that are drawn like the virama of their script with a dot, or as a ring where it goes (Noto
+// Sans and the Sangam fonts; EXP-374: "കമലഁ" like "കമല്", "කමලඁ" like "කමල්"): the Malayalam candrabindu and
+// combining anusvara above, which no modern name uses, and the Sinhala candrabindu but over a kombuva, where it is
+// drawn like the al-lakuna of the long E and long O and the visual keys read it so (SINHALA_CANDRABINDU_ON_KOMBUVA)
+const MARK_DRAWN_AS_VIRAMA = /[\u0D00\u0D01]|(?<![\u0DD9\u0DDC])\u0D81/u;
+
+/**
+ * Whether `marks` put a virama on `base` other than one closing the marks of a consonant or vowel letter, after
+ * nothing but a nukta (EXP-374), or an archaic Malayalam virama. The keys keep viramas, but only on a letter of their
+ * script, so one on a digit, an avagraha or punctuation, before or after a vowel sign or anusvara, or a second one
+ * would draw like a name the keys don't see ("ઽ્ष" next to "ऽ्ष", Telugu "వ్ారి" next to "హ్రి").
+ */
+function placesViramaOddly(base: string, marks: readonly string[]): boolean {
+  const virama = marks.findIndex((mark) => VIRAMA_MARK.test(mark));
+  if (virama < 0) return false;
+  return !INDIC_LETTER.test(base) || TAKES_NO_VIRAMA.test(base) || virama !== marks.length - 1
+    || !marks.slice(0, virama).every((mark) => NUKTA.test(mark))
+    || ARCHAIC_MALAYALAM_VIRAMA.test(marks[virama]);
+}
+
 /**
  * Whether `name`, once composed (NFC joins the two parts of a vowel such as Bengali O), carries a dependent vowel sign
  * anywhere but alone on a letter of its script, or a mark of another script on an Indic letter (EXP-343). The keys keep
  * vowel signs, so "राज" and "राजु" are different names, but drop other marks; so two signs on a letter (क + ा + े draws
  * like को, ु + े like े + ु, Sinhala ෙ + ෙ like ෛ), a sign on another script's letter, a digit or a space, or a mark
  * drawn like a sign (क + combining breve like कॅ, क + Devanagari grave accent like के) would look like a name the keys
- * don't see; so would a length mark alone (LENGTH_MARK) or a vowel sign hidden by a rare mark (MARK_HIDING_VOWEL_SIGN).
- * Real spellings put one vowel sign on a letter, with marks of its own script (nukta, anusvara, virama).
+ * don't see; so would a length mark alone (LENGTH_MARK), a vowel sign hidden by a rare mark (MARK_HIDING_VOWEL_SIGN)
+ * a virama anywhere but last on a letter (placesViramaOddly) or a mark drawn like a virama that the keys drop
+ * (MARK_DRAWN_AS_VIRAMA). Real spellings put one vowel sign on a letter, with marks of its own script (nukta,
+ * anusvara), or a virama after maybe a nukta.
  */
 function marksIndicLetterOddly(name: string): boolean {
   return Array.from(name.normalize("NFC").matchAll(LETTER_WITH_MARKS)).some(([, base, marks]) => {
     const markList = Array.from(marks);
     const vowelSigns = markList.filter((mark) => VOWEL_SIGN.test(mark)).length;
+    if (placesViramaOddly(base, markList) || MARK_DRAWN_AS_VIRAMA.test(marks)) return true;
     if (!INDIC_LETTER.test(base)) return vowelSigns > 0;
     return vowelSigns > 1
       || (vowelSigns > 0 && markList.some((mark) => MARK_HIDING_VOWEL_SIGN.test(mark)))
@@ -259,13 +304,39 @@ function marksIndicLetterOddly(name: string): boolean {
 // Indic dependent vowel signs, which the keys keep (EXP-343): "राज" and "राजु", Kannada "ಕರಣ" and "ಕಿರಣ" are different
 // names. But the Devanagari sign OE, which iOS draws blank
 const KEPT_VOWEL_SIGN = `(?!\\u093A)${DEPENDENT_VOWEL_SIGN}`;
-// The Sinhala al-lakuna that NFD splits off the long E and long O signs (EXP-357: ේ is kombuva + al-lakuna, ෝ kombuva
-// + aela-pilla + al-lakuna), part of the vowel sign and kept with it: "කේ" and "කෙ" are different names
+// The viramas the keys keep (EXP-374), drawn as a stroke or hook on the letter: a dead consonant, a conjunct or a
+// Malayalam legacy chillu is another name than the bare letters ("കമല്" Kamal and "കമല" Kamala, "क्ष" and "कष"); so
+// is a Sinhala al-lakuna, like the one NFD splits off the long E and O signs (EXP-357: "කේ" and "කෙ"). Not the Tamil
+// pulli, a dot dropped like a Latin dot above ("கமல்" stays the name "கமல"), nor the nuktas, dots under the
+// letter ("ज़ैनब" and "जैनब" are one name); names can't hold the archaic Malayalam viramas (placesViramaOddly).
+const KEPT_VIRAMAS = ["\u094D", "\u09CD", "\u0A4D", "\u0ACD", "\u0B4D", "\u0C4D", "\u0CCD", "\u0D4D", "\u0DCA"];
+// Sister scripts the visual keys read as one: Gurmukhi letters drawn like Devanagari ones and Kannada letters like
+// Telugu ones (INDIC_CONFUSABLES), with their viramas (CROSS_SCRIPT_SIGN_LOOKALIKES)
+const SISTER_BLOCKS: ReadonlyArray<readonly number[]> = [[0x0900, 0x0a00], [0x0c00, 0x0c80]];
+
+/** A regex class of the code points of an Indic `mark`'s script: its block, with its sister block (SISTER_BLOCKS). */
+function scriptClassOf(mark: string): string {
+  const block = indicBlockOf(mark) * INDIC_BLOCK_SIZE;
+  const blocks = SISTER_BLOCKS.find((sisters) => sisters.includes(block)) ?? [block];
+  return codePointClass(blocks.map((start) => [start, start + INDIC_BLOCK_SIZE - 1] as const));
+}
+
+// A kept virama on a character of its script (or a sister script) that is no mark, maybe after other marks. Names put
+// it on no other letter (marksIndicLetterOddly), but the visual keys read some letters as another script's: there the
+// virama is dropped, as the Tamil pulli is ("ഥ്" reads like "ம்" and "ம"); Gurmukhi and Kannada viramas are
+// read as the Devanagari and Telugu ones first (CROSS_SCRIPT_SIGN_LOOKALIKES), so "ਟ੍" still reads like "ट्" and
+// "ਪ੍ਰੇਮ" keeps its virama
+const KEPT_VIRAMA = KEPT_VIRAMAS
+  .map((virama) => `(?<=(?=\\P{M})${scriptClassOf(virama)}\\p{M}*)${virama}`)
+  .join("|");
+// The Sinhala al-lakuna that NFD splits off the long E and long O signs (EXP-357), part of the vowel sign: kept
+// whatever the kombuva follows, also a mark the ASCII table read first (the anusvara as "o" in "කංේ")
 const LONG_VOWEL_AL_LAKUNA = "(?<=\\u0DD9\\u0DCF?)\\u0DCA";
-// Marks on a letter or symbol, voicing marks and kept vowel signs aside (see withoutMarks). A mark on a space stays:
-// NFKC turns spacing accents (the arms of "¯\_(ツ)_/¯", ´, ¨) into a space plus a mark, and that mark is all they draw
+// Marks on a letter or symbol, voicing marks, kept vowel signs and viramas aside (see withoutMarks). A mark on a space
+// stays: NFKC turns spacing accents (the arms of "¯\_(ツ)_/¯", ´, ¨) into a space plus a mark, and that mark is all
+// they draw
 const COMBINING_MARK = new RegExp(
-  `(?<!\\s)(?![\\u3099\\u309A]|${KEPT_VOWEL_SIGN}|${LONG_VOWEL_AL_LAKUNA})\\p{Mn}`,
+  `(?<!\\s)(?![\\u3099\\u309A]|${KEPT_VOWEL_SIGN}|${LONG_VOWEL_AL_LAKUNA}|${KEPT_VIRAMA})\\p{Mn}`,
   "gu",
 );
 // Joiners and subdivision tags an accepted name may still carry (variation selectors go with the marks)
@@ -285,12 +356,10 @@ const replaceChars = (text: string, table: ReadonlyMap<string, string>) =>
 // Visual keys only: marks drawn like a vowel sign the keys keep, read as that sign (measured in Kohinoor and the Sangam
 // fonts on iOS and Noto Sans on Android, or by their shape): the Devanagari and Gujarati candrabindu like their candra
 // E but for a dot, the Devanagari short E and short O like E and O, the Oriya overline like the hook of sign I over the
-// letter, the Sinhala candrabindu like the al-lakuna of the long E and long O (Android: KA + kombuva + candrabindu like
-// KA + long E, EXP-357), and the long vocalic signs (RR, LL), which only Sanskrit spells and fonts draw as the short
-// ones with one more curl, like those
+// letter, and the long vocalic signs (RR, LL), which only Sanskrit spells and fonts draw as the short ones with one
+// more curl, like those
 const VOWEL_SIGN_LOOKALIKES: ReadonlyMap<string, string> = new Map([
   ["\u0901", "\u0945"], ["\u0A81", "\u0AC5"], ["\u0946", "\u0947"], ["\u094A", "\u094B"], ["\u0B55", "\u0B3F"],
-  ["\u0D81", "\u0DCA"],
   // Vocalic RR as vocalic R (Malayalam's as U, like its vocalic R in INDIC_CONFUSABLES)
   ["\u0944", "\u0943"], ["\u09C4", "\u09C3"], ["\u0AC4", "\u0AC3"], ["\u0B44", "\u0B43"], ["\u0D44", "\u0D41"],
   // Vocalic LL as vocalic L
@@ -310,11 +379,14 @@ const CANDRA_LOOKALIKES: ReadonlyMap<string, string> = new Map([
 // copies its syllable too: II like II and EE like E ("ਟੀ" like "टी", "ਟੇ" like "टे"). Left out, drawn apart: AA (the
 // kanna stops at mid height), U, UU and AU (other hooks, no AU bar), OO (see INDIC_CONFUSABLES); and the Malayalam
 // AA, II, U and UU signs next to the Tamil ones, on the Malayalam letters drawn like Tamil ones ("ഖ" as "வ")
-const CROSS_SCRIPT_VOWEL_SIGN_LOOKALIKES: ReadonlyMap<string, string> = new Map([
-  ["\u0A40", "\u0940"], ["\u0A47", "\u0947"],
+// The viramas the keys keep (EXP-374) likewise: the Gurmukhi one like the Devanagari stroke ("ਟ੍" like "ट्",
+// Gurmukhi MN; UTS #39), and the Kannada one, a curl at the top right, as the Telugu hook there, so a Kannada letter
+// read as its Telugu twin ("ಜ" as "జ") still meets it with a virama, as when the keys dropped both
+const CROSS_SCRIPT_SIGN_LOOKALIKES: ReadonlyMap<string, string> = new Map([
+  ["\u0A40", "\u0940"], ["\u0A47", "\u0947"], ["\u0A4D", "\u094D"], ["\u0CCD", "\u0C4D"],
 ]);
 const MEASURED_INDIC_LOOKALIKES: ReadonlyMap<string, string> = new Map([
-  ...VOWEL_SIGN_LOOKALIKES, ...CANDRA_LOOKALIKES, ...CROSS_SCRIPT_VOWEL_SIGN_LOOKALIKES,
+  ...VOWEL_SIGN_LOOKALIKES, ...CANDRA_LOOKALIKES, ...CROSS_SCRIPT_SIGN_LOOKALIKES,
 ]);
 // Visual keys only (EXP-356, EXP-364): Indic characters drawn like another spelling of their script, generated from
 // UTS #39 (INDIC_CONFUSABLES: Tamil "௧" as "க" and "ௗ" as "ள", Telugu "హ" as "వా", Malayalam "൬" as "ന്ന",
@@ -338,31 +410,53 @@ const TAMIL_AI_AFTER_LETTER = /((?:\u0B95\u0BCD\u0BB7|\p{L})\p{M}*?)\u0BC8/gu;
 /** Decomposed Indic `text` with each Tamil vowel sign AI where it is drawn, before its letter or ligature. */
 const tamilAiWhereDrawn = (text: string) => text.replace(TAMIL_AI_AFTER_LETTER, "\u0BC8$1");
 
+// The Sinhala candrabindu over a kombuva (and aela-pilla), drawn where the al-lakuna of the long E and long O goes
+// (Android: KA + kombuva + candrabindu like KA + long E, EXP-357). Names can't hold it on a bare letter, where it is
+// drawn like the al-lakuna with a dot (MARK_DRAWN_AS_VIRAMA)
+const SINHALA_CANDRABINDU_ON_KOMBUVA = /(?<=\u0DD9\u0DCF?)\u0D81/gu;
+const SINHALA_AL_LAKUNA = "\u0DCA";
+
 /**
  * Indic characters drawn like another spelling of their script replaced by it (INDIC_LOOKALIKES: candrabindu as
- * candra E, Telugu HA as VA + AA, Tamil digit one as KA), the Tamil sign AI first moved before its letter. Indic
- * characters are decomposed first (NFD), so one that holds a character the table reads (the Tamil O and AU signs, the
- * letter AU) reads like its parts, however it was typed.
+ * candra E, Telugu HA as VA + AA, Tamil digit one as KA), the Tamil sign AI first moved before its letter, and the
+ * Sinhala candrabindu over a kombuva read as the al-lakuna there. Indic characters are decomposed first (NFD), so one
+ * that holds a character the table reads (the Tamil O and AU signs, the letter AU) reads like its parts, however it was
+ * typed.
  */
-const readIndicLookalikes = (text: string) =>
-  replaceChars(tamilAiWhereDrawn(text.replace(INDIC_CHAR, (char) => char.normalize("NFD"))), INDIC_LOOKALIKES);
+const readIndicLookalikes = (text: string) => replaceChars(
+  tamilAiWhereDrawn(text.replace(INDIC_CHAR, (char) => char.normalize("NFD"))),
+  INDIC_LOOKALIKES,
+).replace(SINHALA_CANDRABINDU_ON_KOMBUVA, SINHALA_AL_LAKUNA);
 
 // Malayalam chillus typed as before Unicode 5.1, consonant + virama + zero-width joiner, which fonts draw as the
 // atomic chillu (EXP-372: "Anvar" with NA + virama + joiner like "Anvar" with chillu N), in a word or ending it
 const LEGACY_CHILLU = new RegExp(`(${CHILLU_CONSONANT})\\u0D4D\\u200D`, "gu");
 // The Malayalam digits nine and four, drawn exactly like chillu N and chillu RR (Noto Sans and Sangam). UTS #39 spells
-// them NA and RA + virama (INDIC_CONFUSABLES), which meets the legacy chillu once the keys drop the virama and joiner
+// them NA and RA + virama (INDIC_CONFUSABLES), which meets the legacy chillu once the keys drop the joiner
 const DIGIT_DRAWN_AS_CHILLU: ReadonlyMap<string, string> = new Map([["\u0D6F", "\u0D7B"], ["\u0D6A", "\u0D7C"]]);
 
 /**
  * Visual key only: Malayalam chillus typed with a joiner, and the digits drawn like a chillu, read as the atomic chillu
- * (EXP-372). The letter visual key keeps reading them as the bare consonant, like a virama without a joiner ("Anvar"
- * with NA + virama), so a name meets both spellings through one of its keys.
+ * (EXP-372). The letter visual key keeps reading them as the consonant + virama, like a virama without a joiner
+ * ("Anvar" with NA + virama), so a name meets both spellings through one of its keys; not the bare consonant, another
+ * name (EXP-374: "Kamal" and "Kamala").
  */
 const readChillusAsDrawn = (text: string) => replaceChars(
   text.replace(LEGACY_CHILLU, (_legacy, consonant: string) => ATOMIC_CHILLU_OF[consonant]),
   DIGIT_DRAWN_AS_CHILLU,
 );
+
+// The Gurmukhi udaat and yakash, a hook under the letter where the virama draws its stroke (Gurmukhi MN and Sangam
+// MN: "ਰਾਜੑ" and "ਰਾਜੵ" like "ਰਾਜ੍")
+const GURMUKHI_HOOK_BELOW = /[\u0A51\u0A75]/gu;
+const GURMUKHI_VIRAMA = "\u0A4D";
+
+/**
+ * Visual key only (EXP-374): the Gurmukhi udaat and yakash read as the virama. The other keys drop them like a dot, so
+ * a name with one meets both the virama ("ਕੑਸ" next to "ਕ੍ਸ") and the bare letter, also read as a sister
+ * script's ("ਠੑਧ੍" next to "ठਧ੍" through the letter visual key).
+ */
+const readGurmukhiHooksAsVirama = (text: string) => text.replace(GURMUKHI_HOOK_BELOW, GURMUKHI_VIRAMA);
 
 // Code points Unicode 15.1 reserves for emoji, which names may use (see UNASSIGNED_IN_TABLES): a phone whose fonts lack
 // the emoji, or any phone for those still unassigned, draws them all as the same empty box ("Ana 🫩" like "Ana 🫆").
@@ -376,12 +470,25 @@ const EMPTY_BOX = "\uE000";
 // OE. O and OE stay apart: they are drawn alike only outside a word's first syllable, which depends on the shaping
 const MONGOLIAN_LOOKALIKES: ReadonlyMap<string, string> = new Map([["\u1824", "\u1823"], ["\u1826", "\u1825"]]);
 
+// Visual keys only (EXP-374): the viramas of Devanagari, Bengali, Gurmukhi, Gujarati and Oriya with no letter of their
+// script after them, past marks (at the end of a word, before a space or punctuation), a tick under the letter the size
+// of a nukta that marks the same name ("राजन्" and "राजन", "हनुमान्" and "हनुमान"). Before a letter they make a
+// conjunct, another name ("क्ष" and "कष"); the Malayalam, Telugu, Kannada and Sinhala viramas are a bigger stroke
+// anywhere
+const TICK_VIRAMAS = ["\u094D", "\u09CD", "\u0A4D", "\u0ACD", "\u0B4D"];
+const TICK_VIRAMA_ENDING_WORD = new RegExp(
+  TICK_VIRAMAS.map((virama) => `${virama}(?!\\p{M}*[\\u200C\\u200D]?(?=\\p{L})${scriptClassOf(virama)})`).join("|"),
+  "gu",
+);
+
 /**
- * Visual keys only: Indic characters drawn like a vowel sign or a letter and a sign read as those, Mongolian vowels
- * written alike as one, emoji newer than Unicode 15.1 as one box.
+ * Visual keys only: Indic characters drawn like a vowel sign or a letter and a sign read as those, a tick virama
+ * ending a word dropped, Mongolian vowels written alike as one, emoji newer than Unicode 15.1 as one box.
  */
-const readDrawnAlike = (text: string) =>
-  replaceChars(readIndicLookalikes(text), MONGOLIAN_LOOKALIKES).replace(UNASSIGNED_EMOJI, EMPTY_BOX);
+const readDrawnAlike = (text: string) => replaceChars(
+  readIndicLookalikes(text).replace(TICK_VIRAMA_ENDING_WORD, ""),
+  MONGOLIAN_LOOKALIKES,
+).replace(UNASSIGNED_EMOJI, EMPTY_BOX);
 
 // ── Japanese voicing marks ──────────────────────────
 
@@ -643,10 +750,10 @@ export function nameKey(name: string): string {
  * (EXP-376: "ᠪᠤᠯ" like "ᠪᠣᠯ"), and every emoji newer than Unicode 15.1 as the same empty box, as phones without it
  * draw it ("Ana 🫩" like "Ana 🫆").
  * Malayalam chillus typed with a joiner, and the digits drawn like a chillu, read as the atomic chillu first (EXP-372,
- * readChillusAsDrawn).
+ * readChillusAsDrawn), and the Gurmukhi udaat and yakash as the virama (EXP-374, readGurmukhiHooksAsVirama).
  */
 export function visualKey(name: string): string {
-  const voicingMarksClosed = composeHangul(readDrawnAlike(readChillusAsDrawn(name)))
+  const voicingMarksClosed = composeHangul(readDrawnAlike(readGurmukhiHooksAsVirama(readChillusAsDrawn(name))))
     .replace(SPACE_BEFORE_SPACING_VOICING_MARK, "");
   const symbols = foldSymbols(separateVoicing(voicingMarksClosed, SYMBOL_VOICING_STAND_INS));
   const skeletal = foldSymbols(splitVoicedKana(skeleton(symbols, SYMBOL_VOICING_STAND_INS)));
@@ -695,7 +802,11 @@ const orderKeys = (text: string): OrderKeys => ({
   letterVisual: letterVisualKey(text),
 });
 
-/** Keys of `name` (compute once per player: see RoomManager). */
+/**
+ * Keys of `name` (compute once per player: see RoomManager), only for a name isValidUsername accepted: the key regexes
+ * rely on its bounds (15 units, at most four marks in a row), as KEPT_VIRAMA's lookbehind is quadratic in a run of
+ * marks (tests/playerNameKeysAfterValidation.integration.test.ts).
+ */
 export function nameKeys(name: string): NameKeys {
   return { stored: orderKeys(name), drawn: orderKeys(displayOrder(name)) };
 }

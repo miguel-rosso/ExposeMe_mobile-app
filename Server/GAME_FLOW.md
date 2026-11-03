@@ -247,7 +247,13 @@ After last round: game-over
   it with the first half (`ದ` + `ೆ` + `ೕ` is `ದೇ`, `ক` + `ে` + `ৗ` is `কৌ`). The Malayalam AU length mark is fine alone, the modern spelling of AU (`കൗ`).
   A letter with a vowel sign may not also carry the Gurmukhi yakash (U+0A75) or a Gujarati mark U+0AFA–0AFF (sukun,
   shadda, maddah, the nuktas above): drawn where the vowel signs go, they hide the sign, which the keys keep while
-  they drop the mark (EXP-362); alone on a letter they are fine.
+  they drop the mark (EXP-362); alone on a letter they are fine. A virama must be the last mark on a consonant or
+  vowel letter of its script, after nothing but a nukta (`फ़्रेड`): one on a digit, an avagraha, an om sign,
+  punctuation, a space, a chillu, the khanda ta or the nakaara pollu, before or after a vowel sign or anusvara, a
+  second one, and the archaic Malayalam vertical-bar and circular viramas are refused, since the keys keep viramas only
+  there (EXP-374). So are marks the keys drop that are drawn like the virama with a dot or as a ring where it goes: the
+  Malayalam candrabindu and combining anusvara above (`കമലഁ` like `കമല്`) and the Sinhala candrabindu but over a
+  kombuva (`කමලඁ` like `කමල්`).
   Otherwise: `"Invalid username"`. The name
   is stored and sent to everyone **exactly as typed** (the app compares its own typed name with the room's names).
 - Names that read the same on screen can't share a room. Three keys are compared. `nameKey`: Hangul conjoining jamo
@@ -256,9 +262,11 @@ After last round: game-over
   symbol and spacing mark, plus the lowercase forms of letters it only lists as capitals, such as Cyrillic small ka;
   `managers/asciiConfusables.ts`, regenerated with `scripts/generateAsciiConfusables.mjs`), then NFKC, combining
   marks and accents dropped unless they sit on a space, are an Indic dependent vowel sign (EXP-343: `राज` and `राजु`
-  are different names; but the Devanagari sign OE, which iOS draws blank; nukta, anusvara, candrabindu and virama are
-  still dropped, so `राज़` and `राजं` are `राज`; the Sinhala al-lakuna that NFD splits off the long E and long O
-  signs is kept with them, EXP-357: `කේ` and `කෙ`, `කෝ` and `කො` are different names) or are a Japanese voicing mark (dakuten, handakuten) on a kana
+  are different names; but the Devanagari sign OE, which iOS draws blank; nukta, anusvara and candrabindu are still
+  dropped, so `राज़` and `राजं` are `राज`), are an Indic virama drawn as a stroke or hook on a letter of its script
+  (EXP-374: `കമല്` Kamal and `കമല` Kamala, `राज्` and `राज`, `क्ष` and `कष` are different names; so is the Sinhala
+  al-lakuna, also the one NFD splits off the long E and long O signs, EXP-357: `කේ` and `කෙ`, `කෝ` and `කො`; but the
+  Tamil pulli, a dot, is dropped like a Latin dot above: `கமல்` is `கமல`) or are a Japanese voicing mark (dakuten, handakuten) on a kana
   that takes it (NFC joins them: `た` + dakuten is `だ`; on a Latin letter, `ん` or a kanji it is dropped), the
   table again, case-folded, joiners dropped, whitespace trimmed and collapsed. The table runs before NFKC too, so long s still reads as `f`. `visualKey`: the same, but
   symbols drawn like other symbols read as their UTS #39 prototype first (a second table in the same file,
@@ -286,11 +294,20 @@ After last round: game-over
   (EXP-372: `க்ஷை` next to `னக்ஷ`). In the visual key, Malayalam chillus typed as before Unicode
   5.1, consonant + virama + ZWJ, read as the atomic chillu fonts draw, and so do the digits nine `൯` and four
   `൪`, drawn exactly like chillu N and chillu RR (EXP-372: `അന്` + ZWJ + `വർ`, `അൻവർ` and
-  `അ൯വർ` together); the letter visual key keeps reading them as the bare consonant, like a virama without ZWJ.
-  Left out: spellings UTS #39 writes with a character of
-  another script or a Latin-style mark (Telugu `భ` as `బ` + dot below), and letters it writes with a virama, which the
-  keys drop, so the letter would meet the bare consonant (Malayalam chillu `ൽ` as `ല്`: `കമൽ` stays apart from
-  `കമല`). The Devanagari and Gujarati candra O read as AA + candra E (`ॉ` as `ाॅ`, `ऑ` as `आॅ`, `ૉ` as `ાૅ`, `ઑ`
+  `അ൯വർ` together); the letter visual key keeps reading them as consonant + virama, like a virama without ZWJ, never
+  as the bare consonant (EXP-374: `കമല്` + ZWJ stays apart from `കമല`). In both visual keys the Gurmukhi and Kannada
+  viramas read as the Devanagari and Telugu ones (`ਸ੍` next to `म्`, Kannada `ಜಯ್` next to Telugu `జయ్`), and in the
+  visual key so do the Gurmukhi udaat and yakash, a hook under the letter where the virama is (`ਰਾਜੑ` next to `ਰਾਜ੍`;
+  the other keys drop them like a dot); a virama is
+  kept on a letter of its script or its sister script (Devanagari and Gurmukhi, Telugu and Kannada: `ਪ੍ਰੇਮ` stays
+  apart from `ਪਰੇਮ`) and dropped on a letter read as another script's (`ഥ്` next to Tamil `ம்` and `ம`); the
+  Devanagari, Bengali, Gurmukhi, Gujarati and Oriya viramas with no letter of their script after them (ending a word),
+  a tick the size of a nukta, are dropped (`राजन्` next to `राजन`, `हनुमान्` next to `हनुमान`; before a letter they make a
+  conjunct, another name: `क्ष` and `कष`); and the Sinhala candrabindu over a kombuva reads as its al-lakuna.
+  Left out: spellings UTS #39 writes with a character of another script or
+  a Latin-style mark (Telugu `భ` as `బ` + dot below; `బ` + the Telugu nukta draws a ring under `బ`, apart from `భ`),
+  and letters it writes with a virama, drawn apart from that spelling (EXP-374: the Malayalam chillu `ൽ` has no
+  chandrakkala, so `കമൽ` stays apart from `കമല്`; Kohinoor draws `र्इ` as `र्` + `इ`, apart from `ई`). The Devanagari and Gujarati candra O read as AA + candra E (`ॉ` as `ाॅ`, `ऑ` as `आॅ`, `ૉ` as `ાૅ`, `ઑ`
   as `અાૅ`: `चॉदनी` next to `चाँदनी`), with the candra E and candra A letters as E or A + candra E (`ऍ` as `एॅ`, `ॲ`
   as `अॅ`, `ઍ` as `અૅ`). So real Tamil names such as `கரன்` (Karan) and `கான்` (Khan), or Telugu `రామ` (Rama) and
   `రావు` (Rao), count as `similar`, the same criterion as `Clara` and `Dara`. The code points Unicode

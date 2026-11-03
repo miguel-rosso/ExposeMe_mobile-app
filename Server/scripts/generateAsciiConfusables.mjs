@@ -46,10 +46,12 @@
 // characters the tables above read, composed characters (playerName decomposes Indic text first, so their parts are
 // read), prototypes holding a character of another script, a mark of none or one newer than the generating Node (no
 // name spells them: Telugu "భ" as "బ" + a Latin dot below, Devanagari "आ" as "अ" + a Nandinagari sign), and letters
-// whose prototype holds a virama: the name keys drop it, so the letter would read as bare consonants it is not drawn
-// like (Malayalam chillu L as LA + virama would put "കമൽ" next to "കമല"). Other characters keep it: digits and
-// symbols, which real names don't hold ("൬" as "ന്ന"). Across scripts (EXP-375), only the pairs of
-// CROSS_SCRIPT_INDIC, reviewed one by one: Gurmukhi "ਟ" as Devanagari "ट", Malayalam "ഖ" as Tamil "வ".
+// whose prototype holds a virama, drawn apart from that spelling in the app's fonts (EXP-374, measured in the Sangam
+// fonts and Kohinoor): the chillus have no chandrakkala (Malayalam chillu L as LA + virama would put "കമൽ" next to
+// "കമല്"), and Devanagari "र्इ" draws RA with its virama before I, no reph like "ई"; the Sinhala "එ්" is refused in
+// names. Other characters keep it: digits and symbols, which real names don't hold ("൬" as "ന്ന"). Across scripts
+// (EXP-375), only the pairs of CROSS_SCRIPT_INDIC, reviewed one by one: Gurmukhi "ਟ" as Devanagari "ट", Malayalam
+// "ഖ" as Tamil "வ".
 import { readFileSync } from "fs";
 
 const ASCII_PROTOTYPE = /^[A-Za-z0-9]{1,3}$/;

@@ -87,8 +87,9 @@ describe("Indic independent vowels with a vowel sign", () => {
 });
 
 // EXP-343: the keys keep the dependent vowel signs, so names that differ by a vowel sign are different names ("Raj" and
-// "Raju"), while the other marks are still dropped (nukta, anusvara, candrabindu, virama). A sign alone on a letter of
-// its script is the only spelling accepted, so no stack of signs or foreign mark draws like a sign the keys don't see.
+// "Raju"), while the other marks are still dropped (nukta, anusvara, candrabindu; the virama is kept since EXP-374). A
+// sign alone on a letter of its script is the only spelling accepted, so no stack of signs or foreign mark draws like a
+// sign the keys don't see.
 
 const clash = (a: string, b: string) => nameClash(nameKeys(a), nameKeys(b));
 
@@ -119,7 +120,6 @@ describe("Indic dependent vowel signs (EXP-343)", () => {
     ["nukta", "\u0930\u093E\u091C", "\u0930\u093E\u091C\u093C"],
     ["anusvara", "\u0930\u093E\u091C", "\u0930\u093E\u091C\u0902"],
     ["candrabindu", "\u092E\u093E", "\u092E\u093E\u0901"],
-    ["virama", "\u0930\u093E\u091C", "\u0930\u093E\u091C\u094D"],
     ["Gurmukhi tippi", "\u0A15\u0A3E", "\u0A15\u0A3E\u0A70"],
     // Drawn blank by Kohinoor Devanagari on iOS
     ["Devanagari sign OE", "\u0930\u093E\u091C", "\u0930\u093E\u091C\u093A"],

@@ -123,7 +123,6 @@ export const PhotoProvider: React.FC<PhotoProviderProps> = ({ children }) => {
       if (uri) {
         const encodedUri = encodeURI(uri);
         console.log("Random photo selected.");
-        setPhotoUri(encodedUri);
         return { uri: encodedUri };
       }
     }
@@ -135,6 +134,10 @@ export const PhotoProvider: React.FC<PhotoProviderProps> = ({ children }) => {
   /** A new game starts: photos sent in earlier games may come up again (no repeats within a game, EXP-162). */
   const resetUsedPhotos = useCallback(() => picker.reset(), [picker]);
 
+  /**
+   * My Photos: picks a random photo and shows it through `photoUri`. The game turn uses `pickGamePhoto` instead,
+   * which leaves `photoUri` alone so no consumer re-renders just before round-start (EXP-398).
+   */
   const getRandomPhoto = useCallback(async (): Promise<string | null> => {
     console.log("Getting random photo...");
     const hasPermission = await requestGalleryPermission({ askAgain: true });
@@ -143,7 +146,9 @@ export const PhotoProvider: React.FC<PhotoProviderProps> = ({ children }) => {
       return null;
     }
     const result = await pickFromGallery();
-    return "uri" in result ? result.uri : null;
+    if (!("uri" in result)) return null;
+    setPhotoUri(result.uri);
+    return result.uri;
   }, [requestGalleryPermission, pickFromGallery]);
 
   /**

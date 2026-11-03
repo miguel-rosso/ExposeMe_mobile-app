@@ -15,6 +15,7 @@ jest.mock("@react-native-async-storage/async-storage", () =>
 const mockSocket = new FakeSocket();
 const mockPickGamePhoto = jest.fn();
 const mockUploadPhoto = jest.fn();
+const mockSetPhotoUri = jest.fn();
 jest.mock("expo-router", () => ({
   useRouter: () => ({ replace: jest.fn() }), useLocalSearchParams: () => ({}), useFocusEffect: () => {},
 }));
@@ -27,7 +28,7 @@ jest.mock("../app/providers/GameContext", () => ({
 }));
 jest.mock("../app/providers/PhotoContext", () => ({
   usePhotoContext: () => ({
-    pickGamePhoto: (...a: unknown[]) => mockPickGamePhoto(...a), setPhotoUri: jest.fn(),
+    pickGamePhoto: (...a: unknown[]) => mockPickGamePhoto(...a), setPhotoUri: mockSetPhotoUri,
     checkGalleryAccess: async () => ({ status: "ok", limited: false, canAskAgain: true }),
     selectMorePhotos: jest.fn(async () => {}),
   }),
@@ -50,6 +51,7 @@ afterAll(() => jest.restoreAllMocks());
 beforeEach(() => {
   mockPickGamePhoto.mockReset();
   mockUploadPhoto.mockReset();
+  mockSetPhotoUri.mockReset();
   mockSocket.emitted = [];
 });
 // Unmounted even when a test fails: a screen left mounted would answer the next test's your-turn too
@@ -75,6 +77,8 @@ describe("GameScreen my turn with an unconvertible photo (EXP-292)", () => {
     expect(mockPickGamePhoto).toHaveBeenCalledTimes(2);
     expect(mockSocket.emitted).toContainEqual(["photo-sent", { photo: "/temp/ok.jpg" }]);
     expect(mockSocket.emitted.some(([event]) => event === "photo-unavailable")).toBe(false);
+    // EXP-398: My Photos' photoUri is not the game's to clear (it re-rendered the game and the hidden home)
+    expect(mockSetPhotoUri).not.toHaveBeenCalled();
   });
 
   it("reports photo-unavailable only after several unconvertible photos", async () => {

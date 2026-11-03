@@ -75,7 +75,7 @@ const GameScreen = () => {
   } = useGameContext();
   const safeUsername = username ?? "";
   const safeGameCode = gameCode ?? "";
-  const { pickGamePhoto, setPhotoUri, resetUsedPhotos } = usePhotoContext();
+  const { pickGamePhoto, resetUsedPhotos } = usePhotoContext();
   // One game screen per game (reconnects stay on it): a new screen is a new game, earlier photos may come up again.
   // Optional call: screen tests mock the photo context with only what their flow needs.
   useEffect(() => { resetUsedPhotos?.(); }, [resetUsedPhotos]);
@@ -353,7 +353,6 @@ const GameScreen = () => {
             paused: () => turnRequest.isSuspended(data),
           });
           if ("error" in result) { turnRequest.reportUnavailable(result.error, data); return; }
-          setPhotoUri(null);
           turnRequest.sendPhoto(data, result.url);
           return;
         } catch (e) { console.log("your-turn error:", e); } // never a device toast: my turn must not show (EXP-252)

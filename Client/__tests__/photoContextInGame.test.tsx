@@ -43,10 +43,11 @@ const perm = (status: string, accessPrivileges: string, canAskAgain = true) => (
 
 async function setup() {
   let ctx!: ReturnType<typeof usePhotoContext>;
-  const Probe = () => { ctx = usePhotoContext(); return null; };
+  let renders = 0;
+  const Probe = () => { ctx = usePhotoContext(); renders++; return null; };
   let r!: TestRenderer.ReactTestRenderer;
   await act(async () => { r = TestRenderer.create(<PhotoProvider><Probe /></PhotoProvider>); });
-  return { get ctx() { return ctx; }, r };
+  return { get ctx() { return ctx; }, get renders() { return renders; }, r };
 }
 
 describe("pickGamePhoto (in-game, EXP-041)", () => {
@@ -121,6 +122,37 @@ describe("pickGamePhoto (in-game, EXP-041)", () => {
     let result: any;
     await act(async () => { result = await t.ctx.pickGamePhoto(); });
     expect(result.uri).toMatch(/^file:\/\/\/photos\/p[12]\.jpg$/);
+    act(() => t.r.unmount());
+  });
+});
+
+// EXP-398: only My Photos shows photoUri. A game turn writing it re-rendered every PhotoContext consumer (the game
+// screen and the home hidden under it) right before round-start arrived.
+describe("photoUri belongs to My Photos only (EXP-398)", () => {
+  beforeEach(() => {
+    mockGetPermissions.mockReset();
+    mockGetPermissions.mockResolvedValue(perm("granted", "all"));
+    mockPhotos.length = 0;
+    mockPhotos.push({ id: "p1", mediaType: "image" });
+  });
+
+  it("a game-turn pick leaves photoUri untouched and re-renders no consumer", async () => {
+    const t = await setup();
+    const rendersBefore = t.renders;
+    let result: unknown;
+    await act(async () => { result = await t.ctx.pickGamePhoto(); });
+    expect(result).toEqual({ uri: "file:///photos/p1.jpg" });
+    expect(t.ctx.photoUri).toBeNull();
+    expect(t.renders).toBe(rendersBefore);
+    act(() => t.r.unmount());
+  });
+
+  it("My Photos still shows the photo it picks", async () => {
+    const t = await setup();
+    let uri: string | null = null;
+    await act(async () => { uri = await t.ctx.getRandomPhoto(); });
+    expect(uri).toBe("file:///photos/p1.jpg");
+    expect(t.ctx.photoUri).toBe(uri);
     act(() => t.r.unmount());
   });
 });

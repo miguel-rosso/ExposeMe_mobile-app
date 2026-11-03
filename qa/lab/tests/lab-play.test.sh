@@ -7,7 +7,7 @@
 # downloading the JS bundle (EXP-256) or whose dev-client-boot.yaml loaded check failed: its bundle wait ran out
 # (EXP-297) or it gave up at once on "There was a problem loading the project" (EXP-304); the scoreboards each device
 # checked in play-rounds.yaml and the Maestro version warning (EXP-312), and the holds each device of a hold-used-up.yaml
-# run used up, from the bots' summary (EXP-371).
+# run used up, from the bots' summary (EXP-371), and the hold button point each iOS device gets for its model (EXP-413).
 # Run: qa/lab/tests/lab-play.test.sh
 set -uo pipefail
 
@@ -219,6 +219,26 @@ rc=$?
 [ $rc = 0 ] && ! grep -qi "holds used up" "$TMP/play.out" \
   && ok "a flow without the marker doesn't check the holds" || ko "unmarked flow ignores the holds" "rc=$rc $(cat "$TMP/play.out")"
 rm -rf "$QA/maestro"
+
+# ── Where hold-used-up.yaml taps the hold button on iOS, per device model (EXP-413) ──
+# Each iOS device gets its model's point (the iPad mini's button sits lower than the iPhones'); Android taps the element
+# and gets none. A device without a model gets the iPhone default
+LAB_DEVICES_JSON="$DEVICES_JSON"; DEVICES_JSON="$TMP/models.json"
+cat >"$DEVICES_JSON" <<'EOF'
+[{"id":"FAKE-1","label":"ios-a","platform":"ios","model":"iPhone 17"},
+ {"id":"FAKE-4","label":"ios-d","platform":"ios","model":"iPad mini (A17 Pro)"},
+ {"id":"FAKE-9","label":"ios-z","platform":"ios"},
+ {"id":"emulator-5554","label":"android-a","platform":"android","model":"exposeme_a"}]
+EOF
+play r-hold-points --bots 2 --rounds 10 --devices all
+rc=$?
+tap_point_of() { grep -- "--test-output-dir [^ ]*/$1 " "$TMP/maestro.args" | grep -oE -- "-e HOLD_TAP_POINT=[^ ]*" ; } # label
+[ $rc = 0 ] && [ "$(tap_point_of ios-a)" = "-e HOLD_TAP_POINT=50%,82%" ] \
+  && [ "$(tap_point_of ios-d)" = "-e HOLD_TAP_POINT=50%,87%" ] && [ "$(tap_point_of ios-z)" = "-e HOLD_TAP_POINT=50%,82%" ] \
+  && [ -z "$(tap_point_of android-a)" ] \
+  && ok "play passes each iOS device its model's hold tap point (iPhone 50%,82%, iPad mini 50%,87%), Android none" \
+  || ko "HOLD_TAP_POINT per device model" "rc=$rc $(cat "$TMP/maestro.args")"
+DEVICES_JSON="$LAB_DEVICES_JSON"
 
 # Second room never publishes a code: fail loudly, nothing left running, no device run
 STUB_NO_CODE=3 LAB_ROOM_CODE_TIMEOUT=1 play r3 --bots 2 --devices ios-a --second-room "--bots 3 --host --wait-players 99"

@@ -11,7 +11,7 @@
 # assertTrue scripts) is one step: a wait like extendedWaitUntil that notes when each of its looks starts and ends.
 # Then play-rounds.yaml's scoreboard deadline is checked against GameEngine.ts, and the flow is played on a fake game
 # with slow screen reads (maestro-sim.mjs, scenario `rounds`); hold-used-up.yaml's copy of the hold times too (and the
-# flow on a fake game of its own, scenario `hold`), and the
+# flow on a fake game of its own, scenario `hold`) and its iOS tap by point on each lab model's screen (EXP-413), and the
 # kick-after-game flows' waits against the bots' kick delay (EXP-346). No devices, servers or network.
 # Run: qa/lab/tests/maestro-timing.test.sh
 set -uo pipefail
@@ -537,6 +537,65 @@ sed 's/output.round.greySeenAt < output.round.closingFrom/true/' \
 ! used_up_bounded "$TMP/hold-used-up-late-read.yaml" \
   && ok "checker rejects a used-up look whose read may end after closingFrom" \
   || ko "checker rejects the unbounded used-up look"
+
+# ── hold-used-up.yaml's tap by point lands on the hold button of every lab iOS model (EXP-413) ──
+# On iOS the flow taps HOLD_TAP_POINT, which lab.sh play passes per device model (hold_tap_point), else lab.sh's
+# HOLD_TAP_POINT_DEFAULT. The button's middle sits insets.bottom + HOLD_BUTTON_BOTTOM + HOLD_BUTTON_HEIGHT / 2 above the
+# bottom edge (Client/src/utils/gameRows.ts), so how far down it spans depends on the screen: every IOS_MODELS model's
+# point must lie inside it, TAP_MARGIN_PCT from its edges, on that model's screen in portrait
+GAME_ROWS="$HERE/../../../Client/src/utils/gameRows.ts"
+TAP_MARGIN_PCT=1
+ios_screen() { # IOS_MODELS model -> "<height> <bottom inset>" in pt, portrait (Apple's specs), or nothing
+  case $1 in
+    "iPhone 17") echo "874 34";; "iPhone 16e") echo "844 34";; "iPhone 17 Pro Max") echo "956 34";;
+    "iPad mini (A17 Pro)") echo "1133 20";;
+  esac
+}
+hold_button_span() { # screen height, bottom inset (pt) -> "<top>-<bottom>": the hold button's edges, in % down the screen
+  node -e '
+    const fs = require("fs");
+    const constant = /^export const ([A-Z_]+) = ([A-Z_0-9 +]+);$/gm; // a number, or a sum of the ones before it
+    const values = {};
+    for (const [, name, expr] of fs.readFileSync(process.argv[1], "utf8").matchAll(constant)) {
+      values[name] = new Function(...Object.keys(values), `return (${expr});`)(...Object.values(values));
+    }
+    const [height, inset] = process.argv.slice(2).map(Number);
+    const down = (fromBottom) => ((100 * (height - fromBottom)) / height).toFixed(1);
+    const bottom = inset + values.HOLD_BUTTON_BOTTOM;
+    console.log(`${down(bottom + values.HOLD_BUTTON_HEIGHT)}-${down(bottom)}`);
+  ' "$GAME_ROWS" "$1" "$2"
+}
+point_on_button() { # point (x%,y%), screen height, bottom inset -> exit 0 when it is the button's middle column, inside it
+  local x y top bottom
+  IFS=, read -r x y <<<"${1//%/}"
+  IFS=- read -r top bottom < <(hold_button_span "$2" "$3")
+  [ "$x" = 50 ] && awk -v y="$y" -v top="$top" -v bottom="$bottom" -v m="$TAP_MARGIN_PCT" \
+    'BEGIN { exit !(y >= top + m && y <= bottom - m) }'
+}
+# lab.sh's models and their points (a subshell sources its functions only), then its default
+ios_points="$(bash -c 'source "$1"; for m in "${IOS_MODELS[@]}"; do printf "%s\t%s\n" "$m" "$(hold_tap_point "$m")"; done
+  printf "default\t%s\n" "$HOLD_TAP_POINT_DEFAULT"' _ "$HERE/../lab.sh")"
+tap_default="$(sed -nE 's/^default\t//p' <<<"$ios_points")"
+while IFS=$'\t' read -r model point; do
+  [ "$model" = default ] && continue
+  screen="$(ios_screen "$model")"
+  if [ -z "$screen" ]; then ko "hold-used-up.yaml: no screen size for lab.sh's iOS model '$model' (add it to ios_screen)"; continue; fi
+  # shellcheck disable=SC2086 # height and inset
+  span="$(hold_button_span $screen)"
+  # shellcheck disable=SC2086
+  point_on_button "$point" $screen && ok "hold-used-up.yaml taps $model's hold button at $point (it spans $span% down)" \
+    || ko "hold-used-up.yaml's tap at $point misses $model's hold button" "it spans $span% down"
+done <<<"$ios_points"
+# EXP-413's bug: the iPhones' point on every model, the iPad mini's too
+# shellcheck disable=SC2086 # height and inset
+! point_on_button "$tap_default" $(ios_screen "iPad mini (A17 Pro)") \
+  && ok "checker rejects the iPhones' point ($tap_default) on the iPad mini" \
+  || ko "checker rejects the iPhones' point on the iPad mini"
+# The flow taps lab.sh's point on iOS, lab.sh's default when it gets none
+# shellcheck disable=SC2016 # a Maestro expression, not a shell one
+[ -n "$tap_default" ] && grep -qxF "                      point: \${HOLD_TAP_POINT || \"$tap_default\"}" "$HOLD_FLOW" \
+  && ok "hold-used-up.yaml taps HOLD_TAP_POINT on iOS, lab.sh's default ($tap_default) without it" \
+  || ko "hold-used-up.yaml taps \${HOLD_TAP_POINT || \"<lab.sh's default>\"}" "default: ${tap_default:-none}"
 
 # ── hold-closed.yaml's times fit the server's (EXP-354) ──
 # Without tapping: the button is enabled while the hold window is surely open (until hiddenFrom + SCORE_DISPLAY_TIME -

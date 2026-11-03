@@ -66,6 +66,18 @@ SERVER_PORT=3000
 # no dev-menu onboarding sheet and no dev menu opening over the app at launch (EXP-282, EXP-313)
 DEV_CLIENT_URL="exp+expose-me://expo-development-client/?url=http%3A%2F%2Flocalhost%3A${METRO_PORT}&disableOnboarding=1&disableAutoLaunch=1&__expo_disable_auto_launch=1"
 IOS_MODELS=("iPhone 17" "iPhone 16e" "iPhone 17 Pro Max" "iPad mini (A17 Pro)")
+# Where hold-used-up.yaml taps the hold button on iOS, a tap by point (EXP-371): the button's middle sits insets.bottom
+# + HOLD_BUTTON_BOTTOM + HOLD_BUTTON_HEIGHT / 2 above the bottom edge (Client/src/utils/gameRows.ts). 82% down is inside
+# it on the iPhones of IOS_MODELS (their 34 pt home indicator), not on the iPad mini, whose button sits lower (EXP-413).
+# play passes each iOS device its model's point (HOLD_TAP_POINT); maestro-timing.test.sh checks every IOS_MODELS point
+# lies inside the button on that model's screen. The flow's own default is HOLD_TAP_POINT_DEFAULT
+HOLD_TAP_POINT_DEFAULT="50%,82%"
+hold_tap_point() { # iOS device model -> the point (x%,y%) hold-used-up.yaml taps its hold button at
+  case $1 in
+    "iPad mini"*) echo "50%,87%";;
+    *) echo "$HOLD_TAP_POINT_DEFAULT";;
+  esac
+}
 AVD_IMAGE="system-images;android-35;google_apis_playstore;arm64-v8a"
 AVD_NAMES=("exposeme_a" "exposeme_b" "exposeme_c")
 AVD_DEVICES=("pixel_7" "pixel_4" "pixel_tablet")
@@ -801,6 +813,7 @@ run_maestro_flow() { # device id, flow file, output dir, run name, maestro args.
 run_device_flow() { # device json, flow file, output dir, maestro args...: the flow, re-run once after a stuck boot
   local d=$1 flow=$2 out=$3 id label platform; shift 3
   id="$(jq -r .id <<<"$d")"; label="$(jq -r .label <<<"$d")"; platform="$(jq -r .platform <<<"$d")"
+  [ "$platform" != ios ] || set -- "$@" -e HOLD_TAP_POINT="$(hold_tap_point "$(jq -r '.model // ""' <<<"$d")")"
   run_maestro_flow "$id" "$flow" "$out" "$label" "$@" && return 0
   local reason; reason="$(stuck_booting_reason "$out/$label")" || return 1
   warn "$label: dev client stuck loading the JS bundle ($reason); force-stopping the app and running" \

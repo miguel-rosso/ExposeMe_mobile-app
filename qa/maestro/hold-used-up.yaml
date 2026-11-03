@@ -13,7 +13,8 @@
 # have seen the game over instead is not counted: so the device's only own scoreboard being the last round, with the
 # game over seen right after its taps, fails too; with 2 bots under 1% of 10-round games have no earlier one).
 # lab: holds used up (the bots' hold-end events tell whether the device's holds counted, EXP-371)
-# env: GAME_CODE, USERNAME, METRO_URL (url-encoded), LOBBY_WAIT_MS (optional; lab.sh play passes them)
+# env: GAME_CODE, USERNAME, METRO_URL (url-encoded), LOBBY_WAIT_MS and HOLD_TAP_POINT (optional; lab.sh play passes
+# them, the last one to iOS devices: see Timing)
 # Selectors are testIDs (Client/src/utils/testIds.ts). The button's text is filtered by noHoldsLeft in both languages
 # (Client/src/i18n, kept in sync by qa/lab/tests/maestro-selectors.test.sh): the hold button is one accessibility
 # element whose label is its text (iOS label, Android content description), and `enabled: false` is its disabled state.
@@ -56,10 +57,12 @@
 # the command about 3 s after the taps, past closingFrom, where the greyed out button no longer tells the holds apart
 # from hold-closed (no Maestro 2.11 tap or swipe skips it), so on iOS the flow never checks the button: lab.sh's check
 # from the bots is the proof there. The point is the hold button's middle, insets.bottom + HOLD_BUTTON_BOTTOM +
-# HOLD_BUTTON_HEIGHT / 2 = 162 pt above the bottom edge (Client/src/utils/gameRows.ts): 82% down is inside the button
-# on lab.sh's IOS_MODELS iPhones (17, 16e and 17 Pro Max: on all three it spans 79.7-84.6% at least). The iPad mini's
-# sits lower (84-90%): the taps miss it there, and lab.sh fails the run. Android taps the element: its driver passes
-# waitToSettleTimeoutMs on. hold-closed.yaml taps nothing and runs on both.
+# HOLD_BUTTON_HEIGHT / 2 above the bottom edge (Client/src/utils/gameRows.ts), which depends on the screen and its
+# home indicator: 82% down is inside the button on lab.sh's IOS_MODELS iPhones (17, 16e and 17 Pro Max: on all three it
+# spans 79.7-84.6% at least), 87% on the iPad mini (84.1-89.8%). So the point is HOLD_TAP_POINT, which lab.sh play
+# passes per device model (hold_tap_point, EXP-413; maestro-timing.test.sh checks each model's against its screen),
+# and 82% when it is not given. Android taps the element: its driver passes waitToSettleTimeoutMs on. hold-closed.yaml
+# taps nothing and runs on both.
 # The 4th tap's press and release are a few ms apart, so a hold it started may be over before the look for it reads
 # the screen: the look surely catches a hold that stays on. The server tests (Server/tests/holdsLeft.test.ts) refuse
 # the 4th hold itself, and the app's disabled button is checked by `enabled: false`.
@@ -122,13 +125,14 @@ appId: com.socketNull.ExposeMe
                       retryTapIfNoChange: false
                       waitToSettleTimeoutMs: 200
                       optional: true
-            # The hold button's middle on the lab's iPhones (see the header: an element tap comes too late there)
+            # The hold button's middle (see the header: an element tap comes too late there): lab.sh passes the
+            # device model's point, the default fits the lab's iPhones (EXP-413)
             - runFlow:
                 when:
                   platform: iOS
                 commands:
                   - tapOn:
-                      point: "50%,82%"
+                      point: ${HOLD_TAP_POINT || "50%,82%"}
                       repeat: 4
                       delay: 250
                       retryTapIfNoChange: false

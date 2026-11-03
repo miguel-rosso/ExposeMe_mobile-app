@@ -472,40 +472,107 @@ const EMPTY_BOX = "\uE000";
 
 // Visual keys only (EXP-376): Mongolian vowels the Unicode Standard encodes apart for their sound but "written
 // identically in all positional forms" (chapter 13.2, Mongolian; so Noto Sans Mongolian draws them): U as O and UE as
-// OE. O and OE are drawn alike only outside a word's first syllable (readMongolianWordsAsDrawn)
+// OE. O and OE are drawn alike only outside a word's first syllable (MONGOLIAN_READINGS)
 const MONGOLIAN_LOOKALIKES: ReadonlyMap<string, string> = new Map([["\u1824", "\u1823"], ["\u1826", "\u1825"]]);
 
-// Visual keys only (EXP-385): Mongolian letters drawn alike in some places of a word, as Noto Sans Mongolian 3.002 (the
-// font iOS ships) shapes them: measured with HarfBuzz, Android's shaper, on 44,000 pairs of random words one or more of
-// these letters apart, the only pairs read alike but drawn apart hold the word "ᠤᠤ" or "ᠦᠦ", which the font draws on
-// its own, and still read as O + O by MONGOLIAN_LOOKALIKES: Noto Sans Mongolian 1.04, the font Android ships, draws
-// them like "ᠣᠤ", "ᠤᠣ", "ᠣᠣ" and "ᠥᠦ", "ᠦᠥ", "ᠥᠥ" (EXP-407). A word is a run of the letters U+1820-U+1842 with nothing
-// next to it that could join it or change its shapes (MONGOLIAN_SHAPING): the Mongolian letters, the Sibe syllable
-// boundary marker, the nirugu, the variation selectors, the vowel separator, the joiners and any mark (measured so in
-// that font, but the Ali Gali signs U+1880-U+1884, the separator and the joiners, kept to be safe; names can't hold the
-// last three). Punctuation (the full stop "᠃", the Manchu "᠉") and digits ("᠑") join nothing: a word next to them is
-// read too
+// Visual keys only (EXP-385, EXP-409, EXP-410): Mongolian letters drawn alike in some places of a word, which Noto Sans
+// Mongolian 3.002 (the font iOS ships) and 1.04 (the font Android ships) place apart, so each font has its readings
+// (MONGOLIAN_READINGS). Measured with HarfBuzz, Android's shaper, on 44,000 pairs of random words one or more of these
+// letters apart and checked on 640,000 more: no pair read alike is drawn apart by both fonts. A word is a run of the
+// letters U+1820-U+1842 with nothing next to it that could join it or change its shapes (MONGOLIAN_SHAPING): the
+// Mongolian letters, the Sibe syllable boundary marker, the nirugu, the variation selectors, the vowel separator, the
+// joiners and any mark (measured so in 3.002, but the Ali Gali signs U+1880-U+1884, the separator and the joiners, kept
+// to be safe; names can't hold the last three). Punctuation (the full stop "᠃", the Manchu "᠉") and digits ("᠑") join
+// nothing: a word next to them is read too
 const MONGOLIAN_SHAPING = "[\\u1807\\u180A-\\u180F\\u1820-\\u1878\\u1880-\\u18AA\\u200C\\u200D\\p{M}]";
 const MONGOLIAN_WORD = new RegExp(`(?<!${MONGOLIAN_SHAPING})[\\u1820-\\u1842]+(?!${MONGOLIAN_SHAPING})`, "gu");
-// OE and UE outside the first syllable, which Unicode (chapter 13.2) writes like O and U: after an earlier vowel of the
-// word ("ᠲᠣᠯᠥ" like "ᠲᠣᠯᠣ")
+const MONGOLIAN_O = "\u1823";
+const MONGOLIAN_T = "\u1832";
+
+// iOS (EXP-385): OE and UE outside the first syllable, which Unicode (chapter 13.2) writes like O and U: after an
+// earlier vowel of the word ("ᠲᠣᠯᠥ" like "ᠲᠣᠯᠣ")
 const OE_UE_PAST_FIRST_SYLLABLE = /(?<=[\u1820-\u1827][\u1820-\u1842]*)[\u1825\u1826]/gu;
 // Q and G, drawn one way in a word with masculine vowels and another with feminine ones: there OE and O still differ
 const Q_OR_G = /[\u182C\u182D]/u;
-const MONGOLIAN_O = "\u1823";
 // D inside a word before a vowel but EE, drawn like T there (chapter 13.2: "urtu" and "ordu" are written alike)
 const MEDIAL_D_BEFORE_VOWEL = /(?<=[\u1820-\u1842])\u1833(?=[\u1820-\u1826])/gu;
-const MONGOLIAN_T = "\u1832";
 
-/**
- * Mongolian `text` with OE and UE past a word's first syllable read as O, and D inside a word as T where alike: a
- * reading the visual keys take besides the name as typed (similarKeys), so a word the bounds leave out in one name and
- * not in the other still meets it as typed.
- */
-const readMongolianWordsAsDrawn = (text: string) => text.replace(MONGOLIAN_WORD, (word) => {
+/** Mongolian `text` with OE and UE past a word's first syllable read as O, and D inside a word as T where alike. */
+const readMongolianWordsAsDrawnOnIos = (text: string) => text.replace(MONGOLIAN_WORD, (word) => {
   const vowelsRead = Q_OR_G.test(word) ? word : word.replace(OE_UE_PAST_FIRST_SYLLABLE, MONGOLIAN_O);
   return vowelsRead.replace(MEDIAL_D_BEFORE_VOWEL, MONGOLIAN_T);
 });
+
+// iOS (EXP-409): the words "ᠤᠤ" and "ᠦᠦ" on their own, drawn alike there (O + U) and apart from "ᠣᠣ" and "ᠥᠥ", which
+// MONGOLIAN_LOOKALIKES reads them as: a private-use character, which names can't use, only meets the other one
+const UU_WORD = /^(?:\u1824\u1824|\u1826\u1826)$/u;
+const UU_WORD_MARK = "\uE001";
+
+/** The iOS reading of Mongolian `text` with the words "ᠤᠤ" and "ᠦᠦ" read as one mark. */
+const readMongolianWordsAsDrawnOnIosWithUuAsOne = (text: string) => readMongolianWordsAsDrawnOnIos(
+  text.replace(MONGOLIAN_WORD, (word) => (UU_WORD.test(word) ? UU_WORD_MARK : word)),
+);
+
+// Android (EXP-410): Noto Sans Mongolian 1.04 draws OE and UE like O and U but where they keep their stroke: first in
+// a word, or second after a consonant with letters after them (ONE_CONSONANT_BEFORE). After B inside a word, with
+// letters after, it draws U like OE and UE, and only O apart (B_INSIDE_WORD). Q and G take the shape of a vowel next to
+// them, so the vowels they look at are read as typed (SHAPED_BY_Q_OR_G_BEFORE, SHAPING_G_AFTER; measured on every
+// context of up to three letters between them, and kept to be safe where those differ)
+const MONGOLIAN_LETTER = "[\\u1820-\\u1842]";
+const MONGOLIAN_VOWEL = "[\\u1820-\\u1827]";
+const MONGOLIAN_VOWEL_BUT_I = "[\\u1820\\u1821\\u1823-\\u1827]";
+const MONGOLIAN_CONSONANT = "[\\u1828-\\u1842]";
+const MONGOLIAN_I = "\u1822";
+const MONGOLIAN_Q = "\u182C";
+const MONGOLIAN_G = "\u182D";
+const MONGOLIAN_D = "\u1833";
+const MONGOLIAN_U = "\u1824";
+const MONGOLIAN_OE = "\u1825";
+const I_OR_CONSONANT = `(?:${MONGOLIAN_I}|${MONGOLIAN_CONSONANT})`;
+const ROUND_VOWEL_BUT_O = /[\u1824-\u1826]/gu;
+const ONE_CONSONANT_BEFORE = new RegExp(`^${MONGOLIAN_CONSONANT}$`, "u");
+const B_INSIDE_WORD = /.\u182A$/u;
+const SHAPED_BY_Q_OR_G_BEFORE = new RegExp([
+  // right after Q or G
+  `(?:${MONGOLIAN_Q}|${MONGOLIAN_G})$`,
+  // after a G that starts the word or follows I or a consonant, with only consonants and I since: that G looks ahead
+  `(?:^|${I_OR_CONSONANT})${MONGOLIAN_G}${I_OR_CONSONANT}*$`,
+].join("|"), "u");
+const SHAPING_G_AFTER = new RegExp([
+  // right before a G that no vowel but I follows
+  `^${MONGOLIAN_G}(?!${MONGOLIAN_VOWEL_BUT_I})`,
+  // a consonant before a G ending the word
+  `^${MONGOLIAN_CONSONANT}${MONGOLIAN_G}$`,
+  // consonants, then one I right before a G that no vowel follows
+  `^${MONGOLIAN_CONSONANT}+${MONGOLIAN_I}${MONGOLIAN_G}(?!${MONGOLIAN_VOWEL})`,
+].join("|"), "u");
+// D drawn like T there: first in a word before any letter, inside it before any vowel
+const D_LIKE_T_ON_ANDROID = new RegExp(
+  `^${MONGOLIAN_D}(?=${MONGOLIAN_LETTER})|(?<=${MONGOLIAN_LETTER})${MONGOLIAN_D}(?=${MONGOLIAN_VOWEL})`,
+  "gu",
+);
+
+/** The U, OE or UE `vowel` at `index` of a Mongolian `word` read as the vowel Android's font draws it like. */
+function readRoundVowelOnAndroid(word: string, vowel: string, index: number): string {
+  const before = word.slice(0, index);
+  const after = word.slice(index + 1);
+  if (SHAPED_BY_Q_OR_G_BEFORE.test(before) || SHAPING_G_AFTER.test(after)) return vowel;
+  if (after && B_INSIDE_WORD.test(before)) return MONGOLIAN_OE;
+  if (vowel === MONGOLIAN_U || !before || (after && ONE_CONSONANT_BEFORE.test(before))) return vowel;
+  return MONGOLIAN_O;
+}
+
+/** Mongolian `text` with U, OE, UE and D read as the vowel and T Android draws them like. */
+const readMongolianWordsAsDrawnOnAndroid = (text: string) => text.replace(MONGOLIAN_WORD, (word) => word
+  .replace(ROUND_VOWEL_BUT_O, (vowel, index: number) => readRoundVowelOnAndroid(word, vowel, index))
+  .replace(D_LIKE_T_ON_ANDROID, MONGOLIAN_T));
+
+// Each reading of a Mongolian name as one font draws it: the keys take one at a time (similarKeys), since a phone
+// draws every name with the same font. The iOS one also without the mark for "ᠤᠤ" and "ᠦᠦ", which Android draws like
+// "ᠣᠣ" and "ᠥᠥ", so with a reading that changes one name and not the other a pair still meets as typed
+const MONGOLIAN_READINGS = [
+  readMongolianWordsAsDrawnOnIos, readMongolianWordsAsDrawnOnIosWithUuAsOne, readMongolianWordsAsDrawnOnAndroid,
+];
 
 // Visual keys only (EXP-374): the viramas of Devanagari, Bengali, Gurmukhi, Gujarati and Oriya with no letter of their
 // script after them, past marks (at the end of a word, before a space or punctuation), a tick under the letter the size
@@ -833,15 +900,18 @@ export interface NameKeys {
 /** How a name compares with another: the same name, a different one that looks too alike, or distinct. */
 export type NameClash = "same" | "similar" | null;
 
-// Ways a name may also be drawn, each taken or not (EXP-374, EXP-385, EXP-402, EXP-405): a reading only adds keys, so
-// a name still meets everything it meets as typed, also where a reading changes one name and not the other
-const OPTIONAL_READINGS: ReadonlyArray<(text: string) => string> = [
-  readGurmukhiHooksAsVirama, readChillusAsDrawn, readKhandaTaAsDrawn, readMongolianWordsAsDrawn,
+// Ways a name may also be drawn (EXP-374, EXP-385, EXP-402, EXP-405, EXP-409, EXP-410): from each group the keys take
+// none of its readings or one. A reading only adds keys, so a name still meets everything it meets as typed, also
+// where a reading changes one name and not the other
+const OPTIONAL_READINGS: ReadonlyArray<ReadonlyArray<(text: string) => string>> = [
+  [readGurmukhiHooksAsVirama], [readChillusAsDrawn], [readKhandaTaAsDrawn], MONGOLIAN_READINGS,
 ];
 
-/** `text` read with each combination of OPTIONAL_READINGS, always in the same order (as typed first). */
-const readingsOf = (text: string) =>
-  OPTIONAL_READINGS.reduce((readings, read) => readings.flatMap((reading) => [reading, read(reading)]), [text]);
+/** `text` read with none or one reading of each OPTIONAL_READINGS group, always in the same order (as typed first). */
+const readingsOf = (text: string) => OPTIONAL_READINGS.reduce(
+  (readings, group) => readings.flatMap((reading) => [reading, ...group.map((read) => read(reading))]),
+  [text],
+);
 
 /**
  * The visual and letter visual keys of each reading of `text` (readingsOf), in order. A reading that changes nothing

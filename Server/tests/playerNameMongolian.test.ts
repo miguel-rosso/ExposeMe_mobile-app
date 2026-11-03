@@ -12,6 +12,7 @@ const LA = "\u182F";
 const TA = "\u1832";
 const DA = "\u1833";
 const RA = "\u1837";
+const QA = "\u182C";
 const GA = "\u182D";
 const A = "\u1820";
 const O = "\u1823";
@@ -19,11 +20,18 @@ const U = "\u1824";
 const OE = "\u1825";
 const UE = "\u1826";
 const EE = "\u1827";
+const I = "\u1822";
 
 const expectSimilar = (a: string, b: string) => {
   expect(isValidUsername(a)).toBe(true);
   expect(isValidUsername(b)).toBe(true);
   expect(clash(a, b)).toBe("similar");
+};
+
+const expectDistinct = (a: string, b: string) => {
+  expect(isValidUsername(a)).toBe(true);
+  expect(isValidUsername(b)).toBe(true);
+  expect(clash(a, b)).toBeNull();
 };
 
 describe("Mongolian vowels written alike (EXP-376)", () => {
@@ -47,7 +55,8 @@ describe("Mongolian vowels written alike (EXP-376)", () => {
 
 // EXP-385: letters the Unicode Standard (chapter 13.2) writes alike only in some places of a word: OE and UE like O and
 // U past the first syllable ("tolö" like "tolo"), and D like T inside a word before a vowel ("urtu" and "ordu"). Each
-// pair checked with HarfBuzz on Noto Sans Mongolian 3.002, the font of iOS: drawn alike, or apart.
+// pair checked with HarfBuzz on Noto Sans Mongolian 3.002, the font of iOS, and 1.04, the font of Android: drawn alike
+// in one of them, or apart in both.
 describe("Mongolian letters drawn alike by their place in the word (EXP-385)", () => {
   it.each([
     ["tolo / toloe (OE last)", `${TA}${O}${LA}${O}`, `${TA}${O}${LA}${OE}`],
@@ -64,18 +73,14 @@ describe("Mongolian letters drawn alike by their place in the word (EXP-385)", (
   it.each([
     // OE and UE carry one more stroke in the first syllable
     ["OE in the first syllable", `${BA}${O}${LA}`, `${BA}${OE}${LA}`],
-    ["OE in the first syllable, ending the word", `${TA}${O}`, `${TA}${OE}`],
     // Q and G take another shape next to OE
     ["OE past the first syllable before GA", `${BA}${OE}${LA}${OE}${GA}`, `${BA}${OE}${LA}${O}${GA}`],
-    // D and T keep their shapes first in a word, last, before a consonant and before EE
-    ["D / T first", `${DA}${A}`, `${TA}${A}`],
+    // D and T keep their shapes alone, last in a word and inside it before a consonant
+    ["D / T alone", DA, TA],
     ["D / T last", `${BA}${A}${DA}`, `${BA}${A}${TA}`],
     ["D / T before a consonant", `${BA}${A}${DA}${LA}`, `${BA}${A}${TA}${LA}`],
-    ["D / T before EE", `${BA}${A}${DA}${EE}`, `${BA}${A}${TA}${EE}`],
   ])("%s are different names", (_label, a, b) => {
-    expect(isValidUsername(a)).toBe(true);
-    expect(isValidUsername(b)).toBe(true);
-    expect(clash(a, b)).toBeNull();
+    expectDistinct(a, b);
   });
 
   // Punctuation and digits join nothing, so a word next to them is still read (MONGOLIAN_SHAPING)
@@ -124,6 +129,61 @@ describe("Mongolian letters drawn alike by their place in the word (EXP-385)", (
   it("reads each word on its own", () => {
     expectSimilar(`${TA}${O}${LA}${O} ${TA}${O}`, `${TA}${O}${LA}${OE} ${TA}${O}`);
     // A word's first syllable stays one after another word
-    expect(clash(`${TA}${O} ${TA}${O}`, `${TA}${O} ${TA}${OE}`)).toBeNull();
+    expectDistinct(`${TA}${O}${LA} ${TA}${O}${LA}`, `${TA}${O}${LA} ${TA}${OE}${LA}`);
+  });
+});
+
+// EXP-409: Noto Sans Mongolian 3.002 (iOS) draws the words "ᠤᠤ" and "ᠦᠦ" alike (O + U), and apart from "ᠣᠣ" and "ᠥᠥ",
+// as 1.04 (Android) does with "ᠦᠦ" and "ᠣᠣ", and "ᠤᠤ" and "ᠥᠥ"
+describe("Mongolian words U U and UE UE, drawn alike on iOS (EXP-409)", () => {
+  it.each([
+    ["on their own", `${U}${U}`, `${UE}${UE}`],
+    ["before another word", `${U}${U} ${BA}`, `${UE}${UE} ${BA}`],
+    ["next to a word read by its place", `${U}${U} ${TA}${O}${LA}${OE}`, `${UE}${UE} ${TA}${O}${LA}${O}`],
+  ])("%s look too alike", (_label, a, b) => {
+    expectSimilar(a, b);
+  });
+
+  it.each([
+    ["UE UE / O O", `${UE}${UE}`, `${O}${O}`],
+    ["U U / OE OE", `${U}${U}`, `${OE}${OE}`],
+    ["inside a longer word", `${U}${U}${LA}`, `${UE}${UE}${LA}`],
+    // Alike on iOS but for "ᠲᠥ", which only Android draws like "ᠲᠣ": readings of two fonts never meet
+    ["with a word only Android draws alike", `${U}${U} ${TA}${OE}`, `${UE}${UE} ${TA}${O}`],
+  ])("%s are different names", (_label, a, b) => {
+    expectDistinct(a, b);
+  });
+});
+
+// EXP-410: Noto Sans Mongolian 1.04 (Android) draws OE and UE like O and U in more places than 3.002 (iOS), D like T in
+// more places, and U like OE after B inside a word. Each pair checked with HarfBuzz on both fonts
+describe("Mongolian letters drawn alike by Android's font (EXP-410)", () => {
+  it.each([
+    ["OE ending a word of two letters", `${TA}${O}`, `${TA}${OE}`],
+    ["OE after two consonants", `${TA}${LA}${OE}${LA}`, `${TA}${LA}${O}${LA}`],
+    ["D / T first before a vowel", `${DA}${A}`, `${TA}${A}`],
+    // So iOS draws them too
+    ["D / T first before a consonant", `${DA}${LA}`, `${TA}${LA}`],
+    ["D / T before EE", `${BA}${A}${DA}${EE}`, `${BA}${A}${TA}${EE}`],
+    ["U / OE after B inside a word", `${LA}${BA}${U}${LA}`, `${LA}${BA}${OE}${LA}`],
+    ["OE before a G that takes the next vowel's shape", `${LA}${O}${LA}${OE}${LA}${GA}${A}`,
+      `${LA}${O}${LA}${O}${LA}${GA}${A}`],
+    ["OE after a G that takes an earlier vowel's shape", `${A}${GA}${LA}${OE}`, `${A}${GA}${LA}${O}`],
+  ])("%s look too alike", (_label, a, b) => {
+    expectSimilar(a, b);
+  });
+
+  it.each([
+    ["O / OE after B inside a word", `${LA}${BA}${O}${LA}`, `${LA}${BA}${OE}${LA}`],
+    ["OE right after Q", `${QA}${OE}`, `${QA}${O}`],
+    ["OE right after G", `${LA}${GA}${OE}`, `${LA}${GA}${O}`],
+    // A G before a consonant, I or the word's end takes the shape of the nearest vowel but I before it, or after it
+    ["OE before I and a G ending the word", `${LA}${O}${LA}${OE}${LA}${I}${GA}`, `${LA}${O}${LA}${O}${LA}${I}${GA}`],
+    ["OE after a G that starts the word", `${GA}${LA}${OE}${LA}`, `${GA}${LA}${O}${LA}`],
+    ["OE after I and a G", `${I}${GA}${LA}${OE}`, `${I}${GA}${LA}${O}`],
+    // Alike on Android but for U after B, which only iOS draws like O: readings of two fonts never meet
+    ["with a word only iOS draws alike", `${LA}${BA}${U}${LA} ${TA}${OE}`, `${LA}${BA}${O}${LA} ${TA}${O}`],
+  ])("%s are different names", (_label, a, b) => {
+    expectDistinct(a, b);
   });
 });

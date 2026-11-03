@@ -303,10 +303,17 @@ After last round: game-over
   `കമല്` + ZWJ stays apart from `കമല`). The Gurmukhi udaat and yakash, a hook under the letter where the virama is,
   are dropped like a dot as typed and read as the virama in another reading (EXP-374, EXP-405: `ਰਾਜੑ` next to
   `ਰਾਜ੍`, `৽ਕੑਸ` next to `॰ਕਸ`). Mongolian U and UE read as O and OE everywhere (EXP-376: the Unicode Standard
-  writes them alike); in another reading OE and UE past a word's first syllable read as O (not in words with Q or G,
-  drawn by the word's vowels), and D inside a word before a vowel other than EE as T (EXP-385: `ᠲᠣᠯᠥ` next to `ᠲᠣᠯᠣ`,
-  `urtu` next to `ordu`; measured with HarfBuzz on Noto Sans Mongolian, a word being a run of letters with nothing
-  next to it that joins or reshapes it). In both visual keys the Gurmukhi and Kannada viramas read as the Devanagari
+  writes them alike). The other readings draw a Mongolian name as one font does, one font at a time (a phone draws
+  every name with the same one), a word being a run of letters with nothing next to it that joins or reshapes it:
+  as Noto Sans Mongolian 3.002 (iOS), OE and UE past a word's first syllable read as O (not in words with Q or G,
+  drawn by the word's vowels), and D inside a word before a vowel other than EE as T (EXP-385: `ᠲᠣᠯᠥ` next to
+  `ᠲᠣᠯᠣ`, `urtu` next to `ordu`), also with the words `ᠤᠤ` and `ᠦᠦ` read as one mark (EXP-409); as 1.04 (Android),
+  OE and UE read as O but first in a word, second after a consonant with letters after them, and where a Q or G
+  takes their shape, U, OE and UE after B inside a word as OE, and D as T first in a word before any letter and
+  inside it before any vowel (EXP-410: `ᠲᠥ` next to `ᠲᠣ`, `ᠳᠠ` next to `ᠲᠠ`, `ᠯᠪᠤᠯ` next to `ᠯᠪᠥᠯ`). Measured
+  with HarfBuzz on both fonts over 690,000 pairs of single words (names of several words were not measured, but
+  for a few two-word test names): no pair read alike is drawn apart by both. In both visual keys the Gurmukhi
+  and Kannada viramas read as the Devanagari
   and Telugu ones (`ਸ੍` next to `म्`, Kannada `ಜಯ್` next to Telugu `జయ్`); a virama is
   kept on a letter of its script or its sister script (Devanagari and Gurmukhi, Telugu and Kannada: `ਪ੍ਰੇਮ` stays
   apart from `ਪਰੇਮ`) and dropped on a letter read as another script's (`ഥ്` next to Tamil `ம்` and `ம`); the

@@ -39,9 +39,11 @@ import { emitWhileConnected } from "../../src/utils/socketEmit";
 import { useGameConnection } from "../../src/hooks/useGameConnection";
 import { useTurnRequest } from "../../src/hooks/useTurnRequest";
 import { usePickSender } from "../../src/hooks/usePickSender";
-import { withHost, withoutPlayer } from "../../src/utils/roomPlayers";
+import { isHostIn, withHost, withoutPlayer } from "../../src/utils/roomPlayers";
 import PausedModal from "@/src/components/modals/PausedModal";
 import LeaveGameConfirm from "@/src/components/modals/LeaveGameConfirm";
+import RemovePlayerConfirm from "@/src/components/modals/RemovePlayerConfirm";
+import { useRemovePlayerQuestion } from "../../src/hooks/useRemovePlayerQuestion";
 import LeaveGameButton from "@/src/components/LeaveGameButton";
 import { useFocusedBackHandler } from "../../src/hooks/useFocusedBackHandler";
 import GalleryAccessModal from "@/src/components/modals/GalleryAccessModal";
@@ -239,6 +241,18 @@ const GameScreen = () => {
     goHome(message);
   };
 
+  // ── Removing a player (host only, EXP-425, DEC-052 A) ─
+  // From the scoreboard's rows and the pause modal, asking first with the lobby's question. The server takes the kick
+  // as that player's leave (still an option of the round in play, DEC-038 / DEC-040) and sends their app home
+  const removeQuestion = useRemovePlayerQuestion(socket, playersProvider, !finalScore);
+  const isHost = isHostIn(playersProvider, safeUsername);
+  const askToRemove = isHost ? removeQuestion.ask : undefined;
+  // The scoreboard's removable rows: the others still in the room (one kicked or gone during it has no button)
+  const removablePlayers = useMemo(
+    () => new Set(isHost ? playersProvider.map((p) => p.username).filter((name) => name !== safeUsername) : []),
+    [isHost, playersProvider, safeUsername],
+  );
+
   // ── Leaving on purpose (EXP-377, DEC-050 A) ──────────
   // Exit (the game's button, the pause modal's, Android back) asks first. Leave sends leave-room, which the server takes
   // as a real leave (DEC-011: the game goes on for the others, or ends if one is left) instead of a lost connection
@@ -252,10 +266,11 @@ const GameScreen = () => {
     leaveGame();
   };
   // Android back (the key and the back gesture) never pops the game (the server would take it as a lost connection):
-  // during the game it is Exit, and with the question open its Cancel. iOS has no back here (the route disables the
-  // swipe, app/_layout.tsx)
+  // during the game it is Exit, and with the question open its Cancel (the host's remove question first). iOS has no
+  // back here (the route disables the swipe, app/_layout.tsx)
   useFocusedBackHandler(() => {
-    if (!gameOverRef.current) setAskingToLeave((asking) => !asking);
+    if (removeQuestion.asking !== null) removeQuestion.cancel();
+    else if (!gameOverRef.current) setAskingToLeave((asking) => !asking);
     return true;
   });
 
@@ -471,7 +486,7 @@ const GameScreen = () => {
         showGameOver(data.finalScore);
       },
       "player-left": (name: string) => { console.log(`[GAME] player-left: ${name}`); dropPlayer(name); },
-      // The host can only remove players between games, so mine reaches me on the final screens: home, telling why
+      // The host removed me, during the game or on the final screens (EXP-425): home, telling why
       "player-removed": (removed: Player) => {
         console.log(`[GAME] player-removed: ${removed.username}`);
         if (removed.username === safeUsername) leaveGame(KICKED_BY_HOST_MESSAGE);
@@ -565,11 +580,17 @@ const GameScreen = () => {
         maxPauses={pauseInfo.maxPauses}
         waitingFor={pauseInfo.waitingFor}
         onLeave={() => setAskingToLeave(true)}
+        onRemovePlayer={askToRemove}
       />
       <LeaveGameConfirm
         visible={askingToLeave && !finalScore}
         onConfirm={leaveForGood}
         onCancel={() => setAskingToLeave(false)}
+      />
+      <RemovePlayerConfirm
+        username={removeQuestion.asking}
+        onConfirm={removeQuestion.confirm}
+        onCancel={removeQuestion.cancel}
       />
       <GalleryAccessModal
         access={finalScore || showWinner ? null : galleryGuard.blocked}
@@ -684,6 +705,8 @@ const GameScreen = () => {
                   correctAnswer={correctAnswer}
                   myUsername={safeUsername}
                   reserveHoldButton={holdButtonMounted}
+                  onRemovePlayer={askToRemove}
+                  removable={removablePlayers}
                 />
               </View>
             )}

@@ -151,15 +151,12 @@ function releaseHoldOf(room: Room, socketId: string): void {
 
 /**
  * Drop a room binding of this socket, as an explicit leave. If `owned` (the socket still is that player's
- * current socket) the player is removed, host handed over and the room notified; a socket replaced by a
- * rejoin only detaches. Always leaves the socket.io room. Does not touch socket.data.
+ * current socket) the player is removed (a hold of theirs released), host handed over and the room notified; a socket
+ * replaced by a rejoin only detaches. Always leaves the socket.io room. Does not touch socket.data.
  */
 function leaveBinding(socket: Socket, gameCode: string, username: string, owned: boolean): void {
   const room = roomManager.getRoom(gameCode);
-  if (owned && room) {
-    releaseHoldOf(room, socket.id);
-    gameEngine.removePlayer(room, username, "left");
-  }
+  if (owned && room) gameEngine.removePlayer(room, username, "left");
   socket.leave(gameCode); // after the removal: the leaver hears it too
 }
 
@@ -214,7 +211,6 @@ function leaveSeat(seat: unknown): void {
   const { gameCode, username, rejoinToken } = seat;
   const room = roomManager.getRoom(gameCode);
   if (!room || !roomManager.canRejoin(gameCode, username, rejoinToken)) return;
-  releaseHoldOf(room, roomManager.getPlayer(gameCode, username)!.socketId);
   gameEngine.removePlayer(room, username, "left", (left) => {
     socketsOf(gameCode, left.username).forEach((old) => evictSocket(old, gameCode));
   });
@@ -519,13 +515,14 @@ io.on("connection", (socket: Socket) => {
     } catch (e) { console.error("chat error:", e); }
   });
 
-  // Host kicks a player by username (socket ids are never sent to clients); the host can't kick itself.
-  // Lobby only (also between games), like set-rounds: the app only offers it in the waiting room
+  // Host kicks a player by username (socket ids are never sent to clients); the host can't kick itself. In the lobby,
+  // between games and during a game alike (EXP-425): mid-game the kicked player goes as on leave-room (a hold of theirs
+  // released, still an option of the round in play, the game paused or ended if too few are left)
   socket.on("remove-player", (data: { username: string }) => {
     try {
       if (!gameEvents.take("remove-player")) return;
       const s = session(socket);
-      if (!s || !s.player.isHost || s.room.started) return;
+      if (!s || !s.player.isHost) return;
       if (typeof data?.username !== "string" || data.username === s.player.username) return;
       const { room } = s;
       // Cut off the kicked player's token, current socket and any other socket still bound to them in this room: an app

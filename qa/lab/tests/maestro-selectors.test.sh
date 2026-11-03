@@ -115,10 +115,10 @@ unknown_ids() {
   ' "$TMP/ids" "$TMP/known-ids" "$TMP/known-helpers"
 }
 # Flows besides the boot ones whose ids are all checked against testIds.ts (EXP-176, EXP-348, EXP-346, EXP-354, EXP-339,
-# EXP-390)
-ID_CHECKED_FLOWS="tie-game.yaml hold-used-up.yaml hold-closed.yaml kicked-after-game.yaml kicked-while-offline.yaml join-room.yaml search-room.yaml kicked-notice.yaml device-host-start.yaml unknown-link.yaml unknown-link-home.yaml server-unreachable.yaml"
-# Flows that read the host's removal notice, a system alert matched by its text (EXP-139, EXP-346)
-KICK_NOTICE_FLOWS="kicked-notice.yaml kicked-after-game.yaml kicked-while-offline.yaml"
+# EXP-390, EXP-425)
+ID_CHECKED_FLOWS="tie-game.yaml hold-used-up.yaml hold-closed.yaml kicked-after-game.yaml kicked-while-offline.yaml kicked-mid-game.yaml join-room.yaml search-room.yaml kicked-notice.yaml device-host-start.yaml device-host-kick-mid-game.yaml unknown-link.yaml unknown-link-home.yaml server-unreachable.yaml"
+# Flows that read the host's removal notice, a system alert matched by its text (EXP-139, EXP-346, EXP-425)
+KICK_NOTICE_FLOWS="kicked-notice.yaml kicked-after-game.yaml kicked-while-offline.yaml kicked-mid-game.yaml"
 
 # matches_i18n PATTERN KEY -> whether the Maestro text PATTERN matches the app's KEY string in both en and es (whole
 # text, case-insensitively, like Maestro)
@@ -330,6 +330,18 @@ done
 grep -qF "id: \"lobby-player-$DEVICE_HOST_REMOVED\"" "$DEVICE_HOST_FLOW" \
   && ok "device-host-start.yaml: removes the player its confirmation names ($DEVICE_HOST_REMOVED)" \
   || ko "device-host-start.yaml: taps lobby-player-$DEVICE_HOST_REMOVED"
+# device-host-kick-mid-game.yaml (EXP-425): the same confirmation, opened from bot3's scoreboard row during the game;
+# bots.mjs checks that same bot was removed (--expect-kick, documented in the flow's invocation)
+DEVICE_HOST_KICK_FLOW="$MAESTRO_DIR/device-host-kick-mid-game.yaml"
+for key in confirmRemovePlayer areYouSureRemove; do
+  found="$(flow_text_for "$DEVICE_HOST_KICK_FLOW" "$key" "@$DEVICE_HOST_REMOVED")" \
+    && ok "device-host-kick-mid-game.yaml: reads $key in en and es ($found)" \
+    || ko "device-host-kick-mid-game.yaml: no text selector matches $key in en and es (name @$DEVICE_HOST_REMOVED)"
+done
+grep -qF "id: \"score-remove-$DEVICE_HOST_REMOVED\"" "$DEVICE_HOST_KICK_FLOW" \
+  && grep -qF -- "--expect-kick $DEVICE_HOST_REMOVED" "$DEVICE_HOST_KICK_FLOW" \
+  && ok "device-host-kick-mid-game.yaml: removes the player its confirmation names and the bots expect ($DEVICE_HOST_REMOVED)" \
+  || ko "device-host-kick-mid-game.yaml: taps score-remove-$DEVICE_HOST_REMOVED and runs the bots with --expect-kick $DEVICE_HOST_REMOVED"
 
 # ── Flow simulator ──
 # maestro-sim.mjs runs a flow's own YAML and JS against a fake device with Maestro 2.11's semantics (see its header)

@@ -41,6 +41,8 @@ export default {
   // {name}: the player, highlighted by the dialog
   areYouSureRemove: "Are you sure you want to remove {name} from the room?",
   remove: "Remove",
+  // The host's remove buttons during the game (scoreboard rows, pause modal; EXP-425), named for screen readers
+  removePlayerNamed: "Remove {name}",
   cancel: "Cancel",
   loadingGameRoom: "Loading game room...",
   pleaseWait: "Please wait a moment",

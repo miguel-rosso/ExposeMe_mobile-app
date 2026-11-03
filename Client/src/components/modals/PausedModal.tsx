@@ -2,10 +2,11 @@ import React, { useEffect, useState } from "react";
 import { Text, TouchableOpacity, View } from "react-native";
 import tw from "twrnc";
 import { useI18n } from "../../i18n";
-import { TEST_IDS } from "@/src/utils/testIds";
+import { TEST_IDS, pausedRemoveId } from "@/src/utils/testIds";
 import { formatCountdown } from "@/src/utils/gameState";
 import { waitingForText } from "@/src/utils/waitingFor";
 import { fillTemplate } from "@/src/i18n/format";
+import RemovePlayerButton from "@/src/components/RemovePlayerButton";
 
 // Safety cap for the "Waiting for …" line (names are at most 15 characters, so three of them fit in fewer lines)
 const WAITING_FOR_MAX_LINES = 4;
@@ -20,14 +21,17 @@ interface PausedModalProps {
   waitingFor: readonly string[];
   /** Exit: asks whether to leave the game (the game screen's LeaveGameConfirm) */
   onLeave: () => void;
+  /** Host only (EXP-425): a remove button per awaited player, asking for them (the game screen's RemovePlayerConfirm) */
+  onRemovePlayer?: (username: string) => void;
 }
 
 /**
  * Shown to every connected player while the server has the game paused (fewer than 2 connected).
  * Only displays who the server waits for (EXP-380), its countdown (when it runs out the server sends game-over) and
- * "pause N of M", with an Exit for whoever doesn't want to wait (EXP-377).
+ * "pause N of M", with an Exit for whoever doesn't want to wait (EXP-377). The host can also remove an awaited player
+ * (EXP-425): the game then waits for the others only, or ends if nobody else can come back.
  */
-const PausedModal: React.FC<PausedModalProps> = ({ endsAt, pause, maxPauses, waitingFor, onLeave }) => {
+const PausedModal: React.FC<PausedModalProps> = ({ endsAt, pause, maxPauses, waitingFor, onLeave, onRemovePlayer }) => {
   const { t } = useI18n();
   const [remaining, setRemaining] = useState(endsAt === null ? 0 : endsAt - Date.now());
 
@@ -56,6 +60,19 @@ const PausedModal: React.FC<PausedModalProps> = ({ endsAt, pause, maxPauses, wai
         >
           {waitingForText(waitingFor, t)}
         </Text>
+        {onRemovePlayer && waitingFor.length > 0 && (
+          <View style={tw`flex-row flex-wrap justify-center mb-4`}>
+            {waitingFor.map((username) => (
+              <RemovePlayerButton
+                key={username}
+                username={username}
+                testID={pausedRemoveId(username)}
+                onPress={onRemovePlayer}
+                withName
+              />
+            ))}
+          </View>
+        )}
         <Text testID={TEST_IDS.pausedCountdown} style={tw`text-4xl text-white font-bold`}>
           {formatCountdown(remaining)}
         </Text>

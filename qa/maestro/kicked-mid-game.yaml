@@ -1,0 +1,34 @@
+# EXP-425 / DEC-052 A: the host removes the device during the game. As soon as round 1 starts the host bot removes the
+# device by its label (its username), while the photo and the options are on screen: the game screen goes home at once
+# with the notice in the device's language ("The host removed you from the room." / "El anfitrión te ha sacado de la
+# sala."), never a raw server text, and no game screen is left under home. The two bots play the game on to game over
+# without it (bots.mjs passes, reason "game-over", the kicked player in no later round). For a kick in the lobby see
+# kicked-notice.yaml, after the game kicked-after-game.yaml.
+#   qa/lab/lab.sh play --flow kicked-mid-game --bots 2 --rounds 3 --devices <label> \
+#     --bot-args "--kick <label> --kick-in-game 1"
+# env: GAME_CODE, USERNAME, METRO_URL (url-encoded)
+# Selectors are testIDs (Client/src/utils/testIds.ts) except the system alert, matched in both UI languages.
+# lab: one device (the host bot kicks the one device named in --kick)
+appId: com.socketNull.ExposeMe
+---
+- runFlow: open-app.yaml
+- runFlow: join-room.yaml
+- runFlow: wait-game-start.yaml
+# Removed at round 1's start: back home with the system alert, translated
+- extendedWaitUntil:
+    visible: "(The host removed you from the room|El anfitrión te ha sacado de la sala).*"
+    timeout: 60000
+- assertNotVisible: "Removed by host"
+# EXP-221: title and button in the UI language too, not the system "Alert"
+- assertVisible: "Notice|Aviso"
+- assertNotVisible: "Alert"
+- takeScreenshot: kicked-mid-game-${USERNAME}
+- tapOn: "OK|Aceptar"
+- extendedWaitUntil:
+    visible:
+      id: "join-game-button"
+    timeout: 10000
+# The game screen is gone, not left under home
+- assertNotVisible:
+    id: "leave-game-button|game-waiting-photo|game-waiting-ready|player-option-.*|score-modal"
+- takeScreenshot: kicked-mid-game-home-${USERNAME}

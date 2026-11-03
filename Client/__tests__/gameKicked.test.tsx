@@ -51,6 +51,35 @@ jest.mock("@/src/components/ProgressBar", () => () => null);
 beforeAll(() => { jest.spyOn(console, "log").mockImplementation(() => {}); });
 afterAll(() => jest.restoreAllMocks());
 
+// EXP-425: the host can remove me during the game too: the same notice, token forgotten, home once
+describe("GameScreen: the host removes me during the game (EXP-425)", () => {
+  let r: TestRenderer.ReactTestRenderer;
+  beforeEach(async () => {
+    jest.useFakeTimers();
+    mockSocket.reset();
+    [mockDismissTo, mockClearRejoinToken, mockSetHomeNotice].forEach((m) => m.mockClear());
+    await act(async () => { r = TestRenderer.create(<GameScreen />); });
+    act(() => mockSocket.fire("round-start", { round: 1, photo: "/temp/p.jpg", duration: 7_700 }));
+  });
+  afterEach(() => {
+    act(() => r.unmount());
+    jest.clearAllTimers();
+    jest.useRealTimers();
+  });
+
+  it("my own player-removed mid-round forgets my token and goes home once with the notice", () => {
+    act(() => mockSocket.fire("player-removed", mockPlayers[1]));
+    act(() => mockSocket.fire("disconnect", "io server disconnect"));
+
+    expect(mockClearRejoinToken).toHaveBeenCalledTimes(1);
+    expect(mockSetHomeNotice).toHaveBeenCalledWith(KICKED_BY_HOST_MESSAGE);
+    expect(mockDismissTo).toHaveBeenCalledTimes(1);
+    expect(mockDismissTo).toHaveBeenCalledWith("/");
+    // Nothing goes to the room on the way out: the server already took me out
+    expect(mockSocket.emittedPayloads("leave-room")).toEqual([]);
+  });
+});
+
 const FINAL_SCORE = mockPlayers.map(({ username, points, isHost }) => ({ username, points, isHost, lastAnswerCorrect: false, lastGuess: "" }));
 
 describe("GameScreen: the host removes me (EXP-337)", () => {

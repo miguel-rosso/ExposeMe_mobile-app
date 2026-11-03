@@ -4,7 +4,7 @@ import { registerTurnUpload } from "./helpers";
 import { useTestServer } from "./socketHarness";
 
 // EXP-218: whenever the photo owner goes away while holding the scores screen (leave-room or a dropped connection;
-// the host can't kick players mid-game, EXP-316), the hold ends at once for everyone (hold-end + hold-resume) and the game goes on, instead of
+// a host's kick mid-game too, inGameKick.test.ts), the hold ends at once for everyone (hold-end + hold-resume) and the game goes on, instead of
 // staying frozen until the hold budget runs out. EXP-299: the same when they rejoin on a new socket while the old one
 // is still open (the new socket isn't pressing anything, so nobody would ever send hold-end).
 

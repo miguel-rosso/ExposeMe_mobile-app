@@ -41,6 +41,8 @@ export default {
   // {name}: the player, highlighted by the dialog
   areYouSureRemove: "¿Seguro que quieres expulsar a {name} de la sala?",
   remove: "Expulsar",
+  // The host's remove buttons during the game (scoreboard rows, pause modal; EXP-425), named for screen readers
+  removePlayerNamed: "Expulsar a {name}",
   cancel: "Cancelar",
   loadingGameRoom: "Cargando sala...",
   pleaseWait: "Espera un momento",

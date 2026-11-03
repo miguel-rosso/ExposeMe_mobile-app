@@ -430,9 +430,19 @@ After last round: game-over
   rejoin"): Cancel stays, Leave is the leave above and goes home. Android's back opens that same question and a second
   back cancels it (it never pops the game); the iOS back swipe stays disabled. The server takes it as any leave
   (DEC-011: the game goes on, or ends if one player is left).
-- **Kicked** (`remove-player`, lobby only, also between games while others linger on the final screens): every
+- **Kicked** (`remove-player`: in the lobby, between games while others linger on the final screens, and during a
+  game, EXP-425 / DEC-052 A): every
   socket of the room, the kicked player's included, gets `player-removed`, then the kicked player's sockets are
-  evicted, and their `rejoinToken` is **revoked** in that room (EXP-337). The app, in the lobby or on the final
+  evicted, and their `rejoinToken` is **revoked** in that room (EXP-337). **During a game** the kicked player goes
+  exactly as one who leaves (EXP-377): a hold of theirs ends at once (`hold-resume` + `hold-end`, before
+  `player-removed`), they stay one of the round's options until the next `waiting-photo` and the answer if the photo
+  was theirs (DEC-038, DEC-040: guesses on them score), an awaited photo of theirs goes to another player for the
+  same round (DEC-035), a pause waiting for them is re-sent without them (or ends the game if nobody else can come
+  back), and the game ends at once if fewer than 2 players are left (DEC-011). The host kicks from the round's
+  scoreboard (a remove button on every other player's row) and from the pause modal (one per awaited player), with
+  the lobby's question naming the player ("Are you sure you want to remove @Ana from the room?"); the question stays
+  open across phases, and closes on its own if that player left meanwhile or the game ended. The app, in the lobby,
+  during the game or on the final
   screens, forgets its token on its own `player-removed` and goes home with the notice "the host removed you". An app
   that missed it (offline at the kick: phone locked, no signal) comes back with its stored token: that join is refused
   with **`"Removed by host"`** (checked before `"Game already started"`, so it is told even if a game started
@@ -522,7 +532,7 @@ After last round: game-over
   has: no `rounds-updated` for it. **QA-only:** 3 rounds is also accepted
   when the server runs with `ALLOW_QA_ROUNDS=1`, which `qa/lab/lab.sh server` sets for short device runs; it is off
   by default, so production rejects it, and the app never offers it), `start-game` (not while a game is running), `remove-player { username }`
-  (lobby only, also between games: ignored while a game is running; by username, socket ids are never sent to
+  (in the lobby, between games and during a game; by username, socket ids are never sent to
   clients; the host can't remove itself; evicts every socket bound to the removed player in that room, like a
   rejoin evicts the replaced one, and revokes their token: see "Kicked" above).
 - **Game number.** Every game run in a room gets the next integer (`room.gameNumber`: 0 before the first game, +1 on
@@ -708,7 +718,7 @@ As with the start events, the bar ends `duration` after the payload arrived on t
   hold button in `scores` to the player whose username is the round's `correctAnswer` (nobody is told earlier)
 - Press: game pauses for everyone (server stops timer)
 - Release: game resumes from where it paused
-- An owner who goes away while holding (`leave-room`, connection lost) or rejoins on a new
+- An owner who goes away while holding (`leave-room`, removed by the host, connection lost) or rejoins on a new
   socket releases the hold at once: `hold-resume` + `hold-end`, as a force-release (a rejoiner gets its `game-state`
   after it, with `held: false`)
 - Limits per round: at most **3 holds**, **30 s held in total** (`MAX_HOLDS_PER_ROUND`, `HOLD_BUDGET_PER_ROUND`).

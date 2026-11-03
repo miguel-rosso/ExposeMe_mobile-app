@@ -67,6 +67,8 @@ export const TEST_IDS = {
   leaveGameButton: "leave-game-button",
   pausedLeaveButton: "paused-leave-button",
   leaveGameConfirm: "leave-game-confirm", // its Cancel / Leave are alertModalCancel / alertModalConfirm
+  // The host removing a player during the game (EXP-425): its Cancel / Remove are alertModalCancel / alertModalConfirm
+  removePlayerConfirm: "remove-player-confirm",
   // ── Gallery access (home, lobby, game) ──
   galleryAccessModal: "gallery-access-modal",
   galleryAccessMessage: "gallery-access-message",
@@ -113,6 +115,9 @@ export const finalWinnerId = (username: string) => `final-winner-${username}`;
 export const finalRankId = (username: string) => `final-rank-${username}`;
 export const scoreRankId = (username: string) => `score-rank-${username}`;
 export const scoreGuessId = (username: string) => `score-guess-${username}`;
+/** The host's remove button on a player's scoreboard row, and on an awaited player in the pause modal (EXP-425) */
+export const scoreRemoveId = (username: string) => `score-remove-${username}`;
+export const pausedRemoveId = (username: string) => `paused-remove-${username}`;
 export const roundsOptionId = (rounds: number) => `rounds-option-${rounds}`;
 /** Description text of a SettingsInstructionsScreen carousel step, numbered from 1 */
 export const settingsStepId = (step: number) => `settings-step-${step}`;

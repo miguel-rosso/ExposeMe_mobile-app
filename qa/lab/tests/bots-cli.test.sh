@@ -136,9 +136,31 @@ run 2 "--kick of the host itself exits 2" --bots 3 --host --kick bot1 --timeout 
 run 2 "--kick with several rooms exits 2" --bots 3 --host --rooms 2 --kick bot2 --timeout 1
 run 2 "--kick of a name longer than the server's 15 exits 2" --bots 3 --host --kick abcdefghijklmnop --timeout 1
 run 2 "--kick of an empty name exits 2" --bots 3 --host --kick "" --timeout 1
-# Lobby only (EXP-316): the server ignores remove-player once a game started, so the old NAME@R form is refused
+# The old NAME@R form is refused, pointing at --kick-in-game (EXP-425)
 run 2 "--kick NAME@R (mid-game) exits 2" --bots 3 --host --rounds 3 --kick bot3@2 --timeout 1
-[[ "$err" == *"--kick \"bot3@2\": the host can only remove players in the lobby"* ]] && ok "--kick NAME@R is named as lobby only" || ko "--kick NAME@R is named as lobby only" "$err"
+[[ "$err" == *"--kick \"bot3@2\": there is no NAME@R form, use --kick NAME --kick-in-game R"* ]] && ok "--kick NAME@R points at --kick-in-game" || ko "--kick NAME@R points at --kick-in-game" "$err"
+# --kick-in-game R (EXP-425): the host removes NAME at round R's round-start, inside the hosted game, one kick per run
+run 2 "--kick-in-game without --kick exits 2" --bots 3 --host --rounds 3 --kick-in-game 2 --timeout 1
+[[ "$err" == *"--kick-in-game needs --kick NAME"* ]] && ok "--kick-in-game without --kick is named" || ko "--kick-in-game without --kick is named" "$err"
+for bad in 0 abc 2,3 -1; do
+  run 2 "--kick-in-game $bad exits 2" --bots 3 --host --rounds 3 --kick bot3 --kick-in-game "$bad" --timeout 1
+  [[ "$err" == *"--kick-in-game \"$bad\" is not a round number"* ]] && ok "--kick-in-game $bad is named" || ko "--kick-in-game $bad is named" "$err"
+done
+run 2 "--kick-in-game beyond --rounds exits 2" --bots 3 --host --rounds 3 --kick bot3 --kick-in-game 4 --timeout 1
+[[ "$err" == *"--kick-in-game: round 4 is beyond the game's 3 rounds"* ]] && ok "--kick-in-game beyond --rounds is named" || ko "--kick-in-game beyond --rounds is named" "$err"
+run 2 "--kick-in-game with --kick-after-game exits 2" --bots 3 --host --rounds 3 --kick bot3 --kick-in-game 2 --kick-after-game 5 --timeout 1
+[[ "$err" == *"use --kick-in-game or --kick-after-game, not both"* ]] && ok "--kick-in-game with --kick-after-game is named" || ko "--kick-in-game with --kick-after-game is named" "$err"
+SERVER_URL="$URL" node "$BOTS" --bots 3 --host --rounds 3 --kick bot3 --kick-in-game 2 --timeout 1 >/dev/null 2>"$TMP/err"; rc=$?
+[[ "$rc" != 2 ]] && ok "--kick bot3 --kick-in-game 2 is accepted" || ko "--kick bot3 --kick-in-game 2 is accepted" "$(cat "$TMP/err")"
+[[ "$(node "$BOTS" --help)" == *"--kick-in-game R"* ]] && ok "--help lists --kick-in-game" || ko "--help lists --kick-in-game"
+# --expect-kick NAME (EXP-425): a device hosts and removes one of this run's bots
+run 2 "--expect-kick with --host exits 2" --bots 3 --host --expect-kick bot3 --timeout 1
+[[ "$err" == *"--expect-kick is for a room another player hosts"* ]] && ok "--expect-kick with --host is named" || ko "--expect-kick with --host is named" "$err"
+run 2 "--expect-kick of a name not in the run exits 2" --bots 3 --code K7MQ4X --expect-kick bot4 --timeout 1
+[[ "$err" == *"--expect-kick \"bot4\" is not one of this run's bots (bot1, bot2, bot3)"* ]] && ok "--expect-kick of another name is named" || ko "--expect-kick of another name is named" "$err"
+SERVER_URL="$URL" node "$BOTS" --bots 3 --code K7MQ4X --expect-kick bot3 --timeout 1 >/dev/null 2>"$TMP/err"; rc=$?
+[[ "$rc" != 2 ]] && ok "--code with --expect-kick bot3 is accepted" || ko "--code with --expect-kick bot3 is accepted" "$(cat "$TMP/err")"
+[[ "$(node "$BOTS" --help)" == *"--expect-kick NAME"* ]] && ok "--help lists --expect-kick" || ko "--help lists --expect-kick"
 run 2 "--kick of a name with surrounding spaces exits 2" --bots 3 --host --kick " ios-a" --timeout 1
 # A planned exit must fall inside the hosted game (--rounds), or it never happens
 run 2 "--leave-round beyond --rounds exits 2" --bots 3 --host --rounds 3 --leave-round 4 --timeout 1

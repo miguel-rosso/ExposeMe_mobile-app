@@ -294,7 +294,7 @@ function checkScoredLikeEveryone(r, ctx) {
 }
 
 /**
- * The photo owner who leaves during their own round stays its answer (DEC-038, EXP-301): in that round-scores every
+ * The photo owner who leaves (or is kicked, EXP-425) during their own round stays its answer (DEC-038, EXP-301): in that round-scores every
  * player who voted for them is scored correct, with one point more than at the bot's previous round-scores. A bot
  * that left as its round's owner (--leave-owner, "left-room" { owner }) is that round's answer, and somebody voted
  * for it (bots.mjs makes one bot do so), so the rule was really exercised.
@@ -308,8 +308,9 @@ function checkDepartedOwnerScored(r, ctx) {
     else if (sc && !sc.payload?.scores?.some((row) => row.lastGuess === exit.bot)) out.add(`round ${exit.round}: nobody voted ${exit.bot}, the owner who left`);
   }
   for (const [round, answer] of ctx.answerOf) {
-    // Only a leave: the host can't remove players mid-game (EXP-316), so a kick never takes a round's owner
-    const left = r.events.some((e) => e.round === round && e.ev === "left-room" && e.bot === answer);
+    // A leave or a host's kick during the round (--kick-in-game, EXP-425): the kicked owner stays the answer too
+    const left = r.events.some((e) => e.round === round
+      && ((e.ev === "left-room" && e.bot === answer) || (e.ev === "kick-sent" && e.payload?.username === answer)));
     if (!left) continue;
     for (const sc of r.events.filter((e) => e.ev === "round-scores" && e.round === round && !ctx.wentOffline.has(e.bot))) {
       const previous = r.events.filter((e) => e.bot === sc.bot && e.ev === "round-scores" && e.t < sc.t).pop();
@@ -667,7 +668,7 @@ function checkGoneAtNextGame(r, opts) {
 
 /**
  * Players out of the room (EXP-139): a bot that left (--leave-round, "left-room") or a player the host removed
- * in the lobby (--kick, "kick-sent"; never mid-game, EXP-316). Every other bot still in the room (not offline
+ * (--kick, "kick-sent": in the lobby, mid-game with --kick-in-game, EXP-425, or after it). Every other bot still in the room (not offline
  * meanwhile) is told (player-left / player-removed); from then on the player is in no player list, score table or
  * answer, and nobody guesses it in a later round (in the round of the exit they are still an option, DEC-038); a
  * mid-game leave doesn't stop the game while 2 players remain. A kicked bot gets player-removed itself, then the server

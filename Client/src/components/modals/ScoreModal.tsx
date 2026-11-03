@@ -5,10 +5,11 @@ import tw from "twrnc";
 import { ScoreRound } from "../../models/interfaces";
 import Icon from "react-native-vector-icons/FontAwesome";
 import { useI18n } from "../../i18n";
-import { TEST_IDS, scoreGuessId, scoreRankId } from "@/src/utils/testIds";
+import { TEST_IDS, scoreGuessId, scoreRankId, scoreRemoveId } from "@/src/utils/testIds";
 import { rankScores } from "@/src/utils/ranking";
 import { isRevealedOwner } from "@/src/utils/roundState";
 import PhotoOwnerCard from "@/src/components/PhotoOwnerCard";
+import RemovePlayerButton from "@/src/components/RemovePlayerButton";
 import { useReduceMotion } from "@/src/hooks/useReduceMotion";
 import { topClearOfInset } from "@/src/utils/safeAreaRows";
 import { HOLD_BUTTON_BOTTOM, HOLD_BUTTON_HEIGHT } from "@/src/utils/gameRows";
@@ -49,6 +50,12 @@ interface ScoreModalProps {
   myUsername?: string;
   /** The photo owner's hold button is on screen: keep the list clear of it */
   reserveHoldButton?: boolean;
+  /**
+   * Host only (EXP-425): the rows of `removable` (the other players still in the room: not one kicked or gone during
+   * the scoreboard) get a remove button that asks for them. Keep both stable: the scoreboard is memoised
+   */
+  onRemovePlayer?: (username: string) => void;
+  removable?: ReadonlySet<string>;
 }
 
 const ScoreModal: React.FC<ScoreModalProps> = ({
@@ -58,6 +65,8 @@ const ScoreModal: React.FC<ScoreModalProps> = ({
   correctAnswer,
   myUsername,
   reserveHoldButton = false,
+  onRemovePlayer,
+  removable,
 }) => {
   const { t } = useI18n();
   const insets = useSafeAreaInsets();
@@ -141,6 +150,13 @@ const ScoreModal: React.FC<ScoreModalProps> = ({
                     </View>
                   </View>
                   <Text style={tw`text-lg`}>{player.points}</Text>
+                  {onRemovePlayer && removable?.has(player.username) && (
+                    <RemovePlayerButton
+                      username={player.username}
+                      testID={scoreRemoveId(player.username)}
+                      onPress={onRemovePlayer}
+                    />
+                  )}
                 </View>
               </View>
             </View>

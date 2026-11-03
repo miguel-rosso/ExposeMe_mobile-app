@@ -1,0 +1,90 @@
+# EXP-425 / DEC-052 A: the device is the host and removes a player during the game. It creates the room, the bots join
+# its code, it starts the game and, on a round's scoreboard, taps bot3's remove button: the confirmation names it ("Are
+# you sure you want to remove @bot3 from the room?" / "¿Seguro que quieres expulsar a @bot3 de la sala?") and Remove
+# takes it out. The next scoreboard has no row for bot3. Then the device leaves the game (Exit) and the other two bots
+# play it to game over.
+#   qa/lab/lab.sh play --device-host --flow device-host-kick-mid-game --devices <label> --bots 3 \
+#     --bot-args "--expect-kick bot3"
+# `--device-host` starts the bots (bots.mjs --code) once this flow posted the room code (see device-host-start.yaml).
+# --expect-kick bot3: bots.mjs fails unless bot3 got player-removed (and every other bot was told), its connection was
+# closed and its token refused afterwards ("Removed by host"), and it is in no later round-scores nor answer.
+# The scoreboard shows for 5 s: a slow read can miss it, so the tap is tried on up to SCOREBOARD_TRIES scoreboards;
+# the question then stays open across phases (the app closes it only if bot3 is gone or the game ended).
+# env: USERNAME, METRO_URL (url-encoded), CODE_SINK_URL
+# Selectors are testIDs (Client/src/utils/testIds.ts), so the flow works in any UI language; the confirmation is read
+# in both languages (checked against Client/src/i18n by maestro-selectors.test.sh).
+appId: com.socketNull.ExposeMe
+---
+- runFlow: host-lobby.yaml
+# The code shows once the server answered the create (an empty text until then)
+- extendedWaitUntil:
+    visible:
+      id: "lobby-game-code"
+      text: "[A-Z0-9]{6}"
+    timeout: 30000
+- copyTextFrom:
+    id: "lobby-game-code"
+    text: "[A-Z0-9]{6}"
+# Maestro's http runs on the lab machine, where lab.sh's listener waits for the code (then starts the bots)
+- evalScript: "${output.codePost = http.post(CODE_SINK_URL, { body: maestro.copiedText }).status}"
+- assertTrue:
+    condition: ${output.codePost == 200}
+    label: "lab.sh's listener took the room code (CODE_SINK_URL)"
+- extendedWaitUntil:
+    visible:
+      id: "lobby-player-bot3"
+    timeout: 60000
+    label: "The bots joined the device's room"
+- tapOn:
+    id: "start-game-button"
+# ── On a scoreboard: bot3's remove button (SCOREBOARD_TRIES = 4 scoreboards at most) ──
+- repeat:
+    while:
+      notVisible:
+        id: "remove-player-confirm"
+    times: 4
+    commands:
+      # A round: photo wait (up to 15 s), answering (8.5 s), reveal (3 s)
+      - extendedWaitUntil:
+          visible:
+            id: "score-remove-bot3"
+          timeout: 60000
+          label: "A scoreboard with bot3's remove button (host only)"
+      - tapOn:
+          id: "score-remove-bot3"
+          retryTapIfNoChange: false
+          optional: true
+- assertVisible:
+    text: "Remove player|Expulsar jugador"
+- assertVisible:
+    text: "(Are you sure you want to remove|¿Seguro que quieres expulsar a) @bot3 (from the room|de la sala)\\?"
+    label: "The confirmation names the highlighted @bot3 and asks, in the app's language"
+- takeScreenshot: device-host-kick-confirm-${USERNAME}
+- tapOn:
+    id: "alert-modal-confirm"
+- extendedWaitUntil:
+    notVisible:
+      id: "remove-player-confirm"
+    timeout: 5000
+# ── The next scoreboard has no row for bot3 (the one the kick came on still shows it until it closes) ──
+- extendedWaitUntil:
+    notVisible:
+      id: "score-modal"
+    timeout: 15000
+- extendedWaitUntil:
+    visible:
+      id: "score-rank-bot1"
+    timeout: 60000
+    label: "The next scoreboard"
+- assertNotVisible:
+    id: "score-rank-bot3"
+- takeScreenshot: device-host-kick-next-scores-${USERNAME}
+# ── Leave: the two bots left play on to game over ──
+- tapOn:
+    id: "leave-game-button"
+- tapOn:
+    id: "alert-modal-confirm"
+- extendedWaitUntil:
+    visible:
+      id: "create-game-button"
+    timeout: 10000

@@ -219,14 +219,18 @@ export class GameEngine {
    * - "left" (leave-room, or a socket joining another room): `new-host` if the host left, then `player-left`; then the
    *   game reviews who is left (ready phase: start if all are ready, or end if one is left alone for good; mid-game:
    *   pause or end; lobby: reviewLobby).
-   * - "kicked" (the host's remove-player, lobby only): `player-removed`; `detach` cuts the kicked player's sockets off
-   *   before that review, so the removal is the last thing they hear. The host is never kicked (refused), so a kick
-   *   never hands the host role over.
+   * - "kicked" (the host's remove-player, in the lobby or mid-game, EXP-425): `player-removed`; `detach` cuts the
+   *   kicked player's sockets off before that review, so the removal is the last thing they hear; then the same review
+   *   as a leave. The host is never kicked (refused), so a kick never hands the host role over.
    * - "gone" (start-game cleanup): `new-host` / `player-left` like a leave, but no review: the game is starting.
+   * A photo owner removed while holding the scoreboard releases it first (hold-resume + hold-end), whatever the reason:
+   * nobody else would end that hold before its budget ran out.
    * Returns the removed player, or undefined if `username` was not in the room (or is the host, for a kick).
    */
   removePlayer(room: Room, username: string, reason: RemovalReason, detach?: (removed: Player) => void): Player | undefined {
-    if (reason === "kicked" && this.roomManager.getPlayer(room.gameCode, username)?.isHost) return undefined;
+    const target = this.roomManager.getPlayer(room.gameCode, username);
+    if (!target || (reason === "kicked" && target.isHost)) return undefined;
+    if (room.currentPlayer === target) this.forceRelease(room);
     const result = this.roomManager.removePlayer(room.gameCode, username);
     if (!result.removed) return undefined;
     const { player, newHost, isEmpty } = result;
@@ -262,7 +266,7 @@ export class GameEngine {
 
   /**
    * Ready phase: start early once at least 2 players are connected and all of them are ready.
-   * Call after im-ready and whenever a player disconnects or leaves during the ready phase (kicks are lobby only).
+   * Call after im-ready and whenever a player disconnects, leaves or is kicked during the ready phase.
    * Otherwise READY_TIMEOUT decides (a lone player waits for the others to come back).
    */
   checkReady(room: Room): void {

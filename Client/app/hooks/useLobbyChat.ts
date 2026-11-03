@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Alert, Keyboard } from "react-native";
+import { Alert } from "react-native";
 import type { Socket } from "socket.io-client";
 import { useI18n } from "../i18n";
 import { appendCapped, MAX_CHAT_MESSAGES } from "../utils/reactions";
@@ -38,22 +38,23 @@ export const useLobbyChat = (socket: Socket | null, gameCode: string | null, use
 
   const show = (msg: LobbyChatMessage) => setMessages((prev) => appendCapped(prev, msg, MAX_CHAT_MESSAGES));
 
-  const send = () => {
+  /** Sends the draft; true when it went out (false: blank, within the cooldown, or offline) */
+  const send = (): boolean => {
     const message = draft.trim();
-    if (!message) return;
+    if (!message) return false;
     const now = Date.now();
     if (now - lastSentTime < CHAT_COOLDOWN_MS) {
       Alert.alert(t.slowDown, t.pleaseWaitBeforeSending);
-      return;
+      return false;
     }
     // Offline it is not sent (nor shown): the text stays in the input to send once back
     const sent = !!gameCode && emitWhileConnected(socket, "chat-message", { gameCode, username, message });
-    if (!sent) return;
+    if (!sent) return false;
     // The server doesn't echo it back to me: show it here
     show(newChatMessage(username || "You", message));
     setDraft("");
     setLastSentTime(now);
-    Keyboard.dismiss();
+    return true;
   };
 
   const receive = (data: IncomingChatMessage) => {

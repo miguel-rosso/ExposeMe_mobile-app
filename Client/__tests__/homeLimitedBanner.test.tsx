@@ -205,8 +205,9 @@ describe("Home limited-access banner (EXP-270)", () => {
 // never pushed down (jest has no layout engine: positions are fed through onLayout).
 describe("Home logo vs the limited-access banner (EXP-281)", () => {
   const layout = (y: number, height: number) => ({ nativeEvent: { layout: { x: 0, y, width: 300, height } } });
+  // The logo's positioned (and measured) wrapper, around its slide-in Animatable view
   const logo = (root: ReactTestInstance) =>
-    root.find((n) => n.props.animation === "slideInDown" && typeof n.props.onLayout === "function" && typeof n.type !== "string");
+    root.find((n) => n.props.testID === TEST_IDS.homeLogo && typeof n.props.onLayout === "function" && typeof n.type === "string");
   const bannerWrapper = (root: ReactTestInstance) =>
     root.find((n) => typeof n.props.onLayout === "function" && n.parent?.props.pointerEvents === "box-none");
   const emoji = (root: ReactTestInstance) =>

@@ -1,4 +1,4 @@
-# Type ${GAME_CODE} into the home screen's room code field, replacing whatever it holds (used by join-room.yaml).
+# Type ${GAME_CODE} into the home screen's room code field, replacing whatever it holds (used by search-room.yaml).
 appId: com.socketNull.ExposeMe
 ---
 # The field keeps the last code entered/created in this session (GameContext gameCode) and a tap puts the
@@ -15,6 +15,4 @@ appId: com.socketNull.ExposeMe
 - tapOn:
     id: "game-code-input"
 - inputText: ${GAME_CODE}
-# Codes are alphanumeric (letters keyboard, typed in any case): the full keyboard can cover the search button,
-# so submit to close it first (Enter blurs the field on both platforms; hideKeyboard is unsafe, see join-room.yaml)
-- pressKey: Enter
+# The keyboard stays up: its Enter is the search itself (EXP-378), which the caller presses once the code is checked

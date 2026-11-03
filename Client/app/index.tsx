@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   Dimensions,
   Alert,
   LayoutChangeEvent,
+  Animated,
 } from "react-native";
 import tw from "twrnc";
 import { useRouter } from "expo-router";
@@ -20,6 +21,7 @@ import { useGameContext } from "@/app/providers/GameContext";
 import { StatusBar } from "react-native";
 import * as Animatable from "react-native-animatable";
 import { useFocusedBackHandler } from "@/app/hooks/useFocusedBackHandler";
+import { useKeyboardPadding } from "@/app/hooks/useKeyboardPadding";
 import { useFocusEffect } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useBackgroundContext } from "./providers/BackgroundContext";
@@ -58,6 +60,8 @@ SplashScreen.preventAutoHideAsync();
 
 /** How much the home background photo is blurred */
 const BACKDROP_BLUR_RADIUS = 3;
+/** Keyboard height (pt) at which the top logo has faded out, clearing the way for the raised join panel */
+const LOGO_FADED_AT_KEYBOARD_HEIGHT = 150;
 
 registerHomeAnimations();
 
@@ -81,7 +85,6 @@ const Index = () => {
   const [isJoiningGame, setIsJoiningGame] = useState(false);
   const [shouldAnimateCreateGameButton, setShouldAnimateCreateGameButton] = useState(false);
   const [isFirstMount, setIsFirstMount] = useState(true);
-  const gameCodeInputRef = useRef<TextInput>(null);
   const usernameInputRef = useRef<Animatable.View & View>(null);
   const gameCodeAnimRef = useRef<Animatable.View & View>(null);
   const createGameButtonRef = useRef<Animatable.View & View>(null);
@@ -166,10 +169,28 @@ const Index = () => {
     }
   }, [isJoiningGame]);
 
-  // Android back: closes the keyboard, then the join panel. Only while home is focused: under the waiting room it
-  // would take the press meant for its Exit (EXP-339)
-  useFocusedBackHandler(() =>
-    handleHomeBackPress({ keyboard: Keyboard, isJoiningGame, cancelJoin: handleCancelJoinGame })
+  // Android back and a tap outside the join panel's field and button: close the keyboard first (the room code field
+  // opens with it, EXP-378), then the join panel
+  const closeKeyboardThenJoinPanel = () =>
+    handleHomeBackPress({ keyboard: Keyboard, isJoiningGame, cancelJoin: handleCancelJoinGame });
+  // Only while home is focused: under the waiting room it would take the press meant for its Exit (EXP-339)
+  useFocusedBackHandler(closeKeyboardThenJoinPanel);
+
+  // Leaving home (Search room, an invite link opening the lobby over it, the photo explorer) closes its keyboard: a
+  // field left focused under the next screen would keep it up there
+  useFocusEffect(useCallback(() => () => Keyboard.dismiss(), []));
+
+  // The window doesn't shrink for the keyboard: the join panel rises above it so Search room stays visible, and the
+  // logo fades out as the keyboard comes up, so on short screens the raised panel doesn't cover half of it
+  const keyboardPadding = useKeyboardPadding();
+  const logoOpacity = useMemo(
+    () =>
+      keyboardPadding.interpolate({
+        inputRange: [0, LOGO_FADED_AT_KEYBOARD_HEIGHT],
+        outputRange: [1, 0],
+        extrapolate: "clamp",
+      }),
+    [keyboardPadding]
   );
 
   // Name typed (or cleared): kept in the game context and saved for the next launch
@@ -206,13 +227,16 @@ const Index = () => {
     router.push("/screens/WaitingRoom");
   };
 
-  // Search room: joins the typed room through the waiting room
+  // Search room (button or the keyboard's Go): joins the typed room through the waiting room
   const handleSearchRoom = async () => {
     // The name was already checked (and saved normalized) by Join game, which opened this panel
     if (!isRoomCode(joinCodeDraft)) {
+      // The keyboard stays up to fix the code
       gameCodeAnimRef.current?.shake?.(SHAKE_MS);
       return;
     }
+    // Not over the gallery access modal nor the waiting room
+    Keyboard.dismiss();
 
     if (!(await ensureGalleryAccess())) return;
 
@@ -251,7 +275,7 @@ const Index = () => {
     setShouldAnimateCreateGameButton(true);
   };
 
-  /** The home form's name field with its clear button */
+  /** The home form's name field with its clear button (which keeps the keyboard up, to type the new name) */
   const renderUsernameInput = (animation: string | undefined) => (
     <Animatable.View
       ref={usernameInputRef}
@@ -276,10 +300,7 @@ const Index = () => {
             accessibilityRole="button"
             accessibilityLabel={t.clearUsername}
             style={tw` justify-center  bg-gray-200 h-8 w-8 rounded-full flex items-center justify-center`}
-            onPress={() => {
-              handleUsernameChange("");
-              Keyboard.dismiss();
-            }}
+            onPress={() => handleUsernameChange("")}
           >
             <Ionicons name="close-outline" size={24} color="black" />
           </TouchableOpacity>
@@ -328,35 +349,36 @@ const Index = () => {
         </View>
 
         {/* Logo at the top */}
-        <Animatable.View
-          ref={topLogoRef}
-          animation="slideInDown"
-          duration={HOME_ANIMATION_MS}
-          style={tw`absolute top-[10%]`}
+        {/* The keyboard fade is on a wrapper: the Animatable view's own animations (slide in, exit) drive its style */}
+        <Animated.View
+          testID={TEST_IDS.homeLogo}
+          style={[tw`absolute top-[10%]`, { opacity: logoOpacity }]}
           onLayout={handleLogoLayout}
         >
-          <View style={[tw` flex-1 items-center  max-w-[300px] w-[100%]`, { height: LOGO_BOX_HEIGHT }]}>
-            <Text
-              style={[
-                tw`text-white ${getTitleFontSize()}  z-10 text-center pt-15`,
-                { fontFamily: BRAND_DISPLAY_FONT },
-                BRAND_LOGO_SHADOW,
-              ]}
-            >
-              {t.appName}
-            </Text>
-            <Image
-              source={require("@/assets/images/carasonrojada.png")}
-              style={[
-                tw` z-4 right-[-20] absolute`,
-                { top: LOGO_EMOJI_TOP, width: LOGO_EMOJI_BOX_PERCENT, height: LOGO_EMOJI_BOX_PERCENT },
-                // Shrinks towards its bottom edge to clear the limited-access banner (EXP-281)
-                emojiScale < 1 && { transform: [{ scale: emojiScale }], transformOrigin: "bottom" },
-              ]}
-              resizeMode="contain"
-            />
-          </View>
-        </Animatable.View>
+          <Animatable.View ref={topLogoRef} animation="slideInDown" duration={HOME_ANIMATION_MS}>
+            <View style={[tw` flex-1 items-center  max-w-[300px] w-[100%]`, { height: LOGO_BOX_HEIGHT }]}>
+              <Text
+                style={[
+                  tw`text-white ${getTitleFontSize()}  z-10 text-center pt-15`,
+                  { fontFamily: BRAND_DISPLAY_FONT },
+                  BRAND_LOGO_SHADOW,
+                ]}
+              >
+                {t.appName}
+              </Text>
+              <Image
+                source={require("@/assets/images/carasonrojada.png")}
+                style={[
+                  tw` z-4 right-[-20] absolute`,
+                  { top: LOGO_EMOJI_TOP, width: LOGO_EMOJI_BOX_PERCENT, height: LOGO_EMOJI_BOX_PERCENT },
+                  // Shrinks towards its bottom edge to clear the limited-access banner (EXP-281)
+                  emojiScale < 1 && { transform: [{ scale: emojiScale }], transformOrigin: "bottom" },
+                ]}
+                resizeMode="contain"
+              />
+            </View>
+          </Animatable.View>
+        </Animated.View>
 
         <View style={tw`px-2 flex-1 w-full max-w-[500px] self-center justify-center pt-[18%] items-center`}>
           {/* Home form: name, Create game and Join game */}
@@ -384,10 +406,13 @@ const Index = () => {
             </>
           )}
 
-          {/* Join panel: room code and Search room; tapping outside closes it */}
+          {/* Join panel: room code and Search room; tapping outside closes the keyboard, then the panel */}
           {isJoiningGame && (
-            <TouchableWithoutFeedback accessible={false} onPress={handleCancelJoinGame}>
-              <View style={tw`flex-1 w-full justify-center items-center`}>
+            <TouchableWithoutFeedback accessible={false} onPress={closeKeyboardThenJoinPanel}>
+              <Animated.View
+                testID={TEST_IDS.joinPanel}
+                style={[tw`flex-1 w-full justify-center items-center`, { paddingBottom: keyboardPadding }]}
+              >
                 {/* Room code input */}
                 <Animatable.View
                   ref={gameCodeAnimRef}
@@ -396,7 +421,6 @@ const Index = () => {
                   style={tw`w-full mb-4 relative`}
                 >
                   <TextInput
-                    ref={gameCodeInputRef}
                     testID={TEST_IDS.gameCodeInput}
                     accessibilityLabel={t.enterGameCode}
                     style={tw`p-4 rounded-xl  w-full bg-white text-center text-lg font-bold`}
@@ -408,18 +432,21 @@ const Index = () => {
                     autoCorrect={false}
                     autoComplete="off"
                     spellCheck={false}
+                    // Opens ready to type; the keyboard's Go searches the room (a wrong code keeps the keyboard up)
+                    autoFocus
+                    returnKeyType="go"
+                    submitBehavior="submit"
+                    onSubmitEditing={handleSearchRoom}
                     // No maxLength: it would cut a pasted " K7MQ4X" before sanitizing; sanitizing keeps 6 characters
                   />
+                  {/* Clears the code, keeping the keyboard up to type the right one */}
                   {joinCodeDraft.length > 0 && (
                     <View style={tw`absolute right-4 h-full flex justify-center items-center`}>
                       <TouchableOpacity
                         accessibilityRole="button"
                         accessibilityLabel={t.clearGameCode}
                         style={tw`  bg-gray-200 h-8 w-8 rounded-full flex items-center justify-center`}
-                        onPress={() => {
-                          setJoinCodeDraft("");
-                          Keyboard.dismiss();
-                        }}
+                        onPress={() => setJoinCodeDraft("")}
                       >
                         <Ionicons name="close-outline" size={24} color="black" />
                       </TouchableOpacity>
@@ -430,7 +457,7 @@ const Index = () => {
                 <Animatable.View animation="slideInUpBounce" duration={HOME_ANIMATION_MS} style={tw`w-full`}>
                   <BrandButton testID={TEST_IDS.searchRoomButton} label={t.searchRoom} onPress={handleSearchRoom} />
                 </Animatable.View>
-              </View>
+              </Animated.View>
             </TouchableWithoutFeedback>
           )}
         </View>

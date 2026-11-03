@@ -1,5 +1,5 @@
 import React from "react";
-import { Animated, TextInput, TouchableOpacity, View } from "react-native";
+import { Animated, Keyboard, TextInput, TouchableOpacity, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import tw from "twrnc";
 import ChatMessage from "@/app/components/IngameComunication/ChatMessage";
@@ -27,11 +27,23 @@ export const LobbyChatMessages = ({ chat }: LobbyChatProps) => (
   </View>
 );
 
-/** The chat input and its send button, kept above the keyboard. */
+/**
+ * The chat input and its send button, kept above the keyboard. The keyboard's return key ("send") sends too and keeps
+ * the keyboard up to go on chatting; with nothing typed it closes the keyboard. The button closes it once the message
+ * is out. Those are the lobby's ways back to the room on iOS, which has no back key for the keyboard. A refused send
+ * (cooldown, offline) leaves the keyboard up with the text still in it.
+ */
 export const LobbyChatFooter = ({ chat }: LobbyChatProps) => {
   const { t } = useI18n();
   const keyboardPadding = useKeyboardPadding();
   const blank = !chat.draft.trim();
+  const sendAndCloseKeyboard = () => {
+    if (chat.send()) Keyboard.dismiss();
+  };
+  const handleReturnKey = () => {
+    if (blank) Keyboard.dismiss();
+    else chat.send();
+  };
 
   return (
     <Animated.View style={[tw`w-full mb-5`, { paddingBottom: keyboardPadding }]}>
@@ -44,12 +56,15 @@ export const LobbyChatFooter = ({ chat }: LobbyChatProps) => {
           placeholderTextColor="#999"
           style={tw`flex-1 bg-gray-800/90 text-white px-4 py-3 rounded-full mr-2`}
           maxLength={MAX_CHAT_LENGTH}
+          returnKeyType="send"
+          submitBehavior="submit"
+          onSubmitEditing={handleReturnKey}
         />
         <TouchableOpacity
           testID={TEST_IDS.chatSendButton}
           accessibilityRole="button"
           accessibilityLabel={t.sendMessage}
-          onPress={chat.send}
+          onPress={sendAndCloseKeyboard}
           disabled={blank}
           style={tw`rounded-full w-10 h-10 ${blank ? "bg-gray-600" : "bg-[#ff8605]"} items-center justify-center`}
         >

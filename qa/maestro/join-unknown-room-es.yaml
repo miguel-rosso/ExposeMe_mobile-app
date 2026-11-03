@@ -55,7 +55,8 @@ appId: com.socketNull.ExposeMe
     id: "game-code-input"
 # Well-formed (room-code alphabet, 6 characters) but not a live room
 - inputText: "ZZZZZZ"
-- pressKey: Enter
+# Search room with the keyboard still up: the join panel rises above it (EXP-378; join-room.yaml searches with the
+# keyboard's Go instead)
 - tapOn:
     id: "search-room-button"
 # Back on the home screen with the system alert, translated

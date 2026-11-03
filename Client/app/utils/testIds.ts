@@ -10,6 +10,8 @@ export const TEST_IDS = {
   usernameClearButton: "username-clear-button",
   createGameButton: "create-game-button",
   joinGameButton: "join-game-button",
+  homeLogo: "home-logo", // fades out while the keyboard is up
+  joinPanel: "join-panel", // room code + Search room, lifted above the keyboard
   gameCodeInput: "game-code-input",
   searchRoomButton: "search-room-button",
   ownPhotosButton: "own-photos-button",

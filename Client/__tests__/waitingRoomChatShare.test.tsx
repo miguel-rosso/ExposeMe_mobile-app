@@ -103,7 +103,7 @@ const notices = (r: TestRenderer.ReactTestRenderer) =>
 // ── Chat ─────────────────────────────────────────────────
 
 describe("WaitingRoom: lobby chat (EXP-186)", () => {
-  it("sends the trimmed message to the room, shows it to me at once, clears the input and closes the keyboard", async () => {
+  it("the send button sends the trimmed message to the room, shows it to me at once, clears the input and closes the keyboard", async () => {
     const r = await mount();
     await typeChat(r, "  hola a todos  ");
     expect(byId(r, TEST_IDS.chatSendButton).props.accessibilityState?.disabled).toBeFalsy();
@@ -113,6 +113,18 @@ describe("WaitingRoom: lobby chat (EXP-186)", () => {
     expect(chatShown(r)).toEqual([{ username: "alice", message: "hola a todos" }]);
     expect(byId(r, TEST_IDS.chatInput).props.value).toBe("");
     expect(dismissSpy).toHaveBeenCalledTimes(1);
+    act(() => r.unmount());
+  });
+
+  // EXP-378: the keyboard's return key sends too, and keeps the keyboard up to go on chatting
+  it("the keyboard's return key sends the message the same way and leaves the keyboard up", async () => {
+    const r = await mount();
+    await typeChat(r, "hola");
+    act(() => { byId(r, TEST_IDS.chatInput).props.onSubmitEditing({ nativeEvent: { text: "hola" } }); });
+    expect(mockSocket.emittedPayloads("chat-message")).toEqual([{ gameCode: ROOM_CODE, username: "alice", message: "hola" }]);
+    expect(chatShown(r)).toEqual([{ username: "alice", message: "hola" }]);
+    expect(byId(r, TEST_IDS.chatInput).props.value).toBe("");
+    expect(dismissSpy).not.toHaveBeenCalled();
     act(() => r.unmount());
   });
 
@@ -144,6 +156,7 @@ describe("WaitingRoom: lobby chat (EXP-186)", () => {
     expect(mockSocket.emittedPayloads("chat-message")).toEqual([]);
     expect(chatShown(r)).toEqual([]);
     expect(byId(r, TEST_IDS.chatInput).props.value).toBe("hola");
+    expect(dismissSpy).not.toHaveBeenCalled(); // the keyboard stays up with it
 
     mockSocket.connected = true;
     await sendChat(r); // no cooldown spent by the message that didn't go

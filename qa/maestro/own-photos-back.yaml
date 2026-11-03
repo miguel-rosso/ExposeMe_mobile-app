@@ -68,7 +68,7 @@ appId: com.socketNull.ExposeMe
       id: "game-code-input"
     timeout: 5000
 # Cancel the join to get the normal home back: hardware back on Android (first press may only close the keyboard),
-# tapping outside the field on iOS (left side, clear of the centred dice button)
+# tapping outside the field on iOS
 - runFlow:
     when:
       platform: Android
@@ -86,9 +86,20 @@ appId: com.socketNull.ExposeMe
     when:
       platform: iOS
     commands:
-      # The room-code field doesn't auto-focus, so no keyboard is in the way
-      - tapOn:
-          point: "20%,80%"
+      # The room-code field opens focused (EXP-378): the first tap outside only closes the keyboard, the next one the
+      # panel. The panel has no element to tap besides its field and buttons, so a point inside it: 14% down is under
+      # the language/banner row and the panel's top padding, and over the field even when it rises with the keyboard
+      # (every lab.sh IOS_MODELS model); 20% across is inside the panel's 500 pt column on the iPad too
+      - repeat:
+          while:
+            notVisible:
+              id: "create-game-button"
+          times: 3
+          commands:
+            - tapOn:
+                point: "20%,14%"
+            - waitForAnimationToEnd:
+                timeout: 2000
 - extendedWaitUntil:
     visible:
       id: "create-game-button"

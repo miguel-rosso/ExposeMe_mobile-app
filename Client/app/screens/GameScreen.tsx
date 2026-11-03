@@ -1,9 +1,8 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import {
-  View, Text, TouchableOpacity, StatusBar, BackHandler, LayoutChangeEvent, useWindowDimensions, ActivityIndicator,
-  Alert,
+  View, Text, TouchableOpacity, StatusBar, LayoutChangeEvent, useWindowDimensions, ActivityIndicator, Alert,
 } from "react-native";
-import { useFocusEffect, useLocalSearchParams, type Href } from "expo-router";
+import { useLocalSearchParams, type Href } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import tw from "twrnc";
 import { useGameContext } from "../providers/GameContext";
@@ -42,6 +41,9 @@ import { useTurnRequest } from "../hooks/useTurnRequest";
 import { usePickSender } from "../hooks/usePickSender";
 import { withHost, withoutPlayer } from "../utils/roomPlayers";
 import PausedModal from "@/app/components/modals/PausedModal";
+import LeaveGameConfirm from "@/app/components/modals/LeaveGameConfirm";
+import LeaveGameButton from "@/app/components/LeaveGameButton";
+import { useFocusedBackHandler } from "../hooks/useFocusedBackHandler";
 import GalleryAccessModal from "@/app/components/modals/GalleryAccessModal";
 import { useGalleryAccessGuard } from "@/app/hooks/useGalleryAccessGuard";
 import { useQaRenderAck } from "../hooks/useQaRenderAck";
@@ -69,7 +71,7 @@ const GameScreen = () => {
   const {
     username, gameCode, socket, playersProvider, setPlayersProvider, roundsOfGame, plantedPhotoUri,
     plantedPhotoSent, plantPhoto, getRejoinToken, saveRejoinToken, clearRejoinToken, setPlantedPhotoUri,
-    takeInviteOverRoomScreen,
+    takeInviteOverRoomScreen, leaveRoom,
   } = useGameContext();
   const safeUsername = username ?? "";
   const safeGameCode = gameCode ?? "";
@@ -200,12 +202,6 @@ const GameScreen = () => {
     return () => { live = false; };
   }, [ownRoomCode, username]);
 
-  // ── Block back button ────────────────────────────────
-  useFocusEffect(useCallback(() => {
-    const sub = BackHandler.addEventListener("hardwareBackPress", () => true);
-    return () => sub.remove();
-  }, []));
-
   // ── Leaving this screen ──────────────────────────────
   // router.replace acts on the top screen: anything opened over this one (an invite link's dialog, EXP-360, even one
   // whose push is queued in the same tick) is dismissed first, so that it is always this screen that is replaced
@@ -244,6 +240,26 @@ const GameScreen = () => {
     console.log("[GAME] Out of the game — returning to menu");
     goHome(message);
   };
+
+  // ── Leaving on purpose (EXP-377, DEC-050 A) ──────────
+  // Exit (the game's button, the pause modal's, Android back) asks first. Leave sends leave-room, which the server takes
+  // as a real leave (DEC-011: the game goes on for the others, or ends if one is left) instead of a lost connection
+  // that would pause it, and forgets my rejoin token: I can't come back. Game over closes the question: the final
+  // screens have their own Exit.
+  const [askingToLeave, setAskingToLeave] = useState(false);
+  const leaveForGood = () => {
+    setAskingToLeave(false);
+    if (leftGameRef.current) return;
+    leaveRoom();
+    leaveGame();
+  };
+  // Android back (the key and the back gesture) never pops the game (the server would take it as a lost connection):
+  // during the game it is Exit, and with the question open its Cancel. iOS has no back here (the route disables the
+  // swipe, app/_layout.tsx)
+  useFocusedBackHandler(() => {
+    if (!gameOverRef.current) setAskingToLeave((asking) => !asking);
+    return true;
+  });
 
   // ── Connection: stay in the game, rejoin on reconnect ─
   const { connected } = useGameConnection({
@@ -552,12 +568,25 @@ const GameScreen = () => {
       <StatusBar hidden />
       <WinnerModal visible={showWinner} winners={winners} onAnimationEnd={handleWinnerEnd} />
       <FinalScoreModal visible={showFinalScore} finalScore={finalScore || []} />
-      <PausedModal endsAt={finalScore ? null : pauseEndsAt} pause={pauseCount.pause} maxPauses={pauseCount.maxPauses} />
+      <PausedModal
+        endsAt={finalScore ? null : pauseEndsAt}
+        pause={pauseCount.pause}
+        maxPauses={pauseCount.maxPauses}
+        onLeave={() => setAskingToLeave(true)}
+      />
+      <LeaveGameConfirm
+        visible={askingToLeave && !finalScore}
+        onConfirm={leaveForGood}
+        onCancel={() => setAskingToLeave(false)}
+      />
       <GalleryAccessModal
         access={finalScore || showWinner ? null : galleryGuard.blocked}
         onAllow={() => galleryGuard.check({ ask: true })}
         onSelectPhotos={galleryGuard.selectMore}
         onRetry={() => galleryGuard.check({ ask: false })}
+        // It covers the game's Exit: its own way out asks the same question (EXP-377)
+        onBack={() => setAskingToLeave(true)}
+        backLabel={t.leaveGame}
         blocking
       />
 
@@ -707,6 +736,9 @@ const GameScreen = () => {
           </View>
         )}
       </View>
+
+      {/* Exit: the pause modal has its own, and the photo stays clear while held */}
+      {!finalScore && pauseEndsAt === null && !gameHeld && <LeaveGameButton onPress={() => setAskingToLeave(true)} />}
     </View>
   );
 };

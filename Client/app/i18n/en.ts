@@ -86,6 +86,11 @@ export default {
   waitingPlayersReturn: "Waiting for players to come back…",
   pauseOf: "Pause {pause} of {max}",
   lastPauseWarning: "Last pause: if nobody comes back, the game will end.",
+  // Leaving a game in progress (EXP-377)
+  leaveGame: "Leave game",
+  leaveGameConfirmTitle: "Leave the game?",
+  leaveGameConfirmMessage: "You won't be able to rejoin.",
+  leaveGameConfirm: "Leave",
   someoneChoosingPhoto: "Someone is choosing a photo…",
   roundSkipped: "No photo this time. Round skipped.",
   ownPhotoTimeout: "Your photo didn't arrive in time, so your round was skipped.",

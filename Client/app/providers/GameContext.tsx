@@ -6,7 +6,7 @@ import { GameProviderProps, PlantUploadState, Player, RoomOfGameResponse } from 
 import getEnvVars from "@/config";
 import { uploadPhoto } from "@/app/utils/uploadPhoto";
 import { PLANT_UPLOAD_RETRY, uploadWithRetry } from "@/app/utils/uploadRetry";
-import { leaveAndClose } from "@/app/utils/leaveRoom";
+import { leaveFromAnywhere } from "@/app/utils/leaveRoom";
 import { isFinalRefusal, isPhotoUnavailable, PlantPhotoAck, sendPlantPhoto } from "@/app/utils/plantPhotoAck";
 import type { PhotoAuth } from "@/app/utils/photoAuth";
 import { normalizeUsername, USERNAME_STORAGE_KEY } from "@/app/utils/username";
@@ -156,12 +156,17 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
   };
 
   // Exit (and Join on an invite link to another room): the server removes us and hands the host role over, and the rejoin
-  // token for this room is forgotten. The app moves on at once; the old socket closes once the server confirms.
+  // token for this room is forgotten. The app moves on at once; the old socket closes once the server confirms. Offline
+  // (reconnecting), the old socket keeps the token to rejoin and leave once it is back (leaveFromAnywhere, EXP-377).
   const leaveRoom = () => {
     console.log("Leaving room");
+    const stored = rejoinTokenRef.current;
+    const seat = stored && stored.gameCode === gameCode
+      ? { gameCode: stored.gameCode, username: stored.username, rejoinToken: stored.token }
+      : null;
     clearRejoinToken();
     const leaving = detachSocket();
-    if (leaving) leaveAndClose(leaving);
+    if (leaving) leaveFromAnywhere(leaving, seat);
   };
 
   // ── Stored name ──

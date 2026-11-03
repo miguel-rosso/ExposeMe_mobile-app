@@ -1,0 +1,52 @@
+# EXP-377 / DEC-050 A: a game in progress can be left on purpose. The game's Exit (bottom-left, under the emoji row)
+# asks «Leave the game? You won't be able to rejoin»: Cancel keeps the device in the game, Leave takes it home and the
+# server takes it as a real leave (DEC-011), not a lost connection: the others are never paused for it.
+# Run with TWO bots: the game goes on for them and they play it to game-over (bots.mjs passes, reason "game-over",
+# every round played, no game-paused):
+#   qa/lab/lab.sh play --flow leave-mid-game --bots 2 --rounds 3 --devices <label>
+# or with ONE bot: left alone, it gets game-over at once (no 5 min "Game paused"):
+#   qa/lab/lab.sh play --flow leave-mid-game --bots 1 --rounds 3 --devices <label>
+# The same leave from the pause modal is leave-paused-game.yaml.
+# env: GAME_CODE, USERNAME, METRO_URL (url-encoded)
+# Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
+appId: com.socketNull.ExposeMe
+---
+- runFlow: open-app.yaml
+- runFlow: join-room.yaml
+- runFlow: wait-game-start.yaml
+# Answering phase: the photo and the options are on screen, and so is Exit
+- extendedWaitUntil:
+    visible:
+      id: "player-option-.*"
+    timeout: 180000
+- assertVisible:
+    id: "leave-game-button"
+- takeScreenshot: leave-button-${USERNAME}
+# Cancel keeps the device in the game
+- tapOn:
+    id: "leave-game-button"
+- assertVisible:
+    id: "leave-game-confirm"
+- takeScreenshot: leave-confirm-${USERNAME}
+- tapOn:
+    id: "alert-modal-cancel"
+- assertNotVisible:
+    id: "leave-game-confirm"
+- assertNotVisible:
+    id: "create-game-button"
+- extendedWaitUntil:
+    visible:
+      id: "player-option-.*|score-modal|game-waiting-photo|round-progress"
+    timeout: 5000
+# Leave: home, at once
+- tapOn:
+    id: "leave-game-button"
+- tapOn:
+    id: "alert-modal-confirm"
+- extendedWaitUntil:
+    visible:
+      id: "create-game-button"
+    timeout: 10000
+- assertNotVisible:
+    id: "leave-game-button"
+- takeScreenshot: left-home-${USERNAME}

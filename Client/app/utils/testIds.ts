@@ -53,6 +53,10 @@ export const TEST_IDS = {
   pausedCountdown: "paused-countdown",
   pausedCounter: "paused-counter",
   pausedLastWarning: "paused-last-warning",
+  // Leaving a game in progress (EXP-377): the game's Exit, the pause modal's, and the question both open
+  leaveGameButton: "leave-game-button",
+  pausedLeaveButton: "paused-leave-button",
+  leaveGameConfirm: "leave-game-confirm", // its Cancel / Leave are alertModalCancel / alertModalConfirm
   // ── Gallery access (home, lobby, game) ──
   galleryAccessModal: "gallery-access-modal",
   galleryAccessMessage: "gallery-access-message",

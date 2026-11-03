@@ -9,7 +9,7 @@ import GameScreen from "../app/screens/GameScreen";
 import EmojiReactionLane from "../app/components/IngameComunication/EmojiReactionLane";
 import EmojisButton from "../app/components/IngameComunication/EmojisButtons";
 import ScoreModal, { HOLD_BUTTON_CLEARANCE } from "../app/components/modals/ScoreModal";
-import { ANSWERS_BOTTOM, EMOJI_ROW_BOTTOM, HOLD_BUTTON_BOTTOM } from "../app/utils/gameRows";
+import { ANSWERS_BOTTOM, EMOJI_ROW_BOTTOM, HOLD_BUTTON_BOTTOM, LEAVE_BUTTON } from "../app/utils/gameRows";
 
 // EXP-205: the rows laid over the game photo (timer bar, reactions, answers, emoji row, hold button, reconnecting
 // banner) and the round scoreboard keep clear of the notch, the Dynamic Island, the home indicator and the navigation
@@ -261,3 +261,33 @@ const titleTopWith = (insets: typeof NO_INSETS) => {
   act(() => r.unmount());
   return top;
 };
+
+// ── Exit button (EXP-377) ──
+// Bottom-left, in the strip under the emoji row: above the home indicator / navigation bar, out of a side notch, and
+// below every other bottom row (answers, emoji row, the scoreboard's list), so it covers no option nor button. The
+// rows are anchored to the bottom edge, so a short screen (iPhone SE: no insets) lays them out the same.
+describe("Exit button (EXP-377)", () => {
+  beforeEach(() => { jest.useFakeTimers(); mockSocket.reset(); });
+  afterEach(() => { jest.clearAllTimers(); jest.useRealTimers(); });
+
+  it.each([
+    ["no insets (iPhone SE)", NO_INSETS],
+    ["a Dynamic Island", ISLAND_INSETS],
+    ["a plain status bar", STATUS_BAR_INSETS],
+    ["landscape", LANDSCAPE_INSETS],
+  ])("with %s, sits under the emoji row, the answers and the scoreboard's list", async (_name, insets) => {
+    const r = await playRoundToScores(insets);
+    const button = flat(byId(r.root, TEST_IDS.leaveGameButton)) as Box & { height: number };
+    const answers = placedAncestor(byId(r.root, TEST_IDS.answerOptions), "bottom");
+    expect(button).toMatchObject({ bottom: insets.bottom + LEAVE_BUTTON.bottom, left: insets.left + LEAVE_BUTTON.side });
+    const buttonTop = button.bottom! + button.height;
+    expect(buttonTop).toBeLessThanOrEqual(insets.bottom + EMOJI_ROW_BOTTOM);
+    expect(buttonTop).toBeLessThan(answers.bottom!);
+    // In scores the list keeps clear of it too (the hold button's space only adds to that)
+    act(() => mockSocket.fire("round-reveal", { correctAnswer: "alice", duration: 3_000, yourGuess: "" }));
+    act(() => mockSocket.fire("round-scores", { scores: [], round: 1, totalRounds: 10, duration: 5_000 }));
+    expect(flat(byId(r.root, TEST_IDS.scoreModal)).paddingBottom).toBeGreaterThanOrEqual(buttonTop);
+    expect(flat(byId(r.root, TEST_IDS.leaveGameButton))).toMatchObject({ bottom: button.bottom });
+    act(() => r.unmount());
+  });
+});

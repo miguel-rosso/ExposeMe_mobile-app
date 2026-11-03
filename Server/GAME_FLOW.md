@@ -365,14 +365,27 @@ After last round: game-over
   Events from sockets that never joined, or that were replaced by a rejoin on another socket, are ignored
   (a replaced socket's `leave-room` only detaches that socket; the live player stays). After `leave-room`
   the username is free again, so joining with it needs no token.
-- **Leaving** (Exit in the lobby or on the final screens, or Join on an invite link to another room; Cancel keeps the
-  room, DEC-047): the app sends
+- **Leaving** (Exit in the lobby, during a game or on the final screens, or Join on an invite link to another room;
+  Cancel keeps the room, DEC-047): the app sends
   `leave-room` with an ack callback and closes the socket **only once the server acks it** (it acks after removing
-  the player), or after 1 s without an answer (`LEAVE_ACK_TIMEOUT_MS`, offline) so leaving never hangs; the app moves
+  the player), or after 1 s without an answer (`LEAVE_ACK_TIMEOUT_MS`) so leaving never hangs; the app moves
   on at once. Closing in the same tick as the emit can lose the leave: socket.io dispatches an event on the next tick
   and drops it if the socket disconnected meanwhile, and the player would then be treated as a lost connection
   (lobby: shown as gone for 15 s with the name taken; mid-game: the game pauses for them instead of ending).
+  Leaving while the socket is **offline** (reconnecting): a leave-room on the reconnection would come from a socket
+  bound to no room and be ignored, so the old socket waits up to 10 s (`OFFLINE_LEAVE_TIMEOUT_MS`) to reconnect,
+  rejoins with the rejoin token (which the app has already forgotten for everything else) and sends `leave-room` as
+  above right after it: the server handles a socket's events in order and the join synchronously, so the leave always
+  follows the rejoin (a refused join leaves an unbound socket, whose leave is just acked). Once that join is sent the
+  socket is only closed by the leave (its ack or 1 s cap), never bare, which would be a new lost connection. If it
+  doesn't reconnect in time it is closed and the server goes by the lost connection; the token is dropped either way.
   In the lobby, Android's system back (key or gesture) is that same Exit, and the iOS back swipe is disabled (EXP-336).
+  **During a game** (EXP-377, DEC-050 A) the Exit is on screen from the ready/loading phase to the round scores
+  (hidden during a pause, a hold and after game over), and the pause modal and the blocking gallery notice (photo
+  access revoked or no photos) each have their own; all of them ask first ("Leave the game? You won't be able to
+  rejoin"): Cancel stays, Leave is the leave above and goes home. Android's back opens that same question and a second
+  back cancels it (it never pops the game); the iOS back swipe stays disabled. The server takes it as any leave
+  (DEC-011: the game goes on, or ends if one player is left).
 - **Kicked** (`remove-player`, lobby only, also between games while others linger on the final screens): every
   socket of the room, the kicked player's included, gets `player-removed`, then the kicked player's sockets are
   evicted, and their `rejoinToken` is **revoked** in that room (EXP-337). The app, in the lobby or on the final

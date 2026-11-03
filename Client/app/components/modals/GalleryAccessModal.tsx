@@ -14,8 +14,10 @@ interface GalleryAccessModalProps {
   onSelectPhotos: () => void;
   /** Check again (e.g. after adding photos) */
   onRetry: () => void;
-  /** Back button: close the notice (home) or leave the room (lobby). None in game. */
+  /** Back button: close the notice (home), leave the room (lobby) or ask to leave the game (game, EXP-377) */
   onBack?: () => void;
+  /** The back button's label ("Back" unless the screen says what it does) */
+  backLabel?: string;
   /** Lobby / game: stays until access is back (re-checked on foreground) and says so */
   blocking?: boolean;
   /** Home: step-by-step guide to enable the permission in the system settings */
@@ -23,7 +25,9 @@ interface GalleryAccessModalProps {
 }
 
 /** Explains why the player can't play without photo access / photos and how to fix it. Never navigates by itself. */
-const GalleryAccessModal: React.FC<GalleryAccessModalProps> = ({ access, onAllow, onSelectPhotos, onRetry, onBack, blocking, onShowHelp }) => {
+const GalleryAccessModal: React.FC<GalleryAccessModalProps> = ({
+  access, onAllow, onSelectPhotos, onRetry, onBack, backLabel, blocking, onShowHelp,
+}) => {
   const { t } = useI18n();
   if (!access || access.status === "ok") return null;
 
@@ -59,7 +63,7 @@ const GalleryAccessModal: React.FC<GalleryAccessModalProps> = ({ access, onAllow
           button(TEST_IDS.gallerySettingsButton, t.openSettings, () => Linking.openSettings(), denied && access.canAskAgain ? "bg-gray-600" : "bg-blue-600")}
         {!denied && button(TEST_IDS.galleryRetryButton, t.tryAgain, onRetry, limitedNoPhotos ? "bg-gray-600" : "bg-blue-600")}
         {denied && !access.canAskAgain && onShowHelp && button(TEST_IDS.galleryHelpButton, t.howToEnable, onShowHelp, "bg-gray-600")}
-        {onBack && button(TEST_IDS.galleryBackButton, t.back, onBack, "bg-gray-700")}
+        {onBack && button(TEST_IDS.galleryBackButton, backLabel ?? t.back, onBack, "bg-gray-700")}
         {blocking && !unavailable && <Text style={tw`text-sm text-gray-300 text-center`}>{t.galleryBlockedNote}</Text>}
       </View>
     </View>

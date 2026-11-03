@@ -1,6 +1,7 @@
 # EXP-335: the back swipe never takes the player out of a game. On iOS the edge swipe (and, on iOS 26+, a swipe from
 # anywhere, e.g. over the photo) used to pop GameScreen back home, closing the socket: the server paused the game.
-# On Android the back gesture and the back key go to GameScreen's hardwareBackPress handler, which swallows them.
+# On Android the back gesture and the back key go to GameScreen's hardwareBackPress handler, which never pops the
+# screen: it asks whether to leave the game (EXP-377), and a second back cancels that.
 # The guarantee comes from Client/__tests__/gameScreenSwipeBack.test.tsx (GameScreen's route has gestureEnabled:
 # false) and react-native-screens' gesture delegate (RNSScreenStack.mm: a top screen with gestureEnabled=NO rejects
 # the edge, iOS 26 content and full-screen pop recognizers). This flow is a device smoke test on top of that.
@@ -52,11 +53,27 @@ appId: com.socketNull.ExposeMe
     start: 30%, 40%
     end: 95%, 40%
     duration: 400
+# EXP-377: on Android back is the game's Exit, which only asks («Leave the game?»), and back again is its Cancel. With
+# gesture navigation the edge swipe above was such a back: its question is cancelled first. iOS never asks: its swipe
+# is no back.
 - runFlow:
     when:
       platform: Android
     commands:
+      - runFlow:
+          when:
+            visible:
+              id: "leave-game-confirm"
+          commands:
+            - tapOn:
+                id: "alert-modal-cancel"
       - pressKey: Back
+      - assertVisible:
+          id: "leave-game-confirm"
+      - takeScreenshot: back-asks-${USERNAME}
+      - pressKey: Back
+- assertNotVisible:
+    id: "leave-game-confirm"
 - takeScreenshot: swipe-back-${USERNAME}
 # Still in the game (whatever phase it reached), not home, and the server did not see a drop
 - assertNotVisible:

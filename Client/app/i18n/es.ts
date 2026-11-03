@@ -86,6 +86,11 @@ export default {
   waitingPlayersReturn: "Esperando a que vuelvan los jugadores…",
   pauseOf: "Pausa {pause} de {max}",
   lastPauseWarning: "Es la última pausa: si no vuelven, la partida terminará.",
+  // Leaving a game in progress (EXP-377)
+  leaveGame: "Salir de la partida",
+  leaveGameConfirmTitle: "¿Salir de la partida?",
+  leaveGameConfirmMessage: "No podrás volver a entrar.",
+  leaveGameConfirm: "Salir",
   someoneChoosingPhoto: "Alguien está eligiendo una foto…",
   roundSkipped: "Esta vez no hubo foto. Ronda saltada.",
   ownPhotoTimeout: "Tu foto no llegó a tiempo, así que se ha saltado tu ronda.",

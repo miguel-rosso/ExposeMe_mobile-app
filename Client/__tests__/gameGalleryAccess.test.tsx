@@ -92,8 +92,10 @@ describe("GameScreen gallery access guard (EXP-118)", () => {
     await foreground();
     expect(has(r.root, TEST_IDS.galleryAccessModal)).toBe(true);
     expect(has(r.root, TEST_IDS.gallerySettingsButton)).toBe(true);
-    // No way to dismiss it: only access coming back clears it
-    expect(has(r.root, TEST_IDS.galleryBackButton)).toBe(false);
+    // No way to dismiss it: only access coming back clears it. Its only other way out is leaving the game, which asks
+    // first (EXP-377, see gameLeaveMidGame.test.tsx)
+    expect(has(r.root, TEST_IDS.galleryBackButton)).toBe(true);
+    expect(has(r.root, TEST_IDS.leaveGameConfirm)).toBe(false);
     // Still the game screen, still in the room
     expect(has(r.root, TEST_IDS.gameWaitingReady)).toBe(true);
     expect(mockReplace).not.toHaveBeenCalled();

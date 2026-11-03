@@ -179,6 +179,30 @@ describe("GameContext leaveRoom (EXP-254)", () => {
     act(() => r.unmount());
   });
 
+  // EXP-377: Exit while reconnecting. The token is forgotten at once (no screen can rejoin with it), but the old socket
+  // keeps it to rejoin and leave once it is back, so the server sees a leave, not a lost connection
+  it("while reconnecting, the old socket rejoins this room's seat once back, then leaves", async () => {
+    jest.useFakeTimers();
+    const r = mount();
+    act(() => ctx.setGameCode("ABC123"));
+    act(() => ctx.saveRejoinToken("ABC123", "bob", "tok-1"));
+    act(() => ctx.startSocket());
+    const leaving = Object.assign(mockSockets[0], { once: jest.fn(), off: jest.fn(), connected: false });
+    act(() => ctx.leaveRoom());
+    await expect(ctx.getRejoinToken("ABC123", "bob")).resolves.toBeNull();
+    expect(ctx.socket).toBeNull();
+    expect(leaving.emit).not.toHaveBeenCalled(); // nothing buffered for the unbound reconnection
+
+    const listener = (ev: string) => leaving.once.mock.calls.find(([e]: unknown[]) => e === ev)![1] as (d?: unknown) => void;
+    listener("connect")();
+    expect(leaving.emit.mock.calls.map(([ev]: unknown[]) => ev)).toEqual(["join-create-game", "leave-room"]);
+    expect(leaving.emit).toHaveBeenCalledWith("join-create-game", { gameCode: "ABC123", username: "bob", rejoinToken: "tok-1" });
+    expect(leaving.disconnect).not.toHaveBeenCalled();
+    leaveAck(leaving)();
+    expect(leaving.disconnect).toHaveBeenCalledTimes(1);
+    act(() => r.unmount());
+  });
+
   it("without a socket only forgets the token", async () => {
     const r = mount();
     act(() => ctx.saveRejoinToken("ABC123", "bob", "tok-1"));

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Text, View } from "react-native";
+import { Text, TouchableOpacity, View } from "react-native";
 import tw from "twrnc";
 import { useI18n } from "../../i18n";
 import { TEST_IDS } from "@/app/utils/testIds";
@@ -11,13 +11,16 @@ interface PausedModalProps {
   /** Which pause this is (1..maxPauses): on the last one the game ends if nobody comes back */
   pause: number;
   maxPauses: number;
+  /** Exit: asks whether to leave the game (the game screen's LeaveGameConfirm) */
+  onLeave: () => void;
 }
 
 /**
  * Shown to every connected player while the server has the game paused (fewer than 2 connected).
- * Only displays the server's countdown (when it runs out the server sends game-over) and "pause N of M".
+ * Only displays the server's countdown (when it runs out the server sends game-over) and "pause N of M", with an Exit
+ * for whoever doesn't want to wait (EXP-377).
  */
-const PausedModal: React.FC<PausedModalProps> = ({ endsAt, pause, maxPauses }) => {
+const PausedModal: React.FC<PausedModalProps> = ({ endsAt, pause, maxPauses, onLeave }) => {
   const { t } = useI18n();
   const [remaining, setRemaining] = useState(endsAt === null ? 0 : endsAt - Date.now());
 
@@ -52,6 +55,14 @@ const PausedModal: React.FC<PausedModalProps> = ({ endsAt, pause, maxPauses }) =
             {t.lastPauseWarning}
           </Text>
         )}
+        <TouchableOpacity
+          testID={TEST_IDS.pausedLeaveButton}
+          accessibilityRole="button"
+          onPress={onLeave}
+          style={tw`mt-6 px-5 py-2 rounded-lg bg-gray-600`}
+        >
+          <Text style={tw`text-white text-base font-semibold`}>{t.leaveGame}</Text>
+        </TouchableOpacity>
       </View>
     </View>
   );

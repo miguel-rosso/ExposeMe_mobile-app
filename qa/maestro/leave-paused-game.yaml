@@ -1,0 +1,41 @@
+# EXP-377 / DEC-050 A: whoever is left waiting in «Game paused» can leave instead of sitting through the 5 min countdown.
+# The pause modal's Exit asks the same question as the game's («Leave the game? You won't be able to rejoin»): Cancel
+# keeps the pause on screen, Leave takes the device home. Run with ONE bot that drops mid-round and comes back after the
+# device left; with nobody else in the room, its rejoin ends the game (game-over, DEC-011):
+#   qa/lab/lab.sh play --flow leave-paused-game --bots 1 --rounds 3 --devices <label> \
+#     --bot-args "--drop-round 2 --drop-secs 60"
+# env: GAME_CODE, USERNAME, METRO_URL (url-encoded)
+# Selectors are testIDs (Client/app/utils/testIds.ts), so the flow works in any UI language.
+appId: com.socketNull.ExposeMe
+---
+- runFlow: open-app.yaml
+- runFlow: join-room.yaml
+- extendedWaitUntil:
+    visible:
+      id: "paused-modal"
+    timeout: 240000
+# The game's own Exit is under the pause: the modal has its own
+- assertNotVisible:
+    id: "leave-game-button"
+- tapOn:
+    id: "paused-leave-button"
+- assertVisible:
+    id: "leave-game-confirm"
+- takeScreenshot: paused-leave-confirm-${USERNAME}
+- tapOn:
+    id: "alert-modal-cancel"
+- assertNotVisible:
+    id: "leave-game-confirm"
+- assertVisible:
+    id: "paused-countdown"
+- tapOn:
+    id: "paused-leave-button"
+- tapOn:
+    id: "alert-modal-confirm"
+- extendedWaitUntil:
+    visible:
+      id: "create-game-button"
+    timeout: 10000
+- assertNotVisible:
+    id: "paused-modal"
+- takeScreenshot: paused-left-home-${USERNAME}

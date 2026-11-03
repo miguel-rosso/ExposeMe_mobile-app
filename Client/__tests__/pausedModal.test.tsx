@@ -1,5 +1,6 @@
 import React from "react";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
+import { Text } from "react-native";
 import PausedModal from "../app/components/modals/PausedModal";
 import { TEST_IDS } from "../app/utils/testIds";
 import en from "../app/i18n/en";
@@ -16,9 +17,10 @@ const text = (root: ReactTestInstance, id: string) => {
   return found.length ? [found[0].props.children].flat().join("") : null;
 };
 
-const render = (props: React.ComponentProps<typeof PausedModal>) => {
+type Props = React.ComponentProps<typeof PausedModal>;
+const render = (props: Omit<Props, "onLeave"> & Partial<Pick<Props, "onLeave">>) => {
   let r!: TestRenderer.ReactTestRenderer;
-  act(() => { r = TestRenderer.create(<PausedModal {...props} />); });
+  act(() => { r = TestRenderer.create(<PausedModal onLeave={jest.fn()} {...props} />); });
   return r;
 };
 
@@ -46,6 +48,25 @@ describe("PausedModal", () => {
     expect(text(r.root, TEST_IDS.pausedLastWarning)).toBe(es.lastPauseWarning);
     expect(es.lastPauseWarning).toMatch(/terminar/);
     expect(en.lastPauseWarning).toMatch(/end/);
+    act(() => r.unmount());
+  });
+
+  // EXP-377: whoever doesn't want to wait can leave from the pause (the game screen asks first)
+  it("has an Exit that asks to leave the game (en/es)", () => {
+    const onLeave = jest.fn();
+    const leaveButton = (r: TestRenderer.ReactTestRenderer) =>
+      r.root.find((n) => n.props.testID === TEST_IDS.pausedLeaveButton && typeof n.props.onPress === "function");
+    const label = (r: TestRenderer.ReactTestRenderer) => leaveButton(r).findByType(Text).props.children;
+
+    let r = render({ endsAt: Date.now() + 300_000, pause: 1, maxPauses: 3, onLeave });
+    expect(label(r)).toBe("Leave game");
+    act(() => leaveButton(r).props.onPress());
+    expect(onLeave).toHaveBeenCalledTimes(1);
+    act(() => r.unmount());
+
+    mockT = es;
+    r = render({ endsAt: Date.now() + 300_000, pause: 1, maxPauses: 3 });
+    expect(label(r)).toBe("Salir de la partida");
     act(() => r.unmount());
   });
 

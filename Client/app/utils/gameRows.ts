@@ -12,3 +12,10 @@ export const HOLD_BUTTON_HEIGHT = 64;
 /** The answer options row has p-2: its buttons line up with the hold button */
 const ANSWERS_ROW_PADDING = 8;
 export const ANSWERS_BOTTOM = HOLD_BUTTON_BOTTOM - ANSWERS_ROW_PADDING;
+
+/**
+ * The game's Exit button (EXP-377), bottom-left in the strip under the emoji row: nothing else is drawn there (the
+ * answers, the hold button and the scoreboard's list all end above the emoji row), so it never covers an option or a
+ * button. `side`: its distance from the left safe edge.
+ */
+export const LEAVE_BUTTON = { bottom: 6, height: 36, side: 12 } as const;

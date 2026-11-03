@@ -11,6 +11,7 @@ import { TEST_IDS } from "../app/utils/testIds";
 
 jest.mock("@expo/vector-icons", () => ({ Ionicons: () => null }));
 jest.mock("../app/i18n", () => ({ useI18n: () => ({ t: require("../app/i18n/en").default }) }));
+jest.mock("expo-router", () => require("../testUtils/screenNavigation").screenNavigationMock());
 
 /** A chat whose send goes out (true) or is refused (false: cooldown, offline) */
 const fakeChat = (sendGoesOut = true): LobbyChat => ({

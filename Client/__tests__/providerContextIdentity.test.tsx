@@ -12,6 +12,8 @@ jest.mock("@react-native-async-storage/async-storage", () =>
 );
 jest.mock("socket.io-client", () => ({ io: jest.fn() }));
 jest.mock("expo-media-library", () => ({}));
+// The background hook follows its screen's focus; the probes stand for a focused screen
+jest.mock("expo-router", () => ({ useIsFocused: () => true }));
 
 const GAME_PROVIDER = "../app/providers/GameContext";
 const GAME_CONTEXT = "../app/providers/GameContextInstance";
@@ -97,8 +99,10 @@ describe("provider contexts survive a re-evaluation of their provider module (EX
     const { backgrounds } = require(BACKGROUND_CONTEXT);
     expect(fallback.backgroundImage).toBe(backgrounds[0]);
 
+    // The provider starts on the last background (Math.random pinned), not the context default: it served the hook
+    const random = jest.spyOn(Math, "random").mockReturnValue(0.99);
     const ctx = readHook(refreshed.useBackgroundContext, mounted.BackgroundProvider);
-    expect(ctx.setBackgroundImage).not.toBe(fallback.setBackgroundImage);
-    expect(backgrounds).toContain(ctx.backgroundImage);
+    random.mockRestore();
+    expect(ctx.backgroundImage).toBe(backgrounds[backgrounds.length - 1]);
   });
 });

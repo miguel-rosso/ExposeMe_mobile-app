@@ -198,6 +198,17 @@ describe("Home's join panel with the keyboard (EXP-378)", () => {
     expect(dismissKeyboard).toHaveBeenCalledTimes(1);
   });
 
+  // EXP-397: covered by the lobby, home no longer follows the lobby chat's keyboard (on iOS it animated its padding)
+  it("covered by another screen, home stops listening to the keyboard, and listens again once back on top", async () => {
+    jest.replaceProperty(Platform, "OS", "ios");
+    await openJoinPanel();
+    expect(keyboardListeners.has("keyboardWillShow")).toBe(true);
+    setHomeFocused(false);
+    expect(keyboardListeners.size).toBe(0);
+    setHomeFocused(true);
+    expect(keyboardListeners.has("keyboardWillShow")).toBe(true);
+  });
+
   it("a tap outside with the keyboard up only closes the keyboard: the panel and the typed code stay", async () => {
     const root = await openJoinPanel();
     typeCode(root, "K7M");

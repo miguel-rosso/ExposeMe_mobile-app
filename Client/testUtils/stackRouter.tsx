@@ -136,6 +136,7 @@ export const expoRouterMock = {
   useRouter: () => stackRouter,
   useLocalSearchParams: () => useContext(ScreenContext).params,
   useFocusEffect,
+  useIsFocused: () => useContext(ScreenContext).focused,
   useNavigation: () => ({ getState: navigationState }),
   useRoute: () => ({ key: useContext(ScreenContext).routeKey }),
 };

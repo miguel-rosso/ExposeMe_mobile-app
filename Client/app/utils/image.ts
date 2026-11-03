@@ -1,4 +1,4 @@
-import { Image, Platform, type ImageSourcePropType } from 'react-native';
+import { Image, Platform, TurboModuleRegistry, type ImageSourcePropType, type TurboModule } from 'react-native';
 
 /** A remote/local URI, or the numeric asset id Metro gives a bundled image import. */
 export type ImageSrc = string | number;
@@ -34,8 +34,28 @@ export const prefetchImage = (uri: string, headers: Record<string, string> = {})
 /** A remote (http/https) URI: the server's room photos, as opposed to on-device gallery URIs. */
 export const isRemoteUri = (src: ImageSrc): src is string => typeof src === 'string' && /^https?:\/\//i.test(src);
 
-/** React Native's Blob: its bytes live in the native blob store until close() frees them. */
-type NativeBlob = Blob & { close(): void };
+/** React Native's Blob: its bytes live in the native blob store, under `data.blobId`, until close() frees them. */
+type NativeBlob = Blob & { close(): void; data: { blobId: string; offset: number } };
+
+/** React Native's native blob module: the URI scheme (and host, if any) its blob URIs use. */
+interface NativeBlobModule extends TurboModule {
+  getConstants(): { BLOB_URI_SCHEME?: string | null; BLOB_URI_HOST?: string | null };
+}
+
+/**
+ * The URI an <Image> reads a native blob from, built as React Native's own URL.createObjectURL builds it. The app
+ * can't call URL.createObjectURL: Expo replaces the global URL with one whose createObjectURL looks the blob module up
+ * through global.__turboModuleProxy, which React Native's bridgeless runtime never defines, so it always throws
+ * (EXP-404). Throws when the native blob module gives no URI scheme.
+ */
+const nativeBlobUri = (blob: NativeBlob): string => {
+  const constants = TurboModuleRegistry.get<NativeBlobModule>('BlobModule')?.getConstants();
+  const scheme = constants?.BLOB_URI_SCHEME;
+  if (typeof scheme !== 'string') throw new Error('Cannot create URL for blob');
+  const host = constants?.BLOB_URI_HOST;
+  const prefix = typeof host === 'string' ? `${scheme}://${host}/` : `${scheme}:`;
+  return `${prefix}${blob.data.blobId}?offset=${blob.data.offset}&size=${blob.size}`;
+};
 
 /** XMLHttpRequest.LOADING: React Native has received the whole blob response and created its native blob. */
 const XHR_RESPONSE_ARRIVED = 3;
@@ -85,7 +105,7 @@ export const downloadImageToMemory = (uri: string, headers: Record<string, strin
         return;
       }
       try {
-        resolve(URL.createObjectURL(downloaded!));
+        resolve(nativeBlobUri(downloaded!));
         blob = downloaded;
       } catch (error) {
         // An event handler: nothing would settle the download if this threw

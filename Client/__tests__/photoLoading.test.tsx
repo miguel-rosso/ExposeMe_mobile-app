@@ -1,10 +1,12 @@
 import React from "react";
-import { ActivityIndicator, Image, Platform } from "react-native";
+import { ActivityIndicator, Image, NativeModules, Platform } from "react-native";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import { FakeSocket } from "../testUtils/fakeSocket";
 import { TEST_IDS } from "../app/utils/testIds";
 import { downloadImageToMemory, PHOTO_DOWNLOAD_STALL_TIMEOUT_MS, prefetchImage } from "../app/utils/image";
-import { FakeXhr, installFakeXhr } from "../testUtils/fakeXhr";
+import {
+  EXPO_BRIDGELESS_CREATE_OBJECT_URL_ERROR, FAKE_BLOB_URI as BLOB_URI, FakeXhr, installFakeXhr,
+} from "../testUtils/fakeXhr";
 import PhotoComponent from "../app/components/PhotoComponent";
 // Loaded with the file (jest.mock calls below are hoisted above it): a cold transform must not hit the test timeout
 import GameScreen from "../app/screens/GameScreen";
@@ -18,6 +20,9 @@ import getEnvVars from "../config";
 // the photo is downloaded once into memory and both views draw that copy, the backdrop once the main photo has loaded.
 // EXP-401: a stalled in-memory download settled neither way, so the loading indicator stayed up all round: it times out
 // and falls back to the photo URL, like a failed download.
+// EXP-404: on the device the in-memory copy was never drawn and iOS still downloaded each photo 3 times: Expo's
+// URL.createObjectURL always throws on React Native's bridgeless runtime, so the download "failed" and both views loaded
+// the photo URL. The blob URI is built from React Native's blob module instead.
 
 jest.mock("@react-native-async-storage/async-storage", () =>
   require("@react-native-async-storage/async-storage/jest/async-storage-mock")
@@ -53,7 +58,6 @@ jest.mock("@/app/components/ProgressBar", () => () => null);
 
 const HEADERS = { Authorization: "Bearer tok-123", "X-Game-Code": "123456" };
 const PHOTO_URL = "http://s/temp/a.jpg";
-const BLOB_URI = "blob:photo-1?offset=0&size=1024";
 const { SERVER_URL } = getEnvVars();
 
 const realOS = Platform.OS;
@@ -66,7 +70,7 @@ beforeAll(() => {
 });
 beforeEach(() => {
   getSizeWithHeaders = jest.spyOn(Image, "getSizeWithHeaders").mockResolvedValue({ width: 1600, height: 1200 } as never);
-  restoreXhr = installFakeXhr(BLOB_URI);
+  restoreXhr = installFakeXhr();
 });
 afterEach(() => {
   setOS(realOS);
@@ -248,12 +252,50 @@ describe("PhotoComponent on iOS downloads the photo once (EXP-394)", () => {
   });
 });
 
+describe("PhotoComponent on iOS costs one GET per photo (EXP-404)", () => {
+  beforeEach(() => setOS("ios"));
+
+  // Each network download of the photo: the in-memory download, plus every view drawing the photo URL itself (iOS
+  // keeps no copy of the server's no-store photos, so each such view downloads it again)
+  const photoGets = (root: ReactTestInstance) => FakeXhr.requests.length + serverImages(root).length;
+
+  it("downloads the photo once for the main photo and its backdrop, in the device's blob runtime", async () => {
+    const r = await renderPhoto();
+    await finishDownload();
+    expect(photoGets(r.root)).toBe(1);
+    act(() => mainPhoto(r.root).props.onLoad());
+    expect(coverImages(r.root)).toHaveLength(1); // the backdrop is drawn
+    expect(photoGets(r.root)).toBe(1);
+  });
+
+  it("does not use Expo's URL.createObjectURL: it always throws on React Native's bridgeless runtime", () => {
+    const runtime = globalThis as { RN$Bridgeless?: boolean; __turboModuleProxy?: unknown };
+    const { RN$Bridgeless: bridgeless, __turboModuleProxy: turboModuleProxy } = runtime;
+    // As on the device: React Native's bridgeless runtime defines RN$Bridgeless and never __turboModuleProxy
+    runtime.RN$Bridgeless = true;
+    delete runtime.__turboModuleProxy;
+    try {
+      let ExpoURL!: typeof URL;
+      jest.isolateModules(() => { ExpoURL = require("expo/src/winter/url").URL; });
+      const blob = new FakeXhr().arrive() as unknown as Blob;
+      expect(() => ExpoURL.createObjectURL(blob)).toThrow(EXPO_BRIDGELESS_CREATE_OBJECT_URL_ERROR);
+      // and from then on, for every photo
+      expect(() => ExpoURL.createObjectURL(blob)).toThrow("Cannot create URL for blob");
+    } finally {
+      if (bridgeless === undefined) delete runtime.RN$Bridgeless;
+      else runtime.RN$Bridgeless = bridgeless;
+      if (turboModuleProxy !== undefined) runtime.__turboModuleProxy = turboModuleProxy;
+    }
+  });
+});
+
 describe("downloadImageToMemory (EXP-394)", () => {
   it("resolves with a blob: URI of the photo and frees it once on release", async () => {
     const download = downloadImageToMemory(PHOTO_URL, HEADERS);
     const blob = FakeXhr.requests[0].respond();
     await expect(download.uri).resolves.toBe(BLOB_URI);
-    expect(URL.createObjectURL).toHaveBeenCalledWith(blob);
+    // Never through Expo's URL.createObjectURL, which always throws on the device (EXP-404)
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
     download.release();
     download.release();
     expect(blob.close).toHaveBeenCalledTimes(1);
@@ -277,11 +319,10 @@ describe("downloadImageToMemory (EXP-394)", () => {
     request.respond();
     await expect(download.uri).rejects.toThrow("released");
     expect(blob.close).toHaveBeenCalledTimes(1);
-    expect(URL.createObjectURL).not.toHaveBeenCalled();
   });
 
   it("rejects and frees the photo when no blob: URI can be made for it", async () => {
-    (URL.createObjectURL as jest.Mock).mockImplementation(() => { throw new Error("Cannot create URL for blob"); });
+    jest.spyOn(NativeModules.BlobModule, "getConstants").mockReturnValue({});
     const download = downloadImageToMemory(PHOTO_URL, HEADERS);
     const blob = FakeXhr.requests[0].respond();
     await expect(download.uri).rejects.toThrow("Cannot create URL");

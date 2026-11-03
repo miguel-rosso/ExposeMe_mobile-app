@@ -84,7 +84,7 @@ beforeAll(() => {
 beforeEach(() => {
   mockSocket.reset();
   jest.spyOn(Image, "getSizeWithHeaders").mockResolvedValue({ width: 1600, height: 1200 } as never);
-  restoreXhr = installFakeXhr("blob:photo-1?offset=0&size=1024");
+  restoreXhr = installFakeXhr();
   setQa("1");
 });
 afterEach(() => {

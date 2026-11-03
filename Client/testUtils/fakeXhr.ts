@@ -3,11 +3,19 @@
 // test answer it: respond() with a status and a fake native blob (arrive() first to stop just before its load event),
 // fail() it as a network error, or stall() it to let its timeout run out.
 
+import { NativeModules } from "react-native";
+
+/** Like React Native's Blob: `data` locates its bytes in the native blob store. */
 export interface FakeBlob {
   size: number;
   type: string;
+  data: { blobId: string; offset: number };
   close: jest.Mock;
 }
+
+/** The blob id of every fake response, and the URI an <Image> reads that blob from on iOS. */
+export const FAKE_BLOB_ID = "photo-1";
+export const FAKE_BLOB_URI = `blob:${FAKE_BLOB_ID}?offset=0&size=1024`;
 
 export class FakeXhr {
   static requests: FakeXhr[] = [];
@@ -55,7 +63,7 @@ export class FakeXhr {
 
   /** The response has arrived (LOADING), its load event not dispatched yet: React Native has made its native blob. */
   arrive(status = 200): FakeBlob {
-    const blob: FakeBlob = { size: 1024, type: "image/jpeg", close: jest.fn() };
+    const blob: FakeBlob = { size: 1024, type: "image/jpeg", data: { blobId: FAKE_BLOB_ID, offset: 0 }, close: jest.fn() };
     this.readyState = FakeXhr.LOADING;
     this.status = status;
     this.response = blob;
@@ -86,15 +94,28 @@ export class FakeXhr {
   }
 }
 
-/** Installs FakeXhr as the global XMLHttpRequest and URL.createObjectURL; returns a function that restores both. */
-export const installFakeXhr = (blobUri = "blob:photo-1?offset=0&size=1024"): (() => void) => {
+/** What Expo's URL.createObjectURL throws on the app's bridgeless runtime (proven in photoLoading.test, EXP-404). */
+export const EXPO_BRIDGELESS_CREATE_OBJECT_URL_ERROR = "globalThis.__turboModuleProxy is not a function";
+
+/**
+ * Installs FakeXhr as the global XMLHttpRequest, in the blob runtime the app has on iOS: React Native's iOS blob module
+ * constants (`blob:` URIs, no host) and Expo's URL.createObjectURL, which always throws there. Returns a function that
+ * restores all three.
+ */
+export const installFakeXhr = (): (() => void) => {
   const realXhr = (globalThis as { XMLHttpRequest?: unknown }).XMLHttpRequest;
   const realCreateObjectURL = URL.createObjectURL;
+  const blobConstants = jest
+    .spyOn(NativeModules.BlobModule, "getConstants")
+    .mockReturnValue({ BLOB_URI_SCHEME: "blob", BLOB_URI_HOST: null });
   FakeXhr.requests = [];
   (globalThis as { XMLHttpRequest?: unknown }).XMLHttpRequest = FakeXhr;
-  URL.createObjectURL = jest.fn(() => blobUri);
+  URL.createObjectURL = jest.fn(() => {
+    throw new TypeError(EXPO_BRIDGELESS_CREATE_OBJECT_URL_ERROR);
+  });
   return () => {
     (globalThis as { XMLHttpRequest?: unknown }).XMLHttpRequest = realXhr;
     URL.createObjectURL = realCreateObjectURL;
+    blobConstants.mockRestore();
   };
 };

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef } from "react";
+import { Platform } from "react-native";
 import type { Socket } from "socket.io-client";
 import type { ServerPhase } from "../models/interfaces";
+import { isRemoteUri } from "../utils/image";
 import { emitWhileConnected } from "../utils/socketEmit";
 
 /**
@@ -31,10 +33,26 @@ function takeMark(marks: PendingMarks, phase: ServerPhase): number | undefined {
   return handledAt;
 }
 
+// ── Painted round (for the photo-shown ack) ──
+
+interface PaintedRound {
+  socket: Socket;
+  phase: ServerPhase;
+  round: number;
+}
+
+/**
+ * The phase and round the game screen has painted last, while it shows one (QA builds only). The round photo is drawn
+ * by PhotoComponent, which gets only the photo from the game screen: its photo-shown ack reads the round from here.
+ * There is one game screen at a time.
+ */
+let paintedRound: PaintedRound | null = null;
+
 /**
  * Dev/QA render telemetry (EXP-012, Server/GAME_FLOW.md "QA render telemetry"): once the screen has committed a new
- * server phase (a new `phaseKey`), tells the server with `qa-ack { phase, round, at, handledAt? }`, so the lab can
- * measure how far apart the devices render the same phase. One ack per phase start; nothing at all outside QA builds.
+ * server phase (a new `phaseKey`), tells the server with `qa-ack { phase, round, at, platform, handledAt? }`, so the
+ * lab can measure how far apart the devices render the same phase. One ack per phase start; nothing at all outside QA
+ * builds.
  *
  * Returns `markHandled`, for the socket handlers of the events that start a phase (EXP-223): the ack of that phase then
  * also carries `handledAt`, the device time its handler started, so the lab can split the delay into delivery
@@ -57,8 +75,41 @@ export function useQaRenderAck(
     lastAckedKey.current = phaseKey;
     const handledAt = takeMark(pendingMarks.current, phase); // one ack per handled event: a later restart has none
     // A phase rendered offline is not acked (a late ack would be dropped before the rejoin, and measure nothing)
-    emitWhileConnected(socket, "qa-ack", { phase, round, at: Date.now(), ...(handledAt !== undefined && { handledAt }) });
+    emitWhileConnected(socket, "qa-ack", {
+      phase, round, at: Date.now(), platform: Platform.OS, ...(handledAt !== undefined && { handledAt }),
+    });
   }, [socket, phase, round, phaseKey]);
 
+  useEffect(() => {
+    if (!isQaTelemetryEnabled() || !socket || !phase) return;
+    const painted = { socket, phase, round };
+    paintedRound = painted;
+    return () => {
+      if (paintedRound === painted) paintedRound = null;
+    };
+  }, [socket, phase, round]);
+
   return markHandled;
+}
+
+/** How the main round photo first ended up: drawn, or impossible to draw (no photo on screen) */
+export type PhotoOutcome = "shown" | "failed";
+
+/**
+ * QA photo telemetry (EXP-395, Server/GAME_FLOW.md "QA render telemetry"): the phase ack says when the answering screen
+ * was painted, but the photo may still be downloading and decoding then. Returns the reporter for the main photo's
+ * first outcome: it tells the server with `qa-photo-shown { phase, round, at, platform, failed? }` (the phase and round
+ * the game screen has painted), once per photo; later loads of the same photo are not reported. Only server photos
+ * shown by the game screen are reported (not the own-photos viewer's), and nothing at all outside QA builds.
+ */
+export function useQaPhotoShownAck(photoUrl: string): (outcome: PhotoOutcome) => void {
+  const reportedUrl = useRef<string | null>(null);
+  return useCallback((outcome) => {
+    if (!isQaTelemetryEnabled() || !paintedRound || !isRemoteUri(photoUrl) || reportedUrl.current === photoUrl) return;
+    reportedUrl.current = photoUrl;
+    const { socket, phase, round } = paintedRound;
+    emitWhileConnected(socket, "qa-photo-shown", {
+      phase, round, at: Date.now(), platform: Platform.OS, ...(outcome === "failed" && { failed: true }),
+    });
+  }, [photoUrl]);
 }

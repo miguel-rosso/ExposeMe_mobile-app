@@ -14,7 +14,7 @@ import {
   JOIN_ATTEMPT_LIMIT, JOIN_MISS_PREFIX_MAX, JOIN_MISS_PRESSURE_MAX, JOIN_MISS_SOCKET_INTERVAL_MS, JOIN_MISS_WINDOW_MS,
   MAX_CONNECTIONS_PER_IP,
 } from "../managers/socketGuards";
-import { createQaTelemetry, isQaAck, QA_ACK_BURST, QA_ACK_RATE_PER_S } from "../managers/qaTelemetry";
+import { createQaTelemetry, isQaAck, isQaPhotoShown, QA_ACK_BURST, QA_ACK_RATE_PER_S } from "../managers/qaTelemetry";
 import { JoinCreateGameData, PhotoUnavailableData, Player, Room, RoomOfGameResponse, StartGameAck } from "../models/interfaces";
 
 const roomManager = new RoomManager();
@@ -38,7 +38,8 @@ const joinMisses = createJoinMissGuard({
 const joinExemptions = createSlidingWindow({ max: JOIN_EXEMPT_MAX, windowMs: JOIN_MISS_WINDOW_MS });
 // One socket.io socket per engine.io connection (a second CONNECT on the same transport is refused)
 const connsWithSocket = new WeakSet<object>();
-// Dev/QA only (QA_TELEMETRY=1): records when each device rendered a phase; null in production (no qa-ack handler)
+// Dev/QA only (QA_TELEMETRY=1): records when each device rendered a phase and showed the round photo; null in
+// production (no qa-ack / qa-photo-shown handler)
 const qaTelemetry = createQaTelemetry();
 /** Exported for tests: open connections and join misses per IP key, join attempts and chat messages per socket. */
 export { chatMessages, connections, joinAttempts, joinMisses };
@@ -546,12 +547,23 @@ io.on("connection", (socket: Socket) => {
       try {
         const s = session(socket);
         if (!s || !isQaAck(data) || !qaAckBucket.take()) return;
-        const { phase, round, at, handledAt } = data;
+        const { phase, round, at, platform, handledAt } = data;
         qaTelemetry.record({
-          gameCode: s.room.gameCode, username: s.player.username, phase, round, at, handledAt, receivedAt: Date.now(),
-          serverAt: gameEngine.phaseEmittedAt(s.room, phase, round),
+          gameCode: s.room.gameCode, username: s.player.username, phase, round, at, platform, handledAt,
+          receivedAt: Date.now(), serverAt: gameEngine.phaseEmittedAt(s.room, phase, round),
         });
       } catch (e) { console.error("qa-ack error:", e); }
+    });
+    socket.on("qa-photo-shown", (data: unknown) => {
+      try {
+        const s = session(socket);
+        if (!s || !isQaPhotoShown(data) || !qaAckBucket.take()) return;
+        const { phase, round, at, platform, failed } = data;
+        qaTelemetry.record({
+          kind: "photo-shown", gameCode: s.room.gameCode, username: s.player.username, phase, round, at, platform,
+          failed, receivedAt: Date.now(),
+        });
+      } catch (e) { console.error("qa-photo-shown error:", e); }
     });
   }
 });

@@ -756,7 +756,8 @@ All game events are **atomic** — each contains everything the client needs.
 | `chat-message` | `{ message }` (≤100 chars) | Broadcast as `{ username, message }` with the session username |
 | `emoji-reaction` | `{ emoji }`, exactly one of 😂 😍 ❓ 😳 🔥 😭 🤡 😡 (the app's picker) or 📸 (the app sends it when a screenshot is taken) | Broadcast as `{ username, emoji }` with the session username. Anything else is dropped; at most 5 per socket, refilled 4/s (excess dropped silently) |
 | `plant-photo` | `{ photoUrl }` (with an ack callback) | Applies to the session player (replaces their earlier one); `photoUrl` must be the player's own `/upload` path in this room; accepted until the first round is played. Acked `{ ok: true }` or `{ ok: false, reason: "not-in-room" \| "invalid" \| "too-late" \| "photo-unavailable" }` (see "Planting"); not acked when dropped by the rate limit |
-| `qa-ack` | `{ phase, round, at, handledAt? }` (`phase` one of the four round phases, `round` integer, `at` device clock in ms when the phase was painted, optional `handledAt` device clock in ms when the socket handler of the event that started it ran) | **Dev/QA only**, handled only when the server runs with `QA_TELEMETRY=1` (see "QA render telemetry"); otherwise not even registered |
+| `qa-ack` | `{ phase, round, at, platform, handledAt? }` (`phase` one of the four round phases, `round` integer, `at` device clock in ms when the phase was painted, `platform` `ios` or `android`, optional `handledAt` device clock in ms when the socket handler of the event that started it ran) | **Dev/QA only**, handled only when the server runs with `QA_TELEMETRY=1` (see "QA render telemetry"); otherwise not even registered |
+| `qa-photo-shown` | `{ phase, round, at, platform, failed? }` (`phase`/`round` the round phase the game screen had painted, `at` device clock in ms when the main round photo first drew, `platform` `ios` or `android`, `failed: true` when it could not be drawn at all) | **Dev/QA only**, like `qa-ack` (see "QA render telemetry") |
 
 Payload `gameCode`/`username` fields are ignored for all of the above; identity comes from the session.
 
@@ -784,7 +785,7 @@ Token buckets: burst, then refilled at the rate.
 | `chat-message` | one every 250 ms |
 | `emoji-reaction` | burst 5, refilled 4/s |
 | `plant-photo` | burst 5, refilled 1 every 2 s |
-| `qa-ack` | burst 10, refilled 2/s (dev/QA only) |
+| `qa-ack`, `qa-photo-shown` | one shared budget: burst 10, refilled 2/s (dev/QA only) |
 
 The game-event limits are `GAME_EVENT_LIMITS` in `managers/socketGuards.ts`.
 
@@ -794,21 +795,34 @@ Bot metrics only show when the server *sent* a phase; this shows when each phone
 
 - QA builds of the app (development bundles from a Metro started with `EXPO_PUBLIC_QA=1`, as `qa/lab/lab.sh metro`
   does; a release bundle never sends it) send
-  **`qa-ack { phase, round, at, handledAt? }`** right after the game screen commits a new phase (once per phase start:
+  **`qa-ack { phase, round, at, platform, handledAt? }`** right after the game screen commits a new phase (once per phase start:
   every `waiting-photo`, `round-start`, `round-reveal`, `round-scores`, and a resumed/rejoined phase). `handledAt` is
   the device time the socket handler of that `waiting-photo` / `round-start` / `round-reveal` / `round-scores` started
   (absent for a phase started by a resume, rejoin or hold). Regular builds never send it.
 - The server handles it only with **`QA_TELEMETRY=1`** (`qa/lab/lab.sh server` sets it; production never does, so the
   event is ignored there). Accepted only from a session player, with a valid payload, at most 10 per socket refilled
-  2/s; it appends one JSON line `{ gameCode, username, phase, round, at, handledAt?, receivedAt, serverAt? }`
+  2/s; it appends one JSON line `{ gameCode, username, phase, round, at, platform, handledAt?, receivedAt, serverAt? }`
   (`receivedAt`: server clock on receipt; `serverAt`: server clock when that phase of that round was broadcast,
   if it was broadcast only once in that round; kept for the current and the previous round, so an ack that arrives
   after the next phase's broadcast still gets it) to `QA_TELEMETRY_FILE` (written synchronously, so lines keep arrival order), or logs
   it when no file is set. Nothing is ever sent back. Each lab server start moves the previous file to `<file>.prev`.
+- The answering screen can be painted while its photo still downloads and decodes behind the loading indicator, so QA
+  builds also send **`qa-photo-shown { phase, round, at, platform, failed? }`** once per round photo, when the main
+  photo first draws (on iOS also after falling back from the in-memory copy to the photo URL), or with `failed: true`
+  when it can't be drawn at all; `phase`/`round` are those the game screen had painted then. Same gate, validation and
+  file; its line is `{ kind: "photo-shown", gameCode, username, phase, round, at, platform, failed?, receivedAt }`
+  (EXP-395).
 - After `lab.sh play`, the lab prints the per-phase device render skew (spread of `receivedAt` across devices for the
   same round and phase: p50/p95/max) next to the bots summary, and per device and phase (`latency`) the delivery delay
   (`serverAt` → `handledAt`, the device clock corrected by its offset to the server's, estimated NTP-style from its ack
-  with the shortest round trip) and the handler → paint cost (`at − handledAt`), p50/p95.
+  with the shortest round trip) and the handler → paint cost (`at − handledAt`), p50/p95. Per platform
+  (`photoVisible`) it adds the time from each round's first answering paint on a device to its photo on screen (both
+  on the device clock: `qa-photo-shown.at − qa-ack.at`; a photo belongs to the latest round of that number its device
+  painted at most 60 s before it, so a replay in the same room doesn't mix games), p50/p95/max, the photos that failed
+  to draw (`failed`) and the painted rounds with no `qa-photo-shown` at all: `missing` when the device then acked that
+  round's reveal or scores with no resumed/rejoined answering or reveal paint in between (a spinner all round), else
+  `missingLeft` (its screen left during answering, or it may have been offline when the photo drew). A p95 above
+  3 s, or any failed or `missing` photo, is listed in `warnings` and printed as `WARN …` on stderr; `missingLeft` is not.
 
 ## Photo upload (HTTP)
 

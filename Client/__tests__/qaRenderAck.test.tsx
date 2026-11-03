@@ -1,11 +1,14 @@
 import React from "react";
+import { Platform } from "react-native";
 import TestRenderer, { act } from "react-test-renderer";
 import type { Socket } from "socket.io-client";
 import { MarkPhaseHandled, useQaRenderAck } from "../app/hooks/useQaRenderAck";
 import type { ServerPhase } from "../app/models/interfaces";
 
 // EXP-012: QA builds (development bundle + EXPO_PUBLIC_QA=1) send qa-ack once per rendered phase start; other builds
-// never send it.
+// never send it. Each ack carries the device's platform (EXP-395: the lab reports the photo's time to screen per platform).
+
+const OS = Platform.OS;
 
 interface Props { phase: ServerPhase | null; round: number; phaseKey: number }
 
@@ -48,11 +51,11 @@ describe("useQaRenderAck", () => {
     jest.spyOn(Date, "now").mockReturnValue(1_234);
     renderSteps(PHASES);
     expect(acks()).toEqual([
-      { phase: "waiting-photo", round: 1, at: 1_234 },
-      { phase: "answering", round: 1, at: 1_234 },
-      { phase: "reveal", round: 1, at: 1_234 },
-      { phase: "scores", round: 1, at: 1_234 },
-      { phase: "scores", round: 1, at: 1_234 },
+      { phase: "waiting-photo", round: 1, at: 1_234, platform: OS },
+      { phase: "answering", round: 1, at: 1_234, platform: OS },
+      { phase: "reveal", round: 1, at: 1_234, platform: OS },
+      { phase: "scores", round: 1, at: 1_234, platform: OS },
+      { phase: "scores", round: 1, at: 1_234, platform: OS },
     ]);
     jest.restoreAllMocks();
   });
@@ -76,9 +79,9 @@ describe("useQaRenderAck", () => {
     act(() => r.update(<Marker phase="answering" round={1} phaseKey={3} />)); // resumed: no handler ran
     act(() => r.unmount());
     expect(acks()).toEqual([
-      { phase: "waiting-photo", round: 1, at: 130, handledAt: 100 },
-      { phase: "answering", round: 1, at: 130 },
-      { phase: "answering", round: 1, at: 130 },
+      { phase: "waiting-photo", round: 1, at: 130, platform: OS, handledAt: 100 },
+      { phase: "answering", round: 1, at: 130, platform: OS },
+      { phase: "answering", round: 1, at: 130, platform: OS },
     ]);
     jest.restoreAllMocks();
   });
@@ -106,8 +109,8 @@ describe("useQaRenderAck", () => {
     act(() => r.update(<Marker phase="answering" round={1} phaseKey={2} />));
     act(() => r.unmount());
     expect(acks()).toEqual([
-      { phase: "waiting-photo", round: 1, at: 400, handledAt: 100 },
-      { phase: "answering", round: 1, at: 450, handledAt: 400 },
+      { phase: "waiting-photo", round: 1, at: 400, platform: OS, handledAt: 100 },
+      { phase: "answering", round: 1, at: 450, platform: OS, handledAt: 400 },
     ]);
     jest.restoreAllMocks();
   });
@@ -129,8 +132,8 @@ describe("useQaRenderAck", () => {
     act(() => r.update(<Marker phase="waiting-photo" round={2} phaseKey={3} />)); // resumed (game-resumed): no handler
     act(() => r.unmount());
     expect(acks()).toEqual([
-      { phase: "answering", round: 1, at: 200, handledAt: 200 },
-      { phase: "waiting-photo", round: 2, at: 200 },
+      { phase: "answering", round: 1, at: 200, platform: OS, handledAt: 200 },
+      { phase: "waiting-photo", round: 2, at: 200, platform: OS },
     ]);
     jest.restoreAllMocks();
   });

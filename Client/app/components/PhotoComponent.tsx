@@ -6,6 +6,7 @@ import { TouchableOpacity } from "react-native";
 import { PhotoComponentProps } from "../models/interfaces";
 import { downloadImageToMemory, getImageSource, isRemoteUri } from "../utils/image";
 import { TEST_IDS } from "../utils/testIds";
+import { useQaPhotoShownAck } from "../hooks/useQaRenderAck";
 
 // Android has no native blur view: the backdrop is the same photo, blurred by the image pipeline
 const ANDROID_BACKDROP_BLUR_RADIUS = 50;
@@ -70,8 +71,16 @@ const PhotoComponent: React.FC<PhotoComponentProps> = ({ photoUrl, headers, onLo
   const [settledUrl, setSettledUrl] = useState<string | null>(null);
   const photoSettled = settledUrl === photoUrl;
   const markSettled = () => setSettledUrl(photoUrl);
+  // QA builds only: tells the lab when the photo is really on screen (EXP-395)
+  const reportPhotoShown = useQaPhotoShownAck(photoUrl);
+  const handlePhotoLoad = () => {
+    markSettled();
+    reportPhotoShown("shown");
+  };
   const handlePhotoError = () => {
-    if (!retryFromServer()) markSettled();
+    if (retryFromServer()) return;
+    markSettled();
+    reportPhotoShown("failed");
   };
 
   // Each photo fades in. The value starts at 0 on mount and a new photo resets it in the previous one's cleanup: a
@@ -112,7 +121,7 @@ const PhotoComponent: React.FC<PhotoComponentProps> = ({ photoUrl, headers, onLo
               source={source}
               style={[tw`w-full h-full`, { opacity: fadeAnim }]}
               resizeMode="contain"
-              onLoad={markSettled}
+              onLoad={handlePhotoLoad}
               onError={handlePhotoError}
             />
           )}

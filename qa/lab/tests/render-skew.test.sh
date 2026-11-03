@@ -31,7 +31,7 @@ ack() { # game, user, phase, round, receivedAt
   echo 'not json'; echo; echo '{"gameCode":"ROOM1","username":"z","phase":"answering","round":1}'
 } >"$TMP/telemetry.jsonl"
 
-out="$(node "$SKEW" "$TMP/telemetry.jsonl" ROOM1)"; rc=$?
+out="$(node "$SKEW" "$TMP/telemetry.jsonl" ROOM1 2>/dev/null)"; rc=$?
 [ $rc = 0 ] && ok "summary exits 0" || ko "summary exits 0" "rc=$rc"
 [ "$(jget gameCode <<<"$out")" = '"ROOM1"' ] && ok "summary names the room" || ko "summary names the room" "$out"
 [ "$(jget devices <<<"$out")" = '["android-a","ios-a"]' ] && ok "devices of that room only" || ko "devices of that room only" "$out"
@@ -66,7 +66,7 @@ lack() { # game, user, phase, round, serverAt (- = none), handledAt, at, receive
   # a device that never had a serverAt: no clock offset, no delivery
   lack LAT bot-x reveal 1 - 100 160 4000
 } >"$TMP/latency.jsonl"
-out="$(node "$SKEW" "$TMP/latency.jsonl" LAT)"
+out="$(node "$SKEW" "$TMP/latency.jsonl" LAT 2>/dev/null)"
 [ "$(jget latency.ios-a.clockOffset <<<"$out")" = 0 ] && ok "clock offset of a device in sync" || ko "clock offset of a device in sync" "$out"
 [ "$(jget latency.android-a.clockOffset <<<"$out")" = -3000 ] \
   && ok "clock offset from the shortest round trip" || ko "clock offset from the shortest round trip" "$out"
@@ -80,6 +80,90 @@ out="$(node "$SKEW" "$TMP/latency.jsonl" LAT)"
   && ok "resumed phase (no handledAt) ignored" || ko "resumed phase (no handledAt) ignored" "$out"
 [ "$(jget latency.bot-x <<<"$out")" = '{"clockOffset":null,"phases":{"reveal":{"handlerToPaint":{"n":1,"p50":60,"p95":60}}}}' ] \
   && ok "no serverAt at all: no clock offset" || ko "no serverAt at all: no clock offset" "$out"
+
+# ── render-skew.mjs: round photo on screen per platform (EXP-395) ──
+phase_ack() { # game, user, platform, phase, round, at, [resume]: the device's qa-ack at its device time `at` (painted by
+  # its phase's event it carries handledAt; a resumed or rejoined paint doesn't)
+  local handled=",\"handledAt\":$(($6 - 10))"; [ "${7:-}" = resume ] && handled=""
+  printf '{"gameCode":"%s","username":"%s","phase":"%s","platform":"%s","round":%s,"at":%s,"receivedAt":%s%s}\n' \
+    "$1" "$2" "$4" "$3" "$5" "$6" "$6" "$handled"
+}
+paint() { phase_ack "$1" "$2" "$3" answering "${@:4}"; } # game, user, platform, round, at, [resume]: its answering paint
+shown() { # game, user, platform, round, at, [failed]: its qa-photo-shown line
+  local failed=""; [ "${6:-}" = failed ] && failed=',"failed":true'
+  printf '{"kind":"photo-shown","gameCode":"%s","username":"%s","phase":"answering","platform":"%s","round":%s,"at":%s,"receivedAt":%s%s}\n' \
+    "$1" "$2" "$3" "$4" "$5" "$5" "$failed"
+}
+{
+  # ios-a: 200 and 400 ms; its round-2 photo is shown again later (a remount): only the first counts, whatever the line
+  # order; a resume paints round 2 again: still one round, timed from its first paint
+  paint PH ios-a ios 1 1000; shown PH ios-a ios 1 1200
+  shown PH ios-a ios 2 9000; paint PH ios-a ios 2 5000; shown PH ios-a ios 2 5400; paint PH ios-a ios 2 7000 resume
+  # ios-b: a slow photo, 3.5 s behind its answering paint
+  paint PH ios-b ios 1 1000; shown PH ios-b ios 1 4500
+  # android-a: 100 ms; round 2's photo never drew; round 3's has no answering paint (rejoined at the reveal): no time,
+  # nor for ios-b (two devices with only photo lines in round 3: no answering skew either); round 4 never showed one
+  paint PH android-a android 1 1000; shown PH android-a android 1 1100
+  paint PH android-a android 2 5000; shown PH android-a android 2 5050 failed
+  shown PH android-a android 3 9999; shown PH ios-b ios 3 7777
+  # android-a stays on round 4 until its reveal and never shows the photo: missing
+  paint PH android-a android 4 12000; phase_ack PH android-a android reveal 4 21000
+  # Rounds with no photo the device left or may have been offline in: missingLeft, never a warning. android-a's screen
+  # leaves during round 5's answering (no later ack: leave, kick, game over); ios-b rejoins round 2 in answering (a
+  # resumed paint) before its live reveal, and round 6 straight at the reveal
+  paint PH android-a android 5 30000
+  paint PH ios-b ios 2 5000; paint PH ios-b ios 2 6000 resume; phase_ack PH ios-b ios reveal 2 9000
+  paint PH ios-b ios 6 40000; phase_ack PH ios-b ios reveal 6 49000 resume
+  # Play again in the same room: round 1 again. android-a: 300 ms; ios-a plays it to the scores and never shows it
+  # (game 1's round-1 photo is not it): missing; ios-b's photo has no round 1 of this game painted (game 1's is minutes
+  # older): no time
+  paint PH android-a android 1 200000; shown PH android-a android 1 200300
+  paint PH ios-a ios 1 200000; phase_ack PH ios-a ios scores 1 212000
+  shown PH ios-b ios 1 200050
+  # another game's photo doesn't count
+  shown OTHER ios-a ios 1 999999
+} >"$TMP/photo.jsonl"
+out="$(node "$SKEW" "$TMP/photo.jsonl" PH 2>"$TMP/photo.err")"; rc=$?
+[ $rc = 0 ] && ok "photo summary exits 0 (warnings don't fail it)" || ko "photo summary exits 0" "rc=$rc"
+[ "$(jget photoVisible.p95BoundMs <<<"$out")" = 3000 ] && ok "photo-visible bound is 3 s p95" || ko "photo-visible bound" "$out"
+[ "$(jget photoVisible.platforms.ios <<<"$out")" = '{"n":3,"p50":400,"p95":3500,"max":3500,"failed":0,"missing":1,"missingLeft":2}' ] \
+  && ok "ios: first answering paint → first photo shown, per round and game; rejoined rounds are missingLeft" \
+  || ko "ios photo visible" "$out"
+[ "$(jget photoVisible.platforms.android <<<"$out")" = '{"n":2,"p50":100,"p95":300,"max":300,"failed":1,"missing":1,"missingLeft":1}' ] \
+  && ok "android: failed photo counted, not timed; played through with no photo is missing, left is missingLeft" \
+  || ko "android photo visible" "$out"
+[ "$(jget warnings <<<"$out")" = '["photoVisible android: 1 photo(s) failed to draw","photoVisible android: 1 round(s) painted with no photo shown","photoVisible ios: p95 3500 ms > 3000 ms","photoVisible ios: 1 round(s) painted with no photo shown"]' ] \
+  && ok "slow p95, failed and missing photos are warnings" || ko "photo warnings" "$out"
+grep -q "WARN photoVisible ios: p95 3500 ms > 3000 ms" "$TMP/photo.err" \
+  && grep -q "WARN photoVisible android: 1 round(s) painted with no photo shown" "$TMP/photo.err" \
+  && ok "warnings printed to stderr (stdout stays JSON)" || ko "warnings on stderr" "$(cat "$TMP/photo.err")"
+[ "$(jget phases.answering <<<"$out")" = '{"instances":2,"p50":0,"p95":0,"max":0}' ] \
+  && ok "photo lines are not phase acks" || ko "photo lines are not phase acks" "$out"
+
+# Answering painted, then the reveal, and no photo line at all: a spinner all round
+{ paint MISS ios-a android 1 1000; phase_ack MISS ios-a android reveal 1 9000; } >"$TMP/missing.jsonl"
+out="$(node "$SKEW" "$TMP/missing.jsonl" MISS 2>"$TMP/photo.err")"
+[ "$(jget photoVisible.platforms.android <<<"$out")" = '{"n":0,"p50":null,"p95":null,"max":null,"failed":0,"missing":1,"missingLeft":0}' ] \
+  && grep -q "WARN photoVisible android: 1 round(s) painted with no photo shown" "$TMP/photo.err" \
+  && ok "answering and reveal painted, no photo line: missing 1 and a WARN" || ko "missing photo" "$out $(cat "$TMP/photo.err")"
+# Answering painted, then nothing more of that round (the screen left): missingLeft, no warning
+paint LEFT ios-a android 1 1000 >"$TMP/left.jsonl"
+out="$(node "$SKEW" "$TMP/left.jsonl" LEFT 2>"$TMP/photo.err")"
+[ "$(jget photoVisible.platforms.android <<<"$out")" = '{"n":0,"p50":null,"p95":null,"max":null,"failed":0,"missing":0,"missingLeft":1}' ] \
+  && [ "$(jget warnings <<<"$out")" = '[]' ] && [ ! -s "$TMP/photo.err" ] \
+  && ok "screen left during answering: missingLeft, no WARN" || ko "left during answering" "$out $(cat "$TMP/photo.err")"
+# Answering painted, then a rejoin into answering before the live reveal: it may have been offline when the photo drew
+{ paint OFF ios-a ios 1 1000; paint OFF ios-a ios 1 4000 resume; phase_ack OFF ios-a ios reveal 1 9000; } >"$TMP/off.jsonl"
+out="$(node "$SKEW" "$TMP/off.jsonl" OFF 2>"$TMP/photo.err")"
+[ "$(jget photoVisible.platforms.ios.missingLeft <<<"$out")" = 1 ] && [ "$(jget photoVisible.platforms.ios.missing <<<"$out")" = 0 ] \
+  && [ ! -s "$TMP/photo.err" ] \
+  && ok "rejoined during answering (maybe offline): missingLeft, no WARN" || ko "offline during answering" "$out $(cat "$TMP/photo.err")"
+out="$(node "$SKEW" "$TMP/telemetry.jsonl" ROOM1 2>/dev/null)"
+[ "$(jget photoVisible.platforms <<<"$out")" = '{"unknown":{"n":0,"p50":null,"p95":null,"max":null,"failed":0,"missing":0,"missingLeft":4}}' ] \
+  && ok "paints without a platform count under unknown" || ko "unknown platform" "$out"
+out="$(node "$SKEW" "$TMP/telemetry.jsonl" NOPE 2>"$TMP/photo.err")"
+[ "$(jget photoVisible.platforms <<<"$out")" = '{}' ] && [ "$(jget warnings <<<"$out")" = '[]' ] && [ ! -s "$TMP/photo.err" ] \
+  && ok "nothing painted: empty photoVisible, no warnings" || ko "nothing painted" "$out $(cat "$TMP/photo.err")"
 
 node "$SKEW" "$TMP/telemetry.jsonl" >/dev/null 2>&1; rc=$?
 [ $rc = 2 ] && ok "missing room code: usage error" || ko "missing room code: usage error" "rc=$rc"
@@ -125,7 +209,7 @@ expected="$(grep '"gameCode":"ROOM1"' "$TMP/telemetry.jsonl")"   # verbatim, in 
   && ok "only that game's rows saved verbatim in the run dir" || ko "game rows saved" "rc=$rc $(cat "$RUNS/run1/telemetry.jsonl" 2>&1)"
 grep -q "$RUNS/run1/telemetry.jsonl" <<<"$out" && grep -q "$(grep -c . <<<"$expected") rows" <<<"$out" \
   && ok "play logs where the rows went" || ko "play logs where the rows went" "$out"
-[ "$(node "$SKEW" "$RUNS/run1/telemetry.jsonl" ROOM1)" = "$(node "$SKEW" "$TMP/telemetry.jsonl" ROOM1)" ] \
+[ "$(node "$SKEW" "$RUNS/run1/telemetry.jsonl" ROOM1 2>/dev/null)" = "$(node "$SKEW" "$TMP/telemetry.jsonl" ROOM1 2>/dev/null)" ] \
   && ok "the saved rows reproduce the render skew later" || ko "saved rows reproduce the render skew"
 
 out="$(save_game_telemetry "$RUNS/run1" NOPE 2>&1)"; rc=$?

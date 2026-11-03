@@ -4,8 +4,9 @@
 // device, selector regex options, `below`, env variables, screen reads that take time and see the screen somewhere
 // along them). The YAML is read by structure, so reordering keys or steps doesn't break it; anything it doesn't model
 // (YAML, commands, selector keys, subflow files) fails with the flow's line.
-// Usage: node maestro-sim.mjs <boot|toggle|rounds> FLOW CLIENT_APP_DIR -> one "<name>\t<ok|FAIL>\t<detail>" line per
-// scenario. SIM_GAMES=<n> plays n seeded random games per `rounds` profile instead of 40 (rarer outcomes, e.g. 400)
+// Usage: node maestro-sim.mjs <boot|toggle|rounds|hold> FLOW CLIENT_APP_DIR -> one "<name>\t<ok|FAIL>\t<detail>" line
+// per scenario. SIM_GAMES=<n> plays n seeded random games per `rounds` and `hold` profile instead of 40 (rarer
+// outcomes, e.g. 400)
 import fs from "node:fs";
 
 const [scenario, flowFile, clientApp] = process.argv.slice(2);
@@ -67,7 +68,7 @@ const OPTIONAL_LOOKUP_MS = 7000;
 const LOOKUP_MS = 17000; // tapOn / assertVisible wait this long for the element
 const STEP_MS = 1000; // any other device step
 const POLL_MS = 500;
-const SELECTOR_KEYS = ["id", "text", "below"];
+const SELECTOR_KEYS = ["id", "text", "below", "enabled"];
 class FlowFailure extends Error {} // the device didn't do what the flow expects: what `retry` retries
 
 // Maestro 2.11 compiles text and id selectors with IGNORE_CASE, DOT_MATCHES_ALL and MULTILINE and matches the whole
@@ -102,12 +103,14 @@ function runFlow(commands, device, { skippableSubflows = [], env = {} } = {}) {
   const selector = (s, extraKeys = []) => {
     if (typeof s === "string") return { text: s };
     checkKeys(s, [...SELECTOR_KEYS, ...extraKeys], "selector");
-    return { id: value(s.id), text: value(s.text), below: s.below && selector(s.below) };
+    return { id: value(s.id), text: value(s.text), below: s.below && selector(s.below), enabled: value(s.enabled) };
   };
-  const TAP_KEYS = ["optional", "waitToSettleTimeoutMs"];
+  const TAP_KEYS = ["optional", "waitToSettleTimeoutMs", "repeat", "delay", "retryTapIfNoChange"];
   const describe = (s) => JSON.stringify(selector(s, TAP_KEYS));
-  // `below`: some element matching it is higher on screen (smaller y)
+  // `below`: some element matching it is higher on screen (smaller y); `enabled`: elements are enabled unless they say
+  // otherwise
   const found = (sel, shown) => shown.filter((e) => (!sel.id || matches(sel.id, e.id)) && (!sel.text || matches(sel.text, e.text))
+    && (sel.enabled === undefined || String(e.enabled ?? true) === sel.enabled)
     && (!sel.below || found(sel.below, shown).some((anchor) => (anchor.y ?? 0) < (e.y ?? 0))));
   // One screen read: what shows when it starts (it may take a while, see device.read)
   const isVisible = (s, extraKeys) => {
@@ -134,6 +137,10 @@ function runFlow(commands, device, { skippableSubflows = [], env = {} } = {}) {
   const failedStepArtifacts = () => { device.read({ id: "view-hierarchy-dump" }); step(); };
   // A command that acts on the device: a step, then conditions wait the full optional lookup again
   const interaction = (act = () => {}) => (arg) => { act(arg); step(); lastInteraction = device.now; };
+  // A tap's settle wait: Maestro 2.11 reads the screen at least once after the taps (Maestro.hierarchyBasedTap ->
+  // ScreenshotUtils.waitForAppToSettle), whatever waitToSettleTimeoutMs says. Devices that set `settlesWithRead` play
+  // that read; the others keep the step their scenarios' bounds were measured with
+  const settleTap = () => { if (device.settlesWithRead) device.read({ id: "settle-hierarchy" }); else step(); };
   const commandsByName = {
     waitForAnimationToEnd: step, takeScreenshot: step,
     launchApp: interaction(), swipe: interaction(),
@@ -156,14 +163,21 @@ function runFlow(commands, device, { skippableSubflows = [], env = {} } = {}) {
         if (optional) return failedStepArtifacts(); // a warning
         throw new FlowFailure(`tapOn ${describe(arg)}: not found`);
       }
-      interaction(() => device.tap(selector(arg, TAP_KEYS)))();
+      // `repeat` taps `delay` ms apart (Maestro 2.11's TapRepeat), then the tap's settle wait
+      const sel = selector(arg, TAP_KEYS);
+      const { repeat, delay } = typeof arg === "string" ? {} : arg; // `tapOn: "<text>"` has neither
+      const taps = repeat === undefined ? 1 : Number(value(repeat));
+      const delayMs = delay === undefined ? 0 : Number(value(delay));
+      for (let n = 0; n < taps; n++) { if (n) device.tick(delayMs); device.tap(sel); }
+      settleTap();
+      lastInteraction = device.now;
     },
     assertVisible: (arg) => {
       if (!waitFor(() => isVisible(arg), LOOKUP_MS)) throw new FlowFailure(`assertVisible ${describe(arg)}`);
     },
     assertTrue: (arg) => { // `assertTrue: ${...}` or { condition, label }
       const { condition: cond, label } = typeof arg === "string" ? { condition: arg } : arg;
-      if (!value(cond)) throw new FlowFailure(`assertTrue ${label || cond}`);
+      if (!value(cond)) throw new FlowFailure(`assertTrue ${label ? value(label) : cond}`);
     },
     extendedWaitUntil: (arg) => {
       checkKeys(arg, ["visible", "notVisible", "timeout", "label"], "extendedWaitUntil");
@@ -321,7 +335,8 @@ function onboarding(startLang, fate) {
 // screen reads take readMs(time) each. Records the server phase each tap on an option lands in, and by round the
 // screen reads of the scoreboard checks: the card wait's that saw the scoreboard, and the card name's and
 // options-under-it's, whose reads that saw no scoreboard (`blindChecks`) pass without checking anything; those that
-// saw it held go to `heldReads`.
+// saw it held go to `heldReads`. Rounds whose card a look for it saw on the scoreboard with a name that isn't the
+// device's (`proven`, EXP-350: the only ones the flow may count as checked).
 // ownerRound: the device's photo (its card says so); ownNameRounds: its card wrongly shows its own name (EXP-290);
 // cardlessRounds: its scoreboard has no card; stuckPhotoRound: its photo never loads (EXP-119); slowPhotoRound: its
 // photo loads SLOW_PHOTO_LOADING_MS late, which the look that ends the pass waits for.
@@ -371,7 +386,7 @@ function game({
   const roundMs = phases.reduce((sum, [, ms]) => sum + ms, 0);
   const state = {
     roundMs, phases: Object.fromEntries(phases), taps: [], checks: [], blindChecks: [], heldReads: [], final: false,
-    markerPasses: new Set(), heldSeen: new Set(),
+    markerPasses: new Set(), heldSeen: new Set(), proven: new Set(),
   };
   // The game's timeline: one segment per phase, a held scoreboard split around its holds, then the game over. Each
   // segment shows on screen from its server start plus its paint delay
@@ -420,12 +435,14 @@ function game({
     over: () => (state.final ? [{ id: "final-score-modal" }] : [{ id: "winner-modal" }, { id: "winner-continue" }]),
   })[phase]();
   // The scoreboard checks, by selector (the card wait also ends on the held marker; the looks for the marker check
-  // nothing)
+  // nothing): the card name's filter is the device's name, the proof's any other
   const scoreboardCheck = (sel) => {
     if (/^score-answer-card\|/.test(sel.id || "")) return "card";
-    if (sel.id === "score-answer-name") return "card name";
+    if (sel.id === "score-answer-name") return sel.text === username ? "card name" : "card proof";
     return sel.below?.id === "score-round-title" ? "options under it" : null;
   };
+  // A look that proves the check sees its own element or nothing: it never passes blind
+  const isLook = (check) => check === "card" || check === "card proof";
   const d = device(
     "android",
     (dev, sel) => {
@@ -435,10 +452,13 @@ function game({
         (check === "card" ? state.markerPasses : state.heldSeen).add(seen.round);
       }
       if (check && seen.phase === "scores") state.checks.push({ round: seen.round, check });
-      else if (check && check !== "card") { // the card wait polls
+      else if (check && !isLook(check)) {
         (seen.phase === "held" ? state.heldReads : state.blindChecks).push({ round: seen.round, check });
       }
-      return screen(seen);
+      const shown = screen(seen);
+      if (check === "card proof" && seen.phase === "scores"
+        && shown.some((e) => e.id === "score-answer-name" && e.text !== username)) state.proven.add(seen.round);
+      return shown;
     },
     (dev, sel) => {
       if (matches(sel.id || "", "winner-continue")) state.final = true;
@@ -449,6 +469,95 @@ function game({
   );
   d.now = startAt;
   return { d, state, env: { USERNAME: username } };
+}
+
+// hold-used-up.yaml's game (EXP-361): `rounds` rounds as the server plays them, the device owning `ownedRounds` (its
+// photo: its scoreboard shows the hold button). A tap on the hold button while it is enabled is a quick hold, pressed
+// and released QUICK_HOLD_MS apart, that reaches the server upLatency() ms later (in order: after the release of the
+// previous one). The server accepts it while the round has holds left and more than HOLD_MIN_REMAINING of its
+// scoreboard (GameEngine.ts), freezing the scoreboard meanwhile, and sends hold-closed once only that much is left.
+// The phone paints the server events of its own scoreboards late, in the order they came: the scoreboard
+// paintLag(round, "scores") ms late, its holds and their ends (the held marker; the 3rd end, holdsLeft 0, greys the
+// button out: "No holds left", disabled) paintLag(round, "holds"), hold-closed (which greys it out too)
+// paintLag(round, "hold-closed") but not before them, and the scoreboard's end paintLag(round, "end").
+// app: "correct"; "holdsUncounted", whose button greys out only at hold-closed (a check that took that for the 3
+// holds would pass by mistake); or "fourthHolds", whose greyed out button still sends presses that the server holds
+// FOURTH_HOLD_MS (a release that never comes). Records each read that saw the greyed out button while looking for it
+// (`usedUpReads`: the holds its round had and whether they greyed it out before hold-closed was painted). startAt:
+// when the flow starts, from the game's start.
+const QUICK_HOLD_MS = 60;
+const FOURTH_HOLD_MS = 5000;
+const NO_HOLDS_LEFT = "No holds left";
+function holdGame({ rounds, ownedRounds, readMs, seesAt, upLatency, paintLag = () => 0, app = "correct", startAt = 0 }) {
+  const rules = holdRules();
+  const untilScores = PHOTO_WAIT_MS + engineMs("ANSWER_TIME") + engineMs("REVEAL_TIME");
+  const holds = Object.fromEntries(Array.from({ length: rounds }, (_, i) => [i + 1, []])); // server { from, to }
+  const state = { usedUpReads: [] };
+  const heldMs = (round) => holds[round].reduce((sum, { from, to }) => sum + to - from, 0);
+  // A round's server times: its start, scoreboard, hold-closed and end (its holds push the last two)
+  const timing = (round) => {
+    const start = round === 1 ? 0 : timing(round - 1).end;
+    const scores = start + untilScores;
+    const end = scores + rules.scoresMs + heldMs(round);
+    return { start, scores, closed: end - rules.minRemaining, end };
+  };
+  const press = (at) => {
+    const round = ownedRounds.find((r) => timing(r).scores <= at && at < timing(r).end);
+    if (!round || holds[round].some(({ to }) => at < to)) return;
+    const count = holds[round].length;
+    const left = timing(round).end - at;
+    if ((count >= rules.maxHolds && app !== "fourthHolds") || left < rules.minRemaining) return;
+    holds[round].push({ from: at, to: at + (count < rules.maxHolds ? QUICK_HOLD_MS : FOURTH_HOLD_MS) });
+  };
+  const options = [{ id: "photo-view" }, { id: "player-option-bot1" }, { id: "player-option-bot2" }];
+  const scoreboard = [{ id: "photo-view" }, { id: "round-progress" }, { id: "score-modal" },
+    { id: "score-round-title" }, { id: "score-answer-card" }, { id: "score-answer-name" }];
+  // The screen at t: the round in play, its scoreboard (painted late on the device's own ones), then the game over
+  const screen = (t) => {
+    for (let round = 1; round <= rounds; round++) {
+      const { start, scores, closed, end } = timing(round);
+      const owned = ownedRounds.includes(round);
+      const lag = (event) => (owned ? paintLag(round, event) : 0);
+      if (t >= end + lag("end")) continue;
+      if (t < start + PHOTO_WAIT_MS) return [{ id: "game-waiting-photo" }];
+      if (t < scores + lag("scores")) return options;
+      if (!owned) return scoreboard;
+      const own = holds[round];
+      const heldOn = own.some(({ from, to }) => t >= from + lag("holds") && t < to + lag("holds"));
+      const byHolds = app !== "holdsUncounted" && own.length >= rules.maxHolds
+        && t >= own[rules.maxHolds - 1].to + lag("holds");
+      const lastHoldPainted = own.length ? own.at(-1).to + lag("holds") : -Infinity;
+      const closedPainted = t >= Math.max(closed + lag("hold-closed"), lastHoldPainted);
+      const button = { id: "hold-button", text: byHolds || closedPainted ? NO_HOLDS_LEFT : "Hold photo",
+        enabled: !byHolds && !closedPainted, round, byHolds: byHolds && !closedPainted };
+      return heldOn ? [{ id: "photo-view" }, { id: "game-held" }, button] : [...scoreboard, button];
+    }
+    return [{ id: "winner-modal" }];
+  };
+  const holdButton = (t) => screen(t).find(({ id }) => id === "hold-button");
+  let lastArrival = -Infinity;
+  const d = device(
+    "android",
+    (dev, sel) => {
+      const shown = screen(dev.now);
+      const button = shown.find(({ id }) => id === "hold-button");
+      if (sel.enabled === "false" && matches(sel.id || "", "hold-button") && button && !button.enabled) {
+        state.usedUpReads.push({ round: button.round, holds: holds[button.round].length, byHolds: button.byHolds });
+      }
+      return shown;
+    },
+    (dev, sel) => {
+      const button = matches(sel.id || "", "hold-button") && holdButton(dev.now);
+      if (!button || (!button.enabled && app !== "fourthHolds")) return;
+      lastArrival = Math.max(dev.now + upLatency(), lastArrival + QUICK_HOLD_MS);
+      press(lastArrival);
+    },
+    (dev) => readMs(dev.now),
+    seesAt,
+  );
+  d.settlesWithRead = true;
+  d.now = startAt;
+  return { d, state, env: { USERNAME: "android-a" } };
 }
 
 // ── Scenarios ──
@@ -511,6 +620,24 @@ const seededRandom = (seed) => {
 // The same, with the seed scattered first (Knuth's multiplicative hash): an LCG's first draws barely differ between
 // small seeds, so streams seeded n, 2n, 3n... would start alike
 const scatteredRandom = (seed) => seededRandom(Math.imul(seed, 2654435761));
+// Where along each screen read the device sees the screen (EXP-322): Maestro reports the screen as it was at some
+// point of its read, so every case is played with reads that see it as they start, as they end and anywhere along
+// them (a seeded random point per read, `varies`: each fixed case is then played over as many read-point patterns
+// as random games). Only reads seen as they start (`exact`) rule out a scoreboard check that reads after its
+// scoreboard closed (a blind check, which passes without checking anything) and keep every card checked on a steady
+// emulator. SIM_SEE_SEED=<n> draws other read points (every bound below must hold for any).
+const SEE_POINT_SEED = Number(process.env.SIM_SEE_SEED) || 104729;
+const SEE_POINTS = [
+  { name: "seen as they start", seesAt: () => () => 0, exact: true, varies: false },
+  { name: "seen as they end", seesAt: () => () => 1, exact: false, varies: false },
+  { name: "seen anywhere along them", seesAt: (seed) => scatteredRandom(seed ^ SEE_POINT_SEED), exact: false, varies: true },
+];
+const RANDOM_GAMES = Number(process.env.SIM_GAMES) || 40;
+// Seeded screen reads of a random length in [fastest, slowest] ms
+const randomReads = (seed, [fastest, slowest]) => {
+  const random = seededRandom(seed);
+  return () => Math.round(fastest + random() * (slowest - fastest));
+};
 
 function roundsScenarios(flow) {
   const ROUNDS = 6;
@@ -539,19 +666,6 @@ function roundsScenarios(flow) {
     const revealStart = (round - 1) * roundMs + phases.photo + phases.answering;
     return t >= revealStart && t < revealStart + phases.reveal + phases.scores ? SLOW_READ_MS : STEADY_READ_MS;
   };
-  // Where along each screen read the device sees the screen (EXP-322): Maestro reports the screen as it was at some
-  // point of its read, so every case is played with reads that see it as they start, as they end and anywhere along
-  // them (a seeded random point per read, `varies`: each fixed case is then played over as many read-point patterns
-  // as random games). Only reads seen as they start (`exact`) rule out a scoreboard check that reads after its
-  // scoreboard closed (a blind check, which passes without checking anything) and keep every card checked on a steady
-  // emulator. SIM_SEE_SEED=<n> draws other read points (every bound below must hold for any).
-  const SEE_POINT_SEED = Number(process.env.SIM_SEE_SEED) || 104729;
-  const SEE_POINTS = [
-    { name: "seen as they start", seesAt: () => () => 0, exact: true, varies: false },
-    { name: "seen as they end", seesAt: () => () => 1, exact: false, varies: false },
-    { name: "seen anywhere along them", seesAt: (seed) => scatteredRandom(seed ^ SEE_POINT_SEED), exact: false, varies: true },
-  ];
-  const RANDOM_GAMES = Number(process.env.SIM_GAMES) || 40;
   // EXP-349: how late the device paints each phase after the server starts it, as it166's render telemetry measured
   // (the options p95 0.88 s and up to 2.2 s, the scoreboard and the rest up to 0.5 s; the flow allows a bit more,
   // optionsLagMs and phaseLagMs). Reads seen anywhere along them are also played with seeded random delays like those
@@ -614,20 +728,22 @@ function roundsScenarios(flow) {
     { name: "fixed 2.2 s", range: [2200, 2200], lagged: false,
       bounds: { cardless: { failed: 0.85, flagged: 0.95 }, ownName: { failed: 0.8 }, falseWarnings: 0.25 } },
   ];
-  // How the flow and lab.sh end a run: the flow failed, lab.sh fails it (no scoreboard checked, none held, EXP-353),
-  // or lab.sh warns about scoreboards it waited for without seeing their card (or the held marker)
-  const counts = ({ output }) => ({ waited: 0, checked: 0, held: 0, shown: 0, ...output.scoreboards });
+  // How the flow and lab.sh end a run: the flow failed, lab.sh fails it (no card wait saw a card nor the held marker,
+  // EXP-353), or lab.sh warns about scoreboards it waited for without seeing their card (or the held marker)
+  const counts = ({ output }) => ({ waited: 0, seen: 0, checked: 0, held: 0, shown: 0, ...output.scoreboards });
+  // Card waits that saw the card, not found held after it (lab.sh's `seen - held`)
+  const unheldSeen = (run) => { const { seen, held } = counts(run); return seen - held; };
   const labFails = (run) => {
-    const { shown, waited, checked, held } = counts(run);
-    return shown > 0 && waited >= NONE_CHECKED_MIN_WAITS && !checked && !held;
+    const { shown, waited, held } = counts(run);
+    return shown > 0 && waited >= NONE_CHECKED_MIN_WAITS && !unheldSeen(run) && !held;
   };
-  const unseenWaits = (run) => { const { waited, checked, held } = counts(run); return waited - checked - held; };
+  const unseenWaits = (run) => { const { waited, seen } = counts(run); return waited - seen; };
   const runFailed = (run) => failedPlay(run) || labFails(run);
   const warned = (run) => !runFailed(run) && unseenWaits(run) > 0;
-  // lab.sh's warning for a device that showed scoreboards and checked none with too few card waits to tell
+  // lab.sh's warning for a device that showed scoreboards and saw no card with too few card waits to tell
   const tooSlowWarned = (run) => {
-    const { shown, waited, checked } = counts(run);
-    return shown > 0 && waited < NONE_CHECKED_MIN_WAITS && !checked;
+    const { shown, waited } = counts(run);
+    return shown > 0 && waited < NONE_CHECKED_MIN_WAITS && !unheldSeen(run);
   };
   // The wrong scoreboards, the failure each must cause, whether lab.sh's warning flags it and the share of the games
   // it must be caught in when on every round (a missing card everywhere fails the flow, or lab.sh)
@@ -646,10 +762,8 @@ function roundsScenarios(flow) {
   const MAX_MISSED_LAGGED = 0.15;
   // Rounds whose card a screen read saw on its scoreboard
   const cardsSeen = (state) => new Set(state.checks.filter((c) => c.check === "card").map((c) => c.round));
-  const randomReads = (seed, [fastest, slowest]) => {
-    const random = seededRandom(seed);
-    return () => Math.round(fastest + random() * (slowest - fastest));
-  };
+  // EXP-350: the flow counted a scoreboard as checked that no read proved (or missed one it proved)
+  const falselyChecked = ({ state, output }) => (output.scoreboards?.checked ?? 0) !== state.proven.size;
 
   for (const see of SEE_POINTS) {
     // One fixed case over its read-point patterns (a single one unless the points vary per read)
@@ -679,8 +793,9 @@ function roundsScenarios(flow) {
     if (see.exact) {
       const steady = play(() => STEADY_READ_MS, { seesAt: see.seesAt(1) });
       const unchecked = LATER_ROUNDS.filter((round) => !cardsSeen(steady.state).has(round));
-      report(`steady emulator ${see.name}: the card is checked on every scoreboard after the first`, unchecked.length === 0,
-        `rounds whose card went unchecked: ${unchecked.join(", ")}`);
+      report(`steady emulator ${see.name}: the card is seen on every scoreboard after the first (`
+        + `${steady.state.proven.size} proven checked)`, unchecked.length === 0 && !falselyChecked(steady),
+      `rounds whose card went unseen: ${unchecked.join(", ")}; counted checked ${steady.output.scoreboards?.checked}`);
     }
 
     // ── Slower phones: no false failure, few lost guesses ──
@@ -700,7 +815,7 @@ function roundsScenarios(flow) {
     // game
     for (const profile of RANDOM_PROFILES) {
       for (const lag of lagsFor(see, profile)) {
-        let missed = 0, firstMissed = 0, blind = 0, checked = 0, falseWarned = 0;
+        let missed = 0, firstMissed = 0, blind = 0, checked = 0, proven = 0, falseWarned = 0;
         const failures = [];
         const caught = Object.fromEntries(Object.keys(WRONG_SCOREBOARDS)
           .map((kind) => [kind, { failed: 0, flagged: 0, baseline: 0, everyRound: 0 }]));
@@ -709,12 +824,15 @@ function roundsScenarios(flow) {
             { seesAt: see.seesAt(seed), renderLag: lag.renderLag(seed), ...gameOptions });
           const run = playSeed();
           if (runFailed(run)) failures.push(`seed ${seed}: ${run.failure || (labFails(run) ? "none checked" : "no final ranking")}`);
+          if (falselyChecked(run)) failures.push(`seed ${seed}: ${run.output.scoreboards?.checked} counted checked, `
+            + `${run.state.proven.size} proven`);
           // a failed flow stops guessing: its lost guesses count with its failure
           const missedRounds = failedPlay(run) ? [] : missedGuesses(run.state);
           missed += missedRounds.filter((round) => round > 1).length;
           firstMissed += missedRounds.includes(1) ? 1 : 0;
           blind += run.state.blindChecks.length;
           checked += cardsSeen(run.state).size;
+          proven += run.state.proven.size;
           falseWarned += warned(run) ? 1 : 0;
           for (const [kind, { gameOption, failure: expected, warns }] of Object.entries(WRONG_SCOREBOARDS)) {
             for (const round of CATCHABLE_ROUNDS) {
@@ -741,8 +859,9 @@ function roundsScenarios(flow) {
         const maxMissed = lag.lagged ? MAX_MISSED_LAGGED : MAX_MISSED_RANDOM;
         report(`${name}: none of ${plays} plays failed by mistake${see.exact ? ", no blind check" : ` (${blind} blind checks)`}`
           + `, ${lag.lagged ? `at most ${maxMissed * 100}% of the round 1 guesses lost` : "every round 1 guess in time"} `
-          + `(EXP-326), at most ${maxMissed * 100}% of the later ones (${checked}/${RANDOM_GAMES * ROUNDS} scoreboards `
-          + `checked), at most ${bounds.falseWarnings * 100}% of the games warned (${falseWarned})`,
+          + `(EXP-326), at most ${maxMissed * 100}% of the later ones (${checked}/${RANDOM_GAMES * ROUNDS} cards seen, `
+          + `${proven} of them proven checked and no other), at most ${bounds.falseWarnings * 100}% of the games `
+          + `warned (${falseWarned})`,
         failures.length === 0 && (!see.exact || blind === 0) && firstMissed <= (lag.lagged ? maxMissed * RANDOM_GAMES : 0)
           && missed <= maxMissed * laterRounds && falseWarned <= bounds.falseWarnings * RANDOM_GAMES,
         `failed runs: ${failures.length} ${failures.slice(0, 3).join("; ")}, blind checks: ${blind}, lost round 1 `
@@ -851,11 +970,12 @@ function roundsScenarios(flow) {
   // MAX_HOLDS_PER_ROUND holds with the scoreboard between them: the flow never fails on it, counts it as held when its
   // look for the marker sees it, and the guesses after it still land. The holds of it166 (23 s in a round, 21 s in the
   // last one), a short one, one that ends about when the scoreboard would have closed without it, and three in a row.
-  // What the flow can't tell apart (Maestro reads the screen once per step), reported with the counts (EXP-350):
-  // - a card wait that ended on the marker of a hold over before the look for it (`shortHoldPasses`): its scoreboard
-  //   counts as checked;
+  // What the flow can't tell apart (Maestro reads the screen once per step), reported with the counts:
+  // - a card wait that ended on the marker of a hold over before the look for it (`shortHoldPasses`);
   // - a hold that starts after the card wait saw the card: the name and options checks that follow may read the held
   //   screen (`heldReads`), which they pass without checking anything.
+  // EXP-350: neither counts as checked. A scoreboard counts as checked only when a read proved its card (`proven`: a
+  // look saw it on the scoreboard with a name that isn't the device's), whatever the read points and render delays.
   const HOLDS = {
     3: [{ at: 1000, ms: 23000 }], 4: [{ at: 200, ms: 500 }], 5: [{ at: 1500, ms: 3500 }], 6: [{ at: 800, ms: 21000 }],
   };
@@ -869,15 +989,13 @@ function roundsScenarios(flow) {
     [`slow reads (${SLOW_READ_MS / 1000} s) through round 3's reveal and scoreboard (it136)`, slowAfterGuess(3)],
   ];
   const shortHoldPasses = (state) => [...state.markerPasses].filter((round) => !state.heldSeen.has(round));
-  // Every scoreboard counted as held was seen held. With reads seen as they start, every one counted as checked had
-  // its card seen, but for the short holds, and no check read after its scoreboard closed; seen elsewhere, a card wait
-  // may also pass on a later screen (the winner modal after the last scoreboard): a blind check too
+  // Every scoreboard counted as held was seen held and every one counted as checked was proven (EXP-350). With reads
+  // seen as they start, no check read after its scoreboard closed; seen elsewhere, a card wait may also pass on a
+  // later screen (the winner modal after the last scoreboard): a blind check too
   const heldProblems = (state, output, exact = true) => {
     const { checked, held } = output.scoreboards ?? {};
-    const seen = cardsSeen(state).size;
-    const short = shortHoldPasses(state).length;
     return [
-      exact && checked > seen + short && `${checked} counted checked, ${seen} cards seen, ${short} short holds`,
+      falselyChecked({ state, output }) && `${checked} counted checked, ${state.proven.size} proven`,
       held !== state.heldSeen.size && `${held} counted held, ${state.heldSeen.size} seen held`,
       exact && state.blindChecks.length && `checks that saw no scoreboard: ${JSON.stringify(state.blindChecks)}`,
     ].filter(Boolean);
@@ -890,8 +1008,9 @@ function roundsScenarios(flow) {
       report(`${name}, ${holdsName}: the game ends on the results, every guess in time`,
         !failure && state.final && missed.length === 0,
         `${failure || ""} rounds without a guess in time: ${missed.join(", ")}`);
-      report(`${name}, ${holdsName}: only seen cards counted as checked, no blind check (${output.scoreboards?.held} `
-        + `held, ${shortHoldPasses(state).length} short holds, ${state.heldReads.length} reads of a held screen)`,
+      report(`${name}, ${holdsName}: only proven cards counted as checked (${output.scoreboards?.checked}), no blind `
+        + `check (${output.scoreboards?.held} held, ${shortHoldPasses(state).length} short holds and `
+        + `${state.heldReads.length} reads of a held screen, none counted checked)`,
       problems.length === 0, problems.join("; "));
     }
   }
@@ -927,7 +1046,8 @@ function roundsScenarios(flow) {
   for (const see of SEE_POINTS) {
     for (const profile of RANDOM_PROFILES) {
       for (const lag of lagsFor(see, profile)) {
-        let failures = 0, missed = 0, holds = 0, heldRounds = 0, counted = 0, short = 0, heldReads = 0, warnings = 0;
+        let failures = 0, missed = 0, holds = 0, heldRounds = 0, counted = 0, checked = 0, short = 0, heldReads = 0;
+        let warnings = 0;
         const problems = [], failed = [];
         for (let seed = 1; seed <= RANDOM_GAMES; seed++) {
           const gameHolds = randomHolds(seed);
@@ -945,6 +1065,7 @@ function roundsScenarios(flow) {
           warnings += warned(run) ? 1 : 0;
           missed += missedGuesses(state).filter((round) => round > 1).length;
           counted += output.scoreboards?.held ?? 0;
+          checked += output.scoreboards?.checked ?? 0;
           short += shortHoldPasses(state).length;
           heldReads += state.heldReads.length;
           problems.push(...heldProblems(state, output, see.exact && !lag.lagged).map((p) => `seed ${seed}: ${p}`));
@@ -952,10 +1073,10 @@ function roundsScenarios(flow) {
         const laterRounds = RANDOM_GAMES * LATER_ROUNDS.length;
         const maxMissed = lag.lagged ? MAX_MISSED_LAGGED : MAX_MISSED_RANDOM;
         report(`${RANDOM_GAMES} games with ${profile.name} screen reads ${see.name}${lag.name} and bot holds (${holds} `
-          + `holds in ${heldRounds} rounds: ${counted} counted held, ${short} short ones counted checked; ${heldReads} `
-          + `reads of a held screen; ${warnings} games warned, as many as without holds at most): no failed run, only seen `
-          + "holds counted as held"
-          + `${see.exact && !lag.lagged ? ", only seen cards as checked, no blind check" : ""}, at most `
+          + `holds in ${heldRounds} rounds: ${counted} counted held, ${checked}/${RANDOM_GAMES * ROUNDS} scoreboards `
+          + `checked; ${short} short holds and ${heldReads} reads of a held screen; ${warnings} games warned, as many `
+          + "as without holds at most): no failed run, only seen holds counted as held, only proven cards as checked"
+          + `${see.exact && !lag.lagged ? ", no blind check" : ""}, at most `
           + `${maxMissed * 100}% of the guesses after round 1 lost`,
         failures === 0 && problems.length === 0 && missed <= maxMissed * laterRounds
           && warnings <= (lag.lagged ? profile.laggedBounds : profile.bounds).falseWarnings * RANDOM_GAMES,
@@ -964,6 +1085,107 @@ function roundsScenarios(flow) {
       }
     }
   }
+}
+
+// ── hold-used-up.yaml (EXP-361) ──
+// The device owns about a third of the rounds of a 10-round game (2 bots, as its header runs it). Played with reads
+// seen as they start, as they end and anywhere along them (those also with the device's scoreboard events painted up
+// to it166's 0.5 s late, or on time or that late), on fixed and random screen reads from a fast phone's to the slow
+// emulator's 4 s: the flow never passes on an app whose button greys out only at hold-closed or whose 4th press holds
+// the game, every pass on the correct app saw the button greyed out by the 3 holds before hold-closed was painted, and
+// the correct app fails only for want of an own scoreboard reached in time (its last assert, counted `late`). Each line
+// states the pass rate; a fast phone's must stay high (MIN_FAST_PASSES).
+function holdScenarios(flow) {
+  const ROUNDS = 10;
+  const OWN_SHARE = 1 / 3;
+  const UP_LATENCY_MS = [50, 300]; // a tap reaching the server: adb's input and the local socket
+  const PAINT_LAG_MS = 500; // it166: the scoreboard and the other phases painted up to 0.5 s late
+  const UNCHECKED = /A scoreboard of the device's photo had its holds used up and checked/;
+  const options = { skippableSubflows: ["open-app.yaml", "join-room.yaml", "wait-game-start.yaml"] };
+  const FAST_READS = { name: "fixed 0.3 s", range: [300, 300] };
+  const MIN_FAST_PASSES = 0.75;
+  const fixedReads = (ms) => ({ name: `fixed ${ms / 1000} s`, range: [ms, ms] });
+  const READS = [FAST_READS, ...[400, 500, 1000, 2000, 3000, 4000].map(fixedReads),
+    { name: "random 1-4 s", range: [1000, 4000] }];
+  const eventSalt = (event) => [...event].reduce((hash, c) => (Math.imul(hash, 31) + c.charCodeAt(0)) >>> 0, 7);
+  const lagDraw = (seed, round, event) => scatteredRandom(seed * 7907 + round * 31 + eventSalt(event))();
+  const LAGS = [
+    { name: "", paintLag: () => () => 0 },
+    { name: ", events painted up to 0.5 s late",
+      paintLag: (seed) => (round, event) => Math.round(lagDraw(seed, round, event) * PAINT_LAG_MS) },
+    { name: ", events painted on time or 0.5 s late",
+      paintLag: (seed) => (round, event) => (lagDraw(seed, round, event) < 0.5 ? 0 : PAINT_LAG_MS) },
+  ];
+  const between = (random, [low, high]) => Math.round(low + random() * (high - low));
+  const play = (seed, reads, see, lag, app) => {
+    const own = seededRandom(seed * 104723);
+    const ownedRounds = Array.from({ length: ROUNDS }, (_, i) => i + 1).filter(() => own() < OWN_SHARE);
+    const latency = seededRandom(seed * 15485863);
+    const { d, state, env } = holdGame({ rounds: ROUNDS, ownedRounds, readMs: randomReads(seed, reads.range),
+      seesAt: see.seesAt(seed), upLatency: () => between(latency, UP_LATENCY_MS), paintLag: lag.paintLag(seed), app });
+    return { state, ...runFlow(flow, d, { ...options, env }) };
+  };
+  // A pass on the correct app is proven when the read that ended its wait saw the button greyed out by the 3 holds
+  const proven = ({ state }) => state.usedUpReads.at(-1)?.byHolds === true;
+  for (const reads of READS) {
+    for (const see of SEE_POINTS) {
+      for (const lag of see.varies ? LAGS : LAGS.slice(0, 1)) {
+        let passed = 0, late = 0;
+        const problems = [];
+        for (let seed = 1; seed <= RANDOM_GAMES; seed++) {
+          const run = play(seed, reads, see, lag, "correct");
+          late += run.output.hold?.late ?? 0;
+          if (!run.failure) passed++;
+          if (!run.failure && !proven(run)) {
+            problems.push(`seed ${seed}: passed unproven ${JSON.stringify(run.state.usedUpReads.at(-1))}`);
+          }
+          if (run.failure && !UNCHECKED.test(run.failure)) problems.push(`seed ${seed}: ${run.failure}`);
+          for (const app of ["holdsUncounted", "fourthHolds"]) {
+            if (!play(seed, reads, see, lag, app).failure) problems.push(`seed ${seed}: passed on the ${app} app`);
+          }
+        }
+        const minPasses = reads === FAST_READS && !see.varies ? MIN_FAST_PASSES : 0;
+        report(`${RANDOM_GAMES} games with ${reads.name} screen reads ${see.name}${lag.name}: passes ${passed} `
+          + `(${late} own scoreboards reached too late)${minPasses ? `, at least ${minPasses * 100}%` : ""}, `
+          + "each one proven; never passes when the holds don't grey the button out or a 4th press holds, never fails "
+          + "but unchecked",
+        problems.length === 0 && passed >= minPasses * RANDOM_GAMES, problems.slice(0, 3).join("; "));
+      }
+    }
+  }
+
+  // ── The paint delay in closingFrom (EXP-361) ──
+  // The device's scoreboard painted LATE_SCOREBOARD_MS late and hold-closed on time: hold-closed greys the button out
+  // that much sooner after the scoreboard shows than the flow would think without phaseLagMs in closingFrom. Without
+  // it, the look for the greyed out button can take hold-closed's grey for the 3 holds when one of its polls sees it
+  // and ends before that later bound: an app that doesn't count them then passes. Played on a fast phone (the only
+  // one that reaches its check) over a grid of read lengths, read points and flow starts, which sets where the polls
+  // fall: the flow as it is never passes on a broken app, and the one without phaseLagMs must pass on some
+  const LATE_SCOREBOARD_MS = 500;
+  const OWN_ROUND = 2;
+  const grid = (from, step, count) => Array.from({ length: count }, (_, i) => from + step * i);
+  const SKEW_READS_MS = grid(100, 20, 11); // 0.1-0.3 s
+  const SKEW_SEES_AT = [0, 0.5, 1];
+  const SKEW_STARTS_MS = grid(0, 100, 10); // into round 1's photo and answering
+  const LAG_IN_CLOSING_FROM = "output.look.hiddenFrom - output.timing.phaseLagMs + ";
+  const flowText = JSON.stringify(flow);
+  if (!flowText.includes(LAG_IN_CLOSING_FROM)) throw new Error("hold-used-up.yaml: closingFrom without phaseLagMs");
+  const withoutLag = JSON.parse(flowText.replace(LAG_IN_CLOSING_FROM, "output.look.hiddenFrom + "));
+  const BROKEN_APPS = ["holdsUncounted", "fourthHolds"];
+  const skewedPasses = (steps) => SKEW_READS_MS.flatMap((readMs) => SKEW_SEES_AT.flatMap((seesAt) =>
+    SKEW_STARTS_MS.flatMap((startAt) => BROKEN_APPS.filter((app) => {
+      const { d, env } = holdGame({ rounds: 4, ownedRounds: [OWN_ROUND], readMs: () => readMs, seesAt: () => seesAt,
+        upLatency: () => UP_LATENCY_MS[0], paintLag: (round, event) => (event === "scores" ? LATE_SCOREBOARD_MS : 0),
+        app, startAt });
+      return !runFlow(steps, d, { ...options, env }).failure;
+    }).map((app) => `${app} at ${readMs} ms seen at ${seesAt}, from ${startAt} ms`))));
+  const flowPasses = skewedPasses(flow);
+  const mutantPasses = skewedPasses(withoutLag);
+  const plays = SKEW_READS_MS.length * SKEW_SEES_AT.length * SKEW_STARTS_MS.length * BROKEN_APPS.length;
+  report(`the scoreboard painted ${LATE_SCOREBOARD_MS / 1000} s late and hold-closed on time, ${plays} plays on broken `
+    + `apps with 0.1-0.3 s reads: the flow never passes, without phaseLagMs in closingFrom it would (${mutantPasses.length})`,
+  flowPasses.length === 0 && mutantPasses.length > 0,
+  `flow passed: ${flowPasses.slice(0, 3).join(", ") || "none"}; without phaseLagMs: ${mutantPasses.slice(0, 3).join(", ")}`);
 }
 
 // lab.sh's NONE_CHECKED_MIN_WAITS: the fewest card waits, all without a card, that fail a run checking none
@@ -987,8 +1209,8 @@ function botsConstants(...names) {
 }
 
 try {
-  const scenarios = { boot: bootScenarios, toggle: toggleScenarios, rounds: roundsScenarios };
-  if (!scenarios[scenario]) throw new Error(`unknown scenario: ${scenario} (boot, toggle or rounds)`);
+  const scenarios = { boot: bootScenarios, toggle: toggleScenarios, rounds: roundsScenarios, hold: holdScenarios };
+  if (!scenarios[scenario]) throw new Error(`unknown scenario: ${scenario} (boot, toggle, rounds or hold)`);
   scenarios[scenario](readFlow(flowFile));
 } catch (e) {
   console.error(e.message);

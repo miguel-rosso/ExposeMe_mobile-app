@@ -26,8 +26,10 @@
 # a look is a single screen read (Orchestra.adjustedToLatestInteraction; evalScriptCommand always reports a change,
 # assertTrue doesn't). So their bookkeeping is in the loops' scripts and in assertTrue steps whose value is always
 # true. Verified in Maestro 2.11.0's bytecode: lab.sh play and doctor warn on any other Maestro version.
-# Skipping is never silent: lab.sh play prints how many scoreboards each device checked and flags a run that checked
-# none: a card missing on every round, or a phone too slow to tell (EXP-353: failing then would fail it by mistake).
+# Skipping is never silent: lab.sh play prints how many scoreboards each device checked and flags a run whose card
+# waits saw no card: a card missing on every round, or a phone too slow to tell (EXP-353: failing then would fail it by
+# mistake). EXP-350: a scoreboard counts as checked only when one screen read saw its card and that it shows another
+# name (a check that something is absent passes on a held screen too); lab.sh also prints the card waits that saw one.
 # EXP-325: the photo owner may hold the scoreboard (bots: `lab.sh play --bot-args "--hold 0.5"`), hiding it behind the
 # photo for up to 30 s. The card wait also ends on the held marker, and a look for the marker once the scoreboard
 # should have closed counts the hold as held (printed by lab.sh play next to the checked ones) and waits it out; no
@@ -52,9 +54,10 @@ appId: com.socketNull.ExposeMe
 # The least a scoreboard stays on screen (painted up to phaseLagMs late, the next phase maybe on time)
 - evalScript: ${output.timing.scoresShownMs = output.timing.scoresMs - output.timing.phaseLagMs}
 # No round played yet: no scoreboard to check, no options of its own on screen. Scoreboards counted: those shown
-# (every pass after the first), those waited for, those whose card was checked and those found held instead
+# (every pass after the first), those waited for, those whose card wait saw the card or the held marker (`seen`),
+# those a screen read proved checked (EXP-350) and those found held
 - evalScript: "${output.round = { closesAfter: 0, closesBy: 0, opensBy: 0, readMs: 0 }}"
-- evalScript: "${output.scoreboards = { shown: 0, waited: 0, checked: 0, held: 0 }}"
+- evalScript: "${output.scoreboards = { shown: 0, waited: 0, seen: 0, checked: 0, held: 0 }}"
 # Round 1's options are waited for by the loop's own wait, so a device that leaves the lobby late taps right after its
 # first look that sees them (EXP-326: a wait for the game screen and the loop's read before that look cost the slow
 # Android its round 1 guess)
@@ -91,12 +94,13 @@ appId: com.socketNull.ExposeMe
       # EXP-325: while the photo owner holds the scoreboard the app shows only the photo and the `game-held` marker, and
       # the scoreboard stays up past `closesBy`. So the card wait also ends on the marker (a look that saw it read no
       # scoreboard without its card), and the look for the marker in the wait for the next options tells a held
-      # scoreboard apart. A held scoreboard's card is not checked.
+      # scoreboard apart. A card wait that ended on the marker checked no card.
       # The bookkeeping is in assertTrue steps (always true) and the looks' scripts, which don't act on the device, so
-      # the looks stay single reads. A card wait that ended on the card (or the marker) is counted by its checks' guard,
-      # which lab.sh counts too. The looks before it saw no scoreboard (it shows its card), so it closes at least its
-      # least length after the last one started, which may let the checks start later than `closesAfter`, and it saw
-      # no options: the next round's show after it started.
+      # the looks stay single reads. A card wait that ended on the card (or the marker) is counted by its checks' guard
+      # (`seen`), a scoreboard a read proved checked by the guard of that look (EXP-350); lab.sh counts both. The looks
+      # before it saw no scoreboard (it shows its card), so it closes at least its least length after the last one
+      # started, which may let the checks start later than `closesAfter`, and it saw no options: the next round's show
+      # after it started.
       # ── timed: scores ──
       - runFlow:
           when:
@@ -142,7 +146,7 @@ appId: com.socketNull.ExposeMe
             - assertTrue: ${(output.round.closesAfter = Math.max(output.round.closesAfter, output.round.closesFrom)), true}
             - runFlow:
                 when:
-                  true: ${output.round.cardWaited && ++output.scoreboards.checked}
+                  true: ${output.round.cardWaited && ++output.scoreboards.seen}
                 commands:
                   # EXP-290: the card never shows this phone's own name: on the owner's phone it says "It was your
                   # photo!" / "¡Era tu foto!" instead (its other branch, PhotoOwnerCard.tsx). Filtered by the player
@@ -168,6 +172,28 @@ appId: com.socketNull.ExposeMe
                               below:
                                 id: "score-round-title"
                             timeout: 1000
+                  # EXP-350: both checks above pass on any screen without their element, such as a hold that started
+                  # after the card wait (the app then hides the scoreboard), or after a card wait that ended on the
+                  # marker of a short hold. So a scoreboard counts as checked only when one screen read saw its card
+                  # with a name that is not this phone's (`(?!...)`: Maestro matches the whole text; `.+`, not empty:
+                  # it also tries the element's hint and accessibility text, empty on Android). A look, so it fails
+                  # nothing (the name check above does) and a slow phone proves few; it only starts while its read
+                  # would still see this scoreboard (as the card wait), as a single read (conditionWaitMs after the
+                  # tap: a false look waits for its element). A card it saw means no next options yet (`hiddenFrom`).
+                  # The options check reads an absence, so it can't be proven so and stays a best effort
+                  - repeat:
+                      while:
+                        true: ${!output.round.proofLooked && Date.now() + output.round.readMs / 2 < output.round.closesAfter && Date.now() > output.round.actedAt + output.timing.conditionWaitMs && (output.round.proofLooked = Date.now())}
+                      commands:
+                        - runFlow:
+                            when:
+                              true: ${output.round.proofLooked}
+                              visible:
+                                id: "score-answer-name"
+                                text: "(?!${USERNAME}$).+"
+                            commands:
+                              - assertTrue: ${++output.scoreboards.checked}
+                              - assertTrue: ${output.options.hiddenFrom = Math.max(output.options.hiddenFrom, output.round.proofLooked)}
       # ── end timed ──
       # This round's options stay up through its reveal, so until a look finds them gone (or they surely are), options
       # on screen are not the next round's. That look is the first known to come before the next round's options. It
@@ -202,17 +228,15 @@ appId: com.socketNull.ExposeMe
             # EXP-325: after a card wait, the first time a look finds no options well after the scoreboard would have
             # closed without a hold (`closesBy` + `heldLookDelayMs`), a look for the held marker. Earlier, the next
             # options are often about to show and the look would cost the guess a screen read; by then only a hold (or
-            # a slow photo upload) keeps them away. A held scoreboard counts as held instead of checked (the card wait
-            # also ends on the marker), and the hold must end within the round's hold budget. A hold already over by
-            # then goes uncounted, and if the card wait only saw its marker, its scoreboard counts as checked
-            # (maestro-sim.mjs reports how often).
+            # a slow photo upload) keeps them away. A held scoreboard counts as held (the card wait also ends on the
+            # marker, EXP-350: it is checked only if a read proved its card, see above), and the hold must end within
+            # the round's hold budget. A hold already over by then goes uncounted (maestro-sim.mjs reports how often).
             - runFlow:
                 when:
                   true: ${!output.options.shown && output.round.cardWaited && !output.round.heldLooked && Date.now() > output.round.closesBy + output.timing.heldLookDelayMs && (output.round.heldLooked = true)}
                   visible:
                     id: "game-held"
                 commands:
-                  - assertTrue: ${--output.scoreboards.checked >= 0}
                   - assertTrue: ${++output.scoreboards.held}
                   - extendedWaitUntil:
                       notVisible:

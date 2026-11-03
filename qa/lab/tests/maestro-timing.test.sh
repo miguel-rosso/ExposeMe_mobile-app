@@ -3,12 +3,14 @@
 # Android emulator every step that reads the screen takes 1-4 s, while the options are up for 8.5 s (answering) + 3 s
 # (reveal) and the scoreboard for 5 s, so the steps between `# ── timed: <phase> ──` and `# ── end timed ──` must be few
 # and cheap: no settle waits, no conditional reads (a `runFlow` whose `when` is only a `true:` script reads nothing),
-# no text search (a testID filtered by an env variable, like `text: "${USERNAME}"`, is no UI string, and one filtered by
-# an app string in every language, `"<en>|<es>"` of one Client/app/i18n key, works in either: both are allowed).
+# no text search (a testID filtered by an env variable, like `text: "${USERNAME}"`, or by any text but one, like
+# `text: "(?!${USERNAME}$).+"`, is no UI string, and one filtered by an app string in every language, `"<en>|<es>"` of
+# one Client/app/i18n key, works in either: all are allowed).
 # A poll loop (EXP-353: a `repeat` whose `while` is a script bound in time by Date.now(), holding only looks and
 # assertTrue scripts) is one step: a wait like extendedWaitUntil that notes when each of its looks starts and ends.
 # Then play-rounds.yaml's scoreboard deadline is checked against GameEngine.ts, and the flow is played on a fake game
-# with slow screen reads (maestro-sim.mjs, scenario `rounds`); hold-used-up.yaml's copy of the hold times too, and the
+# with slow screen reads (maestro-sim.mjs, scenario `rounds`); hold-used-up.yaml's copy of the hold times too (and the
+# flow on a fake game of its own, scenario `hold`), and the
 # kick-after-game flows' waits against the bots' kick delay (EXP-346). No devices, servers or network.
 # Run: qa/lab/tests/maestro-timing.test.sh
 set -uo pipefail
@@ -24,8 +26,9 @@ ko() { fail=$((fail + 1)); echo "FAIL - $1${2:+ ($2)}"; }
 
 # Steps that touch the device allowed per timed block (evalScript, assertTrue and a script-only `when` are free: they
 # never read the screen). Scores: the card wait plus two checks of the scoreboard (EXP-141 no options under it, EXP-290
-# the card never shows my own name), each started only while the scoreboard can still be up (EXP-312)
-budget() { case $1 in answering) echo 3;; scores) echo 3;; *) echo "";; esac; }
+# the card never shows my own name) and the look that proves the card checked (EXP-350), each started only while the
+# scoreboard can still be up (EXP-312)
+budget() { case $1 in answering) echo 3;; scores) echo 4;; *) echo "";; esac; }
 # Longest settle wait after a tap or swipe in a timed block: the progress bar never settles, so the default waits it out
 MAX_SETTLE_MS=500
 # Slowest screen read seen on the Android emulator (12 players): the worst case of one budgeted step
@@ -132,7 +135,7 @@ timed_blocks() {
     /^[ \t]*optional:[ \t]*true/ { warn("optional step inside a timed phase (a missing element costs up to 7 s)") }
     /^[ \t]*id:/ { id_line = NR; id_indent = match($0, /[^ \t]/) }
     /^[ \t]*text:/ {
-      env_filter = $0 ~ /^[ \t]*text:[ \t]*"\$\{[A-Z_]+\}"[ \t]*$/
+      env_filter = $0 ~ /^[ \t]*text:[ \t]*"(\$\{[A-Z_]+\}|\(\?!\$\{[A-Z_]+\}\$\)\.\+)"[ \t]*$/
       text = $0; sub(/^[ \t]*text:[ \t]*/, "", text); sub(/[ \t]+$/, "", text)
       if (text ~ /^".*"$/) text = substr(text, 2, length(text) - 2)
       if (!((env_filter || text in translated) && id_line == NR - 1 && id_indent == match($0, /[^ \t]/)))
@@ -295,6 +298,16 @@ cat >"$TMP/env-text.yaml" <<'EOF'
       id: "hold-button"
       text: "No holds left|Ya no puedes"
     timeout: 1000
+- extendedWaitUntil:
+    visible:
+      id: "score-answer-name"
+      text: "(?!${USERNAME}$).+"
+    timeout: 1000
+- extendedWaitUntil:
+    visible:
+      id: "score-answer-name"
+      text: "(?!Bot 1$).+"
+    timeout: 1000
 # ── end timed ──
 EOF
 timed_blocks "$TMP/env-text.yaml" >"$TMP/env-text.out"
@@ -306,8 +319,11 @@ grep -q "^ERR 14: text selector" "$TMP/env-text.out" && ok "checker flags a UI s
   || ko "checker flags a UI string filter on a testID" "$(cat "$TMP/env-text.out")"
 ! grep -q "^ERR 19:" "$TMP/env-text.out" && ok "checker allows a testID filtered by an app string in every language" \
   || ko "checker allows a testID filtered by an app string in every language" "$(cat "$TMP/env-text.out")"
+! grep -q "^ERR 34:" "$TMP/env-text.out" && grep -q "^ERR 39: text selector" "$TMP/env-text.out" \
+  && ok "checker allows a testID filtered by any text but an env variable's, not by any text but a UI string" \
+  || ko "checker allows (?!\${VAR}\$).+ filters only" "$(cat "$TMP/env-text.out")"
 grep -q "^ERR 24: text selector" "$TMP/env-text.out" && grep -q "^ERR 29: text selector" "$TMP/env-text.out" \
-  && [ "$(grep -c '^ERR' "$TMP/env-text.out")" = 4 ] \
+  && [ "$(grep -c '^ERR' "$TMP/env-text.out")" = 5 ] \
   && ok "checker flags an app string without a testID, and a filter that is not one key in every language" \
   || ko "checker flags translated filters without a testID or off the app strings" "$(cat "$TMP/env-text.out")"
 # EXP-353: a poll loop of looks and assertTrue scripts is one step; anything else in it, a condition reading the screen
@@ -439,17 +455,20 @@ else
   [ -n "$sim_lags" ] && [ "$(flow_ms optionsLagMs)" -ge "$sim_answering_lag" ] && [ "${phase_lag:-0}" -ge "$sim_other_lag" ] \
     && ok "play-rounds.yaml allows the render delays maestro-sim.mjs plays ($sim_answering_lag ms for the options, $sim_other_lag ms for the rest)" \
     || ko "play-rounds.yaml's render delays cover maestro-sim.mjs's" "sim: ${sim_lags:-none}, flow: $flow_timing"
-  # Every scoreboard step starts only before closesAfter, the card wait half a read before it and the last check a read
-  # before it (EXP-353: one that runs into the next round's options leaves that round no look before them); lab.sh
-  # counts the passes of the card wait's guard (lab-play.test.sh keeps them in sync)
+  # Every scoreboard step starts only before closesAfter, the card wait and the proof look (EXP-350, also a single
+  # read) half a read before it and the options check a read before it (EXP-353: one that runs into the next round's
+  # options leaves that round no look before them); lab.sh counts the passes of the card wait's guard (lab-play.test.sh
+  # keeps them in sync)
   card_guard="true: $(sed -nE "s/^SCOREBOARD_GUARD='(.*)'$/\1/p" "$HERE/../lab.sh")"
   # shellcheck disable=SC2016
   check_guard='true: ${Date.now() < output.round.closesAfter}'
   # shellcheck disable=SC2016
   last_check_guard='true: ${Date.now() + output.round.slowestReadMs < output.round.closesAfter}'
-  guards="$(awk -v card="$card_guard" -v check="$check_guard" -v last="$last_check_guard" '/# ── timed: scores ──/ { on = 1 }
-    /# ── end timed ──/ { on = 0 } { line = $0; sub(/^[ \t]*/, "", line) }
-    on && (line == card || line == check || line == last) { n++ } END { print n + 0 }' "$ROUNDS")"
+  # shellcheck disable=SC2016
+  proof_guard='true: ${!output.round.proofLooked && Date.now() + output.round.readMs / 2 < output.round.closesAfter && Date.now() > output.round.actedAt + output.timing.conditionWaitMs && (output.round.proofLooked = Date.now())}'
+  guards="$(awk -v card="$card_guard" -v check="$check_guard" -v last="$last_check_guard" -v proof="$proof_guard" '
+    /# ── timed: scores ──/ { on = 1 } /# ── end timed ──/ { on = 0 } { line = $0; sub(/^[ \t]*/, "", line) }
+    on && (line == card || line == check || line == last || line == proof) { n++ } END { print n + 0 }' "$ROUNDS")"
   read -r _ _ _ score_steps _ < <(timed_blocks "$ROUNDS" | grep "^BLOCK scores ")
   flow_has "$card_guard" && [ "$guards" = "${score_steps:-x}" ] \
     && ok "each of the $score_steps scoreboard steps starts only before the scoreboard may close" \
@@ -457,8 +476,9 @@ else
 fi
 
 # ── hold-used-up.yaml's hold times fit the server's (EXP-176) ──
-# Its taps use up the round's holds (MAX_HOLDS_PER_ROUND) within the scoreboard's time that still lets a hold start
-# (SCORE_DISPLAY_TIME minus HOLD_MIN_REMAINING), and a scoreboard it did not check is waited out for the hold budget
+# Its taps use up the round's holds (MAX_HOLDS_PER_ROUND) and press once more (EXP-361) within the scoreboard's time
+# that still lets a hold start (SCORE_DISPLAY_TIME minus HOLD_MIN_REMAINING), and a scoreboard it did not check is
+# waited out for the hold budget
 HOLD_FLOW="$MAESTRO_DIR/hold-used-up.yaml"
 hold_timing="$(sed -nE 's/^- evalScript: "\$\{output\.timing = \{ (.*) \}\}"$/\1/p' "$HOLD_FLOW")"
 hold_ms() { tr ',' '\n' <<<"$hold_timing" | sed -nE "s/^ *$1: ([0-9]+) *$/\1/p"; } # KEY -> its value in the flow
@@ -466,37 +486,39 @@ hold_min="$(engine_ms HOLD_MIN_REMAINING)" max_holds="$(engine_ms MAX_HOLDS_PER_
 hold_taps="$(awk '/^[ \t]*- tapOn:/ { tap = 1; next } tap && /^[ \t]*repeat:/ { print $2; exit } /^[ \t]*- / { tap = 0 }' "$HOLD_FLOW")"
 [ -n "$hold_min" ] && [ -n "$max_holds" ] && [ -n "$hold_budget" ] && [ -n "$scores" ] \
   && [ "$(hold_ms scoresMs)" = "$scores" ] && [ "$(hold_ms holdMinMs)" = "$hold_min" ] \
-  && [ "$(hold_ms holdBudgetMs)" = "$hold_budget" ] && [ "$hold_taps" = "$max_holds" ] \
+  && [ "$(hold_ms holdBudgetMs)" = "$hold_budget" ] && [ "$hold_taps" = "$((max_holds + 1))" ] \
   && ok "hold-used-up.yaml taps $hold_taps times and copies GameEngine.ts's hold times ($scores/$hold_min/$hold_budget ms)" \
   || ko "hold-used-up.yaml's hold times match GameEngine.ts" \
     "engine: scores=$scores min=$hold_min holds=$max_holds budget=$hold_budget; flow: taps=$hold_taps $hold_timing"
 [ "$(blocks_of hold-used-up.yaml scores)" = 1 ] \
   && ok "hold-used-up.yaml budgets its steps on the device's scoreboard" || ko "hold-used-up.yaml has a scores block"
-# EXP-354: hold-closed greys the button out by itself from the 1.5 s mark, so the "no holds left" wait and the 4th tap
-# end before it could (closingFrom): the wait's last read starts readMs before it (one that started just before it
-# could see the screen after hold-closed), the 4th tap also leaves its latency, and nothing is bound to the
-# scoreboard's close any more
+# EXP-354: hold-closed greys the button out by itself from the 1.5 s mark, so the presses reach the server and the
+# "no holds left" look ends before it could (closingFrom: hiddenFrom less the phone's paint delay of the scoreboard,
+# EXP-361, the same phaseLagMs as play-rounds.yaml's, plus the hold window): the look proves the holds only by a read
+# that ended before it (one that ends after it could see the screen after hold-closed), and nothing is bound to the
+# scoreboard's close any more. maestro-sim.mjs plays the flow against those bounds (scenario `hold`, below; it also
+# checks that the flow without phaseLagMs in closingFrom would pass on a broken app)
 # shellcheck disable=SC2016
-closing_from='${output.round.closingFrom = output.look.hiddenFrom + output.timing.scoresMs - output.timing.holdMinMs}'
-used_up_bounded() { # FLOW -> whether its used-up checks all end before closingFrom
+used_up_closing_from='${output.round.closingFrom = output.look.hiddenFrom - output.timing.phaseLagMs + output.timing.scoresMs - output.timing.holdMinMs}'
+used_up_bounded() { # FLOW -> whether its used-up check proves the holds only before closingFrom
   # shellcheck disable=SC2016
-  grep -qF "evalScript: $closing_from" "$1" \
-    && grep -qF 'timeout: ${output.round.closingFrom - output.round.readMs - Date.now()}' "$1" \
-    && grep -qF '&& output.round.closingFrom - output.round.readMs - Date.now() > 0}' "$1" \
-    && grep -qF 'true: ${output.round.closingFrom - output.round.readMs - output.timing.tapLatencyMs - Date.now() > 0}' "$1" \
-    && ! grep -qF 'timeout: ${output.round.closingFrom - Date.now()}' "$1" \
+  grep -qF "evalScript: $used_up_closing_from" "$1" \
+    && grep -qF '!output.round.usedUpLooked && output.round.tappedBy + output.timing.tapLatencyMs < output.round.closingFrom' "$1" \
+    && grep -qF 'assertTrue: ${(output.round.usedUp = output.round.greySeenAt > 0 && output.round.greySeenAt < output.round.closingFrom), true}' "$1" \
+    && grep -qF 'assertTrue: ${output.round.greySeenAt = Date.now()}' "$1" \
     && ! grep -q 'closesAfter' "$1"
 }
-used_up_bounded "$HOLD_FLOW" \
-  && ok "hold-used-up.yaml checks the used up holds only with reads that end before hold-closed could grey the button out" \
-  || ko "hold-used-up.yaml's checks bound by closingFrom minus a read (hiddenFrom + scores - hold min)"
-# The bound before EXP-354's last pass: the wait kept starting reads until closingFrom itself
+[ "$(hold_ms phaseLagMs)" = "${phase_lag:-x}" ] && used_up_bounded "$HOLD_FLOW" \
+  && ok "hold-used-up.yaml proves the used up holds only with reads that end before hold-closed could grey the button out" \
+  || ko "hold-used-up.yaml's check bound by closingFrom (hiddenFrom - phase lag + scores - hold min)" \
+    "phaseLagMs: hold-used-up $(hold_ms phaseLagMs), play-rounds ${phase_lag:-none}"
+# The bound before EXP-361: a greyed out button seen at any time of the look counted
 # shellcheck disable=SC2016
-sed 's/timeout: ${output.round.closingFrom - output.round.readMs - Date.now()}/timeout: ${output.round.closingFrom - Date.now()}/' \
+sed 's/output.round.greySeenAt < output.round.closingFrom/true/' \
   "$HOLD_FLOW" >"$TMP/hold-used-up-late-read.yaml"
 ! used_up_bounded "$TMP/hold-used-up-late-read.yaml" \
-  && ok "checker rejects a used-up wait whose last read may start just before closingFrom" \
-  || ko "checker rejects the unmargined used-up wait"
+  && ok "checker rejects a used-up look whose read may end after closingFrom" \
+  || ko "checker rejects the unbounded used-up look"
 
 # ── hold-closed.yaml's times fit the server's (EXP-354) ──
 # Without tapping: the button is enabled while the hold window is surely open (until hiddenFrom + SCORE_DISPLAY_TIME -
@@ -508,6 +530,7 @@ closed_ms() { tr ',' '\n' <<<"$closed_timing" | sed -nE "s/^ *$1: ([0-9]+) *$/\1
   && ok "hold-closed.yaml copies GameEngine.ts's scoreboard and hold window times ($scores/$hold_min ms)" \
   || ko "hold-closed.yaml's times match GameEngine.ts" "engine: scores=$scores min=$hold_min; flow: $closed_timing"
 # shellcheck disable=SC2016
+closing_from='${output.round.closingFrom = output.look.hiddenFrom + output.timing.scoresMs - output.timing.holdMinMs}'
 grep -qF "evalScript: $closing_from" "$CLOSED_FLOW" \
   && grep -qF 'evalScript: ${output.round.closesBy = output.look.seenAt + output.timing.scoresMs}' "$CLOSED_FLOW" \
   && grep -qF 'true: ${output.round.known && Date.now() + output.round.readMs < output.round.closingFrom}' "$CLOSED_FLOW" \
@@ -582,6 +605,18 @@ if out="$(node "$HERE/maestro-sim.mjs" rounds "$ROUNDS" "$CLIENT_APP" 2>&1)"; th
   done <<<"$out"
 else
   ko "play-rounds.yaml: the simulator runs the flow" "$(tr '\n' ' ' <<<"$out")"
+fi
+
+# ── hold-used-up.yaml on a fake game of its own (EXP-361) ──
+# With reads of 0.3 to 4 s seen anywhere along them and its scoreboard's events painted late: it never passes on an app
+# whose button greys out only at hold-closed or whose 4th press holds, every pass on the correct app is proven, and it
+# fails there only for want of an own scoreboard reached in time; each line states the pass rate
+if out="$(node "$HERE/maestro-sim.mjs" hold "$HOLD_FLOW" "$CLIENT_APP" 2>&1)"; then
+  while IFS=$'\t' read -r name verdict detail; do
+    [ "$verdict" = ok ] && ok "hold-used-up.yaml: $name" || ko "hold-used-up.yaml: $name" "$detail"
+  done <<<"$out"
+else
+  ko "hold-used-up.yaml: the simulator runs the flow" "$(tr '\n' ' ' <<<"$out")"
 fi
 
 echo "# $pass passed, $fail failed"

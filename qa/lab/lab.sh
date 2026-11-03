@@ -818,9 +818,15 @@ SCOREBOARD_GUARD='${Date.now() + output.round.readMs / 2 < output.round.closesAf
 # The guard of its checks after the card wait (EXP-353): COMPLETED when the wait saw the card (or the held marker); a
 # scoreboard whose card no look saw is left unchecked (lab-play.test.sh checks the flow has it)
 # shellcheck disable=SC2016
-CHECKED_GUARD='${output.round.cardWaited && ++output.scoreboards.checked}'
-# The script guard of its look for the held marker (EXP-325): COMPLETED when that look found a checked scoreboard held,
-# which then counts as held, not checked (lab-play.test.sh checks the flow has it)
+SEEN_GUARD='${output.round.cardWaited && ++output.scoreboards.seen}'
+# The script guard of the look after those checks that proves one (EXP-350): COMPLETED when one screen read saw the
+# card with a name that is not the device's, the only way a scoreboard counts as checked (a check that something is
+# absent passes on a held screen too; lab-play.test.sh checks the flow has it)
+# shellcheck disable=SC2016
+CHECKED_GUARD='${output.round.proofLooked}'
+# The script guard of its look for the held marker (EXP-325): COMPLETED when that look found a scoreboard whose card
+# wait saw the card or the marker held, which then counts as held, not as a card seen (lab-play.test.sh checks the
+# flow has it)
 # shellcheck disable=SC2016
 HELD_GUARD='${!output.options.shown && output.round.cardWaited && !output.round.heldLooked && Date.now() > output.round.closesBy + output.timing.heldLookDelayMs && (output.round.heldLooked = true)}'
 # The fewest card waits, all without seeing a card nor the held marker, that fail a run checking none (EXP-353): a
@@ -835,47 +841,50 @@ maestro_version_check() { # warns (exit 1) unless the Maestro CLI is the version
   return 1
 }
 
-scoreboards_checked() { # maestro --test-output-dir: "<checked> <shown> <held> <waited> <unseen> <failed>" of its
-  # play-rounds.yaml run (scoreboards checked, shown, found held, waited for, and waited for without seeing the card nor
-  # the held marker; whether a Maestro step failed), or nothing
+scoreboards_checked() { # maestro --test-output-dir: "<checked> <cards> <shown> <held> <waited> <unseen> <failed>" of
+  # its play-rounds.yaml run (scoreboards proven checked, whose card wait saw the card and that weren't found held,
+  # shown, found held, waited for, and waited for without seeing the card nor the held marker; whether a Maestro step
+  # failed), or nothing
   local f; f="$(find "$1" -name commands.json 2>/dev/null | head -1)"
   [ -n "$f" ] || return 0
-  jq -r --arg guard "$SCOREBOARD_GUARD" --arg checked "$CHECKED_GUARD" --arg held "$HELD_GUARD" '
+  jq -r --arg guard "$SCOREBOARD_GUARD" --arg seen "$SEEN_GUARD" --arg checked "$CHECKED_GUARD" --arg held "$HELD_GUARD" '
     def completed($condition): [.[] | select(.command.runFlowCommand.condition.scriptCondition == $condition
       and .metadata.status == "COMPLETED")] | length;
     [.[] | select(.command.runFlowCommand.condition.scriptCondition == $guard)] as $passes
     | select($passes | length > 0)
-    | completed($held) as $held | completed($checked) as $reached | completed($guard) as $waited
+    | completed($held) as $held | completed($seen) as $reached | completed($guard) as $waited
+    | completed($checked) as $checked
     | (if any(.[]; .metadata.status == "FAILED") then 1 else 0 end) as $failed
-    | "\($reached - $held) \($passes | length - 1) \($held) \($waited) \($waited - $reached) \($failed)"' "$f" 2>/dev/null
+    | "\($checked) \($reached - $held) \($passes | length - 1) \($held) \($waited) \($waited - $reached) \($failed)"' \
+    "$f" 2>/dev/null
 }
 
 print_scoreboards_checked() { # maestro output dir: one line per device run that played rounds; fails (exit 1) when a
-  # run checked no scoreboard and found none held though at least NONE_CHECKED_MIN_WAITS card waits ran: they all ended
+  # run saw no card and found no scoreboard held though at least NONE_CHECKED_MIN_WAITS card waits ran: they all ended
   # without seeing a card, so a card missing on every round (EXP-353: the flow itself never fails on a scoreboard it
   # can't tell; maestro-sim.mjs sees a correct game end that way only with random 2.5-4 s reads, under 1 % of them).
   # A run that failed in Maestro already fails, and
   # one with fewer card waits (a phone too slow for their guard) can't tell: both only warn. Also warns about the
   # scoreboards waited for whose card no look saw (unchecked: a phone too slow to tell, or a card missing on that round)
-  local run counts checked shown held waited unseen failed device none=0
+  local run counts checked cards shown held waited unseen failed device none=0
   for run in "$1"/*/; do
     counts="$(scoreboards_checked "$run")"
     [ -n "$counts" ] || continue
-    read -r checked shown held waited unseen failed <<<"$counts"
+    read -r checked cards shown held waited unseen failed <<<"$counts"
     device="$(basename "$run")"
-    log "$device: $checked/$shown scoreboards checked, $held held (play-rounds.yaml)"
+    log "$device: $checked/$shown scoreboards checked ($cards with their card seen), $held held (play-rounds.yaml)"
     [ "$unseen" = 0 ] \
       || warn "$device: $unseen scoreboard(s) waited for without seeing the card or the held marker (unchecked: a phone too slow to tell, or the card missing)"
-    [ "$checked" = 0 ] && [ "$shown" -gt 0 ] && [ "$failed" = 0 ] || continue
+    [ "$cards" = 0 ] && [ "$shown" -gt 0 ] && [ "$failed" = 0 ] || continue
     if [ "$waited" = 0 ]; then
       warn "$device: no scoreboard reached in time: phone too slow to check"
     elif [ "$waited" -lt "$NONE_CHECKED_MIN_WAITS" ]; then
-      warn "$device: no scoreboard checked, $waited waited for: too few to tell a missing card from a phone too slow"
+      warn "$device: no card seen, $waited scoreboard(s) waited for: too few to tell a missing card from a phone too slow"
     elif [ "$held" = 0 ]; then
       warn "$device: NONE CHECKED: no scoreboard showed its card: is the card missing? see the round screenshots"
       none=1
     else
-      warn "$device: no scoreboard checked, $held found held: the photo owner held them, so their cards went unseen"
+      warn "$device: no card seen, $held scoreboard(s) found held: the photo owner held them, so their cards went unseen"
     fi
   done
   [ $none = 0 ]

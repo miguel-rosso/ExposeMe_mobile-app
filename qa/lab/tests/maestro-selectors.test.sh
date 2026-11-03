@@ -115,8 +115,8 @@ unknown_ids() {
   ' "$TMP/ids" "$TMP/known-ids" "$TMP/known-helpers"
 }
 # Flows besides the boot ones whose ids are all checked against testIds.ts (EXP-176, EXP-348, EXP-346, EXP-354, EXP-339,
-# EXP-390, EXP-425)
-ID_CHECKED_FLOWS="tie-game.yaml hold-used-up.yaml hold-closed.yaml kicked-after-game.yaml kicked-while-offline.yaml kicked-mid-game.yaml join-room.yaml search-room.yaml kicked-notice.yaml device-host-start.yaml device-host-kick-mid-game.yaml unknown-link.yaml unknown-link-home.yaml server-unreachable.yaml"
+# EXP-390, EXP-425, EXP-422)
+ID_CHECKED_FLOWS="tie-game.yaml hold-used-up.yaml hold-closed.yaml kicked-after-game.yaml kicked-while-offline.yaml kicked-mid-game.yaml join-room.yaml search-room.yaml kicked-notice.yaml device-host-start.yaml device-host-kick-mid-game.yaml unknown-link.yaml unknown-link-home.yaml server-unreachable.yaml mute-player.yaml"
 # Flows that read the host's removal notice, a system alert matched by its text (EXP-139, EXP-346, EXP-425)
 KICK_NOTICE_FLOWS="kicked-notice.yaml kicked-after-game.yaml kicked-while-offline.yaml kicked-mid-game.yaml"
 

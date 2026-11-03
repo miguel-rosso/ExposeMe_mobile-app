@@ -10,6 +10,7 @@ import { leaveFromAnywhere } from "@/src/utils/leaveRoom";
 import { isFinalRefusal, isPhotoUnavailable, PlantPhotoAck, sendPlantPhoto } from "@/src/utils/plantPhotoAck";
 import type { PhotoAuth } from "@/src/utils/photoAuth";
 import { normalizeUsername, USERNAME_STORAGE_KEY } from "@/src/utils/username";
+import { endMutesOutsideRoom } from "@/src/hooks/useMutedPlayers";
 import { GameContext } from "./GameContextInstance";
 
 const { SERVER_URL } = getEnvVars();
@@ -62,9 +63,11 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
 
   // ── State kept in step with its ref ──
 
+  // A new room (or none: every way out of the room sets null) ends the stay in the last one: its mutes go (EXP-422)
   const setGameCode = useCallback((code: string | null) => {
     gameCodeRef.current = code;
     setGameCodeState(code);
+    endMutesOutsideRoom(code);
   }, []);
 
   const setPlantedPhotoUri = useCallback((uri: string | null) => {

@@ -5,11 +5,14 @@ import tw from "twrnc";
 import { ScoreRound } from "../../models/interfaces";
 import Icon from "react-native-vector-icons/FontAwesome";
 import { useI18n } from "../../i18n";
-import { TEST_IDS, scoreGuessId, scoreRankId, scoreRemoveId } from "@/src/utils/testIds";
+import { TEST_IDS, scoreGuessId, scoreMuteId, scoreRankId, scoreRemoveId } from "@/src/utils/testIds";
 import { rankScores } from "@/src/utils/ranking";
 import { isRevealedOwner } from "@/src/utils/roundState";
 import PhotoOwnerCard from "@/src/components/PhotoOwnerCard";
 import RemovePlayerButton from "@/src/components/RemovePlayerButton";
+import MutePlayerButton from "@/src/components/IngameComunication/MutePlayerButton";
+import { ShowMutedPhotoButton } from "@/src/components/MutedPhotoCover";
+import { MutedNames, NOBODY_MUTED } from "@/src/hooks/useMutedPlayers";
 import { useReduceMotion } from "@/src/hooks/useReduceMotion";
 import { topClearOfInset } from "@/src/utils/safeAreaRows";
 import { HOLD_BUTTON_BOTTOM, HOLD_BUTTON_HEIGHT } from "@/src/utils/gameRows";
@@ -56,6 +59,12 @@ interface ScoreModalProps {
    */
   onRemovePlayer?: (username: string) => void;
   removable?: ReadonlySet<string>;
+  /** Players muted on this device (EXP-422): their rows show it; scores and ranks are unchanged */
+  muted?: MutedNames;
+  /** Every other player's row gets a mute / unmute button (keep it stable: memo) */
+  onToggleMute?: (username: string) => void;
+  /** The photo behind is a muted player's, covered: a Show under the owner card reveals it (keep it stable: memo) */
+  onShowMutedPhoto?: () => void;
 }
 
 const ScoreModal: React.FC<ScoreModalProps> = ({
@@ -67,6 +76,9 @@ const ScoreModal: React.FC<ScoreModalProps> = ({
   reserveHoldButton = false,
   onRemovePlayer,
   removable,
+  muted = NOBODY_MUTED,
+  onToggleMute,
+  onShowMutedPhoto,
 }) => {
   const { t } = useI18n();
   const insets = useSafeAreaInsets();
@@ -111,6 +123,12 @@ const ScoreModal: React.FC<ScoreModalProps> = ({
         />
       )}
 
+      {onShowMutedPhoto && (
+        <View style={tw`mb-3`}>
+          <ShowMutedPhotoButton testID={TEST_IDS.scoreShowMutedPhoto} onPress={onShowMutedPhoto} />
+        </View>
+      )}
+
       {/* Shrinks to the space left (never grows past its rows) and scrolls: 12 players don't fit small phones */}
       <ScrollView
         testID={TEST_IDS.scoreList}
@@ -150,6 +168,15 @@ const ScoreModal: React.FC<ScoreModalProps> = ({
                     </View>
                   </View>
                   <Text style={tw`text-lg`}>{player.points}</Text>
+                  {onToggleMute && player.username !== myUsername && (
+                    <MutePlayerButton
+                      username={player.username}
+                      muted={muted.has(player.username)}
+                      testID={scoreMuteId(player.username)}
+                      onToggle={onToggleMute}
+                      onLight
+                    />
+                  )}
                   {onRemovePlayer && removable?.has(player.username) && (
                     <RemovePlayerButton
                       username={player.username}

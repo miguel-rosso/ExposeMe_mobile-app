@@ -15,6 +15,8 @@ const mockSocket = new FakeSocket();
 const mockPlayers = ["alice", "bob", "carol"].map((username) => ({
   username, points: 0, isHost: username === "alice", connected: true, lastGuess: "", lastAnswerCorrect: false,
 }));
+// Icon fonts are not loadable under jest (the pause modal's mute chips, EXP-422)
+jest.mock("react-native-vector-icons/FontAwesome", () => "Icon");
 jest.mock("expo-router", () => ({
   useRouter: () => ({ replace: jest.fn() }), useLocalSearchParams: () => ({}), useFocusEffect: () => {},
 }));

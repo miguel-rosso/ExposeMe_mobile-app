@@ -8,6 +8,8 @@ import GameScreen from "../app/screens/GameScreen";
 // EXP-292: on my turn, a photo that can't be converted no longer skips the round: GameScreen picks another photo
 // from the gallery and sends it, within the server's photo wait; only after a few such photos is it reported.
 
+// Icon fonts are not loadable under jest (the pause modal's mute chips, EXP-422)
+jest.mock("react-native-vector-icons/FontAwesome", () => "Icon");
 jest.mock("@react-native-async-storage/async-storage", () =>
   require("@react-native-async-storage/async-storage/jest/async-storage-mock")
 );

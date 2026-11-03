@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Alert } from "react-native";
 import type { Socket } from "socket.io-client";
 import { useI18n } from "../i18n";
 import { appendCapped, MAX_CHAT_MESSAGES } from "../utils/reactions";
 import { CHAT_COOLDOWN_MS } from "../utils/protocolLimits";
 import { emitWhileConnected } from "../utils/socketEmit";
+import { MutedNames, withoutMuted } from "./useMutedPlayers";
 
 /** A message on the lobby chat: mine or another player's */
 export interface LobbyChatMessage {
@@ -29,12 +30,24 @@ const newChatMessage = (username: string, message: string): LobbyChatMessage => 
  * The lobby chat: the messages on screen (the newest MAX_CHAT_MESSAGES, each one removed once its bubble fades out) and
  * sending, at most one message per CHAT_COOLDOWN_MS. Other players' messages come in through `receive`, which the
  * screen attaches with the rest of its socket handlers. The message being typed is the chat footer's own state, so
- * typing never re-renders the screen holding this hook (EXP-396).
+ * typing never re-renders the screen holding this hook (EXP-396). Players muted on this device (`muted`, EXP-422) are
+ * never shown: their messages are dropped as they arrive, and muting removes the ones already on screen.
  */
-export const useLobbyChat = (socket: Socket | null, gameCode: string | null, username: string | null) => {
+export const useLobbyChat = (
+  socket: Socket | null, gameCode: string | null, username: string | null, muted: MutedNames,
+) => {
   const { t } = useI18n();
   const [messages, setMessages] = useState<LobbyChatMessage[]>([]);
   const [lastSentTime, setLastSentTime] = useState<number>(0);
+  // Read by `receive`, which the screen attaches once with its socket handlers
+  const mutedRef = useRef(muted);
+  mutedRef.current = muted;
+  // A mute removes that player's bubbles in the same render, not one after it
+  const [messagesMuted, setMessagesMuted] = useState(muted);
+  if (muted !== messagesMuted) {
+    setMessagesMuted(muted);
+    setMessages((prev) => withoutMuted(prev, muted));
+  }
 
   const show = (msg: LobbyChatMessage) => setMessages((prev) => appendCapped(prev, msg, MAX_CHAT_MESSAGES));
 
@@ -57,7 +70,8 @@ export const useLobbyChat = (socket: Socket | null, gameCode: string | null, use
   };
 
   const receive = (data: IncomingChatMessage) => {
-    if (data.username !== username) show(newChatMessage(data.username, data.message));
+    if (data.username === username || mutedRef.current.has(data.username)) return;
+    show(newChatMessage(data.username, data.message));
   };
 
   const remove = (id: string) => setMessages((prev) => prev.filter((msg) => msg.id !== id));

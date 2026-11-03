@@ -8,6 +8,7 @@ import EmojiReaction from "../src/components/IngameComunication/EmojiReaction";
 import EmojiReactionLane, { REACTION_LANE_GAP, REACTION_PILL_HEIGHT } from "../src/components/IngameComunication/EmojiReactionLane";
 import ProgressBar from "../src/components/ProgressBar";
 import { useRoomReactions } from "../src/components/IngameComunication/RoomReactionLane";
+import { NOBODY_MUTED } from "../src/hooks/useMutedPlayers";
 
 // EXP-166: room emoji reactions are capped on screen, only known emojis are shown, they don't replay on the next photo,
 // and the screenshot reaction is a single listener per game that sends the fixed "📸" (label translated locally).
@@ -466,7 +467,7 @@ describe("useRoomReactions: socket change (EXP-393)", () => {
     const second = new FakeSocket();
     const latestPhoto = () => "/temp/1.jpg";
     const Harness = ({ socket }: { socket: FakeSocket }) => {
-      useRoomReactions({ socket: socket as any, listening: true, photo: "/temp/1.jpg", latestPhoto });
+      useRoomReactions({ socket: socket as any, listening: true, photo: "/temp/1.jpg", latestPhoto, muted: NOBODY_MUTED });
       return null;
     };
     let r!: TestRenderer.ReactTestRenderer;

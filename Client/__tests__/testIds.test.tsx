@@ -4,7 +4,7 @@ import path from "path";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import {
   TEST_IDS, playerOptionId, lobbyPlayerId, lobbyPlayerOfflineId, roundsOptionId, winnerNameId, finalWinnerId, finalRankId,
-  scoreRankId, scoreRemoveId, settingsStepId,
+  scoreRankId, scoreRemoveId, settingsStepId, lobbyMuteId, scoreMuteId, reactionPillId,
 } from "../src/utils/testIds";
 import AlertModal from "../src/components/modals/AlertModal";
 import CloseButton from "../src/components/CloseButton";
@@ -71,6 +71,9 @@ describe("E2E testIDs (EXP-008)", () => {
     expect(sources).toContain("finalWinnerId(w.username)");
     expect(sources).toContain("finalRankId(item.username)");
     expect(sources).toContain("settingsStepId(item.id)");
+    expect(sources).toContain("lobbyMuteId(item.username)");
+    expect(sources).toContain("scoreMuteId(player.username)");
+    expect(sources).toContain("reactionPillId(username)");
   });
 
   it("only uses registered ids in Maestro flows", () => {
@@ -102,6 +105,9 @@ describe("E2E testIDs (EXP-008)", () => {
       lobbyPlayerOfflineId("bot3"), playerOptionId("bot3"), scoreRankId("bot3"), finalRankId("bot3"),
       // EXP-425 device-host-kick-mid-game flow: the device host removes bot3 from a scoreboard; bot1's row stays
       scoreRemoveId("bot3"), scoreRankId("bot1"),
+      // EXP-422 mute-player flow: the bots muted in the lobby and on the scoreboard, and their reactions
+      lobbyMuteId("bot1"), scoreMuteId("bot1"), scoreMuteId("bot2"),
+      ...["bot1", "bot2", "bot3"].map(reactionPillId),
       // System photo picker and crop screen used by plant-photo.yaml (not our components)
       "com.google.android.providers.media.module:id/icon_thumbnail",
       "com.socketNull.ExposeMe:id/crop_image_menu_crop",

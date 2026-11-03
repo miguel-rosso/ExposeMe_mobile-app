@@ -17,6 +17,8 @@ import GalleryAccessModal from "@/src/components/modals/GalleryAccessModal";
 import InviteConfirmModal from "@/src/components/modals/InviteConfirmModal";
 import { useGalleryAccessGuard } from "@/src/hooks/useGalleryAccessGuard";
 import { useLobbyChat } from "@/src/hooks/useLobbyChat";
+import { useMutedPlayers } from "@/src/hooks/useMutedPlayers";
+import MutePlayerButton from "@/src/components/IngameComunication/MutePlayerButton";
 import { useStartGame } from "@/src/hooks/useStartGame";
 import { Ionicons } from "@expo/vector-icons";
 import { LobbyChatFooter, LobbyChatMessages } from "@/src/components/LobbyChat";
@@ -27,7 +29,7 @@ import PlantPhotoButton from "@/src/components/PlantPhotoButton";
 import { BRAND_RED } from "@/src/theme/brand";
 import { INVITE_BASE_URL } from "@/config";
 import { useI18n } from "../../src/i18n";
-import { TEST_IDS, lobbyPlayerId, lobbyPlayerOfflineId, roundsOptionId } from "../../src/utils/testIds";
+import { TEST_IDS, lobbyMuteId, lobbyPlayerId, lobbyPlayerOfflineId, roundsOptionId } from "../../src/utils/testIds";
 import { isHostIn, withConnection, withHost, withoutPlayer } from "../../src/utils/roomPlayers";
 import { attachHandlers, SocketHandlers } from "../../src/utils/socketHandlers";
 import { emitJoin, isConnectionRefused } from "../../src/utils/roomJoin";
@@ -119,7 +121,9 @@ const WaitingRoom = () => {
   const [isSelecting, setIsSelecting] = useState<boolean>(false);
   // Until the room answers (or a started game's snapshot opens the game screen)
   const [isLoading, setIsLoading] = useState<boolean>(true);
-  const chat = useLobbyChat(socket, gameCode, username);
+  // Players muted on this device for this room (EXP-422): their chat bubbles are not shown
+  const mutes = useMutedPlayers(gameCode);
+  const chat = useLobbyChat(socket, gameCode, username, mutes.muted);
   const startRequest = useStartGame(socket);
 
   /** Forgets the picked photo: the game it was picked for was played without this lobby. */
@@ -573,20 +577,17 @@ const WaitingRoom = () => {
   // Gone players don't count: the server removes them at the start (EXP-379)
   const canStart = canOfferStart(players);
 
-  // Memoized: the player list (a PureComponent) only re-renders its rows when the players or the host change, not on
-  // every other lobby update (chat bubbles, notices: EXP-396)
+  // Memoized: the player list (a PureComponent) only re-renders its rows when the players, the host or the mutes change,
+  // not on every other lobby update (chat bubbles, notices: EXP-396)
   const renderPlayer = useCallback(({ item }: { item: Player }) => {
     const isMe = item.username === username;
     const offline = item.connected === false;
+    // The mute button sits next to the row's touchable (the host's tap to remove), not inside it: a touchable is one
+    // element for screen readers, which could never reach a button within it
     return (
-      <TouchableOpacity
-        testID={lobbyPlayerId(item.username)}
-        onPress={() => {
-          if (isHost && !isMe) confirmRemovePlayer(item);
-        }}
-        activeOpacity={isMe || !isHost ? 1 : 0.7}
+      <View
         style={[
-          tw`flex-row items-center px-4 py-3 mb-2 rounded-2xl`,
+          tw`flex-row items-center pr-4 mb-2 rounded-2xl`,
           {
             backgroundColor: isMe ? "rgba(0,0,0,0.55)" : "rgba(0,0,0,0.45)",
             borderWidth: 1,
@@ -595,27 +596,44 @@ const WaitingRoom = () => {
           },
         ]}
       >
-        <View style={tw`h-9 w-9 rounded-full bg-white/10 items-center justify-center mr-3`}>
-          {item.isHost ? (
-            <Text style={tw`text-sm`}>👑</Text>
-          ) : (
-            <Text style={tw`text-white text-sm font-bold opacity-50`}>
-              {item.username.charAt(0).toUpperCase()}
+        <TouchableOpacity
+          testID={lobbyPlayerId(item.username)}
+          onPress={() => {
+            if (isHost && !isMe) confirmRemovePlayer(item);
+          }}
+          activeOpacity={isMe || !isHost ? 1 : 0.7}
+          style={tw`flex-1 flex-row items-center pl-4 py-3`}
+        >
+          <View style={tw`h-9 w-9 rounded-full bg-white/10 items-center justify-center mr-3`}>
+            {item.isHost ? (
+              <Text style={tw`text-sm`}>👑</Text>
+            ) : (
+              <Text style={tw`text-white text-sm font-bold opacity-50`}>
+                {item.username.charAt(0).toUpperCase()}
+              </Text>
+            )}
+          </View>
+          <Text style={tw`text-white text-base flex-1 ${isMe ? "font-bold" : "font-medium"}`}>
+            {item.username}
+          </Text>
+          {offline && (
+            <Text testID={lobbyPlayerOfflineId(item.username)} style={tw`text-white/60 text-xs italic mr-2`}>
+              {t.playerDisconnected}
             </Text>
           )}
-        </View>
-        <Text style={tw`text-white text-base flex-1 ${isMe ? "font-bold" : "font-medium"}`}>
-          {item.username}
-        </Text>
-        {offline && (
-          <Text testID={lobbyPlayerOfflineId(item.username)} style={tw`text-white/60 text-xs italic mr-2`}>
-            {t.playerDisconnected}
-          </Text>
+          {isMe && <Text style={tw`text-white/40 text-xs`}>{t.you}</Text>}
+        </TouchableOpacity>
+        {!isMe && (
+          <MutePlayerButton
+            username={item.username}
+            muted={mutes.muted.has(item.username)}
+            testID={lobbyMuteId(item.username)}
+            onToggle={mutes.toggle}
+          />
         )}
-        {isMe && <Text style={tw`text-white/40 text-xs`}>{t.you}</Text>}
-      </TouchableOpacity>
+      </View>
     );
-  }, [username, isHost, t, confirmRemovePlayer]);
+  }, [username, isHost, t, confirmRemovePlayer, mutes.muted, mutes.toggle]);
 
   return (
     <View style={tw`flex-1`}>

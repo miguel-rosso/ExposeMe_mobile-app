@@ -14,6 +14,8 @@ import GameScreen from "../app/screens/GameScreen";
 // marking the room exit (useGoHome). Before, the only way out was killing the app, which the server took as a lost
 // connection (the others paused for up to 5 min).
 
+// Icon fonts are not loadable under jest (the pause modal's mute chips, EXP-422)
+jest.mock("react-native-vector-icons/FontAwesome", () => "Icon");
 jest.mock("@react-native-async-storage/async-storage", () =>
   require("@react-native-async-storage/async-storage/jest/async-storage-mock")
 );

@@ -43,6 +43,12 @@ export default {
   remove: "Remove",
   // The host's remove buttons during the game (scoreboard rows, pause modal; EXP-425), named for screen readers
   removePlayerNamed: "Remove {name}",
+  // Muting a player on this device (EXP-422): lobby and game player rows, named for screen readers
+  mutePlayerNamed: "Mute {name}",
+  unmutePlayerNamed: "Unmute {name}",
+  // GameScreen: over the round's photo when it is a muted player's, until "Show" reveals it for this round
+  mutedPlayerPhoto: "Photo from a muted player",
+  showMutedPhoto: "Show",
   cancel: "Cancel",
   loadingGameRoom: "Loading game room...",
   pleaseWait: "Please wait a moment",

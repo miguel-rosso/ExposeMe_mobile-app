@@ -2,6 +2,7 @@ import React, { memo, useEffect, useRef } from "react";
 import { Text, Animated } from "react-native";
 import tw from "twrnc";
 import { SCREENSHOT_EMOJI } from "../../utils/reactions";
+import { reactionPillId } from "../../utils/testIds";
 
 interface EmojiReactionProps {
   id: string;
@@ -54,6 +55,7 @@ const EmojiReaction: React.FC<EmojiReactionProps> = ({ id, username, emoji, scre
 
   return (
     <Animated.View
+      testID={reactionPillId(username)}
       style={[
         tw`bg-black bg-opacity-40 rounded-full px-3 py-1 flex-row items-center justify-center mb-2`,
         { opacity, transform: [{ translateY }] },

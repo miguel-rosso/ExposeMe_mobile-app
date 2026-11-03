@@ -69,6 +69,10 @@ export const TEST_IDS = {
   leaveGameConfirm: "leave-game-confirm", // its Cancel / Leave are alertModalCancel / alertModalConfirm
   // The host removing a player during the game (EXP-425): its Cancel / Remove are alertModalCancel / alertModalConfirm
   removePlayerConfirm: "remove-player-confirm",
+  // Over a muted player's round photo (EXP-422), until its Show reveals it for this round
+  mutedPhotoCover: "muted-photo-cover",
+  mutedPhotoShowButton: "muted-photo-show-button",
+  scoreShowMutedPhoto: "score-show-muted-photo", // the same Show on the scoreboard, which covers the cover's
   // ── Gallery access (home, lobby, game) ──
   galleryAccessModal: "gallery-access-modal",
   galleryAccessMessage: "gallery-access-message",
@@ -118,6 +122,12 @@ export const scoreGuessId = (username: string) => `score-guess-${username}`;
 /** The host's remove button on a player's scoreboard row, and on an awaited player in the pause modal (EXP-425) */
 export const scoreRemoveId = (username: string) => `score-remove-${username}`;
 export const pausedRemoveId = (username: string) => `paused-remove-${username}`;
+/** Mute / unmute another player on this device (EXP-422): lobby rows, scoreboard rows, awaited players when paused */
+export const lobbyMuteId = (username: string) => `lobby-mute-${username}`;
+export const scoreMuteId = (username: string) => `score-mute-${username}`;
+export const pausedMuteId = (username: string) => `paused-mute-${username}`;
+/** An emoji reaction's pill over the photo, by its sender (EXP-422: a muted player's never shows) */
+export const reactionPillId = (username: string) => `reaction-${username}`;
 export const roundsOptionId = (rounds: number) => `rounds-option-${rounds}`;
 /** Description text of a SettingsInstructionsScreen carousel step, numbered from 1 */
 export const settingsStepId = (step: number) => `settings-step-${step}`;

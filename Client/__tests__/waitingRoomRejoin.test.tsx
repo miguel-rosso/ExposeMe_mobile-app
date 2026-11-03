@@ -150,8 +150,8 @@ describe("WaitingRoom: joining a game already in progress (EXP-097)", () => {
   it("does not re-request state when entering the game normally via game-started", async () => {
     const r = await mount();
     act(() => mockSocket.fire("room-of-game", roomOfGame));
-    act(() => mockSocket.fire("game-started", players));
-    expect(mockReplace).toHaveBeenCalledWith("/screens/GameScreen");
+    act(() => mockSocket.fire("game-started", players, 15, 2));
+    expect(mockReplace).toHaveBeenCalledWith({ pathname: "/screens/GameScreen", params: { gameNumber: "2" } });
 
     mockSocket.emitted = [];
     act(() => r.unmount());

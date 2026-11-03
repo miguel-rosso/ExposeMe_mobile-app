@@ -46,20 +46,23 @@ export interface RoundView {
   /** The game's number of rounds as the server sent it (round-scores, snapshot); 0 until then */
   totalRounds: number;
   /**
-   * The server's number of the game this screen shows (waiting-photo, snapshot of a started game); NO_GAME_NUMBER
-   * until then (the ready phase of a game opened from game-started)
+   * The server's number of the game this screen shows: game-started's, when the lobby opened the screen with it
+   * (roundViewOfGame), then every waiting-photo and snapshot of a started game; NO_GAME_NUMBER until one is known
    */
   gameNumber: number;
 }
 
 /** No game number seen yet; the server's numbers start at 1 */
-const NO_GAME_NUMBER = 0;
+export const NO_GAME_NUMBER = 0;
 
 export const initialRoundView: RoundView = {
   photo: null, round: 0, phase: null, phaseDuration: 0, phaseTotal: 0, phaseKey: 0, correctAnswer: "", scores: null,
   mySelection: "", gameHeld: false, pressing: false, noHoldsLeft: false, leavers: [], totalRounds: 0,
   gameNumber: NO_GAME_NUMBER,
 };
+
+/** The game screen's view before game `gameNumber`'s first event (NO_GAME_NUMBER: a game not known yet) */
+export const roundViewOfGame = (gameNumber: number): RoundView => ({ ...initialRoundView, gameNumber });
 
 /**
  * The revealed answer (`correctAnswer`) is me: the round's photo was mine. The only way the owner's screen learns it,
@@ -174,8 +177,8 @@ const applySnapshot = (state: RoundView, snap: GameStateSnapshot, serverUrl: str
 /**
  * The `game-state` snapshot is of another game than the one this screen shows: the game shown ended while I was away
  * (its game-over was lost) and the host already started the next one, which has the room's next game number. A
- * not-started snapshot is the end of a game (its final scores); a screen that saw no game number yet takes the
- * snapshot's game as its own.
+ * not-started snapshot is the end of a game (its final scores). A screen opened from game-started knows its number
+ * from the start (EXP-384); one that knows none yet (opened on a game in progress) takes the snapshot's game as its own.
  */
 export const isAnotherGame = (state: RoundView, snap: GameStateSnapshot): boolean =>
   snap.started && state.gameNumber !== NO_GAME_NUMBER && snap.gameNumber !== state.gameNumber;

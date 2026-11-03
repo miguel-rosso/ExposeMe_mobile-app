@@ -372,6 +372,21 @@ describe("GameContext planted photo", () => {
     expect(plantPhotoUrls()).toEqual([]);
     act(() => r.unmount());
   });
+
+  // EXP-384: a rejoin's room-of-game re-plants it, and the snapshot right after it says the game it was picked for is
+  // over (the next one started): the game screen drops it, and that upload must not plant it in the next game
+  it("a photo dropped while uploading is not sent", async () => {
+    const r = mount();
+    const upload = holdNextUpload();
+    act(() => ctx.setPlantedPhotoUri("file:///a.jpg"));
+    let first!: Promise<boolean>;
+    act(() => { first = ctx.plantPhoto(); });
+    act(() => ctx.setPlantedPhotoUri(null));
+    await act(async () => { upload.release(UPLOADED); expect(await first).toBe(false); });
+    expect(plantPhotoUrls()).toEqual([]);
+    expect(ctx.plantedPhotoSent).toBe(false);
+    act(() => r.unmount());
+  });
 });
 
 // EXP-269: a busy server refuses uploads with 429/503 + Retry-After (e.g. a party on one wifi planting at once). The

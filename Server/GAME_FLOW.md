@@ -484,10 +484,12 @@ After last round: game-over
 - **Game number.** Every game run in a room gets the next integer (`room.gameNumber`: 0 before the first game, +1 on
   every accepted `start-game`; a refused start uses none). It is the third argument of `game-started`, and is in
   every `waiting-photo` and `game-state` (in a not-started snapshot, the number of the last game, 0 if none was
-  played). The game screen keeps the number of the game it shows (from its first `waiting-photo` or `game-state`):
-  a rejoin snapshot of a started game with another number is the next game, started while the player was away and
+  played). The game screen keeps the number of the game it shows: `game-started`'s when the lobby opened it from that
+  event (so it knows its game already in the ready phase, EXP-384), else its first `waiting-photo` or `game-state`.
+  A rejoin snapshot of a started game with another number is the next game, started while the player was away and
   missed the `game-over` of theirs, so the screen hands over to it as the final screens do (see below), however early
-  its own game ended. A screen that has seen no number yet (still in the ready phase) takes the snapshot's.
+  its own game ended, and the photo planted for the old game is dropped. A screen opened on a game in progress that
+  has seen no number yet takes the snapshot's.
 - `im-ready` only counts between `game-started` and the first round (`started && phase === null`).
   The first round is scheduled (after `GAME_START_DELAY`, 1 s) as soon as **at least 2 players are connected
   and all connected players are ready** (checked on `im-ready` and when a player disconnects or leaves during

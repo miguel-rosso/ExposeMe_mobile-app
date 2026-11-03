@@ -32,8 +32,8 @@ import { prefetchImage } from "@/app/utils/image";
 import { photoWaitOf, pickAndUploadTurnPhoto } from "../utils/turnPhoto";
 import { SkipNotice, skipNoticeFor, skipNoticeText } from "../utils/waitingPhoto";
 import {
-  gameStateFollowUps, initialRoundView, isAnotherGame, isRevealedOwner, phaseElapsed, RoundAction, roundOptions,
-  roundReducer, RoundView,
+  gameStateFollowUps, isAnotherGame, isRevealedOwner, phaseElapsed, RoundAction, roundOptions,
+  roundReducer, RoundView, roundViewOfGame,
 } from "../utils/roundState";
 import { emitWhileConnected } from "../utils/socketEmit";
 import { useGameConnection } from "../hooks/useGameConnection";
@@ -56,7 +56,9 @@ import { attachHandlers, SocketHandlers } from "../utils/socketHandlers";
 import { safeBottomRow, safeTopRow } from "../utils/safeAreaRows";
 import { ANSWERS_BOTTOM, HOLD_BUTTON_BOTTOM } from "../utils/gameRows";
 import { PROGRESS_BAR_AREA, progressBarAreaBottom, progressBarRow } from "../utils/progressBarRow";
-import { GAME_SCREEN_PATH, GameScreenParams, opensOnGameInProgress } from "../utils/gameScreenRoute";
+import {
+  GAME_SCREEN_PATH, GameScreenParams, openingGameNumber, opensOnGameInProgress,
+} from "../utils/gameScreenRoute";
 import { useGoHome } from "../hooks/useGoHome";
 import { isKickedByHost, KICKED_BY_HOST_MESSAGE } from "../utils/serverMessage";
 
@@ -88,15 +90,18 @@ const GameScreen = () => {
   useScreenshotReaction(socket);
 
   // ── Round state (reset each round) ───────────────────
+  const routeParams = useLocalSearchParams<GameScreenParams>();
+  // Opened from game-started: the game is known from the start, so a rejoin snapshot of the next one, before this
+  // game's first round event, is told apart (EXP-384)
+  const [openingView] = useState(() => roundViewOfGame(openingGameNumber(routeParams)));
   // roundRef always holds the latest state, updated on dispatch: socket listeners and timers read it (their closures
   // would see stale state), and back-to-back events build on each other. The screen renders roundView.
-  const roundRef = useRef<RoundView>(initialRoundView);
+  const roundRef = useRef<RoundView>(openingView);
   // Room photo credentials for the round-photo prefetch (set with photoHeaders, below)
   const photoHeadersRef = useRef<Record<string, string> | undefined>(undefined);
-  const [roundView, setRoundView] = useState<RoundView>(initialRoundView);
+  const [roundView, setRoundView] = useState<RoundView>(openingView);
   // Opened on a game in progress (a rejoin from the lobby): its phase is unknown until the server's snapshot, so a
   // neutral loader is shown instead of the ready phase's "waiting for everyone to be ready" (EXP-289)
-  const routeParams = useLocalSearchParams<GameScreenParams>();
   const [awaitingSnapshot, setAwaitingSnapshot] = useState(() => opensOnGameInProgress(routeParams));
   // Device time the event that started the current phase (a new phaseKey) arrived: its progress bar ends `phaseDuration`
   // after it, not after the phase's paint, which can come much later on slow phones (EXP-300)

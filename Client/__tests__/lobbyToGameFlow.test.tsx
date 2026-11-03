@@ -9,8 +9,8 @@ import WaitingRoom from "../app/screens/WaitingRoom";
 import GameScreen from "../app/screens/GameScreen";
 
 // EXP-187: from the lobby into the game with the server's real event sequence, both screens on one shared socket and
-// one game context (as in the app): room-of-game -> start-game -> game-started (players, rounds) -> the game screen
-// takes over the socket and says im-ready -> waiting-photo -> round-start draws the first round.
+// one game context (as in the app): room-of-game -> start-game -> game-started (players, rounds, game number) -> the
+// game screen takes over the socket and says im-ready -> waiting-photo -> round-start draws the first round.
 
 const mockSocket = new FakeSocket();
 
@@ -25,9 +25,13 @@ interface MockAppState {
   gameCode: string | null;
   roundsOfGame: number;
   playersProvider: unknown[];
+  /** GameContext's planted photo: the picked one, and whether the server acked it */
+  plantedPhotoUri: string | null;
+  plantedPhotoSent: boolean;
 }
+const NO_PLANTED_PHOTO = { plantedPhotoUri: null, plantedPhotoSent: false };
 const mockStore = {
-  state: { route: LOBBY_ROUTE, routeParams: {}, gameCode: null, roundsOfGame: 10, playersProvider: [] } as MockAppState,
+  state: { route: LOBBY_ROUTE, routeParams: {}, gameCode: null, roundsOfGame: 10, playersProvider: [], ...NO_PLANTED_PHOTO } as MockAppState,
   listeners: new Set<() => void>(),
   set(patch: Partial<MockAppState>) {
     mockStore.state = { ...mockStore.state, ...patch };
@@ -45,8 +49,19 @@ const mockReplace = jest.fn((href: MockHref) => {
   else mockStore.set({ route: href.pathname, routeParams: href.params ?? {} });
 });
 
+// GameContext's plantPhoto contract (gameContextPlanted.test): the picked photo is uploaded, and plant-photo goes only
+// if it is still the picked one once the upload is done (a photo replaced or dropped meanwhile is never sent)
+const mockPlantPhoto = jest.fn(async () => {
+  const uri = mockStore.state.plantedPhotoUri;
+  if (!uri) return false;
+  await Promise.resolve(); // the upload
+  if (mockStore.state.plantedPhotoUri !== uri) return false;
+  mockSocket.emit("plant-photo", { photoUrl: uri });
+  return true;
+});
+
 jest.mock("expo-router", () => ({
-  useRouter: () => ({ replace: mockReplace }),
+  useRouter: () => ({ replace: mockReplace, dismissTo: jest.fn() }),
   useLocalSearchParams: () => mockStore.state.routeParams,
   ...require("../testUtils/screenNavigation").screenNavigationMock(),
   useFocusEffect: () => {},
@@ -56,12 +71,15 @@ jest.mock("../app/providers/GameContext", () => ({
     const state = mockUseStore();
     return {
       socket: mockSocket, username: "bob", gameCode: state.gameCode, roundsOfGame: state.roundsOfGame,
-      playersProvider: state.playersProvider, plantedPhotoUri: null, plantedPhotoSent: false,
+      playersProvider: state.playersProvider, plantedPhotoUri: state.plantedPhotoUri, plantedPhotoSent: state.plantedPhotoSent,
       setGameCode: (gameCode: string | null) => mockStore.set({ gameCode }),
       setRoundsOfGame: (roundsOfGame: number) => mockStore.set({ roundsOfGame }),
       setPlayersProvider: (playersProvider: unknown[]) => mockStore.set({ playersProvider }),
-      startSocket: jest.fn(), endSocket: jest.fn(), leaveRoom: jest.fn(), setPlantedPhotoUri: jest.fn(), plantPhoto: jest.fn(),
+      startSocket: jest.fn(), endSocket: jest.fn(), leaveRoom: jest.fn(),
+      setPlantedPhotoUri: (plantedPhotoUri: string | null) => mockStore.set({ plantedPhotoUri, plantedPhotoSent: false }),
+      plantPhoto: mockPlantPhoto,
       saveRejoinToken: jest.fn(), getRejoinToken: async () => "tok-bob", clearRejoinToken: jest.fn(),
+      takeInviteOverRoomScreen: () => null,
     };
   },
 }));
@@ -109,6 +127,8 @@ const ROOM_ROUNDS = 15;
 const PHOTO_WAIT_MS = 15_000;
 const ANSWERING_MS = 7_700;
 const FIRST_PHOTO = "/temp/round-1.jpg";
+const GAME_NUMBER = 1;
+const GAME_SCREEN_AT_START = { pathname: GAME_ROUTE, params: { gameNumber: String(GAME_NUMBER) } };
 
 // Public player data (no socketId)
 const player = (username: string, isHost = false) =>
@@ -154,7 +174,7 @@ beforeEach(() => {
   jest.useFakeTimers();
   mockSocket.reset();
   mockReplace.mockClear();
-  mockStore.state = { route: LOBBY_ROUTE, routeParams: {}, gameCode: ROOM_CODE, roundsOfGame: 10, playersProvider: [] };
+  mockStore.state = { route: LOBBY_ROUTE, routeParams: {}, gameCode: ROOM_CODE, roundsOfGame: 10, playersProvider: [], ...NO_PLANTED_PHOTO };
 });
 
 describe("Lobby -> game with the server's events (EXP-187)", () => {
@@ -165,11 +185,11 @@ describe("Lobby -> game with the server's events (EXP-187)", () => {
     expect(has(r.root, lobbyPlayerId("carol"))).toBe(true);
     expect(has(r.root, TEST_IDS.lobbyWaiting)).toBe(true); // a guest waits for the host
 
-    // The host started: the server sends the public players and the rounds to the whole room
-    await act(async () => { mockSocket.fire("game-started", LOBBY_PLAYERS, ROOM_ROUNDS); });
+    // The host started: the server sends the public players, the rounds and the game's number to the whole room
+    await act(async () => { mockSocket.fire("game-started", LOBBY_PLAYERS, ROOM_ROUNDS, GAME_NUMBER); });
     await flush();
     expect(mockReplace).toHaveBeenCalledTimes(1);
-    expect(mockReplace).toHaveBeenCalledWith(GAME_ROUTE);
+    expect(mockReplace).toHaveBeenCalledWith(GAME_SCREEN_AT_START);
     expect(has(r.root, TEST_IDS.lobbyGameCode)).toBe(false);
     expect(has(r.root, TEST_IDS.gameWaitingReady)).toBe(true);
 
@@ -183,7 +203,7 @@ describe("Lobby -> game with the server's events (EXP-187)", () => {
     expect(mockSocket.emittedPayloads("join-create-game")).toHaveLength(1);
 
     // First phase: someone is choosing a photo, with the room's rounds from the lobby and the server's wait
-    act(() => mockSocket.fire("waiting-photo", { round: 1, duration: PHOTO_WAIT_MS }));
+    act(() => mockSocket.fire("waiting-photo", { round: 1, duration: PHOTO_WAIT_MS, gameNumber: GAME_NUMBER }));
     expect(has(r.root, TEST_IDS.gameWaitingReady)).toBe(false);
     expect(has(r.root, TEST_IDS.gameWaitingPhoto)).toBe(true);
     expect(texts(r.root)).toContain(en.roundOf.replace("{round}", "1").replace("{total}", String(ROOM_ROUNDS)));
@@ -208,7 +228,7 @@ describe("Lobby -> game with the server's events (EXP-187)", () => {
     expect(mockReplace).not.toHaveBeenCalled();
     expect(has(r.root, TEST_IDS.startGameButton)).toBe(true);
 
-    await act(async () => { mockSocket.fire("game-started", hostRoom.room.players, ROOM_ROUNDS); });
+    await act(async () => { mockSocket.fire("game-started", hostRoom.room.players, ROOM_ROUNDS, GAME_NUMBER); });
     await flush();
     expect(has(r.root, TEST_IDS.gameWaitingReady)).toBe(true);
     expect(mockSocket.emittedPayloads("im-ready")).toHaveLength(1);
@@ -221,7 +241,7 @@ describe("Lobby -> game with the server's events (EXP-187)", () => {
     const r = await openLobby();
     act(() => mockSocket.fire("room-of-game", roomOfGame));
     const startedWith = LOBBY_PLAYERS.filter((p) => p.username !== "carol");
-    await act(async () => { mockSocket.fire("game-started", startedWith, ROOM_ROUNDS); });
+    await act(async () => { mockSocket.fire("game-started", startedWith, ROOM_ROUNDS, GAME_NUMBER); });
     await flush();
 
     act(() => mockSocket.fire("waiting-photo", { round: 1, duration: PHOTO_WAIT_MS }));
@@ -276,9 +296,73 @@ describe("Lobby -> game in progress (EXP-289)", () => {
   it("a game opened by game-started is in its ready phase: 'are you ready?' at once, no loader", async () => {
     const r = await openLobby();
     act(() => mockSocket.fire("room-of-game", roomOfGame));
-    await act(async () => { mockSocket.fire("game-started", LOBBY_PLAYERS, ROOM_ROUNDS); });
+    await act(async () => { mockSocket.fire("game-started", LOBBY_PLAYERS, ROOM_ROUNDS, GAME_NUMBER); });
     await flush();
     expect(has(r.root, TEST_IDS.gameWaitingReady)).toBe(true);
     expect(has(r.root, TEST_IDS.gameLoading)).toBe(false);
+  });
+});
+
+// EXP-384: I planted a photo for game 1 and dropped in its ready phase, before its first waiting-photo. The others
+// played game 1 to its end and the host started game 2 before I came back. The game screen opened by game-started
+// knows it shows game 1, so the rejoin's snapshot of game 2 hands over to it (through the lobby) and the photo picked
+// for game 1 is dropped, not planted in game 2.
+describe("Lobby -> game, rejoining in the ready phase (EXP-384)", () => {
+  const OLD_PLANTED = "file:///planted-for-game-1.jpg";
+  // The rejoin's room-of-game: a started game in its ready phase, without my planted photo
+  const startedRoomOfGame = {
+    ...roomOfGame, hasPlantedPhoto: false, room: { ...roomOfGame.room, started: true, phase: null, round: 0 },
+  };
+  const readySnapshot = (gameNumber: number): GameStateSnapshot => ({
+    started: true, gameNumber, phase: null, round: 0, totalRounds: ROOM_ROUNDS, photo: null, correctAnswer: null,
+    yourGuess: null, duration: 0, phaseTotal: 0, held: false, holdsLeft: 3, pause: null, scores: [],
+    players: LOBBY_PLAYERS, roundOptions: [],
+  });
+
+  /** Game 1 opened from game-started with my planted photo acked, then my socket drops before its first round */
+  async function dropInReadyPhase() {
+    const r = await openLobby();
+    act(() => mockSocket.fire("room-of-game", roomOfGame));
+    act(() => mockStore.set({ plantedPhotoUri: OLD_PLANTED, plantedPhotoSent: true }));
+    await act(async () => { mockSocket.fire("game-started", LOBBY_PLAYERS, ROOM_ROUNDS, GAME_NUMBER); });
+    await flush();
+    expect(has(r.root, TEST_IDS.gameWaitingReady)).toBe(true);
+    act(() => { mockSocket.connected = false; mockSocket.fire("disconnect", "transport close"); });
+    mockSocket.emitted = [];
+    mockReplace.mockClear();
+    return r;
+  }
+
+  /** socket.io reconnects: the screen rejoins, and the server answers with room-of-game and its snapshot at once */
+  async function rejoinTo(snapshot: GameStateSnapshot) {
+    await act(async () => { mockSocket.connected = true; mockSocket.fire("connect"); });
+    await flush();
+    expect(mockSocket.emittedPayloads("join-create-game")).toEqual([{ gameCode: ROOM_CODE, username: "bob", rejoinToken: "tok-bob" }]);
+    act(() => {
+      mockSocket.fire("room-of-game", startedRoomOfGame);
+      mockSocket.fire("game-state", snapshot);
+    });
+    await flush();
+  }
+
+  it("a snapshot of the next game hands over to it and drops the photo planted for this one", async () => {
+    await dropInReadyPhase();
+    await rejoinTo(readySnapshot(GAME_NUMBER + 1));
+    expect(mockReplace).toHaveBeenCalledWith(LOBBY_ROUTE);
+    expect(mockStore.state.plantedPhotoUri).toBeNull();
+    expect(mockSocket.emittedPayloads("plant-photo")).toEqual([]);
+    // Not game 2's im-ready from the old screen: the fresh game screen sends it
+    expect(mockSocket.emittedPayloads("im-ready")).toEqual([]);
+  });
+
+  it("a snapshot of this game's ready phase stays on it and plants the photo the server lost again", async () => {
+    const r = await dropInReadyPhase();
+    await rejoinTo(readySnapshot(GAME_NUMBER));
+    expect(mockReplace).not.toHaveBeenCalled();
+    expect(has(r.root, TEST_IDS.gameWaitingReady)).toBe(true);
+    expect(mockStore.state.plantedPhotoUri).toBe(OLD_PLANTED);
+    expect(mockSocket.emittedPayloads("plant-photo")).toEqual([{ photoUrl: OLD_PLANTED }]);
+    // The ready phase's snapshot sends im-ready again (the screen's own, sent offline, was deferred to it)
+    expect(mockSocket.emittedPayloads("im-ready")).toHaveLength(1);
   });
 });

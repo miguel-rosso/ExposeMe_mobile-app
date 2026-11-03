@@ -189,12 +189,13 @@ describe("WaitingRoom: player list and host controls (EXP-063)", () => {
     act(() => r.unmount());
   });
 
-  it("game-started hands the players to the game and opens the game screen", async () => {
+  it("game-started hands the players to the game and opens the game screen on that game's number", async () => {
     const r = await mount([player("alice", true), player("bob")]);
     const players = [player("alice", true), player("bob")];
-    act(() => mockSocket.fire("game-started", players));
+    act(() => mockSocket.fire("game-started", players, 10, 4));
     expect(mockCtx.setPlayersProvider).toHaveBeenCalledWith(players);
-    expect(mockReplace).toHaveBeenCalledWith("/screens/GameScreen");
+    // EXP-384: the game screen knows its game from the start
+    expect(mockReplace).toHaveBeenCalledWith({ pathname: "/screens/GameScreen", params: { gameNumber: "4" } });
     act(() => r.unmount());
   });
 
@@ -236,9 +237,9 @@ describe("WaitingRoom: the host's Start answers (EXP-379)", () => {
     expect(pill.props.disabled).toBe(true);
     expect(pill.props.accessibilityState).toMatchObject({ disabled: true });
 
-    act(() => mockSocket.fire("game-started", [player("alice", true), player("bob")]));
+    act(() => mockSocket.fire("game-started", [player("alice", true), player("bob")], 10, 1));
     await answer({ ok: true });
-    expect(mockReplace).toHaveBeenCalledWith("/screens/GameScreen");
+    expect(mockReplace).toHaveBeenCalledWith({ pathname: "/screens/GameScreen", params: { gameNumber: "1" } });
     expect(startButton(r).props.disabled).toBe(true);
     expect(hasId(r, TEST_IDS.startGameNotice)).toBe(false);
     act(() => r.unmount());

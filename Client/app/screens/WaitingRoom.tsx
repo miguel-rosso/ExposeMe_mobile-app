@@ -37,7 +37,7 @@ import { isKickedByHost, KICKED_BY_HOST_MESSAGE } from "../utils/serverMessage";
 import { ROUND_OPTIONS } from "../utils/protocolLimits";
 import { canOfferStart } from "../utils/startGame";
 import { dismissKeyboardOnBackPress } from "../utils/keyboardBackPress";
-import { GAME_SCREEN_PATH, GAME_SCREEN_ROUTE_NAME, RESYNC_GAME_SCREEN } from "../utils/gameScreenRoute";
+import { GAME_SCREEN_ROUTE_NAME, gameScreenAtStart, RESYNC_GAME_SCREEN } from "../utils/gameScreenRoute";
 import { HOME_PATH } from "../utils/homeRoute";
 import { useGoHome } from "../hooks/useGoHome";
 import { useRouteBelow } from "../hooks/useRouteBelow";
@@ -422,9 +422,10 @@ const WaitingRoom = () => {
       "player-connection": (d: PlayerConnectionData) =>
         setPlayers((prev) => withConnection(prev, d.username, d.connected)),
 
-      "game-started": (players: Player[]) => {
+      // The game screen gets the game's number: it tells its own game from the next one from the start (EXP-384)
+      "game-started": (players: Player[], _rounds: number, gameNumber: number) => {
         setPlayersProvider(players);
-        replaceScreen(GAME_SCREEN_PATH);
+        replaceScreen(gameScreenAtStart(gameNumber));
       },
 
       // Every rejoin is followed by a snapshot; a started game means we came back to a game in progress

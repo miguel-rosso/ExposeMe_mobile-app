@@ -1,7 +1,7 @@
 import { GameStateSnapshot, Player } from "../app/models/interfaces";
 import {
-  gameStateFollowUps, initialRoundView, isAnotherGame, isRevealedOwner, phaseElapsed, RoundAction, roundOptions, roundReducer,
-  RoundView,
+  gameStateFollowUps, initialRoundView, isAnotherGame, isRevealedOwner, NO_GAME_NUMBER, phaseElapsed, RoundAction, roundOptions,
+  roundReducer, RoundView, roundViewOfGame,
 } from "../app/utils/roundState";
 
 // Ported from the applyRoundStart / applyWaitingPhoto / applyGameState setter tests (EXP-215): same expectations,
@@ -497,8 +497,18 @@ describe("isAnotherGame (EXP-318)", () => {
     expect(another(snapshot({ started: false, gameNumber: 2, phase: null, round: 0, photo: null }))).toBe(false);
   });
 
-  it("a screen that saw no game number yet (ready phase, or opened on a game in progress) takes the snapshot's game", () => {
+  it("a screen that knows no game number yet (opened on a game in progress) takes the snapshot's game", () => {
     expect(another(snapshot({ gameNumber: 3, phase: "scores", round: 7 }), view())).toBe(false);
-    expect(another(snapshot({ gameNumber: 3, phase: null, round: 0, photo: null }), view({ phase: null }))).toBe(false);
+    expect(another(snapshot({ gameNumber: 3, phase: null, round: 0, photo: null }), roundViewOfGame(NO_GAME_NUMBER))).toBe(false);
+  });
+
+  // EXP-384: opened from game-started, the screen knows its game before any round event: a rejoin in its ready phase
+  // that finds the next game started tells it apart
+  it("a screen opened from game-started tells the next game apart already in its ready phase", () => {
+    const readyOfGame1 = roundViewOfGame(1);
+    expect(readyOfGame1).toEqual({ ...initialRoundView, gameNumber: 1 });
+    expect(another(snapshot({ gameNumber: 2, phase: null, round: 0, photo: null }), readyOfGame1)).toBe(true);
+    expect(another(snapshot({ gameNumber: 2, phase: "waiting-photo", round: 0, photo: null }), readyOfGame1)).toBe(true);
+    expect(another(snapshot({ gameNumber: 1, phase: null, round: 0, photo: null }), readyOfGame1)).toBe(false);
   });
 });

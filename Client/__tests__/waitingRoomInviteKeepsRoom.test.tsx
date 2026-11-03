@@ -295,11 +295,11 @@ describe("The room takes the lobby away while Join waits for the gallery check (
     const r = await linkReachesLobby();
     const finishJoin = pressJoinHoldingGallery(r);
 
-    await act(async () => { socket.fire("game-started", [{ username: "alice" }, { username: "bob" }]); });
+    await act(async () => { socket.fire("game-started", [{ username: "alice" }, { username: "bob" }], 10, 1); });
     await finishJoin();
     await flush();
 
-    expect(mockRouter.replace).toHaveBeenCalledWith("/screens/GameScreen");
+    expect(mockRouter.replace).toHaveBeenCalledWith({ pathname: "/screens/GameScreen", params: { gameNumber: "1" } });
     expectJoinDidNothing(socket);
     expect(ctx.gameCode).toBe(MY_ROOM);
   });

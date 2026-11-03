@@ -95,6 +95,8 @@ const hostTops = (n: ReactTestInstance): ReactTestInstance[] =>
 
 /** iPhone SE keyboard with the suggestion bar: the worst case for room under the room code */
 const KEYBOARD_HEIGHT = 260;
+/** Android's minimum touch target (dp) */
+const MIN_TOUCH_TARGET = 48;
 const NEWEST_MESSAGE = { username: "carol", message: "¡ya estoy dentro!" };
 
 /** The lobby with alice hosting bob and carol, and a bubble from each; `keyboardUp` mounts it with the keyboard open */
@@ -200,9 +202,41 @@ describe.each([
     act(() => r.unmount());
   });
 
-  it("lets taps through the bubbles to the controls underneath", async () => {
+  it("lets taps through the bubbles to the controls underneath, except on another player's report flag (EXP-423)", async () => {
     const r = await mountLobbyWithBubbles({ keyboardUp });
-    expect(styleOf(hostById(r.root, TEST_IDS.lobbyChatMessages)).pointerEvents).toBe("none");
+    const chat = hostById(r.root, TEST_IDS.lobbyChatMessages);
+    expect(styleOf(chat).pointerEvents).toBe("box-none");
+    // Nothing in the bubbles but their report flags takes a touch: every host node outside a flag passes taps on
+    // ('box-none') or sits in a view that never takes one ('none'), its texts included (a Text is a hit target)
+    const flags = chat.findAll((n) => typeof n.type === "string" && /^chat-report-/.test(n.props.testID ?? ""));
+    expect(flags.map((n) => n.props.testID)).toEqual(["chat-report-bob", `chat-report-${NEWEST_MESSAGE.username}`]);
+    const inFlag = (n: ReactTestInstance) => lineage(n).some((a) => flags.includes(a));
+    /** The pointerEvents the node itself has, or 'none' when a view it sits in (up to the chat area) has 'none' */
+    const touchMode = (n: ReactTestInstance) => {
+      const upToChat = lineage(n).slice(0, lineage(n).indexOf(chat));
+      if (upToChat.some((a) => typeof a.type === "string" && styleOf(a).pointerEvents === "none")) return "none";
+      return styleOf(n).pointerEvents ?? n.props.pointerEvents ?? "auto";
+    };
+    const hosts = chat.findAll((n) => typeof n.type === "string" && n !== chat && !inFlag(n));
+    expect(hosts.length).toBeGreaterThan(0);
+    expect(hosts.filter((n) => !["none", "box-none"].includes(touchMode(n))).map((n) => n.type)).toEqual([]);
+    // The texts themselves are under a 'none' view
+    const texts = hosts.filter((n) => (n.type as unknown) === "Text");
+    expect(texts.length).toBe(4);
+    expect(texts.every((n) => touchMode(n) === "none")).toBe(true);
+    // Each flag is a box of its own of at least 48 dp, laid out inside its bubble (Android drops touches outside a
+    // view's parent: a hitSlop past it would not count), in a bubble at least as tall
+    for (const flag of flags) {
+      const box = styleOf(flag);
+      expect(flag.props.hitSlop).toBeUndefined();
+      expect(box).toEqual(expect.objectContaining({ position: "absolute", top: 0, right: 0, bottom: 0 }));
+      expect(box.width).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
+      expect(box.minHeight).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
+      const bubble = hostParent(flag);
+      expect(hostParent(bubble)).toBe(chat);
+      expect(styleOf(bubble).minHeight).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
+      expect(styleOf(bubble).paddingRight).toBeGreaterThanOrEqual(box.width as number);
+    }
     act(() => r.unmount());
   });
 });
@@ -218,7 +252,7 @@ describe("LobbyChatMessages: centred bubbles (EXP-411)", () => {
     let r!: TestRenderer.ReactTestRenderer;
     act(() => {
       r = TestRenderer.create(
-        <LobbyChatMessages chat={chatWith([
+        <LobbyChatMessages myUsername="alice" onReport={jest.fn()} chat={chatWith([
           { id: "1", username: "bob", message: "hola" },
           { id: "2", username: "carol", message: "un mensaje bastante más largo para ver el ancho" },
         ])} />
@@ -261,7 +295,7 @@ describe("LobbyChatMessages: bubbles readable over the controls (EXP-416)", () =
     let r!: TestRenderer.ReactTestRenderer;
     act(() => {
       r = TestRenderer.create(
-        <LobbyChatMessages chat={{
+        <LobbyChatMessages myUsername="alice" onReport={jest.fn()} chat={{
           messages: [{ id: "1", username: "chatter", message: "hola" }],
           send: jest.fn(() => true), receive: jest.fn(), remove: jest.fn(), clear: jest.fn(),
         }} />
@@ -274,7 +308,8 @@ describe("LobbyChatMessages: bubbles readable over the controls (EXP-416)", () =
     expect(alphaOf(String(style.backgroundColor))).toBeGreaterThanOrEqual(1 - MAX_SHOW_THROUGH);
     expect(style.borderWidth ?? 0).toBeGreaterThan(0);
     expect(style.borderColor).toBeDefined();
-    expect(styleOf(container).pointerEvents).toBe("none");
+    expect(styleOf(container).pointerEvents).toBe("box-none");
+    expect(style.pointerEvents).toBe("box-none");
     act(() => r.unmount());
   });
 });

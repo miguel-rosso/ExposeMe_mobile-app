@@ -75,6 +75,18 @@ export const TEST_IDS = {
   mutedPhotoCover: "muted-photo-cover",
   mutedPhotoShowButton: "muted-photo-show-button",
   scoreShowMutedPhoto: "score-show-muted-photo", // the same Show on the scoreboard, which covers the cover's
+  // Reporting content (EXP-423): the round photo's button, then the dialog (reasons: reportReasonId), the lobby chat
+  // bubbles' button is chatReportId
+  reportPhotoButton: "report-photo-button",
+  reportModal: "report-modal",
+  reportCancelButton: "report-cancel-button",
+  reportSending: "report-sending",
+  reportThanks: "report-thanks", // «Thanks, we'll review it»
+  reportMuteButton: "report-mute-button", // the thanks' offer to mute the reported player
+  reportRefused: "report-refused", // the server can't take it (nothing of that to report there): no Try again
+  reportFailed: "report-failed",
+  reportRetryButton: "report-retry-button",
+  reportCloseButton: "report-close-button",
   // ── Gallery access (home, lobby, game) ──
   galleryAccessModal: "gallery-access-modal",
   galleryAccessMessage: "gallery-access-message",
@@ -128,6 +140,10 @@ export const pausedRemoveId = (username: string) => `paused-remove-${username}`;
 export const lobbyMuteId = (username: string) => `lobby-mute-${username}`;
 export const scoreMuteId = (username: string) => `score-mute-${username}`;
 export const pausedMuteId = (username: string) => `paused-mute-${username}`;
+/** A reason of the report dialog (EXP-423), by its protocol value (ReportReason) */
+export const reportReasonId = (reason: string) => `report-reason-${reason}`;
+/** The report button on another player's lobby chat bubble (EXP-423), by its author */
+export const chatReportId = (username: string) => `chat-report-${username}`;
 /** An emoji reaction's pill over the photo, by its sender (EXP-422: a muted player's never shows) */
 export const reactionPillId = (username: string) => `reaction-${username}`;
 export const roundsOptionId = (rounds: number) => `rounds-option-${rounds}`;

@@ -47,6 +47,10 @@ import RemovePlayerConfirm from "@/src/components/modals/RemovePlayerConfirm";
 import { useRemovePlayerQuestion } from "../../src/hooks/useRemovePlayerQuestion";
 import { useMutedPlayers } from "../../src/hooks/useMutedPlayers";
 import { useMutedPhotoReveal } from "../../src/hooks/useMutedPhotoReveal";
+import { useContentReport } from "../../src/hooks/useContentReport";
+import { roundPhotoReport } from "../../src/utils/contentReport";
+import ReportContentModal from "@/src/components/modals/ReportContentModal";
+import ReportPhotoButton from "@/src/components/ReportPhotoButton";
 import LeaveGameButton from "@/src/components/LeaveGameButton";
 import ReconnectingBanner from "@/src/components/ReconnectingBanner";
 import { useFocusedBackHandler } from "../../src/hooks/useFocusedBackHandler";
@@ -263,6 +267,9 @@ const GameScreen = () => {
   // stay an answer option and keep their points: the game is the same for everyone
   const mutes = useMutedPlayers(gameCode);
   const mutedPhoto = useMutedPhotoReveal(photo, mutes.muted.has(correctAnswer));
+  // Reporting the round photo (EXP-423): the round on screen, its owner once revealed; none when the photo is mine
+  const report = useContentReport(socket);
+  const photoReport = roundPhotoReport(roundView, safeUsername);
 
   // ── Leaving on purpose (EXP-377, DEC-050 A) ──────────
   // Exit (the game's button, the pause modal's, Android back) asks first. Leave sends leave-room, which the server takes
@@ -277,10 +284,11 @@ const GameScreen = () => {
     leaveGame();
   };
   // Android back (the key and the back gesture) never pops the game (the server would take it as a lost connection):
-  // during the game it is Exit, and with the question open its Cancel (the host's remove question first). iOS has no
-  // back here (the route disables the swipe, app/_layout.tsx)
+  // during the game it is Exit, and with the question open its Cancel (the host's remove question first, then the
+  // report dialog, which is closed). iOS has no back here (the route disables the swipe, app/_layout.tsx)
   useFocusedBackHandler(() => {
     if (removeQuestion.asking !== null) removeQuestion.cancel();
+    else if (report.flow.step !== "closed") report.close();
     else if (!gameOverRef.current) setAskingToLeave((asking) => !asking);
     return true;
   });
@@ -605,6 +613,15 @@ const GameScreen = () => {
         onConfirm={removeQuestion.confirm}
         onCancel={removeQuestion.cancel}
       />
+      <ReportContentModal
+        flow={report.flow}
+        onChoose={report.choose}
+        onRetry={report.retry}
+        onClose={report.close}
+        myUsername={safeUsername}
+        muted={mutes.muted}
+        onMute={mutes.toggle}
+      />
       <GalleryAccessModal
         access={finalScore || showWinner ? null : galleryGuard.blocked}
         onAllow={() => galleryGuard.check({ ask: true })}
@@ -772,6 +789,10 @@ const GameScreen = () => {
 
       {/* Exit: the pause modal has its own, and the photo stays clear while held */}
       {!finalScore && pauseEndsAt === null && !gameHeld && <LeaveGameButton onPress={() => setAskingToLeave(true)} />}
+      {/* Report the round photo: in the Exit button's strip, and like it never over the pause or a held photo */}
+      {photoReport && !finalScore && pauseEndsAt === null && !gameHeld && (
+        <ReportPhotoButton onPress={() => report.start(photoReport)} />
+      )}
     </View>
   );
 };

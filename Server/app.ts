@@ -9,6 +9,7 @@ import { errorHandler } from "./middlewares/errorHandler";
 import { notFound, securityHeaders } from "./middlewares/securityHeaders";
 import { requireRoomMember, requireRoomUpload } from "./middlewares/uploadAccess";
 import { socketHandshakeLimit, socketOriginGuard } from "./middlewares/socketOrigin";
+import { reportStore } from "./managers/reportStore";
 import { closeOnBinaryMessage, MAX_SOCKET_MESSAGE_BYTES } from "./middlewares/socketPayload";
 
 const app = express();
@@ -90,5 +91,8 @@ io.engine.on("connection", closeOnBinaryMessage);
 // Deletes uploads past their TTL at startup (leftovers from a previous process) and periodically after that
 const uploadSweeper = startUploadSweeper(uploadPath);
 server.on("close", uploadSweeper.stop);
+// Deletes content reports (and their photo copies) past REPORT_RETENTION_DAYS, at startup and daily
+const reportPurge = reportStore.startPurging();
+server.on("close", reportPurge.stop);
 
 export { server, io };

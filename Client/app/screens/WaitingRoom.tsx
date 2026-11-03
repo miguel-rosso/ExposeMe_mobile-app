@@ -16,8 +16,10 @@ import AlertModal from "@/src/components/modals/AlertModal";
 import GalleryAccessModal from "@/src/components/modals/GalleryAccessModal";
 import InviteConfirmModal from "@/src/components/modals/InviteConfirmModal";
 import { useGalleryAccessGuard } from "@/src/hooks/useGalleryAccessGuard";
-import { useLobbyChat } from "@/src/hooks/useLobbyChat";
+import { LobbyChatMessage, useLobbyChat } from "@/src/hooks/useLobbyChat";
 import { useMutedPlayers } from "@/src/hooks/useMutedPlayers";
+import { useContentReport } from "@/src/hooks/useContentReport";
+import ReportContentModal from "@/src/components/modals/ReportContentModal";
 import MutePlayerButton from "@/src/components/IngameComunication/MutePlayerButton";
 import { useStartGame } from "@/src/hooks/useStartGame";
 import { Ionicons } from "@expo/vector-icons";
@@ -124,6 +126,12 @@ const WaitingRoom = () => {
   // Players muted on this device for this room (EXP-422): their chat bubbles are not shown
   const mutes = useMutedPlayers(gameCode);
   const chat = useLobbyChat(socket, gameCode, username, mutes.muted);
+  // Reporting another player's chat message (EXP-423)
+  const report = useContentReport(socket);
+  const startReport = report.start;
+  const reportMessage = useCallback(
+    (msg: LobbyChatMessage) => startReport({ kind: "message", author: msg.username, text: msg.message }), [startReport],
+  );
   const startRequest = useStartGame(socket);
 
   /** Forgets the picked photo: the game it was picked for was played without this lobby. */
@@ -521,12 +529,17 @@ const WaitingRoom = () => {
 
   // Android back (the key and the back gesture) is Exit too: popping the lobby would only close the socket, keeping
   // this player in the room as a lost connection (EXP-336). With the chat keyboard open it only closes the keyboard
-  // (EXP-064), and with the remove-player confirmation open (an overlay, not a native modal) it only closes that.
-  // With the invite dialog open it is its Cancel. iOS has no back here: the route disables the swipe (app/_layout.tsx).
+  // (EXP-064), and with the remove-player confirmation or the report dialog open (overlays, not native modals) it only
+  // closes that. With the invite dialog open it is its Cancel. iOS has no back here: the route disables the swipe
+  // (app/_layout.tsx).
   useBackHandler(() => {
     if (dismissKeyboardOnBackPress(Keyboard)) return true;
     if (dialogVisible) {
       setDialogVisible(false);
+      return true;
+    }
+    if (report.flow.step !== "closed") {
+      report.close();
       return true;
     }
     handleClose();
@@ -799,7 +812,7 @@ const WaitingRoom = () => {
                   </View>
                 )}
               </View>
-              <LobbyChatMessages chat={chat} />
+              <LobbyChatMessages chat={chat} myUsername={username} onReport={reportMessage} />
             </View>
           </View>
           <LobbyChatFooter chat={chat} />
@@ -823,6 +836,17 @@ const WaitingRoom = () => {
         onCancel={() => setDialogVisible(false)}
         confirmButtonColor="bg-red-600"
         cancelButtonColor="bg-blue-500"
+      />
+
+      {/* Report of a chat message: reason, then the thanks with the offer to mute its author */}
+      <ReportContentModal
+        flow={report.flow}
+        onChoose={report.choose}
+        onRetry={report.retry}
+        onClose={report.close}
+        myUsername={username}
+        muted={mutes.muted}
+        onMute={mutes.toggle}
       />
 
       {/* Invite link: nothing joins until Join (the saved name is read first, to fill it in) */}

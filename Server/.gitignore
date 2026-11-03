@@ -38,3 +38,5 @@ yarn-error.*
 app-example
 .env
 temp
+# Content reports (REPORTS_FILE default) and their photo copies: personal data, never committed
+reports

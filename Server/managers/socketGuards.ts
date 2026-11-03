@@ -343,6 +343,8 @@ export function createEventLimiter<E extends string>(limits: Readonly<Record<E, 
  *   uploaded copy when it is answered photo-unavailable
  * - hold-end: only a real release (from the socket holding) spends a token, one per accepted hold; holds are
  *   limited more tightly (HOLD_START_BURST, HOLD_START_RATE_PER_S), so a release always gets through
+ * - report-content: a player reporting a round photo or a chat message (EXP-423), through a reason picker: 5 at once,
+ *   then about 5 a minute (one every 12 s), more than a round lasts between two photos
  */
 export const GAME_EVENT_LIMITS = {
   "leave-room": { burst: 5, ratePerS: 0.5 },
@@ -355,6 +357,7 @@ export const GAME_EVENT_LIMITS = {
   "submit-answer": { burst: 10, ratePerS: 5 },
   "plant-photo": { burst: 5, ratePerS: 0.5 },
   "hold-end": { burst: 10, ratePerS: 1 },
+  "report-content": { burst: 5, ratePerS: 1 / 12 },
 } as const satisfies Record<string, RateLimit>;
 
 export type LimitedGameEvent = keyof typeof GAME_EVENT_LIMITS;

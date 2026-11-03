@@ -16,6 +16,7 @@ export const ANSWERS_BOTTOM = HOLD_BUTTON_BOTTOM - ANSWERS_ROW_PADDING;
 /**
  * The game's Exit button (EXP-377), bottom-left in the strip under the emoji row: nothing else is drawn there (the
  * answers, the hold button and the scoreboard's list all end above the emoji row), so it never covers an option or a
- * button. `side`: its distance from the left safe edge.
+ * button. `side`: its distance from the left safe edge. The round photo's report button (EXP-423) sits in the same
+ * strip, bottom-right, `side` from the right safe edge.
  */
 export const LEAVE_BUTTON = { bottom: 6, height: 36, side: 12 } as const;

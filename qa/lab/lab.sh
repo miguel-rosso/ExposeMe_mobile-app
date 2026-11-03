@@ -342,8 +342,10 @@ cmd_server() {
   # ALLOW_QA_ROUNDS=1: accept QA-only 3-round games (play --rounds 3); production never sets it
   # QA_TELEMETRY=1: record the qa-ack of QA builds (when each device rendered a phase) in $telemetry (play reads it);
   # a fresh server starts a fresh file, so it never grows across sessions
+  # REPORTS_FILE: content reports (bots --report, device flows) and their photo copies stay in qa/runs, per port
   bg_running "$name" || rotate_telemetry "$telemetry"
   bg_start "$name" "$logf" "$ROOT/Server" env PORT="$port" ALLOW_QA_ROUNDS=1 QA_TELEMETRY=1 QA_TELEMETRY_FILE="$telemetry" \
+    REPORTS_FILE="${REPORTS_FILE:-$RUNS/reports-$port/reports.jsonl}" \
     UPLOAD_ROOM_RATE_MAX="${UPLOAD_ROOM_RATE_MAX:-100000}" \
     UPLOAD_PLAYER_RATE_MAX="${UPLOAD_PLAYER_RATE_MAX:-100000}" \
     UPLOAD_INFLIGHT_MAX="${UPLOAD_INFLIGHT_MAX:-10000}" UPLOAD_INFLIGHT_PER_IP_MAX="${UPLOAD_INFLIGHT_PER_IP_MAX:-10000}" \

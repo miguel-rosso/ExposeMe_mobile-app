@@ -1,0 +1,83 @@
+# EXP-423 / DEC-052 A: reporting the round photo on this device. The device hosts (like device-host-start.yaml): it
+# creates the room, the bots join its code, it starts the game. On the first round photo it taps the report flag (bottom
+# right, in the Exit button's strip), picks «Sexual content» / «Contenido sexual» and expects «Thanks, we'll review it» /
+# «Gracias, lo revisaremos» (its wording, the other reasons and the mute offer are checked by
+# Client/__tests__/gameReportPhoto.test.tsx). The device's own photo can't be reported (the server answers not-found:
+# the dialog says «This can't be reported»), and nobody is told whose photo it is before the reveal, so a round the device
+# owns is closed and the next round's photo is reported instead. The flow ends there; the bots play on to game over.
+#   qa/lab/lab.sh play --device-host --flow report-photo --devices <label> --bots 2
+# The report lands in the lab server's REPORTS_FILE (qa/runs/reports-<port>/, git-ignored) with a copy of the photo.
+# env: USERNAME, METRO_URL (url-encoded), CODE_SINK_URL
+# Selectors are testIDs (Client/src/utils/testIds.ts), so the flow works in any UI language.
+# lab: one device (the room's host)
+appId: com.socketNull.ExposeMe
+---
+- runFlow: host-lobby.yaml
+- extendedWaitUntil:
+    visible:
+      id: "lobby-game-code"
+      text: "[A-Z0-9]{6}"
+    timeout: 30000
+- copyTextFrom:
+    id: "lobby-game-code"
+    text: "[A-Z0-9]{6}"
+# Maestro's http runs on the lab machine, where lab.sh's listener waits for the code (then starts the bots)
+- evalScript: "${output.codePost = http.post(CODE_SINK_URL, { body: maestro.copiedText }).status}"
+- assertTrue:
+    condition: ${output.codePost == 200}
+    label: "lab.sh's listener took the room code (CODE_SINK_URL)"
+- extendedWaitUntil:
+    visible:
+      id: "lobby-player-bot2"
+    timeout: 60000
+    label: "The bots joined the device's room"
+- tapOn:
+    id: "start-game-button"
+# ── Report a round photo: the device's own (refused) is closed, then the next round's is tried ──
+- evalScript: "${output.report = { tries: 0, done: false }}"
+- repeat:
+    while:
+      true: ${!output.report.done && ++output.report.tries <= 3}
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: "report-photo-button"
+          timeout: 240000
+          label: "A round photo is on screen, with its report flag"
+      - tapOn:
+          id: "report-photo-button"
+      - extendedWaitUntil:
+          visible:
+            id: "report-reason-sexual"
+          timeout: 5000
+          label: "The reason picker opened"
+      - tapOn:
+          id: "report-reason-sexual"
+      - extendedWaitUntil:
+          visible:
+            id: "report-thanks|report-refused|report-failed"
+          timeout: 10000
+          label: "The server answered the report"
+      - runFlow:
+          when:
+            visible:
+              id: "report-thanks"
+          commands:
+            - evalScript: ${output.report.done = true}
+            - takeScreenshot: report-photo-thanks-${USERNAME}
+      - tapOn:
+          id: "report-close-button"
+      - assertNotVisible:
+          id: "report-modal"
+      # Refused (the device's own photo): wait for the next round's photo wait before trying again
+      - runFlow:
+          when:
+            true: ${!output.report.done}
+          commands:
+            - extendedWaitUntil:
+                visible:
+                  id: "game-waiting-photo"
+                timeout: 60000
+- assertTrue:
+    condition: ${output.report.done}
+    label: "A round photo was reported and the app said «Thanks, we'll review it»"

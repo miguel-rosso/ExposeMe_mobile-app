@@ -293,6 +293,18 @@ bot_emojis="$(sed -nE 's/^const ALLOWED_EMOJIS = (\[.*\]);$/\1/p' "$BOTS")"
 [[ -n "$server_emojis" && "$bot_emojis" == "$server_emojis" ]] && ok "ALLOWED_EMOJIS matches the server's" \
   || ko "ALLOWED_EMOJIS matches the server's" "ours=[$bot_emojis] server=[$server_emojis]"
 
+# ── --report: a bot reports each round photo it doesn't own (EXP-423) ──
+run 2 "--report takes no value" --bots 3 --host --report 1 --timeout 1
+[[ "$err" == *'unexpected argument "1"'* ]] && ok "--report's stray value is named" || ko "--report's stray value is named" "$err"
+SERVER_URL="$URL" node "$BOTS" --bots 3 --host --report --timeout 1 >/dev/null 2>"$TMP/err"; rc=$?
+[[ "$rc" != 2 ]] && ok "--report is accepted" || ko "--report is accepted" "$(cat "$TMP/err")"
+[[ "$(node "$BOTS" --help)" == *"--report "* ]] && ok "--help lists --report" || ko "--help lists --report"
+# REPORT_REASONS: the server's is a typed `as const` array, ours the plain array
+server_reasons="$(sed -nE 's/^export const REPORT_REASONS = (\[.*\]) as const;$/\1/p' "$SERVER_SRC/managers/contentReports.ts")"
+bot_reasons="$(sed -nE 's/^const REPORT_REASONS = (\[.*\]);$/\1/p' "$BOTS")"
+[[ -n "$server_reasons" && "$bot_reasons" == "$server_reasons" ]] && ok "REPORT_REASONS matches the server's" \
+  || ko "REPORT_REASONS matches the server's" "ours=[$bot_reasons] server=[$server_reasons]"
+
 # ── --answer-right: the bots vote for the owner and end tied with points (EXP-348) ──
 # Options that make a bot miss or change a vote would break the tie, so they are refused with it
 for clash in "--no-answer" "--plant 1" "--chaos 0.1" "--drop-round 2" "--drop-rounds 2,3" "--leave-round 2" "--leave-offline-round 2" "--play-again-linger 5"; do

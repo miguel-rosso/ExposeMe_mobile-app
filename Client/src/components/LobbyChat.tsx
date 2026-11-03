@@ -4,7 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import tw from "twrnc";
 import ChatMessage from "@/src/components/IngameComunication/ChatMessage";
 import { useKeyboardPadding } from "@/src/hooks/useKeyboardPadding";
-import type { LobbyChat } from "@/src/hooks/useLobbyChat";
+import type { LobbyChat, LobbyChatMessage } from "@/src/hooks/useLobbyChat";
 import { useI18n } from "../i18n";
 import { TEST_IDS } from "../utils/testIds";
 import { MAX_CHAT_LENGTH } from "../utils/protocolLimits";
@@ -13,16 +13,24 @@ interface LobbyChatProps {
   chat: LobbyChat;
 }
 
+interface LobbyChatMessagesProps extends LobbyChatProps {
+  /** This device's player: their own bubbles can't be reported */
+  myUsername: string | null;
+  /** Opens the report dialog for another player's message (EXP-423) */
+  onReport: (msg: LobbyChatMessage) => void;
+}
+
 /**
  * The chat bubbles, centred and filling the area they are placed in: the lobby puts them over everything between the
  * room code and the chat input, so they never cover the code or its copy and share buttons (EXP-411). They stack up
  * from the bottom, the newest nearest the input; when the keyboard leaves too little room, the oldest are cut off at
- * the top. Each one leaves once it has faded out. Taps go through them to the controls underneath.
+ * the top. Each one leaves once it has faded out. Taps go through them to the controls underneath, except on the
+ * report flag of another player's bubble.
  */
-export const LobbyChatMessages = ({ chat }: LobbyChatProps) => (
+export const LobbyChatMessages = ({ chat, myUsername, onReport }: LobbyChatMessagesProps) => (
   <View
     testID={TEST_IDS.lobbyChatMessages}
-    style={[tw`absolute inset-0 z-40 items-center justify-end overflow-hidden`, { pointerEvents: "none" }]}
+    style={[tw`absolute inset-0 z-40 items-center justify-end overflow-hidden`, { pointerEvents: "box-none" }]}
   >
     {chat.messages.map((msg) => (
       <ChatMessage
@@ -30,6 +38,7 @@ export const LobbyChatMessages = ({ chat }: LobbyChatProps) => (
         username={msg.username}
         message={msg.message}
         onAnimationEnd={() => chat.remove(msg.id)}
+        onReport={msg.username === myUsername ? undefined : () => onReport(msg)}
       />
     ))}
   </View>

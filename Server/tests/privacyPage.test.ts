@@ -23,15 +23,12 @@ describe("renderPrivacyPage", () => {
     expect(page).toContain("within 30 minutes");
     expect(page).toContain("no accounts, no ads and no analytics or tracking");
     expect(page).toContain("not directed at children under 13");
-    expect(page).toContain("not stored by the server");
-    expect(page).toContain("Chat messages are only relayed, never kept.");
+    expect(page).toContain("The server doesn't store them");
     expect(page).toContain("doesn't write it to its logs");
     expect(page).toContain("the one on screen at that moment once its round ends");
     expect(page).toContain("GDPR art. 6(1)(b)");
     expect(page).toContain("(art. 6(1)(f))");
     expect(page).toContain("Render Services, Inc. (United States)");
-    // Reporting doesn't exist yet (EXP-423 adds its paragraph when it ships)
-    expect(page).not.toMatch(/report a photo|days so that it can be reviewed/);
   });
 
   it("Spanish: the same facts in Spanish", () => {
@@ -41,13 +38,72 @@ describe("renderPrivacyPage", () => {
     expect(page).toContain("como máximo 30 minutos");
     expect(page).toContain("No hay cuentas, ni anuncios, ni analítica ni seguimiento");
     expect(page).toContain("no está dirigida a menores de 13 años");
-    expect(page).toContain("Los mensajes del chat solo se reenvían, nunca se guardan.");
+    expect(page).toContain("El servidor no los guarda");
     expect(page).toContain("la que está en pantalla en ese momento, al acabar su ronda");
     expect(page).toContain("art. 6.1.b del RGPD");
     expect(page).toContain("(art. 6.1.f)");
     expect(page).toContain("Render Services, Inc. (Estados Unidos)");
-    expect(page).not.toMatch(/denuncia/i);
     expect(page).not.toContain("privacy policy");
+  });
+
+  // EXP-423: reports keep the reported photo and message beyond the game, for the retention period
+  describe("reports", () => {
+    const reportsSection = (page: string, heading: string) => page.split(`<h2>${heading}</h2>`)[1].split("<h2>")[0];
+
+    it("English: what a report stores, who sees it and for how long", () => {
+      const page = render("en");
+      const section = reportsSection(page, "Reports");
+      for (const item of [
+        "the room code", "the round", "your player name", "the reported player's name", "the reason you picked",
+        "the text of a reported message", "a copy of a reported photo",
+      ]) expect(section).toContain(item);
+      expect(section).toContain("Only we, the operator, review reports");
+      expect(section).toContain("deleted 90 days after the report");
+      expect(section).not.toContain("notification service");
+      // The other sections stay true: a reported photo outlives the 30 minutes, and we see reported content
+      expect(page).toContain("unless one is reported");
+      expect(page).toContain("If someone reports your photo or your message, we see it too");
+      expect(page).toContain("A reported photo is copied and kept with its report.");
+      expect(page).toContain("<strong>Reports</strong>: 90 days");
+      expect(page).toContain("never photos, messages or IP addresses (reports are never written to them)");
+      expect(page).toContain("Nobody else gets it");
+      expect(page).toContain("the abuse limits, the reports and the server logs");
+    });
+
+    it("Spanish: the same in Spanish", () => {
+      const page = render("es");
+      const section = reportsSection(page, "Denuncias");
+      for (const item of [
+        "el código de la sala", "la ronda", "tu nombre de jugador", "el nombre del jugador denunciado",
+        "el motivo que elegiste", "el texto del mensaje denunciado", "una copia de la foto denunciada",
+      ]) expect(section).toContain(item);
+      expect(section).toContain("Solo nosotros, como responsables del servicio, revisamos las denuncias");
+      expect(section).toContain("se borran 90 días después de la denuncia");
+      expect(page).toContain("salvo que se denuncie alguna");
+      expect(page).toContain("Si alguien denuncia tu foto o tu mensaje, también lo vemos nosotros");
+      expect(page).toContain("De una foto denunciada se guarda una copia con su denuncia.");
+      expect(page).toContain("<strong>Denuncias</strong>: 90 días");
+      expect(page).toContain("nunca fotos, mensajes ni direcciones IP (las denuncias nunca se anotan en ellos)");
+      expect(page).toContain("Nadie más los recibe");
+    });
+
+    it("names the webhook's provider as a recipient only when one is configured", () => {
+      const withWebhook = (language: "en" | "es") =>
+        renderPrivacyPage({ language, contactEmail: null, controllerName: null, reportWebhook: true });
+      expect(reportsSection(withWebhook("en"), "Reports")).toContain("also sent to the notification service we use");
+      expect(reportsSection(withWebhook("es"), "Denuncias")).toContain("se envía además al servicio de avisos que usamos");
+      expect(reportsSection(render("es"), "Denuncias")).not.toContain("servicio de avisos");
+      // «Who sees it» names it too, instead of saying nobody else gets the data
+      expect(reportsSection(withWebhook("en"), "Who sees it")).toContain("Apart from the summaries of reports sent to our notification service");
+      expect(reportsSection(withWebhook("en"), "Who sees it")).not.toContain("Nobody else gets it");
+      expect(reportsSection(withWebhook("es"), "Quién lo ve")).toContain("Aparte de los resúmenes de denuncias que se envían a nuestro servicio de avisos");
+    });
+
+    it("states the configured retention", () => {
+      const page = renderPrivacyPage({ language: "en", contactEmail: null, controllerName: null, reportRetentionDays: 30 });
+      expect(page).toContain("deleted 30 days after the report");
+      expect(page).toContain("<strong>Reports</strong>: 30 days");
+    });
   });
 
   it("shows the last-updated date in the page language", () => {

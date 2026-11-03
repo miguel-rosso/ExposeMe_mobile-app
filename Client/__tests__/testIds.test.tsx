@@ -4,7 +4,7 @@ import path from "path";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import {
   TEST_IDS, playerOptionId, lobbyPlayerId, lobbyPlayerOfflineId, roundsOptionId, winnerNameId, finalWinnerId, finalRankId,
-  scoreRankId, scoreRemoveId, settingsStepId, lobbyMuteId, scoreMuteId, reactionPillId,
+  scoreRankId, scoreRemoveId, settingsStepId, lobbyMuteId, scoreMuteId, reactionPillId, reportReasonId,
 } from "../src/utils/testIds";
 import AlertModal from "../src/components/modals/AlertModal";
 import CloseButton from "../src/components/CloseButton";
@@ -74,6 +74,8 @@ describe("E2E testIDs (EXP-008)", () => {
     expect(sources).toContain("lobbyMuteId(item.username)");
     expect(sources).toContain("scoreMuteId(player.username)");
     expect(sources).toContain("reactionPillId(username)");
+    expect(sources).toContain("reportReasonId(reason)");
+    expect(sources).toContain("chatReportId(username)");
   });
 
   it("only uses registered ids in Maestro flows", () => {
@@ -108,6 +110,8 @@ describe("E2E testIDs (EXP-008)", () => {
       // EXP-422 mute-player flow: the bots muted in the lobby and on the scoreboard, and their reactions
       lobbyMuteId("bot1"), scoreMuteId("bot1"), scoreMuteId("bot2"),
       ...["bot1", "bot2", "bot3"].map(reactionPillId),
+      // EXP-423 report-photo flow: the second bot in the device's room, and the reason it picks
+      lobbyPlayerId("bot2"), reportReasonId("sexual"),
       // System photo picker and crop screen used by plant-photo.yaml (not our components)
       "com.google.android.providers.media.module:id/icon_thumbnail",
       "com.socketNull.ExposeMe:id/crop_image_menu_crop",

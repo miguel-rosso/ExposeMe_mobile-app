@@ -741,6 +741,42 @@ As with the start events, the bar ends `duration` after the payload arrived on t
   ignored from a socket that holds nothing, and only a real release counts against its limit (burst 10, refilled
   1/s, see "Per-socket event limits"); releases never outnumber accepted holds, so a release always gets through
 
+## Reports
+
+A player can report a round photo or another player's chat message (EXP-423, DEC-052 A: Apple guideline 1.2,
+Google Play's user-generated content rules) with **`report-content { kind, reason, round?, author?, text? }`**,
+acknowledged `{ ok: true }` or `{ ok: false, reason: "not-in-room" | "invalid" | "not-found" }`.
+
+- `reason`: one of `sexual`, `violence`, `harassment`, `other` (the app's picker: «Contenido sexual / Violencia o
+  odio / Acoso / Otro»). `kind: "photo"` names the round (`round`, round-start's); `kind: "message"` names the chat
+  bubble by its `author` and `text`, exactly as `chat-message` relayed them (offensive words already masked, as the
+  room saw it). The app has no message ids, so the server keeps each room's last 100 relayed chat messages in memory,
+  with the players in the room when each was sent (`managers/chatLog.ts`, gone with the room), and a message report
+  must match one of them exactly; this keeps the chat protocol unchanged.
+- The reporter and the room come from the session; a `gameCode` or reporter field in the payload is ignored, so a
+  report is always about the sender's own room. `"not-found"`: no round photo `round` of the room's current (or last)
+  game shown to the sender (their seat was in the room at its round-start), no such message in the room's recent chat
+  sent while the sender's seat was in the room, or content of the sender's own. Seats, not names: a rejoin keeps its
+  seat, someone who joins later under a name that was there gets a new one. One report per player and content per
+  game: reporting it again is acked `{ ok: true }` and not stored a second time. `"invalid"`: an unknown kind or reason, a round that is no positive integer, or a
+  missing author / text.
+- Accepted reports are appended as one JSON line to `REPORTS_FILE` (default `Server/reports/reports.jsonl`):
+  `{ time, roomCode, round, reporter, reported, kind, reason, text, photoFile }` (`round` null for a message, `text`
+  null for a photo). A reported photo is kept in `photos/` next to that file the moment the report is accepted (a hard
+  link to its upload, a copy across disks; `photoFile`), so it can be reviewed after the game deletes the upload.
+  `photoFile` is null when the upload was already deleted, when the disk refuses it (only the error code is logged),
+  when the game already keeps 5 other photos (distinct
+  photos, however many reports each gets), or when the photos kept would go over `REPORT_PHOTOS_MAX_BYTES` (default
+  500 MB; logged, and the webhook, if set, gets `{ notice: { kind: "report-photos-full", maxBytes, time } }` once until
+  a purge frees room). Reports and their photos are purged
+  after `REPORT_RETENTION_DAYS` (default 90), at startup and hourly; the purge only ever deletes upload-named files.
+  The files are private to the server's user (0600, directories 0700). With `REPORT_WEBHOOK_URL` set, each report is
+  also POSTed there as `{ report }` (that JSON, no photo bytes), given up after 5 s; nothing waits for it, nor for the
+  disk write: the ack only says the report was accepted. Reports are never written to the server log (a line there
+  would pair with the round's `photo from <owner>` line). Both paths are git-ignored.
+- Rate-limited per socket (burst 5, refilled 1 every 12 s); a report dropped by the limit gets no ack (the app's ack
+  timeout tells the player it couldn't be sent).
+
 ## Events (Server → Client)
 
 All game events are **atomic** — each contains everything the client needs.
@@ -790,6 +826,7 @@ All game events are **atomic** — each contains everything the client needs.
 | `chat-message` | `{ message }` (≤100 chars, with an ack callback) | Broadcast as `{ username, message }` with the session username, insults, slurs and explicit sexual words (es/en) masked to their first character plus one `*` per further character as shown on screen (grapheme: an emoji with its skin tone is one); whole words only, after folding case, accents, compatibility forms (circled, fullwidth), lookalike letters of other scripts, leetspeak, stretched letters and separators; list and rules in `managers/chatFilter.ts`. Acked `{ message }` with that same masked text, which the app shows as the sender's own bubble (no ack within 3 s: not shown, and the sender is told it wasn't sent); not acked when blank, too long, from a socket in no room, or dropped by the rate limit |
 | `emoji-reaction` | `{ emoji }`, exactly one of 😂 😍 ❓ 😳 🔥 😭 🤡 😡 (the app's picker) or 📸 (the app sends it when a screenshot is taken) | Broadcast as `{ username, emoji }` with the session username. Anything else is dropped; at most 5 per socket, refilled 4/s (excess dropped silently) |
 | `plant-photo` | `{ photoUrl }` (with an ack callback) | Applies to the session player (replaces their earlier one); `photoUrl` must be the player's own `/upload` path in this room; accepted until the first round is played. Acked `{ ok: true }` or `{ ok: false, reason: "not-in-room" \| "invalid" \| "too-late" \| "photo-unavailable" }` (see "Planting"); not acked when dropped by the rate limit |
+| `report-content` | `{ kind, reason, round?, author?, text? }` (with an ack callback) | Report a round photo (`kind: "photo"`, `round`) or another player's chat message (`kind: "message"`, `author`, `text`) with a `reason` (`sexual` \| `violence` \| `harassment` \| `other`); about the sender's own room only. Acked `{ ok: true }` or `{ ok: false, reason: "not-in-room" \| "invalid" \| "not-found" }`; not acked when dropped by the rate limit (see "Reports") |
 | `qa-ack` | `{ phase, round, at, platform, handledAt? }` (`phase` one of the four round phases, `round` integer, `at` device clock in ms when the phase was painted, `platform` `ios` or `android`, optional `handledAt` device clock in ms when the socket handler of the event that started it ran) | **Dev/QA only**, handled only when the server runs with `QA_TELEMETRY=1` (see "QA render telemetry"); otherwise not even registered |
 | `qa-photo-shown` | `{ phase, round, at, platform, failed? }` (`phase`/`round` the round phase the game screen had painted, `at` device clock in ms when the main round photo first drew, `platform` `ios` or `android`, `failed: true` when it could not be drawn at all) | **Dev/QA only**, like `qa-ack` (see "QA render telemetry") |
 
@@ -819,6 +856,7 @@ Token buckets: burst, then refilled at the rate.
 | `chat-message` | one every 250 ms |
 | `emoji-reaction` | burst 5, refilled 4/s |
 | `plant-photo` | burst 5, refilled 1 every 2 s |
+| `report-content` | burst 5, refilled 1 every 12 s |
 | `qa-ack`, `qa-photo-shown` | one shared budget: burst 10, refilled 2/s (dev/QA only) |
 
 The game-event limits are `GAME_EVENT_LIMITS` in `managers/socketGuards.ts`.
@@ -906,7 +944,8 @@ unknown room or a token that is not a current member of it → **403**.
   deletion for those expiring before the next sweep, so restarts don't leave photos behind). The sweep only deletes
   regular files directly in the upload dir named like an upload (`<32 hex>.jpg|png|webp`) or a legacy upload
   (`<13-digit epoch ms>-<name>.jpg|jpeg|png|webp`); symlinks, subdirectories, dotfiles (`.gitkeep`) and any other name
-  are never touched.
+  are never touched. A **reported** photo is copied out of the upload dir when reported and kept with its report
+  (see "Reports"), not deleted with the upload.
 - `photo-sent` / `plant-photo` take the returned `/temp/...` path, and only a photo that **the sender uploaded in
   this room** (and that still exists); anything else (another player's or another room's photo, a path never
   uploaded) is ignored. `photo-sent` additionally takes only the owner's turn upload for the photo awaited now: an

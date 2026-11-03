@@ -6,7 +6,7 @@ import { isValidUsername, MAX_USERNAME_LENGTH } from "../managers/playerName";
 import { maskOffensiveWords } from "../managers/chatFilter";
 import { isRoomCode, normalizeRoomCode } from "../managers/roomCode";
 import { acceptsPlantedPhoto, setUploadRooms } from "../middlewares/uploadAccess";
-import { UploadRecord, uploadStore } from "../middlewares/uploadStore";
+import { UploadRecord, uploadNameOf, uploadStore } from "../middlewares/uploadStore";
 import { createSlidingWindow } from "../middlewares/rateLimit";
 import {
   ALLOWED_EMOJIS, CHAT_MESSAGE_LIMIT, createConnectionCounter, createEventLimiter, createJoinMissGuard, createSocketWindowLimit,
@@ -15,6 +15,10 @@ import {
   JOIN_ATTEMPT_LIMIT, JOIN_MISS_PREFIX_MAX, JOIN_MISS_PRESSURE_MAX, JOIN_MISS_SOCKET_INTERVAL_MS, JOIN_MISS_WINDOW_MS,
   MAX_CONNECTIONS_PER_IP,
 } from "../managers/socketGuards";
+import { createChatLog } from "../managers/chatLog";
+import { contentKey, parseReport, ReportContentAck, ReportContentData, resolveReport } from "../managers/contentReports";
+import { createReportLedger } from "../managers/reportLedger";
+import { reportStore } from "../managers/reportStore";
 import { createQaTelemetry, isQaAck, isQaPhotoShown, QA_ACK_BURST, QA_ACK_RATE_PER_S } from "../managers/qaTelemetry";
 import { JoinCreateGameData, PhotoUnavailableData, Player, Room, RoomOfGameResponse, StartGameAck } from "../models/interfaces";
 
@@ -29,6 +33,10 @@ const MAX_CHAT_LENGTH = 100;
 // Per-socket sliding windows (see managers/socketGuards): join-create-game attempts, chat messages
 const joinAttempts = createSocketWindowLimit(JOIN_ATTEMPT_LIMIT);
 const chatMessages = createSocketWindowLimit(CHAT_MESSAGE_LIMIT);
+// Each room's recent chat, so a reported message can be checked against what was really sent (EXP-423)
+const chatLog = createChatLog();
+// Each room game's reports: one per player and content, and a few photo copies per game (EXP-423)
+const reportLedger = createReportLedger();
 // Per-IP limits (see managers/socketGuards): open sockets, and join attempts with a code that matches no room
 const connections = createConnectionCounter(MAX_CONNECTIONS_PER_IP);
 // Per IP key, per IPv6 /48 and global budget (see createJoinMissGuard)
@@ -109,6 +117,67 @@ function plantPhoto(socket: Socket, photoUrl: unknown): PlantPhotoAck {
   player.hasPlantedPhoto = true;
   gameEngine.onLatePlantedPhoto(room); // retry sent after the planted rounds were drawn
   console.log(`[${room.gameCode}] Planted photo received from ${player.username}`);
+  return { ok: true };
+}
+
+// ── Reports ──
+
+/** The upload file of a round photo's `/temp/<name>` path, while it is still stored (for the report's photo copy). */
+function uploadFileOf(photo: string): string | null {
+  const name = uploadNameOf(photo);
+  return (name && uploadStore.get(name)?.file) || null;
+}
+
+/**
+ * The reported round photo kept for review right now, before the game can delete its upload: its name in the reports'
+ * photos, or null when it is gone already, the game already keeps its share of other photos, or the disk refused it
+ * (EACCES, ENOSPC…: only the error code is logged). The report is stored either way. Otherwise not logged: a line
+ * would tell when the room reported something.
+ */
+function keepReportedPhoto(room: Room, photo: string): string | null {
+  if (!reportLedger.mayKeepPhoto(room, photo)) return null;
+  const upload = uploadFileOf(photo);
+  let kept: string | null = null;
+  try {
+    kept = upload ? reportStore.keepPhoto(upload) : null;
+  } catch (err) {
+    console.error("Reported photo not kept:", (err as NodeJS.ErrnoException)?.code ?? "unknown error");
+    return null;
+  }
+  if (kept) reportLedger.photoKept(room, photo);
+  return kept;
+}
+
+/**
+ * Files the session player's report about content of another player in their own room (EXP-423): a round photo they
+ * were shown, or a message still in the room's chat log that was sent while they were there. Stored (and the webhook
+ * notified) without waiting for it; the photo is kept at once (keepReportedPhoto). A second report of the same
+ * content by the same player in a game is acknowledged the same, and not stored again. Never logged: the room's log
+ * would pair it with the round's "photo from <owner>" line.
+ */
+function reportContent(socket: Socket, data: ReportContentData): ReportContentAck {
+  const s = session(socket);
+  if (!s) return { ok: false, reason: "not-in-room" };
+  const report = parseReport(data);
+  if (!report) return { ok: false, reason: "invalid" };
+  const { room, player } = s;
+  const content = resolveReport(report, player, {
+    shownPhoto: (round) => gameEngine.shownPhoto(room, round),
+    heardByReporter: (author, text) => chatLog.heardBy(room, author, text, player),
+  });
+  if (!content) return { ok: false, reason: "not-found" };
+  const key = contentKey(content);
+  if (reportLedger.alreadyReported(room, player, key)) return { ok: true };
+  const { round, reported, text, photo } = content;
+  void reportStore.save(
+    {
+      time: new Date().toISOString(), roomCode: room.gameCode, round, reporter: player.username, reported,
+      kind: report.kind, reason: report.reason, text,
+    },
+    photo ? keepReportedPhoto(room, photo) : null,
+  );
+  // Only once queued: a report that failed before (no ack) is stored when the app sends it again
+  reportLedger.recordReport(room, player, key);
   return { ok: true };
 }
 
@@ -515,6 +584,8 @@ io.on("connection", (socket: Socket) => {
       if (!chatMessages.take(socket.id)) return;
       const relayed = maskOffensiveWords(message);
       socket.broadcast.to(s.room.gameCode).emit("chat-message", { username: s.player.username, message: relayed });
+      // The text exactly as the room got it: a report names a bubble by its author and that text (EXP-423)
+      chatLog.record(s.room, s.player.username, relayed);
       if (typeof ack === "function") ack({ message: relayed });
     } catch (e) { console.error("chat error:", e); }
   });
@@ -538,6 +609,21 @@ io.on("connection", (socket: Socket) => {
         socketsOf(room.gameCode, kicked.username).forEach((old) => evictSocket(old, room.gameCode));
       });
     } catch (e) { console.error("remove-player error:", e); }
+  });
+
+  // ── Reports ────────────────────────────────────────
+
+  // A round photo or another player's chat message, reported with a reason (EXP-423). Only the reported content comes
+  // in the payload (reporter and room from the session). Acked with reportContent's answer once handled; not acked
+  // when dropped by the rate limit (the app's ack timeout covers that)
+  socket.on("report-content", (data: Partial<ReportContentData> | undefined, ack?: unknown) => {
+    try {
+      if (!gameEvents.take("report-content")) return;
+      const answer = reportContent(socket, {
+        kind: data?.kind, reason: data?.reason, round: data?.round, author: data?.author, text: data?.text,
+      });
+      if (typeof ack === "function") ack(answer);
+    } catch (e) { console.error("report-content error:", e); }
   });
 
   // ── QA telemetry (dev/QA only) ─────────────────────

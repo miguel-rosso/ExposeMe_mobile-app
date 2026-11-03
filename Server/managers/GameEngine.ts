@@ -6,6 +6,7 @@ import {
 import { DISCONNECT_GRACE, RoomManager } from "./RoomManager";
 import { uploadStore } from "../middlewares/uploadStore";
 import { drawPlantedDelay, PhotoWaitHistory } from "./plantedDelay";
+import type { ShownPhoto } from "./contentReports";
 
 export const ANSWER_TIME = 8_500;
 // Clients are shown ANSWER_TIME minus this (a 7.7 s bar), while answers are taken until ANSWER_TIME: a tap at the very
@@ -132,10 +133,12 @@ interface GameRun {
    * `game-state` (`roundOptions`), so a client that missed a `player-left` still draws them.
    */
   answerOptions?: readonly Player[];
+  /** Every round photo of the game, by round: what a report-content about it points at (EXP-423, see shownPhoto) */
+  shownPhotos: Map<number, ShownPhoto>;
 }
 
 function newGameRun(): GameRun {
-  return { freeOwnerChanges: new Map(), phaseEmits: new Map() };
+  return { freeOwnerChanges: new Map(), phaseEmits: new Map(), shownPhotos: new Map() };
 }
 
 export class GameEngine {
@@ -197,6 +200,14 @@ export class GameEngine {
    */
   phaseEmittedAt(room: Room, phase: RoundPhase, round: number): number | undefined {
     return this.runs.get(room)?.phaseEmits.get(round)?.get(phase);
+  }
+
+  /**
+   * Round `round`'s photo in the room's current (or last) game, whose owner and the players it was shown to (for
+   * report-content, EXP-423); undefined for a round not played. Its upload may be gone already (game over, owner left).
+   */
+  shownPhoto(room: Room, round: number): ShownPhoto | undefined {
+    return this.runs.get(room)?.shownPhotos.get(round);
   }
 
   /**
@@ -309,7 +320,11 @@ export class GameEngine {
     room.phase = "answering";
     room.currentPhoto = photo;
     room._consecutiveSkips = 0;
-    this.run(room).answerOptions = [...room.players];
+    const run = this.run(room);
+    run.answerOptions = [...room.players];
+    run.shownPhotos.set(room.round, {
+      photo, owner: owner.username, viewers: new Set(room.players),
+    });
     console.log(`[${room.gameCode}] Round ${room.round}: ${source} photo from ${owner.username}`);
 
     this.markPhaseEmitted(room, room.round);

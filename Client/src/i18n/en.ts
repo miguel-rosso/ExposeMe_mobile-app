@@ -49,6 +49,19 @@ export default {
   // GameScreen: over the round's photo when it is a muted player's, until "Show" reveals it for this round
   mutedPlayerPhoto: "Photo from a muted player",
   showMutedPhoto: "Show",
+  // Reporting the round photo or another player's chat message (EXP-423): the buttons, named for screen readers
+  reportPhoto: "Report photo",
+  reportMessageFrom: "Report message from {name}",
+  // The reason picker, then the answer
+  reportTitle: "Why are you reporting this?",
+  reportReasonSexual: "Sexual content",
+  reportReasonViolence: "Violence or hate",
+  reportReasonHarassment: "Harassment",
+  reportReasonOther: "Other",
+  reportSending: "Sending…",
+  reportThanks: "Thanks, we'll review it",
+  reportRefused: "This can't be reported.",
+  reportFailed: "The report couldn't be sent.",
   cancel: "Cancel",
   loadingGameRoom: "Loading game room...",
   pleaseWait: "Please wait a moment",

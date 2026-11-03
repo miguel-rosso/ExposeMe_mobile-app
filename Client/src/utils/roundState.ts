@@ -112,7 +112,8 @@ const PER_ROUND_RESET = {
   correctAnswer: "", scores: null, mySelection: "", gameHeld: false, pressing: false, noHoldsLeft: false, leavers: [],
 } as const;
 
-const inRoundPhase = (phase: ServerPhase | null) => phase === "answering" || phase === "reveal" || phase === "scores";
+/** A round in play, its photo on screen: answering, reveal or scores */
+export const inRoundPhase = (phase: ServerPhase | null) => phase === "answering" || phase === "reveal" || phase === "scores";
 
 /** The snapshot shows a round in play (answering/reveal/scores) with its photo */
 const showsRound = (snap: GameStateSnapshot) => inRoundPhase(snap.phase) && !!snap.photo;

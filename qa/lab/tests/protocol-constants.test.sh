@@ -33,6 +33,8 @@ mirrors "$LIMITS" ROUND_OPTIONS managers/RoomManager.ts ROUND_OPTIONS
 mirrors "$LIMITS" MAX_CHAT_LENGTH routes/socketRoutes.ts MAX_CHAT_LENGTH
 mirrors src/utils/roomCode.ts ROOM_CODE_ALPHABET managers/roomCode.ts ROOM_CODE_ALPHABET
 mirrors src/utils/roomCode.ts ROOM_CODE_LENGTH managers/roomCode.ts ROOM_CODE_LENGTH
+# Report reasons (EXP-423): the picker offers exactly the reasons the server takes, in the same order
+mirrors src/utils/contentReport.ts REPORT_REASONS managers/contentReports.ts REPORT_REASONS
 
 # Emoji reactions: the picker's emojis plus the screenshot one are exactly what the server relays (ALLOWED_EMOJIS)
 quoted() { grep -o '"[^"]*"' | LC_ALL=C sort | tr '\n' ' '; }

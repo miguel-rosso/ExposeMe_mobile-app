@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { STATIC_PAGE_CSP } from "../middlewares/securityHeaders";
 import { UPLOAD_TTL_MS } from "../middlewares/uploadSweeper";
+import { REPORT_RETENTION_DAYS, REPORT_WEBHOOK_URL } from "../managers/reportConfig";
 import { escapeHtml, INVITE_LANGUAGES, InviteLanguage, pickInviteLanguage } from "./joinPage";
 
 // ── Privacy policy page (/privacy) ──
@@ -59,6 +60,10 @@ interface PolicyFacts {
   /** HTML of the contact line's address: a mailto link, or null when no address is configured */
   contactLink: string | null;
   photoTtlMinutes: number;
+  /** Days a report and its photo copy are kept (REPORT_RETENTION_DAYS) */
+  reportRetentionDays: number;
+  /** Each report's summary also goes to a webhook (REPORT_WEBHOOK_URL is set) */
+  reportWebhook: boolean;
 }
 
 interface Section {
@@ -77,12 +82,12 @@ const TEXT: Record<InviteLanguage, PolicyText> = {
   en: {
     title: "ExposeMe privacy policy",
     lastUpdated: "Last updated:",
-    sections: ({ controller, contactLink, photoTtlMinutes }) => [
+    sections: ({ controller, contactLink, photoTtlMinutes, reportRetentionDays, reportWebhook }) => [
       {
         heading: "In short",
         paragraphs: [
           "ExposeMe is a party game: each round shows a photo from one player's gallery and the others guess whose it is.",
-          `There are no accounts, no ads and no analytics or tracking. What you share in a game is only for the players in that game, and its photos are deleted from the server within ${photoTtlMinutes} minutes at the latest. We don't sell or share your data.`,
+          `There are no accounts, no ads and no analytics or tracking. What you share in a game is only for the players in that game, and its photos are deleted from the server within ${photoTtlMinutes} minutes at the latest, unless one is reported (see "Reports"). We don't sell or share your data.`,
         ],
       },
       {
@@ -108,32 +113,46 @@ const TEXT: Record<InviteLanguage, PolicyText> = {
         heading: "What else the game uses",
         paragraphs: [
           "<strong>Your player name</strong>: the one you type. The other players in your room see it, and the server's game logs record it with the room code (who joined, whose photo each round showed).",
-          "<strong>Chat messages and reactions</strong>: sent to the players in your room at that moment and not stored by the server. If you take a screenshot during a game, the other players get a reaction saying so; the screenshot itself is not sent.",
+          "<strong>Chat messages and reactions</strong>: sent to the players in your room at that moment. The server doesn't store them; it only holds a room's latest messages in its memory while the room exists, to check the reports about them (see \"Reports\"). If you take a screenshot during a game, the other players get a reaction saying so; the screenshot itself is not sent.",
           "<strong>Your IP address</strong>: like any internet service, the server sees it. It only uses it in memory, to limit abuse (too many requests or connections), and doesn't write it to its logs. Our hosting provider may record it in its own request logs.",
           "<strong>On your phone</strong>: the app saves your name, your language and a code to rejoin your last game. They stay on your phone.",
         ],
       },
       {
+        heading: "Reports",
+        paragraphs: [
+          "During a game you can report the round's photo, and in the lobby another player's chat message, if it is sexual, violent or hateful, harassment or otherwise abusive.",
+          "A report stores: when it was sent, the room code, the round, your player name, the reported player's name, what was reported (a photo or a message), the reason you picked, the text of a reported message and a copy of a reported photo. Nobody in the game is told about it.",
+          reportWebhook
+            ? "Only we, the operator, review reports, to stop abuse. A summary of each report (everything above except the photo) is also sent to the notification service we use to be told about new reports."
+            : "Only we, the operator, review reports, to stop abuse.",
+          `Reports and the copies of reported photos are deleted ${reportRetentionDays} days after the report.`,
+        ],
+      },
+      {
         heading: "Who sees it",
         paragraphs: [
-          "Only the players in your game room see your photos, your name and your messages: the server sends a photo only to members of the room it was taken in. Keep in mind that other players can take screenshots.",
+          "Only the players in your game room see your photos, your name and your messages: the server sends a photo only to members of the room it was taken in. If someone reports your photo or your message, we see it too (see \"Reports\"). Keep in mind that other players can take screenshots.",
           // TODO(owner): name the Render region the service runs in (and, if it is outside the EU, the transfer safeguard)
-          "The server is hosted by Render Services, Inc. (United States), which processes this data on our behalf only to run it. Nobody else gets it, and nothing is used for advertising.",
+          reportWebhook
+            ? "The server is hosted by Render Services, Inc. (United States), which processes this data on our behalf only to run it. Apart from the summaries of reports sent to our notification service (see \"Reports\"), nobody else gets it, and nothing is used for advertising."
+            : "The server is hosted by Render Services, Inc. (United States), which processes this data on our behalf only to run it. Nobody else gets it, and nothing is used for advertising.",
         ],
       },
       {
         heading: "How long it is kept",
         paragraphs: [
-          `<strong>Photos</strong>: deleted from the server when the game ends, when the room empties or when you leave it (the one on screen at that moment once its round ends), and in any case within ${photoTtlMinutes} minutes after being sent.`,
-          "<strong>Rooms and player names</strong>: held only in the server's memory while the room exists. Chat messages are only relayed, never kept.",
-          "<strong>Server logs</strong>: game events with room codes and player names, never photos, messages or IP addresses. Our hosting provider keeps them for a limited time, for troubleshooting.",
+          `<strong>Photos</strong>: deleted from the server when the game ends, when the room empties or when you leave it (the one on screen at that moment once its round ends), and in any case within ${photoTtlMinutes} minutes after being sent. A reported photo is copied and kept with its report.`,
+          "<strong>Rooms and player names</strong>: held only in the server's memory while the room exists. Chat messages are only relayed; a room's latest ones stay in memory while the room exists, and a reported one is kept with its report.",
+          `<strong>Reports</strong>: ${reportRetentionDays} days, with the copy of a reported photo.`,
+          "<strong>Server logs</strong>: game events with room codes and player names, never photos, messages or IP addresses (reports are never written to them). Our hosting provider keeps them for a limited time, for troubleshooting.",
         ],
       },
       {
         heading: "Your rights",
         paragraphs: [
-          "Legal basis: we use this data to provide the game you ask to play (GDPR art. 6(1)(b)), and, for the abuse limits and the server logs, our legitimate interest in keeping the service safe and working (art. 6(1)(f)).",
-          "You can ask to access or delete your data, or object to its use, by contacting us. As there are no accounts and photos are deleted within minutes, there is usually nothing left that we could link to you. You can also complain to your data protection authority.",
+          "Legal basis: we use this data to provide the game you ask to play (GDPR art. 6(1)(b)), and, for the abuse limits, the reports and the server logs, our legitimate interest in keeping the service safe and working (art. 6(1)(f)).",
+          "You can ask to access or delete your data, or object to its use, by contacting us. As there are no accounts and photos are deleted within minutes, there is usually nothing left that we could link to you, apart from reports. You can also complain to your data protection authority.",
         ],
       },
       {
@@ -151,12 +170,12 @@ const TEXT: Record<InviteLanguage, PolicyText> = {
   es: {
     title: "Política de privacidad de ExposeMe",
     lastUpdated: "Última actualización:",
-    sections: ({ controller, contactLink, photoTtlMinutes }) => [
+    sections: ({ controller, contactLink, photoTtlMinutes, reportRetentionDays, reportWebhook }) => [
       {
         heading: "En resumen",
         paragraphs: [
           "ExposeMe es un juego de fiesta: en cada ronda se muestra una foto de la galería de un jugador y el resto adivina de quién es.",
-          `No hay cuentas, ni anuncios, ni analítica ni seguimiento. Lo que compartes en una partida es solo para los jugadores de esa partida, y sus fotos se borran del servidor como máximo ${photoTtlMinutes} minutos después. No vendemos ni compartimos tus datos.`,
+          `No hay cuentas, ni anuncios, ni analítica ni seguimiento. Lo que compartes en una partida es solo para los jugadores de esa partida, y sus fotos se borran del servidor como máximo ${photoTtlMinutes} minutos después, salvo que se denuncie alguna (ver «Denuncias»). No vendemos ni compartimos tus datos.`,
         ],
       },
       {
@@ -182,32 +201,46 @@ const TEXT: Record<InviteLanguage, PolicyText> = {
         heading: "Qué más usa el juego",
         paragraphs: [
           "<strong>Tu nombre de jugador</strong>: el que escribes. Lo ven los demás jugadores de tu sala, y los registros de partida del servidor lo anotan junto al código de la sala (quién entra, de quién es la foto de cada ronda).",
-          "<strong>Mensajes del chat y reacciones</strong>: se envían a los jugadores de tu sala en ese momento y el servidor no los guarda. Si haces una captura de pantalla durante una partida, los demás jugadores reciben una reacción que lo indica; la captura en sí no se envía.",
+          "<strong>Mensajes del chat y reacciones</strong>: se envían a los jugadores de tu sala en ese momento. El servidor no los guarda; solo tiene los últimos mensajes de cada sala en su memoria mientras existe la sala, para comprobar las denuncias sobre ellos (ver «Denuncias»). Si haces una captura de pantalla durante una partida, los demás jugadores reciben una reacción que lo indica; la captura en sí no se envía.",
           "<strong>Tu dirección IP</strong>: como cualquier servicio de internet, el servidor la ve. Solo la usa en memoria, para limitar abusos (demasiadas peticiones o conexiones), y no la escribe en sus registros. Nuestro proveedor de alojamiento puede anotarla en sus propios registros de peticiones.",
           "<strong>En tu móvil</strong>: la app guarda tu nombre, tu idioma y un código para volver a tu última partida. Se quedan en tu móvil.",
         ],
       },
       {
+        heading: "Denuncias",
+        paragraphs: [
+          "Durante una partida puedes denunciar la foto de la ronda, y en la sala de espera el mensaje del chat de otro jugador, si es sexual, violento o de odio, acoso o un abuso de otro tipo.",
+          "Una denuncia guarda: cuándo se envió, el código de la sala, la ronda, tu nombre de jugador, el nombre del jugador denunciado, qué se denunció (una foto o un mensaje), el motivo que elegiste, el texto del mensaje denunciado y una copia de la foto denunciada. Nadie de la partida recibe aviso de ella.",
+          reportWebhook
+            ? "Solo nosotros, como responsables del servicio, revisamos las denuncias, para frenar abusos. Un resumen de cada denuncia (todo lo anterior menos la foto) se envía además al servicio de avisos que usamos para enterarnos de las nuevas."
+            : "Solo nosotros, como responsables del servicio, revisamos las denuncias, para frenar abusos.",
+          `Las denuncias y las copias de las fotos denunciadas se borran ${reportRetentionDays} días después de la denuncia.`,
+        ],
+      },
+      {
         heading: "Quién lo ve",
         paragraphs: [
-          "Solo los jugadores de tu sala ven tus fotos, tu nombre y tus mensajes: el servidor solo envía una foto a los miembros de la sala en la que se subió. Ten en cuenta que los demás jugadores pueden hacer capturas de pantalla.",
+          "Solo los jugadores de tu sala ven tus fotos, tu nombre y tus mensajes: el servidor solo envía una foto a los miembros de la sala en la que se subió. Si alguien denuncia tu foto o tu mensaje, también lo vemos nosotros (ver «Denuncias»). Ten en cuenta que los demás jugadores pueden hacer capturas de pantalla.",
           // TODO(owner): same region as the English text
-          "El servidor está alojado en Render Services, Inc. (Estados Unidos), que trata estos datos en nuestro nombre solo para hacerlo funcionar. Nadie más los recibe y nada se usa para publicidad.",
+          reportWebhook
+            ? "El servidor está alojado en Render Services, Inc. (Estados Unidos), que trata estos datos en nuestro nombre solo para hacerlo funcionar. Aparte de los resúmenes de denuncias que se envían a nuestro servicio de avisos (ver «Denuncias»), nadie más los recibe y nada se usa para publicidad."
+            : "El servidor está alojado en Render Services, Inc. (Estados Unidos), que trata estos datos en nuestro nombre solo para hacerlo funcionar. Nadie más los recibe y nada se usa para publicidad.",
         ],
       },
       {
         heading: "Cuánto tiempo se guarda",
         paragraphs: [
-          `<strong>Fotos</strong>: se borran del servidor cuando termina la partida, cuando la sala se vacía o cuando la abandonas (la que está en pantalla en ese momento, al acabar su ronda), y en cualquier caso como máximo ${photoTtlMinutes} minutos después de enviarlas.`,
-          "<strong>Salas y nombres de jugador</strong>: solo están en la memoria del servidor mientras existe la sala. Los mensajes del chat solo se reenvían, nunca se guardan.",
-          "<strong>Registros del servidor</strong>: eventos de partida con códigos de sala y nombres de jugador, nunca fotos, mensajes ni direcciones IP. Nuestro proveedor de alojamiento los conserva durante un tiempo limitado, para resolver problemas.",
+          `<strong>Fotos</strong>: se borran del servidor cuando termina la partida, cuando la sala se vacía o cuando la abandonas (la que está en pantalla en ese momento, al acabar su ronda), y en cualquier caso como máximo ${photoTtlMinutes} minutos después de enviarlas. De una foto denunciada se guarda una copia con su denuncia.`,
+          "<strong>Salas y nombres de jugador</strong>: solo están en la memoria del servidor mientras existe la sala. Los mensajes del chat solo se reenvían; los últimos de cada sala siguen en memoria mientras existe la sala, y uno denunciado se guarda con su denuncia.",
+          `<strong>Denuncias</strong>: ${reportRetentionDays} días, con la copia de la foto denunciada.`,
+          "<strong>Registros del servidor</strong>: eventos de partida con códigos de sala y nombres de jugador, nunca fotos, mensajes ni direcciones IP (las denuncias nunca se anotan en ellos). Nuestro proveedor de alojamiento los conserva durante un tiempo limitado, para resolver problemas.",
         ],
       },
       {
         heading: "Tus derechos",
         paragraphs: [
-          "Base legal: usamos estos datos para prestarte el juego al que pides jugar (art. 6.1.b del RGPD) y, para los límites contra abusos y los registros del servidor, por nuestro interés legítimo en mantener el servicio seguro y en funcionamiento (art. 6.1.f).",
-          "Puedes pedir acceder a tus datos o borrarlos, u oponerte a su uso, contactando con nosotros. Como no hay cuentas y las fotos se borran en minutos, normalmente no queda nada que podamos relacionar contigo. También puedes reclamar ante tu autoridad de protección de datos.",
+          "Base legal: usamos estos datos para prestarte el juego al que pides jugar (art. 6.1.b del RGPD) y, para los límites contra abusos, las denuncias y los registros del servidor, por nuestro interés legítimo en mantener el servicio seguro y en funcionamiento (art. 6.1.f).",
+          "Puedes pedir acceder a tus datos o borrarlos, u oponerte a su uso, contactando con nosotros. Como no hay cuentas y las fotos se borran en minutos, normalmente no queda nada que podamos relacionar contigo, salvo las denuncias. También puedes reclamar ante tu autoridad de protección de datos.",
         ],
       },
       {
@@ -232,6 +265,10 @@ export interface PrivacyPageOptions {
   controllerName: string | null;
   /** Escaped here; null shows a pointer to the store page's developer contact instead */
   contactEmail: string | null;
+  /** Days reports are kept (default: REPORT_RETENTION_DAYS) */
+  reportRetentionDays?: number;
+  /** Reports also go to a webhook (default: whether REPORT_WEBHOOK_URL is set) */
+  reportWebhook?: boolean;
 }
 
 const formatDate = (isoDate: string, language: InviteLanguage) =>
@@ -242,12 +279,17 @@ const mailtoLink = (email: string) => `<a href="mailto:${escapeHtml(email)}">${e
 const renderSection = ({ heading, paragraphs }: Section) =>
   `<h2>${heading}</h2>${paragraphs.map((paragraph) => `<p>${paragraph}</p>`).join("")}`;
 
-export function renderPrivacyPage({ language, controllerName, contactEmail }: PrivacyPageOptions): string {
+export function renderPrivacyPage({
+  language, controllerName, contactEmail, reportRetentionDays = REPORT_RETENTION_DAYS,
+  reportWebhook = REPORT_WEBHOOK_URL !== null,
+}: PrivacyPageOptions): string {
   const text = TEXT[language];
   const sections = text.sections({
     controller: controllerName ? escapeHtml(controllerName) : null,
     contactLink: contactEmail ? mailtoLink(contactEmail) : null,
     photoTtlMinutes: PHOTO_TTL_MINUTES,
+    reportRetentionDays,
+    reportWebhook,
   });
   return `
     <!DOCTYPE html>

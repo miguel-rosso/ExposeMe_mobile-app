@@ -197,6 +197,13 @@
 //   node qa/lab/bots.mjs --bots 2 --host --rounds 3 --emoji-rate 4 --hold 1 --chaos 1   # holders drop mid-scoreboard,
 //                           so the game pauses there: emojis_received_paused must stay 0 (a bot sending in the pause
 //                           shows up there, about 25 per run)
+//            --report       like the app's «Report» on the round photo (EXP-423): at each reveal one bot that doesn't own the
+//                           round's photo (the first such bot of the room) reports it (report-content { kind: "photo",
+//                           round, reason }, cycling through the app's reasons), which must be acked { ok: true } within
+//                           REPORT_ACK_TIMEOUT_MS; at round 1 it also reports round 2's photo, not played yet, which must
+//                           be acked { ok: false, reason: "not-found" }. summary: reports_sent, reports_acked. The reports
+//                           go to the server's REPORTS_FILE (lab.sh server: qa/runs, git-ignored).
+//   node qa/lab/bots.mjs --bots 3 --host --rounds 3 --report
 //   Checks and metrics of each room: qa/lab/bots-analysis.mjs (tested on recorded events by qa/lab/tests/bots-analysis.test.sh).
 //   Every bot records waiting-photo { round, duration, gameNumber } (room-wide, owner secret; exactly WAITING_PHOTO_KEYS
 //   in bots-analysis.mjs, see GAME_FLOW.md «Game number»): same payload for all, skew measured.
@@ -235,7 +242,8 @@ import { analyseRoom, DISCONNECT_GRACE_MS, skipReasonLeak } from "./bots-analysi
 // ── Command line ──
 // Parsed and validated before anything touches the network (EXP-197): --help and bad arguments never connect
 const BOOL_FLAGS = new Set([
-  "host", "no-answer", "answer-right", "app-resync", "lobby-host-drop", "drop-on-turn", "quit-after-game-over", "leave-owner", "help",
+  "host", "no-answer", "answer-right", "app-resync", "lobby-host-drop", "drop-on-turn", "quit-after-game-over", "leave-owner", "report",
+  "help",
 ]);
 const VALUE_FLAGS = new Set([
   "server", "bots", "rooms", "rounds", "wait-players", "code", "code-file", "photos", "out", "chaos", "upload-fail",
@@ -283,6 +291,8 @@ Headless ExposeMe players (see the header of qa/lab/bots.mjs for every scenario)
   --emoji-rate N             every bot sends N emoji reactions per second (above 0, at most the server's 4) during the
                              reveal and the scoreboard (not while paused), to measure their render cost; summary:
                              emojis_sent, emojis_received, emojis_received_paused
+  --report                   at each reveal a bot that doesn't own the photo reports it (report-content), which must be
+                             acked ok; summary: reports_sent, reports_acked
   --help, -h                 print this help and exit (no network)
 
 Exit codes: 0 pass, 1 fail, 2 bad arguments.`;
@@ -422,6 +432,13 @@ function emojiRateOption() {
   return rate;
 }
 const EMOJI_RATE = emojiRateOption();
+
+// ── Reporting the round photo (--report, EXP-423) ──
+const REPORT = !!args.report;
+// The app's reason picker (Server/managers/contentReports.ts; bots-cli.test.sh checks the copy)
+const REPORT_REASONS = ["sexual", "violence", "harassment", "other"];
+// Like the app (Client/src/utils/contentReport.ts): a report counts as sent only once acked
+const REPORT_ACK_TIMEOUT_MS = 5_000;
 const UPLOAD_FAIL = Number(args["upload-fail"] || 0);
 const PHOTO_UNAVAILABLE = Number(args["photo-unavailable"] || 0);
 const NO_READY = Number(args["no-ready"] || 0);
@@ -711,6 +728,7 @@ function runRoom(roomIdx, fixedCode) {
     const spareSockets = []; // short-lived second connections of a bot (a holder rejoining on a new socket, --hold)
     // --emoji-rate: sent by this room's bots, relayed back to them (receivedPaused: while the game was paused)
     const emojis = { sent: 0, received: 0, receivedPaused: 0, timers: [] };
+    const reports = { sent: 0, acked: 0 }; // --report: report-content sent by this room's bots, and acked as expected
     const offlineLeave = { sentAt: null }; // --leave-offline-round: when the leaver's seat leave was sent
     /** --leave-offline-round (EXP-387): every bot that left offline sent its seat leave and the server acked it. */
     const seatLeaveProblems = () => events.filter((e) => e.ev === "left-room" && e.payload?.offline).flatMap(({ bot }) => {
@@ -736,6 +754,7 @@ function runRoom(roomIdx, fixedCode) {
       resolve({
         code, events, errors, uploads, rateLimited, reason, players: bots.map((b) => b.name),
         emojis: { sent: emojis.sent, received: emojis.received, receivedPaused: emojis.receivedPaused },
+        reports,
       });
     };
     const timer = setTimeout(() => {
@@ -1132,10 +1151,26 @@ function runRoom(roomIdx, fixedCode) {
         socket.emit("submit-answer", { guess: bot.guess });
         rec("guess-sent", round, { guess: bot.guess });
       };
+      /** --report: reports `round`'s photo with `reason`; the ack must be `expected` (a lost connection loses it: no fault). */
+      const reportPhoto = async (round, reason, expected) => {
+        reports.sent++;
+        const ack = await socket.timeout(REPORT_ACK_TIMEOUT_MS)
+          .emitWithAck("report-content", { kind: "photo", round, reason })
+          .catch(() => null);
+        rec("report-ack", round, { reason, ack });
+        if (ack && ack.ok === expected.ok && ack.reason === expected.reason) reports.acked++;
+        else if (ack || socket.connected) errors.push(`${name}: report of round ${round}'s photo answered ${JSON.stringify(ack)}, expected ${JSON.stringify(expected)}`);
+      };
       socket.on("round-reveal", (d) => {
         bot.phase = "reveal";
         // yourGuess: our own answer as the server froze it (null if missing, so the check reports it)
         rec("round-reveal", bot.round, { correctAnswer: d.correctAnswer, yourGuess: d.yourGuess ?? null });
+        // --report: the room's first bot still playing that isn't the photo's owner reports it, like a player tapping «Report»
+        if (REPORT && bots.find((b) => !b.gone && b.name !== d.correctAnswer) === bot) {
+          const round = bot.round;
+          void reportPhoto(round, REPORT_REASONS[round % REPORT_REASONS.length], { ok: true });
+          if (round === 1) void reportPhoto(round + 1, "other", { ok: false, reason: "not-found" });
+        }
         // Our photo: like the app, the scoreboard then shows us the hold button (--hold)
         bot.ownedRound = d.correctAnswer === name ? bot.round : 0;
         // Fair play: a vote sent once the answer is public must be ignored (checked against round-scores)
@@ -1455,6 +1490,11 @@ const summary = {
     emojis_sent: results.reduce((n, r) => n + r.emojis.sent, 0),
     emojis_received: results.reduce((n, r) => n + r.emojis.received, 0),
     emojis_received_paused: results.reduce((n, r) => n + r.emojis.receivedPaused, 0),
+  } : {}),
+  // --report: every report sent must be acked as expected (a dropped connection can lose one)
+  ...(REPORT ? {
+    reports_sent: results.reduce((n, r) => n + r.reports.sent, 0),
+    reports_acked: results.reduce((n, r) => n + r.reports.acked, 0),
   } : {}),
   rooms_detail: rooms,
 };

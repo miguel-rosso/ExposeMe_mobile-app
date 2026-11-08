@@ -10,7 +10,9 @@ import { MAX_FILE_SIZE } from "./upload";
 // - uploadInFlightLimit runs right after requireUploadMember (only authenticated members take slots) and before any
 //   byte of the body is read: per member, per room, per IP (429) and server-wide (503);
 // - every admitted upload must be fully received within UPLOAD_REQUEST_TIMEOUT_MS (408 and the connection is closed),
-//   so a slow sender can't hold a slot longer than that. Processing a complete body is not timed here (the slot is
+//   so a slow sender can't hold a slot longer than that, and may carry at most MAX_UPLOAD_BODY_BYTES in total, counted
+//   as they are read, so a chunked body (no Content-Length) can't pad the photo with bytes multer skips (413 and the
+//   connection is closed). Processing a complete body is not timed here (the slot is
 //   kept until the response; sanitizeImage's queue is sized to UPLOAD_INFLIGHT_MAX, so an upload admitted here is
 //   never refused there, and a job whose client is gone leaves that queue with its slot).
 // Worst-case buffered memory ≈ UPLOAD_INFLIGHT_MAX × MAX_FILE_SIZE (32 × 5 MB = 160 MB by default).
@@ -30,16 +32,63 @@ export const UPLOAD_REQUEST_TIMEOUT_MS = envInt("UPLOAD_REQUEST_TIMEOUT_MS", 20_
 
 /** Multipart boundaries and part headers on top of the file itself. */
 const MULTIPART_OVERHEAD = 64 * 1024;
+/** Most bytes a whole /upload body may carry, declared (Content-Length) or not (chunked). */
+export const MAX_UPLOAD_BODY_BYTES = MAX_FILE_SIZE + MULTIPART_OVERHEAD;
+/** Chunked-encoding framing (chunk sizes, CRLFs, trailers) a real client adds on top of the body: ~0.1% at 8 KB chunks. */
+const CHUNKED_FRAMING_ALLOWANCE = 64 * 1024;
+/**
+ * Most bytes an upload may take off the wire after admission. Bounds what the HTTP parser reads but never hands over
+ * as body (e.g. chunk extensions around 1-byte chunks), which the decoded count alone doesn't see.
+ */
+export const MAX_UPLOAD_WIRE_BYTES = MAX_UPLOAD_BODY_BYTES + CHUNKED_FRAMING_ALLOWANCE;
 const RETRY_AFTER_S = "2";
 
-/** 413 for a declared body that can't fit, before reading it (multer still enforces the limit on chunked bodies). */
+/** 413 for a declared body that can't fit, before reading it (a chunked body is counted as it arrives, see capBodyBytes). */
 export function uploadDeclaredSize(req: Request, res: Response, next: NextFunction) {
   const declared = Number(req.get("content-length"));
-  if (Number.isFinite(declared) && declared > MAX_FILE_SIZE + MULTIPART_OVERHEAD) {
+  if (Number.isFinite(declared) && declared > MAX_UPLOAD_BODY_BYTES) {
     res.setHeader("Connection", "close");
     return void res.status(413).json({ error: "File too large" });
   }
   next();
+}
+
+/** Answers `status` (unless already answered), then closes the connection once the response is out. */
+function abortUpload(req: Request, res: Response, status: 408 | 413, error: string) {
+  if (!res.headersSent) {
+    res.setHeader("Connection", "close");
+    res.status(status).json({ error });
+  }
+  if (res.writableFinished) req.socket.destroy();
+  else res.once("finish", () => req.socket.destroy());
+}
+
+/**
+ * Counts the body bytes as they are read (by multer, or by the drain after an early answer) and aborts the upload with
+ * 413 once they pass MAX_UPLOAD_BODY_BYTES, or once the bytes read off the connection since admission pass
+ * MAX_UPLOAD_WIRE_BYTES. A chunked body declares no size, multer only limits the photo part (not a preamble or epilogue
+ * it skips), and the HTTP parser drops chunk extensions before they reach the body.
+ */
+function capBodyBytes(req: Request, res: Response) {
+  // Per connection: a keep-alive socket has already read the earlier requests (and this one's head)
+  const wireAtAdmission = req.socket.bytesRead;
+  let bodyBytes = 0;
+  let aborted = false;
+  req.on("data", (chunk: Buffer) => {
+    bodyBytes += chunk.length;
+    const wireBytes = req.socket.bytesRead - wireAtAdmission;
+    if (aborted || (bodyBytes <= MAX_UPLOAD_BODY_BYTES && wireBytes <= MAX_UPLOAD_WIRE_BYTES)) return;
+    aborted = true;
+    abortUpload(req, res, 413, "File too large");
+  });
+  // Listening alone would start the flow before multer pipes the body, so the stream is paused until then. Having
+  // started to read it (on('data') schedules a read) also keeps Node from _dump()-ing an unread body when a later
+  // middleware answers early: _dump() removes every 'data' listener, which would drop this counter. Such a body is
+  // drained here instead, still counted.
+  req.pause();
+  res.once("finish", () => {
+    if (!req.complete) req.resume();
+  });
 }
 
 /** Counters per key that drop the key at zero, so idle keys never accumulate. */
@@ -101,16 +150,11 @@ export function createInFlightLimiter(opts: {
     // The whole body must arrive within timeoutMs; then the slot is freed by closing the connection. Only reception
     // is timed: once the body is complete, processing (sanitizeImage queue) runs to its own limits.
     const timer = setTimeout(() => {
-      if (req.complete) return;
-      if (!res.headersSent) {
-        res.setHeader("Connection", "close");
-        res.status(408).json({ error: "Upload timed out" });
-      }
-      res.once("finish", () => req.socket.destroy());
-      if (res.writableFinished) req.socket.destroy();
+      if (!req.complete) abortUpload(req, res, 408, "Upload timed out");
     }, opts.timeoutMs);
     timer.unref();
     req.once("end", () => clearTimeout(timer));
+    capBodyBytes(req, res);
 
     let released = false;
     const release = () => {

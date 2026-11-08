@@ -88,7 +88,9 @@ describe("POST /upload per-member in-flight cap (EXP-153)", () => {
       status(code: number) { status = code; return res; },
       json: () => res,
     });
-    const req = { ip: "198.51.100.7", socket: {}, complete: false, once: () => undefined } as unknown as Request;
+    const req = Object.assign(new EventEmitter(), {
+      ip: "198.51.100.7", socket: {}, complete: false, pause() {}, resume() {},
+    }) as unknown as Request;
     const next = vi.fn();
     mw(req, res as unknown as Response, next);
     return next.mock.calls.length === 1 ? 200 : status;

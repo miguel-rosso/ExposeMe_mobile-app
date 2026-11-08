@@ -9,7 +9,9 @@ import { ipKey } from "../middlewares/ipKey";
 // EXP-181: every Express per-IP limit keys by the same normalized IP as the socket.io handshake limits: IPv6 by its
 // /64 (rotating addresses inside it doesn't buy a fresh bucket) and IPv4-mapped IPv6 as plain IPv4.
 
-const req = (ip: string) => ({ ip, socket: {}, complete: true, once: () => undefined }) as unknown as Request;
+/** A request whose body was already received: the in-flight limiter only listens to it. */
+const req = (ip: string) =>
+  Object.assign(new EventEmitter(), { ip, socket: {}, complete: true, pause() {}, resume() {} }) as unknown as Request;
 
 function fakeRes() {
   const res = Object.assign(new EventEmitter(), {

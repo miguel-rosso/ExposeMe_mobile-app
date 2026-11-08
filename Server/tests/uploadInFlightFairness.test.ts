@@ -14,7 +14,9 @@ const limiter = () =>
     max: MAX, perIpMax: PER_IP_MAX, perIpBusyMax: PER_IP_BUSY_MAX, perRoomMax: 100, perMemberMax: 100, timeoutMs: 60_000,
   });
 
-const req = (ip: string) => ({ ip, socket: {}, complete: true, once: () => undefined }) as unknown as Request;
+/** A request whose body was already received: the in-flight limiter only listens to it. */
+const req = (ip: string) =>
+  Object.assign(new EventEmitter(), { ip, socket: {}, complete: true, pause() {}, resume() {} }) as unknown as Request;
 
 function fakeRes() {
   const res = Object.assign(new EventEmitter(), {

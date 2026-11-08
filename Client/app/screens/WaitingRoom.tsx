@@ -126,8 +126,8 @@ const WaitingRoom = () => {
   // Players muted on this device for this room (EXP-422): their chat bubbles are not shown
   const mutes = useMutedPlayers(gameCode);
   const chat = useLobbyChat(socket, gameCode, username, mutes.muted);
-  // Reporting another player's chat message (EXP-423)
-  const report = useContentReport(socket);
+  // Reporting another player's chat message (EXP-423), which mutes them for me (EXP-438)
+  const report = useContentReport(socket, { myUsername: username, mute: mutes.mute });
   const startReport = report.start;
   const reportMessage = useCallback(
     (msg: LobbyChatMessage) => startReport({ kind: "message", author: msg.username, text: msg.message }), [startReport],
@@ -838,15 +838,13 @@ const WaitingRoom = () => {
         cancelButtonColor="bg-blue-500"
       />
 
-      {/* Report of a chat message: reason, then the thanks with the offer to mute its author */}
+      {/* Report of a chat message: reason (which mutes its author for me), then the answer */}
       <ReportContentModal
         flow={report.flow}
         onChoose={report.choose}
         onRetry={report.retry}
         onClose={report.close}
         myUsername={username}
-        muted={mutes.muted}
-        onMute={mutes.toggle}
       />
 
       {/* Invite link: nothing joins until Join (the saved name is read first, to fill it in) */}

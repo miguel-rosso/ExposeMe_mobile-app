@@ -23,10 +23,7 @@ interface LoggedMessage {
 export function createChatLog(size = CHAT_LOG_SIZE) {
   const logs = new WeakMap<Room, LoggedMessage[]>();
   return {
-    /**
-     * `username` sent `message` to the rest of `room`, exactly as relayed in chat-message (masked, EXP-424), heard by
-     * the room's players now.
-     */
+    /** `username` sent `message` to the rest of `room`, exactly as relayed in chat-message, heard by its players now. */
     record(room: Room, username: string, message: string): void {
       const log = logs.get(room) ?? [];
       log.push({ username, message, audience: new Set(room.players) });

@@ -82,7 +82,7 @@ export const TEST_IDS = {
   reportCancelButton: "report-cancel-button",
   reportSending: "report-sending",
   reportThanks: "report-thanks", // «Thanks, we'll review it»
-  reportMuteButton: "report-mute-button", // the thanks' offer to mute the reported player
+  reportMutedNotice: "report-muted-notice", // «You muted X»: the reported player, muted by the report (EXP-438)
   reportRefused: "report-refused", // the server can't take it (nothing of that to report there): no Try again
   reportFailed: "report-failed",
   reportRetryButton: "report-retry-button",

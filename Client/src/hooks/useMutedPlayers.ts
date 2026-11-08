@@ -38,8 +38,9 @@ export const withoutMuted = <T extends { username: string }>(list: T[], muted: M
   list.some((item) => muted.has(item.username)) ? list.filter((item) => !muted.has(item.username)) : list;
 
 /**
- * The players this device muted in `room` (the game context's room code), and `toggle` to mute or unmute one (stable
- * for a room). Without a room nobody is muted and `toggle` does nothing.
+ * The players this device muted in `room` (the game context's room code), `toggle` to mute or unmute one, and `mute`
+ * to mute one who may already be (reporting them, EXP-438); both stable for a room. Without a room nobody is muted and
+ * neither does anything.
  */
 export const useMutedPlayers = (room: string | null) => {
   const muted = useSyncExternalStore(subscribe, () => mutedIn(room));
@@ -49,5 +50,9 @@ export const useMutedPlayers = (room: string | null) => {
     if (!names.delete(username)) names.add(username);
     setMutes(room, names);
   }, [room]);
-  return { muted, toggle };
+  const mute = useCallback((username: string) => {
+    if (room === null || mutedIn(room).has(username)) return;
+    setMutes(room, new Set(mutedIn(room)).add(username));
+  }, [room]);
+  return { muted, toggle, mute };
 };

@@ -128,8 +128,22 @@ describe("useMutedPlayers (EXP-422)", () => {
   it("without a room nobody is muted and nothing can be", () => {
     const noRoom = mountMutes(null);
     act(() => noRoom.result.current.toggle("bob"));
+    act(() => noRoom.result.current.mute("bob"));
     expect(noRoom.result.current.muted.size).toBe(0);
     noRoom.unmount();
+  });
+
+  // EXP-438: reporting a player mutes them, whether or not they already were (never unmutes, unlike toggle)
+  it("mute mutes a player and leaves one already muted as is (the same set: nothing re-renders)", () => {
+    const game = mountMutes("ROOM14");
+    act(() => game.result.current.mute("bob"));
+    const afterFirst = game.result.current.muted;
+    expect([...afterFirst]).toEqual(["bob"]);
+    act(() => game.result.current.mute("bob"));
+    expect(game.result.current.muted).toBe(afterFirst);
+    act(() => game.result.current.mute("carol"));
+    expect([...game.result.current.muted]).toEqual(["bob", "carol"]);
+    game.unmount();
   });
 
   it("withoutMuted keeps the same list when nobody in it is muted", () => {

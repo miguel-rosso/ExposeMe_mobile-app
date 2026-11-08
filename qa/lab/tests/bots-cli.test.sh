@@ -305,6 +305,18 @@ bot_reasons="$(sed -nE 's/^const REPORT_REASONS = (\[.*\]);$/\1/p' "$BOTS")"
 [[ -n "$server_reasons" && "$bot_reasons" == "$server_reasons" ]] && ok "REPORT_REASONS matches the server's" \
   || ko "REPORT_REASONS matches the server's" "ours=[$bot_reasons] server=[$server_reasons]"
 
+# ── --chat: each bot sends one lobby chat message, relayed as typed (EXP-438) ──
+run 2 "--chat takes no value" --bots 3 --host --chat 1 --timeout 1
+[[ "$err" == *'unexpected argument "1"'* ]] && ok "--chat's stray value is named" || ko "--chat's stray value is named" "$err"
+SERVER_URL="$URL" node "$BOTS" --bots 3 --host --chat --timeout 1 >/dev/null 2>"$TMP/err"; rc=$?
+[[ "$rc" != 2 ]] && ok "--chat is accepted" || ko "--chat is accepted" "$(cat "$TMP/err")"
+[[ "$(node "$BOTS" --help)" == *"--chat "* ]] && ok "--help lists --chat" || ko "--help lists --chat"
+# CHAT_ACK_TIMEOUT_MS: the app's (Client/src/hooks/useLobbyChat.ts), ours written with a digit separator
+app_chat_ack="$(sed -nE 's/^export const CHAT_ACK_TIMEOUT_MS = ([0-9_]+);$/\1/p' "$HERE/../../../Client/src/hooks/useLobbyChat.ts" | tr -d _)"
+bot_chat_ack="$(sed -nE 's/^const CHAT_ACK_TIMEOUT_MS = ([0-9_]+);$/\1/p' "$BOTS" | tr -d _)"
+[[ -n "$app_chat_ack" && "$bot_chat_ack" == "$app_chat_ack" ]] && ok "CHAT_ACK_TIMEOUT_MS matches the app's" \
+  || ko "CHAT_ACK_TIMEOUT_MS matches the app's" "ours=$bot_chat_ack app=$app_chat_ack"
+
 # ── --answer-right: the bots vote for the owner and end tied with points (EXP-348) ──
 # Options that make a bot miss or change a vote would break the tie, so they are refused with it
 for clash in "--no-answer" "--plant 1" "--chaos 0.1" "--drop-round 2" "--drop-rounds 2,3" "--leave-round 2" "--leave-offline-round 2" "--play-again-linger 5"; do

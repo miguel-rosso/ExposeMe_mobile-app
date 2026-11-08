@@ -12,8 +12,8 @@ import GameScreen from "../app/screens/GameScreen";
 
 // EXP-423 / DEC-052 A: «Report» on the round photo. Available while the photo is on screen (answering, reveal,
 // scoreboard), never on the photo revealed as mine; a reason picker, then report-content with the round and reason
-// (nothing else: the server takes reporter and room from the session), «Thanks, we'll review it» once acked, with an
-// offer to mute the photo's owner when this device knows who it is (from the reveal on).
+// (nothing else: the server takes reporter and room from the session), «Thanks, we'll review it» once acked. Picking
+// the reason also mutes the photo's owner for me (EXP-438) when this device knows who it is (from the reveal on).
 
 jest.mock("@react-native-async-storage/async-storage", () =>
   require("@react-native-async-storage/async-storage/jest/async-storage-mock")
@@ -129,7 +129,7 @@ describe("GameScreen: reporting the round photo (EXP-423)", () => {
     expect(pressable(r.root, TEST_IDS.reportPhotoButton).props.accessibilityLabel).toBe("Report photo");
   });
 
-  it("asks why, sends the round and reason only, then thanks once acked (no mute offer: the owner is still secret)", async () => {
+  it("asks why, sends the round and reason only, then thanks once acked (nobody muted: the owner is still secret)", async () => {
     await mount();
     press(r.root, TEST_IDS.reportPhotoButton);
     expect(textOf(find(r.root, TEST_IDS.reportModal)[0])).toContain("Why are you reporting this?");
@@ -143,7 +143,7 @@ describe("GameScreen: reporting the round photo (EXP-423)", () => {
 
     await answerLastReport({ ok: true });
     expect(textOf(find(r.root, TEST_IDS.reportThanks)[0])).toBe("Thanks, we'll review it");
-    expect(has(r.root, TEST_IDS.reportMuteButton)).toBe(false);
+    expect(has(r.root, TEST_IDS.reportMutedNotice)).toBe(false);
     press(r.root, TEST_IDS.reportCloseButton);
     expect(has(r.root, TEST_IDS.reportModal)).toBe(false);
   });
@@ -156,19 +156,42 @@ describe("GameScreen: reporting the round photo (EXP-423)", () => {
     expect(reports()).toEqual([]);
   });
 
-  it("once revealed, the thanks offers to mute the photo's owner, which covers their photo", async () => {
+  it("once revealed, picking the reason mutes the photo's owner, which covers their photo, and the thanks says so", async () => {
     await mount();
     act(() => mockSocket.fire("round-reveal", reveal("bob")));
     press(r.root, TEST_IDS.reportPhotoButton);
-    press(r.root, reportReasonId("sexual"));
-    await answerLastReport({ ok: true });
-
-    expect(textOf(pressable(r.root, TEST_IDS.reportMuteButton))).toBe("Mute bob");
     expect(has(r.root, TEST_IDS.mutedPhotoCover)).toBe(false);
-    press(r.root, TEST_IDS.reportMuteButton);
-    expect(has(r.root, TEST_IDS.reportModal)).toBe(false);
+    press(r.root, reportReasonId("sexual"));
     // bob is muted now: his revealed photo is covered
     expect(has(r.root, TEST_IDS.mutedPhotoCover)).toBe(true);
+
+    await answerLastReport({ ok: true });
+    expect(textOf(find(r.root, TEST_IDS.reportMutedNotice)[0])).toBe("You muted bob");
+    press(r.root, TEST_IDS.reportCloseButton);
+    expect(has(r.root, TEST_IDS.reportModal)).toBe(false);
+    expect(has(r.root, TEST_IDS.mutedPhotoCover)).toBe(true);
+  });
+
+  it("opened while answering, the reveal coming before the reason: picking it mutes the owner revealed meanwhile", async () => {
+    await mount();
+    press(r.root, TEST_IDS.reportPhotoButton);
+    act(() => mockSocket.fire("round-reveal", reveal("bob")));
+    expect(has(r.root, TEST_IDS.mutedPhotoCover)).toBe(false);
+    press(r.root, reportReasonId("sexual"));
+    expect(reports().map((x) => x.payload)).toEqual([{ kind: "photo", round: 1, reason: "sexual" }]);
+    expect(has(r.root, TEST_IDS.mutedPhotoCover)).toBe(true);
+    await answerLastReport({ ok: true });
+    expect(textOf(find(r.root, TEST_IDS.reportMutedNotice)[0])).toBe("You muted bob");
+  });
+
+  it("opened while answering, the photo then revealed as mine: picking the reason mutes nobody", async () => {
+    await mount();
+    press(r.root, TEST_IDS.reportPhotoButton);
+    act(() => mockSocket.fire("round-reveal", reveal("alice")));
+    press(r.root, reportReasonId("other"));
+    await answerLastReport({ ok: false, reason: "not-found" });
+    expect(has(r.root, TEST_IDS.reportRefused)).toBe(true);
+    expect(has(r.root, TEST_IDS.reportMutedNotice)).toBe(false);
   });
 
   it("is offered on the scoreboard too, and never on the photo revealed as mine", async () => {
@@ -239,5 +262,15 @@ describe("GameScreen: reporting the round photo (EXP-423)", () => {
     press(r.root, reportReasonId("other"));
     await answerLastReport({ ok: true });
     expect(textOf(find(r.root, TEST_IDS.reportThanks)[0])).toBe("Gracias, lo revisaremos");
+  });
+
+  it("in Spanish, the owner muted by the report: «Has silenciado a bob»", async () => {
+    mockT = es;
+    await mount();
+    act(() => mockSocket.fire("round-reveal", reveal("bob")));
+    press(r.root, TEST_IDS.reportPhotoButton);
+    press(r.root, reportReasonId("other"));
+    await answerLastReport({ ok: true });
+    expect(textOf(find(r.root, TEST_IDS.reportMutedNotice)[0])).toBe("Has silenciado a bob");
   });
 });

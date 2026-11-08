@@ -1,0 +1,31 @@
+# EXP-438 (DEC-060 A): the chat has no word filter. The server relays a message exactly as typed and acks the sender
+# { ok: true }; only then does the app show the sender's own bubble, with the text it typed (words the old filter of
+# EXP-424 masked included).
+# The text is ASCII ("que", not "qué"): Maestro's inputText can't type accented characters on Android.
+# The unit guarantees are in Server/tests/chatMessage.integration.test.ts and Client/__tests__/waitingRoomChatShare.test.tsx.
+# No bots needed (the device hosts the room itself and is the sender), so run it directly against the lab server:
+#   ~/.maestro/bin/maestro --device <id> test qa/maestro/lobby-chat.yaml -e USERNAME=<label> -e METRO_URL=<url-encoded>
+# env: USERNAME, METRO_URL (url-encoded)
+# Selectors are testIDs (Client/src/utils/testIds.ts); the bubble is matched by the message text, which is the
+# player's own text in any UI language.
+appId: com.socketNull.ExposeMe
+---
+- runFlow: host-lobby.yaml
+- tapOn:
+    id: "chat-input"
+- inputText: "que puta foto"
+- tapOn:
+    id: "chat-send-button"
+# The bubble shows for about 5 s: wait for it, then check right away
+- extendedWaitUntil:
+    visible: "que puta foto"
+    timeout: 5000
+- assertVisible:
+    id: "chat-input"
+- takeScreenshot: lobby-chat-${USERNAME}
+- tapOn:
+    id: "close-button"
+- extendedWaitUntil:
+    visible:
+      id: "create-game-button"
+    timeout: 10000

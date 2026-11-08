@@ -3,7 +3,6 @@ import { io } from "../app";
 import { isAllowedRounds, RoomManager } from "../managers/RoomManager";
 import { GameEngine } from "../managers/GameEngine";
 import { isValidUsername, MAX_USERNAME_LENGTH } from "../managers/playerName";
-import { maskOffensiveWords } from "../managers/chatFilter";
 import { isRoomCode, normalizeRoomCode } from "../managers/roomCode";
 import { acceptsPlantedPhoto, setUploadRooms } from "../middlewares/uploadAccess";
 import { UploadRecord, uploadNameOf, uploadStore } from "../middlewares/uploadStore";
@@ -575,18 +574,18 @@ io.on("connection", (socket: Socket) => {
     } catch (e) { console.error("plant-photo error:", e); }
   });
 
-  // Acked with the text the room got (offensive words masked), so the sender shows exactly that; not acked when dropped
+  // Relayed exactly as typed (no word filter, EXP-438: each player mutes or reports). Acked { ok: true } once the room
+  // got it, so the sender shows its own bubble; not acked when dropped
   socket.on("chat-message", (data: { message: string }, ack?: unknown) => {
     try {
       const s = session(socket);
       const message = data?.message;
       if (!s || typeof message !== "string" || !message.trim() || message.length > MAX_CHAT_LENGTH) return;
       if (!chatMessages.take(socket.id)) return;
-      const relayed = maskOffensiveWords(message);
-      socket.broadcast.to(s.room.gameCode).emit("chat-message", { username: s.player.username, message: relayed });
-      // The text exactly as the room got it: a report names a bubble by its author and that text (EXP-423)
-      chatLog.record(s.room, s.player.username, relayed);
-      if (typeof ack === "function") ack({ message: relayed });
+      socket.broadcast.to(s.room.gameCode).emit("chat-message", { username: s.player.username, message });
+      // A report names a bubble by its author and text (EXP-423)
+      chatLog.record(s.room, s.player.username, message);
+      if (typeof ack === "function") ack({ ok: true });
     } catch (e) { console.error("chat error:", e); }
   });
 

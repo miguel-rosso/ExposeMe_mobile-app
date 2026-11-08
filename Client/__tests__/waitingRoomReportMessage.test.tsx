@@ -7,7 +7,8 @@ import WaitingRoom from "../app/screens/WaitingRoom";
 
 // EXP-423 / DEC-052 A: «Report» on another player's lobby chat bubble. A flag next to the author's name (never on my
 // own bubbles) opens the reason picker; report-content names the bubble by its author and text (chat messages have no
-// ids), and once acked the thanks offers to mute the author, which takes their bubbles away.
+// ids). Picking the reason also mutes the author for me (EXP-438, on this device only): their bubbles go at once, and
+// the answer tells me they are muted.
 
 const mockSocket = new FakeSocket();
 const mockLeaveRoom = jest.fn();
@@ -90,9 +91,9 @@ async function mountLobby() {
   act(() => mockSocket.fire("chat-message", { username: "bob", message: BOB_SAYS }));
   act(() => find(r.root, TEST_IDS.chatInput).find((n) => n.props.onChangeText)!.props.onChangeText("stop it"));
   press(r.root, TEST_IDS.chatSendButton);
-  // The server acks my message with the text the room got (EXP-424): only then is my bubble shown
+  // The server acks my message once the room got it: only then is my bubble shown
   const [, , ackChat] = mockSocket.emitted.find(([event]) => event === "chat-message")!;
-  await act(async () => { ackChat({ message: "stop it" }); });
+  await act(async () => { ackChat({ ok: true }); });
   return r;
 }
 
@@ -119,21 +120,46 @@ describe("WaitingRoom: reporting a chat message (EXP-423)", () => {
     expect(has(r.root, chatReportId("alice"))).toBe(false);
   });
 
-  it("reports the bubble by its author and text, thanks once acked, and muting bob takes his bubbles away", async () => {
+  it("reports the bubble by its author and text, and mutes bob at once: his bubbles go, the thanks says so", async () => {
     r = await mountLobby();
     press(r.root, chatReportId("bob"));
     expect(has(r.root, TEST_IDS.reportModal)).toBe(true);
+    expect(bubbleAuthors(r.root)).toEqual(["bob", "alice"]); // not muted for opening the picker
     press(r.root, reportReasonId("harassment"));
     expect(reports().map((x) => x.payload)).toEqual([{ kind: "message", author: "bob", text: BOB_SAYS, reason: "harassment" }]);
+    expect(bubbleAuthors(r.root)).toEqual(["alice"]);
+    expect(pressable(r.root, lobbyMuteId("bob")).props.accessibilityLabel).toBe("Unmute bob");
 
     await act(async () => { reports()[0].ack({ ok: true }); });
     expect(textOf(find(r.root, TEST_IDS.reportThanks)[0])).toBe("Thanks, we'll review it");
-    expect(textOf(pressable(r.root, TEST_IDS.reportMuteButton))).toBe("Mute bob");
-
-    press(r.root, TEST_IDS.reportMuteButton);
+    expect(textOf(find(r.root, TEST_IDS.reportMutedNotice)[0])).toBe("You muted bob");
+    press(r.root, TEST_IDS.reportCloseButton);
     expect(has(r.root, TEST_IDS.reportModal)).toBe(false);
+    // Still muted after the dialog, and his next messages don't show either
+    act(() => mockSocket.fire("chat-message", { username: "bob", message: "again" }));
     expect(bubbleAuthors(r.root)).toEqual(["alice"]);
-    expect(pressable(r.root, lobbyMuteId("bob")).props.accessibilityLabel).toBe("Unmute bob");
+  });
+
+  it("a report that fails or is refused still leaves bob muted, and says so", async () => {
+    r = await mountLobby();
+    press(r.root, chatReportId("bob"));
+    press(r.root, reportReasonId("other"));
+    await act(async () => { reports()[0].ack({ ok: false, reason: "not-found" }); });
+    expect(has(r.root, TEST_IDS.reportRefused)).toBe(true);
+    expect(textOf(find(r.root, TEST_IDS.reportMutedNotice)[0])).toBe("You muted bob");
+    press(r.root, TEST_IDS.reportCloseButton);
+    expect(bubbleAuthors(r.root)).toEqual(["alice"]);
+  });
+
+  it("unmuting bob from the player list after reporting him shows his bubbles again", async () => {
+    r = await mountLobby();
+    press(r.root, chatReportId("bob"));
+    press(r.root, reportReasonId("other"));
+    await act(async () => { reports()[0].ack({ ok: true }); });
+    press(r.root, TEST_IDS.reportCloseButton);
+    press(r.root, lobbyMuteId("bob"));
+    act(() => mockSocket.fire("chat-message", { username: "bob", message: "sorry" }));
+    expect(bubbleAuthors(r.root)).toEqual(["alice", "bob"]);
   });
 
   it("Android back closes the report dialog and stays in the room", async () => {
@@ -149,12 +175,11 @@ describe("WaitingRoom: reporting a chat message (EXP-423)", () => {
     expect(mockLeaveRoom).toHaveBeenCalledTimes(1);
   });
 
-  it("Close after the thanks keeps the author unmuted", async () => {
+  it("Cancel in the reason picker reports nothing and keeps the author unmuted", async () => {
     r = await mountLobby();
     press(r.root, chatReportId("bob"));
-    press(r.root, reportReasonId("other"));
-    await act(async () => { reports()[0].ack({ ok: true }); });
-    press(r.root, TEST_IDS.reportCloseButton);
+    press(r.root, TEST_IDS.reportCancelButton);
+    expect(reports()).toEqual([]);
     expect(bubbleAuthors(r.root)).toEqual(["bob", "alice"]);
     expect(pressable(r.root, lobbyMuteId("bob")).props.accessibilityLabel).toBe("Mute bob");
   });

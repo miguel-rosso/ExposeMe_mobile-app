@@ -204,6 +204,12 @@
 //                           be acked { ok: false, reason: "not-found" }. summary: reports_sent, reports_acked. The reports
 //                           go to the server's REPORTS_FILE (lab.sh server: qa/runs, git-ignored).
 //   node qa/lab/bots.mjs --bots 3 --host --rounds 3 --report
+//            --chat         like a player typing in the lobby chat (EXP-438): each bot sends one chat-message on joining
+//                           the room's lobby, with words the old filter (EXP-424) masked, which must be acked { ok: true }
+//                           within CHAT_ACK_TIMEOUT_MS; every chat-message a bot receives must be another bot's, exactly
+//                           as typed (no word filter, never an echo of its own). summary: chats_sent, chats_acked,
+//                           chats_received (a message reaches the bots already in the room: the last to join hears none).
+//   node qa/lab/bots.mjs --bots 3 --host --rounds 3 --chat
 //   Checks and metrics of each room: qa/lab/bots-analysis.mjs (tested on recorded events by qa/lab/tests/bots-analysis.test.sh).
 //   Every bot records waiting-photo { round, duration, gameNumber } (room-wide, owner secret; exactly WAITING_PHOTO_KEYS
 //   in bots-analysis.mjs, see GAME_FLOW.md «Game number»): same payload for all, skew measured.
@@ -243,7 +249,7 @@ import { analyseRoom, DISCONNECT_GRACE_MS, skipReasonLeak } from "./bots-analysi
 // Parsed and validated before anything touches the network (EXP-197): --help and bad arguments never connect
 const BOOL_FLAGS = new Set([
   "host", "no-answer", "answer-right", "app-resync", "lobby-host-drop", "drop-on-turn", "quit-after-game-over", "leave-owner", "report",
-  "help",
+  "chat", "help",
 ]);
 const VALUE_FLAGS = new Set([
   "server", "bots", "rooms", "rounds", "wait-players", "code", "code-file", "photos", "out", "chaos", "upload-fail",
@@ -293,6 +299,8 @@ Headless ExposeMe players (see the header of qa/lab/bots.mjs for every scenario)
                              emojis_sent, emojis_received, emojis_received_paused
   --report                   at each reveal a bot that doesn't own the photo reports it (report-content), which must be
                              acked ok; summary: reports_sent, reports_acked
+  --chat                     each bot sends one lobby chat message, which must be acked ok and reach the others exactly
+                             as typed; summary: chats_sent, chats_acked, chats_received
   --help, -h                 print this help and exit (no network)
 
 Exit codes: 0 pass, 1 fail, 2 bad arguments.`;
@@ -439,6 +447,13 @@ const REPORT = !!args.report;
 const REPORT_REASONS = ["sexual", "violence", "harassment", "other"];
 // Like the app (Client/src/utils/contentReport.ts): a report counts as sent only once acked
 const REPORT_ACK_TIMEOUT_MS = 5_000;
+
+// ── Lobby chat (--chat, EXP-438) ──
+const CHAT = !!args.chat;
+// Like the app (Client/src/hooks/useLobbyChat.ts): a message not acked in this time is not shown
+const CHAT_ACK_TIMEOUT_MS = 3_000;
+/** --chat: what bot `name` types, with words the old filter masked (EXP-424); the room must get it as typed. */
+const chatTextOf = (name) => `${name}: que puta foto, fuck`;
 const UPLOAD_FAIL = Number(args["upload-fail"] || 0);
 const PHOTO_UNAVAILABLE = Number(args["photo-unavailable"] || 0);
 const NO_READY = Number(args["no-ready"] || 0);
@@ -729,6 +744,13 @@ function runRoom(roomIdx, fixedCode) {
     // --emoji-rate: sent by this room's bots, relayed back to them (receivedPaused: while the game was paused)
     const emojis = { sent: 0, received: 0, receivedPaused: 0, timers: [] };
     const reports = { sent: 0, acked: 0 }; // --report: report-content sent by this room's bots, and acked as expected
+    const chats = { sent: 0, acked: 0, received: 0 }; // --chat: chat-message sent by this room's bots, acked, relayed
+    /**
+     * --chat (EXP-438): with two or more bots in the lobby, the later one's message reaches the earlier one, so a room
+     * where no bot heard any message lost the relay.
+     */
+    const chatProblems = () => (CHAT && chats.sent >= 2 && chats.received === 0
+      ? [`--chat: ${chats.sent} bots chatted in the lobby and none heard another's message`] : []);
     const offlineLeave = { sentAt: null }; // --leave-offline-round: when the leaver's seat leave was sent
     /** --leave-offline-round (EXP-387): every bot that left offline sent its seat leave and the server acked it. */
     const seatLeaveProblems = () => events.filter((e) => e.ev === "left-room" && e.payload?.offline).flatMap(({ bot }) => {
@@ -748,6 +770,7 @@ function runRoom(roomIdx, fixedCode) {
       errors.push(...seatLeaveProblems());
       if (KICK_IN_GAME_ROUND && !kick.scheduled) errors.push(`--kick-in-game ${KICK_IN_GAME_ROUND}: that round never started, ${KICK} was never removed`);
       if (EXPECTED_KICK) recordExpectedKick();
+      errors.push(...chatProblems());
       clearTimeout(timer);
       emojis.timers.forEach(clearInterval);
       [...bots.map((b) => b.socket), ...spareSockets].forEach((s) => s.disconnect());
@@ -755,6 +778,7 @@ function runRoom(roomIdx, fixedCode) {
         code, events, errors, uploads, rateLimited, reason, players: bots.map((b) => b.name),
         emojis: { sent: emojis.sent, received: emojis.received, receivedPaused: emojis.receivedPaused },
         reports,
+        chats,
       });
     };
     const timer = setTimeout(() => {
@@ -872,6 +896,24 @@ function runRoom(roomIdx, fixedCode) {
           if (priv.paused) emojis.receivedPaused++;
         });
       }
+      // --chat (EXP-438): like a player typing in the lobby, one message on joining, which the server must ack ok (a lost
+      // connection loses the ack: no fault). Every message heard must be another bot's, exactly as it typed it
+      const sendChat = async () => {
+        bot.chatSent = true;
+        chats.sent++;
+        const ack = await socket.timeout(CHAT_ACK_TIMEOUT_MS)
+          .emitWithAck("chat-message", { message: chatTextOf(name) })
+          .catch(() => null);
+        if (ack?.ok === true) chats.acked++;
+        else if (ack || socket.connected) errors.push(`${name}: chat-message answered ${JSON.stringify(ack)}, expected { ok: true }`);
+      };
+      if (CHAT) {
+        socket.on("chat-message", (d) => {
+          chats.received++;
+          if (d?.username === name) errors.push(`${name}: its own chat-message was echoed back`);
+          else if (d?.message !== chatTextOf(d?.username)) errors.push(`${name}: chat-message from ${d?.username} relayed as ${JSON.stringify(d?.message)}, not as typed`);
+        });
+      }
       socket.on("room-of-game", (d) => {
         if (!d.success) { errors.push(`${name} join failed: ${d.message}`); return; }
         // Play again on the same socket after game-over (EXP-172): same token, still in the room, host kept
@@ -919,6 +961,7 @@ function runRoom(roomIdx, fixedCode) {
         }
         // Like the app picking a photo to plant in the lobby: uploaded and planted at once
         if (bot.plants && !bot.plantSent && !d.room.started) plant();
+        if (CHAT && !bot.chatSent && !d.room.started) void sendChat();
         // Its own mark comes back only to itself, once the server has the photo
         if (bot.plantedAt && !d.room.started && d.hasPlantedPhoto !== true) errors.push(`${name}: room-of-game says not planted after plant-photo`);
         maybeStart();
@@ -1495,6 +1538,12 @@ const summary = {
   ...(REPORT ? {
     reports_sent: results.reduce((n, r) => n + r.reports.sent, 0),
     reports_acked: results.reduce((n, r) => n + r.reports.acked, 0),
+  } : {}),
+  // --chat: every message sent must be acked (a dropped connection can lose one); received counts the relays
+  ...(CHAT ? {
+    chats_sent: results.reduce((n, r) => n + r.chats.sent, 0),
+    chats_acked: results.reduce((n, r) => n + r.chats.acked, 0),
+    chats_received: results.reduce((n, r) => n + r.chats.received, 0),
   } : {}),
   rooms_detail: rooms,
 };

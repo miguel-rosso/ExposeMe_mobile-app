@@ -62,6 +62,7 @@ export default {
   reportThanks: "Thanks, we'll review it",
   reportRefused: "This can't be reported.",
   reportFailed: "The report couldn't be sent.",
+  reportMutedPlayerNamed: "You muted {name}",
   cancel: "Cancel",
   loadingGameRoom: "Loading game room...",
   pleaseWait: "Please wait a moment",

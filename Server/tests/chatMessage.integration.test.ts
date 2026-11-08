@@ -2,11 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Socket as ClientSocket } from "socket.io-client";
 import { useTestServer } from "./socketHarness";
 
-// EXP-424: chat-message is relayed to the room with offensive words masked (see managers/chatFilter); the rest of the
-// message, and the sender's username, go through untouched. The sender's ack carries the same masked text (no shadow
-// filtering: the app shows it as the sender's own bubble); a dropped message is not acked.
+// EXP-438 (DEC-060 A): chat-message is relayed to the room exactly as typed, with the sender's session username; there
+// is no word filter (moderation is per viewer: each player mutes or reports). The sender's ack only says the room got
+// it ({ ok: true }: the app then shows its own bubble); a dropped message is not acked.
 
-type ChatAck = { message: string };
+type ChatAck = { ok: true };
 
 // Long enough for a local round trip; a missing ack resolves null after it
 const ACK_WAIT_MS = 500;
@@ -35,19 +35,14 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("chat-message moderation", () => {
-  it("relays the message with offensive words masked, and acks the sender the same text", async () => {
+describe("chat-message", () => {
+  it("relays the message exactly as typed, words once masked included, and acks the sender { ok: true }", async () => {
     const { host, guest } = await lobby();
+    const message = "qué p.u.t.a foto, la computadora de mierda 😂";
     const relayed = once<{ username: string; message: string }>(guest, "chat-message");
-    const ack = chat(host, { message: "qué p.u.t.a foto, la computadora de mierda 😂" });
-    const masked = "qué p****** foto, la computadora de m***** 😂";
-    expect(await relayed).toEqual({ username: "host", message: masked });
-    expect(await ack).toEqual({ message: masked });
-  });
-
-  it("acks a clean message unchanged", async () => {
-    const { host } = await lobby();
-    expect(await chat(host, { message: "hola, ¿de quién es?" })).toEqual({ message: "hola, ¿de quién es?" });
+    const ack = chat(host, { message });
+    expect(await relayed).toEqual({ username: "host", message });
+    expect(await ack).toEqual({ ok: true });
   });
 
   it("does not ack a message it drops: blank, too long, from a socket in no room, or over the rate limit", async () => {
@@ -60,7 +55,7 @@ describe("chat-message moderation", () => {
     // Date frozen: the next message is surely within the 250 ms of the one before, however slow the machine
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
-      expect(await chat(host, { message: "first" })).toEqual({ message: "first" });
+      expect(await chat(host, { message: "first" })).toEqual({ ok: true });
       expect(await chat(host, { message: "too soon" })).toBeNull();
     } finally {
       vi.useRealTimers();

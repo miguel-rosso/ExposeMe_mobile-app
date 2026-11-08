@@ -267,9 +267,10 @@ const GameScreen = () => {
   // stay an answer option and keep their points: the game is the same for everyone
   const mutes = useMutedPlayers(gameCode);
   const mutedPhoto = useMutedPhotoReveal(photo, mutes.muted.has(correctAnswer));
-  // Reporting the round photo (EXP-423): the round on screen, its owner once revealed; none when the photo is mine
-  const report = useContentReport(socket);
+  // Reporting the round photo (EXP-423): the round on screen, its owner once revealed (then muted for me by the report,
+  // EXP-438, also when the reveal comes while the reason picker is open); none when the photo is mine
   const photoReport = roundPhotoReport(roundView, safeUsername);
+  const report = useContentReport(socket, { myUsername: safeUsername, mute: mutes.mute, onScreen: photoReport });
 
   // ── Leaving on purpose (EXP-377, DEC-050 A) ──────────
   // Exit (the game's button, the pause modal's, Android back) asks first. Leave sends leave-room, which the server takes
@@ -619,8 +620,6 @@ const GameScreen = () => {
         onRetry={report.retry}
         onClose={report.close}
         myUsername={safeUsername}
-        muted={mutes.muted}
-        onMute={mutes.toggle}
       />
       <GalleryAccessModal
         access={finalScore || showWinner ? null : galleryGuard.blocked}

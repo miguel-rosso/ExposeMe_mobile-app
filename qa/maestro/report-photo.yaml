@@ -1,7 +1,7 @@
 # EXP-423 / DEC-052 A: reporting the round photo on this device. The device hosts (like device-host-start.yaml): it
 # creates the room, the bots join its code, it starts the game. On the first round photo it taps the report flag (bottom
 # right, in the Exit button's strip), picks «Sexual content» / «Contenido sexual» and expects «Thanks, we'll review it» /
-# «Gracias, lo revisaremos» (its wording, the other reasons and the mute offer are checked by
+# «Gracias, lo revisaremos» (its wording, the other reasons and the owner muted by the report, EXP-438, are checked by
 # Client/__tests__/gameReportPhoto.test.tsx). The device's own photo can't be reported (the server answers not-found:
 # the dialog says «This can't be reported»), and nobody is told whose photo it is before the reveal, so a round the device
 # owns is closed and the next round's photo is reported instead. The flow ends there; the bots play on to game over.

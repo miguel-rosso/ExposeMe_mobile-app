@@ -135,21 +135,20 @@ describe("report-content: who may report what", () => {
     });
   });
 
-  it("a masked message (EXP-424): reported as the room got it, masked, and stored that way", async () => {
+  it("a message with insults (EXP-438: no word filter): reported and stored exactly as typed", async () => {
     const [alice, bob] = await createRoom("alice", "bob");
     const relayed = once<{ username: string; message: string }>(bob.socket, "chat-message");
     const acked = alice.socket.timeout(ACK_TIMEOUT_MS).emitWithAck("chat-message", { message: "eres una puta" });
-    const { message: masked } = await relayed;
-    expect(masked).toBe("eres una p***");
-    expect(await acked).toEqual({ message: masked });
+    expect((await relayed).message).toBe("eres una puta");
+    expect(await acked).toEqual({ ok: true });
 
-    expect(await report(bob.socket, { kind: "message", reason: "harassment", author: "alice", text: masked }))
-      .toEqual({ ok: true });
-    // The unmasked words were never shown to anyone: they aren't a message of the room
     expect(await report(bob.socket, { kind: "message", reason: "harassment", author: "alice", text: "eres una puta" }))
+      .toEqual({ ok: true });
+    // Only what the room really got is a message of the room
+    expect(await report(bob.socket, { kind: "message", reason: "harassment", author: "alice", text: "eres una p***" }))
       .toEqual({ ok: false, reason: "not-found" });
     await vi.waitFor(() => expect(storedReports()).toHaveLength(1));
-    expect(storedReports()[0]).toMatchObject({ reporter: "bob", reported: "alice", kind: "message", text: masked });
+    expect(storedReports()[0]).toMatchObject({ reporter: "bob", reported: "alice", kind: "message", text: "eres una puta" });
   });
 
   it("words nobody said, or the reporter's own message: not-found", async () => {

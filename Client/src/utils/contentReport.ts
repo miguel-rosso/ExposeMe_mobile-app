@@ -37,12 +37,31 @@ export const reportPayload = (target: ReportTarget, reason: ReportReason) =>
 export const reportedPlayer = (target: ReportTarget): string | undefined =>
   target.kind === "photo" ? target.owner : target.author;
 
+/**
+ * `target` with its photo's owner when it was picked before the reveal and `onScreen` (what can be reported now) is the
+ * same round's photo, revealed since; `target` itself otherwise.
+ */
+export const withRevealedOwner = (target: ReportTarget, onScreen: ReportTarget | null): ReportTarget => {
+  const revealedSince = target.kind === "photo" && target.owner === undefined && onScreen?.kind === "photo"
+    && onScreen.round === target.round && onScreen.owner !== undefined;
+  return revealedSince ? { ...target, owner: onScreen.owner } : target;
+};
+
+/**
+ * The player muted for me by reporting `target` (EXP-438): the one who sent it, when this device knows who it is, and
+ * never me; null otherwise (a photo before its reveal).
+ */
+export const playerMutedByReport = (target: ReportTarget, myUsername: string | null): string | null => {
+  const reported = reportedPlayer(target);
+  return reported !== undefined && reported !== myUsername ? reported : null;
+};
+
 /** What the game screen shows of the round (its RoundView) */
 type RoundOnScreen = Pick<RoundView, "photo" | "round" | "phase" | "correctAnswer">;
 
 /**
  * The report of the round photo on screen, or null when there is none to report: no photo, a phase without it, or a
- * photo revealed as mine. Its owner once revealed (reveal, scores), so the thanks can offer to mute them.
+ * photo revealed as mine. Its owner once revealed (reveal, scores), so reporting it mutes them (EXP-438).
  */
 export const roundPhotoReport = (
   { photo, round, phase, correctAnswer }: RoundOnScreen, username: string | null,

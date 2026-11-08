@@ -749,8 +749,8 @@ acknowledged `{ ok: true }` or `{ ok: false, reason: "not-in-room" | "invalid" |
 
 - `reason`: one of `sexual`, `violence`, `harassment`, `other` (the app's picker: «Contenido sexual / Violencia o
   odio / Acoso / Otro»). `kind: "photo"` names the round (`round`, round-start's); `kind: "message"` names the chat
-  bubble by its `author` and `text`, exactly as `chat-message` relayed them (offensive words already masked, as the
-  room saw it). The app has no message ids, so the server keeps each room's last 100 relayed chat messages in memory,
+  bubble by its `author` and `text`, exactly as `chat-message` relayed them (as typed: the chat has no word filter,
+  EXP-438). The app has no message ids, so the server keeps each room's last 100 relayed chat messages in memory,
   with the players in the room when each was sent (`managers/chatLog.ts`, gone with the room), and a message report
   must match one of them exactly; this keeps the chat protocol unchanged.
 - The reporter and the room come from the session; a `gameCode` or reporter field in the payload is ignored, so a
@@ -776,6 +776,10 @@ acknowledged `{ ok: true }` or `{ ok: false, reason: "not-in-room" | "invalid" |
   would pair with the round's `photo from <owner>` line). Both paths are git-ignored.
 - Rate-limited per socket (burst 5, refilled 1 every 12 s); a report dropped by the limit gets no ack (the app's ack
   timeout tells the player it couldn't be sent).
+- Picking the reason also mutes the reported player for the reporter (EXP-438, DEC-060 A), whatever the server then
+  answers: the chat author, or a photo's owner once revealed (before the reveal nobody knows whose it is, so nobody is
+  muted). Muting is the app's own (EXP-422): nothing about it is sent to the server, and it can be undone from the
+  player list.
 
 ## Events (Server → Client)
 
@@ -805,7 +809,7 @@ All game events are **atomic** — each contains everything the client needs.
 | `game-over` | - | `{ finalScore }` | Show final results (`finalScore`: same shape as `round-scores.scores`) |
 | `player-connection` | lobby | `{ username, connected }` | A player is gone (disconnected > 15 s) or back: dim / undim them in the lobby list |
 | `new-host` | any | public player | The host left (lobby or mid-game), was removed at game start, or has been gone > 15 s in the lobby (also checked at game-over): this player is the host now |
-| `chat-message` | any | `{ username, message }` | Chat from another player (not echoed to the sender, which gets the same `message` in its ack) |
+| `chat-message` | any | `{ username, message }` | Chat from another player, as typed (not echoed to the sender, which gets `{ ok: true }` in its ack) |
 | `emoji-reaction` | any | `{ username, emoji }` | Emoji reaction, to the whole room (sender included) |
 
 ## Events (Client → Server)
@@ -823,7 +827,7 @@ All game events are **atomic** — each contains everything the client needs.
 | `submit-answer` | `{ guess }` | Player's pick, sent on every tap (the photo owner's too, scored like any other). Only during `answering`, the last one counts (`""` withdraws it); ignored in `reveal`/`scores`, or if `guess` is not one of the round's options (the players in the room at its `round-start`, those who left since included); at most 10 per socket, refilled 5/s (excess dropped). No guess is stored and sent in scores as `lastGuess: ""` (the app shows its own translated "No guess") |
 | `hold-start` | - | Photo owner pressed hold (scores only; per-round limits, see "Hold") |
 | `hold-end` | - | Photo owner released hold |
-| `chat-message` | `{ message }` (≤100 chars, with an ack callback) | Broadcast as `{ username, message }` with the session username, insults, slurs and explicit sexual words (es/en) masked to their first character plus one `*` per further character as shown on screen (grapheme: an emoji with its skin tone is one); whole words only, after folding case, accents, compatibility forms (circled, fullwidth), lookalike letters of other scripts, leetspeak, stretched letters and separators; list and rules in `managers/chatFilter.ts`. Acked `{ message }` with that same masked text, which the app shows as the sender's own bubble (no ack within 3 s: not shown, and the sender is told it wasn't sent); not acked when blank, too long, from a socket in no room, or dropped by the rate limit |
+| `chat-message` | `{ message }` (≤100 chars, with an ack callback) | Broadcast as `{ username, message }` with the session username, the message exactly as typed: there is no word filter (EXP-438, DEC-060 A; moderation is per viewer, see "Reports"). Acked `{ ok: true }` once relayed, and only then does the app show the sender's own bubble, with the text it sent (no ack within 3 s: not shown, and the sender is told it wasn't sent); not acked when blank, too long, from a socket in no room, or dropped by the rate limit |
 | `emoji-reaction` | `{ emoji }`, exactly one of 😂 😍 ❓ 😳 🔥 😭 🤡 😡 (the app's picker) or 📸 (the app sends it when a screenshot is taken) | Broadcast as `{ username, emoji }` with the session username. Anything else is dropped; at most 5 per socket, refilled 4/s (excess dropped silently) |
 | `plant-photo` | `{ photoUrl }` (with an ack callback) | Applies to the session player (replaces their earlier one); `photoUrl` must be the player's own `/upload` path in this room; accepted until the first round is played. Acked `{ ok: true }` or `{ ok: false, reason: "not-in-room" \| "invalid" \| "too-late" \| "photo-unavailable" }` (see "Planting"); not acked when dropped by the rate limit |
 | `report-content` | `{ kind, reason, round?, author?, text? }` (with an ack callback) | Report a round photo (`kind: "photo"`, `round`) or another player's chat message (`kind: "message"`, `author`, `text`) with a `reason` (`sexual` \| `violence` \| `harassment` \| `other`); about the sender's own room only. Acked `{ ok: true }` or `{ ok: false, reason: "not-in-room" \| "invalid" \| "not-found" }`; not acked when dropped by the rate limit (see "Reports") |

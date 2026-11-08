@@ -1,7 +1,8 @@
 import { FakeSocket } from "../testUtils/fakeSocket";
 import type { AckSocket } from "../src/utils/socketAck";
 import {
-  REPORT_ACK_TIMEOUT_MS, reportedPlayer, reportPayload, roundPhotoReport, sendContentReport,
+  playerMutedByReport, REPORT_ACK_TIMEOUT_MS, reportedPlayer, reportPayload, roundPhotoReport, sendContentReport,
+  withRevealedOwner,
 } from "../src/utils/contentReport";
 
 // EXP-423: what a report sends and what the round photo's report button points at. The dialog flows are covered by
@@ -41,6 +42,37 @@ describe("roundPhotoReport", () => {
     expect(roundPhotoReport({ ...round, phase: "waiting-photo" }, "alice")).toBeNull();
     expect(roundPhotoReport({ ...round, phase: null }, "alice")).toBeNull();
     expect(roundPhotoReport({ ...round, phase: "reveal", correctAnswer: "alice" }, "alice")).toBeNull();
+  });
+});
+
+describe("playerMutedByReport (EXP-438)", () => {
+  it("a message's author, or a photo's owner once revealed", () => {
+    expect(playerMutedByReport({ kind: "message", author: "bob", text: "hi" }, "alice")).toBe("bob");
+    expect(playerMutedByReport({ kind: "photo", round: 3, owner: "bob" }, "alice")).toBe("bob");
+  });
+
+  it("nobody: a photo whose owner is still secret, or content of mine", () => {
+    expect(playerMutedByReport({ kind: "photo", round: 3 }, "alice")).toBeNull();
+    expect(playerMutedByReport({ kind: "photo", round: 3, owner: "alice" }, "alice")).toBeNull();
+    expect(playerMutedByReport({ kind: "message", author: "alice", text: "hi" }, "alice")).toBeNull();
+  });
+});
+
+describe("withRevealedOwner (EXP-438)", () => {
+  const before = { kind: "photo" as const, round: 3 };
+
+  it("a photo picked before its reveal takes the owner of the same round's photo revealed since", () => {
+    expect(withRevealedOwner(before, { kind: "photo", round: 3, owner: "bob" })).toEqual({ ...before, owner: "bob" });
+  });
+
+  it("anything else stays as it is: still secret, another round, nothing on screen, a known owner, a message", () => {
+    expect(withRevealedOwner(before, { kind: "photo", round: 3 })).toBe(before);
+    expect(withRevealedOwner(before, { kind: "photo", round: 4, owner: "bob" })).toBe(before);
+    expect(withRevealedOwner(before, null)).toBe(before);
+    const known = { kind: "photo" as const, round: 3, owner: "carol" };
+    expect(withRevealedOwner(known, { kind: "photo", round: 3, owner: "bob" })).toBe(known);
+    const message = { kind: "message" as const, author: "bob", text: "hi" };
+    expect(withRevealedOwner(message, { kind: "photo", round: 3, owner: "carol" })).toBe(message);
   });
 });
 

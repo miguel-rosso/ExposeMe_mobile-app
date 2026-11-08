@@ -6,7 +6,7 @@ import { useTestServer } from "./socketHarness";
 // EXP-440: client messages are small JSON. One larger than MAX_SOCKET_MESSAGE_BYTES (over WebSocket or long-polling)
 // or carrying binary data closes only that connection, before socket.io buffers it; everyone else plays on.
 
-type ChatAck = { message: string };
+type ChatAck = { ok: true };
 
 // Long enough for a local round trip; a missing ack resolves null after it
 const ACK_WAIT_MS = 500;
@@ -37,7 +37,7 @@ const oversizedMessage = () => ({ message: "x".repeat(MAX_SOCKET_MESSAGE_BYTES) 
 /** The host still talks to the room after the guest was cut off. */
 async function expectHostStillChats(host: ClientSocket) {
   expect(host.connected).toBe(true);
-  expect(await chat(host, { message: "still here" })).toEqual({ message: "still here" });
+  expect(await chat(host, { message: "still here" })).toEqual({ ok: true });
 }
 
 describe("socket message size limit", () => {
@@ -45,7 +45,7 @@ describe("socket message size limit", () => {
     const { host, guest } = await lobby();
     const message = "😂".repeat(50); // 100 UTF-16 units, 200 bytes of UTF-8
     const relayed = once<{ message: string }>(host, "chat-message");
-    expect(await chat(guest, { message })).toEqual({ message });
+    expect(await chat(guest, { message })).toEqual({ ok: true });
     expect((await relayed).message).toBe(message);
   });
 
@@ -75,7 +75,7 @@ describe("socket message size limit", () => {
     // (set-rounds from a guest is ignored, so the burst changes nothing in the room)
     const notes = Array.from({ length: 300 }, (_, i) => `${i} ${"y".repeat(190)}`);
     for (const note of notes) guest.emit("set-rounds", { rounds: 5, note });
-    expect(await chat(guest, { message: "after the burst" })).toEqual({ message: "after the burst" });
+    expect(await chat(guest, { message: "after the burst" })).toEqual({ ok: true });
     expect(guest.connected).toBe(true);
     await expectHostStillChats(host);
   });

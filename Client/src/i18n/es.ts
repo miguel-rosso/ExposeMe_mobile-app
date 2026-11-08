@@ -62,6 +62,7 @@ export default {
   reportThanks: "Gracias, lo revisaremos",
   reportRefused: "Esto no se puede denunciar.",
   reportFailed: "No se pudo enviar la denuncia.",
+  reportMutedPlayerNamed: "Has silenciado a {name}",
   cancel: "Cancelar",
   loadingGameRoom: "Cargando sala...",
   pleaseWait: "Espera un momento",

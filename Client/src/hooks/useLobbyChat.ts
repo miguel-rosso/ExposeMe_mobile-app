@@ -4,7 +4,7 @@ import type { Socket } from "socket.io-client";
 import { useI18n } from "../i18n";
 import { appendCapped, MAX_CHAT_MESSAGES } from "../utils/reactions";
 import { CHAT_COOLDOWN_MS } from "../utils/protocolLimits";
-import { AckSocket, emitAwaitingAck } from "../utils/socketAck";
+import { AckSocket, emitAwaitingAck, hasBooleanOk } from "../utils/socketAck";
 import { MutedNames, withoutMuted } from "./useMutedPlayers";
 
 /** A message on the lobby chat: mine or another player's */
@@ -20,24 +20,19 @@ interface IncomingChatMessage {
   message: string;
 }
 
-/** How long my message waits for chat-message's ack (the text as the room got it) before it is not shown at all. */
+/** How long my message waits for chat-message's ack (the room got it) before it is not shown at all. */
 export const CHAT_ACK_TIMEOUT_MS = 3000;
 
-/** chat-message's ack: my message as the server relayed it, offensive words masked (EXP-424) */
-interface ChatMessageAck {
-  message: string;
-}
-
-const isChatMessageAck = (answer: unknown): answer is ChatMessageAck =>
-  typeof answer === "object" && answer !== null && typeof (answer as { message?: unknown }).message === "string";
+/** chat-message's ack: the room got my message, as typed (there is no word filter, EXP-438) */
+const isChatMessageAck = (answer: unknown): answer is { ok: true } => hasBooleanOk(answer) && answer.ok;
 
 /**
- * Sends `message` to the room and resolves with the text the room got, or null when there is no ack: not connected,
+ * Sends `message` to the room and resolves true once the server acks it, false when there is no ack: not connected,
  * the connection dropped, the server dropped it (rate limit) or answered after CHAT_ACK_TIMEOUT_MS.
  */
-export const sendChatMessage = (socket: AckSocket, message: string): Promise<string | null> =>
+export const sendChatMessage = (socket: AckSocket, message: string): Promise<boolean> =>
   emitAwaitingAck(socket, "chat-message", [{ message }], isChatMessageAck, { timeoutMs: CHAT_ACK_TIMEOUT_MS })
-    .then((ack) => ack?.message ?? null);
+    .then((ack) => ack !== null);
 
 const newChatMessage = (username: string, message: string): LobbyChatMessage => ({
   id: `${Date.now()}-${Math.random()}`,
@@ -47,11 +42,10 @@ const newChatMessage = (username: string, message: string): LobbyChatMessage => 
 
 /**
  * The lobby chat: the messages on screen (the newest MAX_CHAT_MESSAGES, each one removed once its bubble fades out) and
- * sending, at most one message per CHAT_COOLDOWN_MS. My own message shows with the text the server relayed (its ack),
- * so I see exactly what the room sees (offensive words masked); without an ack it isn't shown and I'm told it wasn't
- * sent. Other players' messages come in through `receive`, which the screen attaches with the rest of its socket
- * handlers. The message being typed is the chat footer's own state, so typing never re-renders the screen holding this
- * hook (EXP-396). Players muted on this device (`muted`, EXP-422) are never shown: their messages are dropped as they
+ * sending, at most one message per CHAT_COOLDOWN_MS. My own message shows once the server acks it, as I typed it (the
+ * room gets it as typed too); without an ack it isn't shown and I'm told it wasn't sent. Other players' messages come
+ * in through `receive`, which the screen attaches with the rest of its socket handlers. The message being typed is the
+ * chat footer's own state, so typing never re-renders the screen holding this hook (EXP-396). Players muted on this device (`muted`, EXP-422) are never shown: their messages are dropped as they
  * arrive, and muting removes the ones already on screen.
  */
 export const useLobbyChat = (
@@ -86,11 +80,11 @@ export const useLobbyChat = (
     }
     // Offline it is not sent (nor shown): the text stays in the input to send once back
     if (!gameCode || !socket?.connected) return false;
-    // The server doesn't echo it back to me: its ack carries the text the room got
-    sendChatMessage(socket, message).then((relayed) => {
+    // The server doesn't echo it back to me: its ack says the room got it
+    sendChatMessage(socket, message).then((sent) => {
       if (currentGameCode.current !== gameCode) return; // left that room meanwhile: nothing to show there
-      if (relayed === null) Alert.alert(t.error, t.chatMessageNotSent);
-      else show(newChatMessage(username || "You", relayed));
+      if (sent) show(newChatMessage(username || "You", message));
+      else Alert.alert(t.error, t.chatMessageNotSent);
     });
     setLastSentTime(now);
     return true;

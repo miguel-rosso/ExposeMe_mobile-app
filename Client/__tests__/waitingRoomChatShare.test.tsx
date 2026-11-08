@@ -98,10 +98,10 @@ const sendChat = (r: TestRenderer.ReactTestRenderer) => pressId(r, TEST_IDS.chat
 
 const chatShown = (r: TestRenderer.ReactTestRenderer) =>
   r.root.findAll((n) => (n.type as unknown) === "ChatMessage").map((n) => ({ username: n.props.username, message: n.props.message }));
-/** Plays the server's ack of the `index`-th chat-message I sent: the text the room got (EXP-424: masked). */
-const ackChat = (index: number, message: string) => act(async () => {
+/** Plays the server's ack of the `index`-th chat-message I sent (`answer`: { ok: true } once the room got it). */
+const ackChat = (index: number, answer: unknown = { ok: true }) => act(async () => {
   const [, , ack] = mockSocket.emitted.filter(([event]) => event === "chat-message")[index];
-  ack({ message });
+  ack(answer);
   for (let i = 0; i < 5; i++) await Promise.resolve(); // the ack's promise chain
 });
 const notices = (r: TestRenderer.ReactTestRenderer) =>
@@ -119,20 +119,28 @@ describe("WaitingRoom: lobby chat (EXP-186)", () => {
     expect(mockSocket.emittedPayloads("chat-message")).toEqual([{ message: "hola a todos" }]);
     expect(byId(r, TEST_IDS.chatInput).props.value).toBe("");
     expect(dismissSpy).toHaveBeenCalledTimes(1);
-    expect(chatShown(r)).toEqual([]); // not until the server says what the room got
+    expect(chatShown(r)).toEqual([]); // not until the server says the room got it
 
-    await ackChat(0, "hola a todos");
+    await ackChat(0);
     expect(chatShown(r)).toEqual([{ username: "alice", message: "hola a todos" }]);
     act(() => r.unmount());
   });
 
-  // EXP-424: the server masks offensive words; I see my message exactly as the room got it (no shadow filtering)
-  it("shows my message with the text of the server's ack, offensive words masked, not the text I typed", async () => {
+  // EXP-438 (DEC-060 A): no word filter; the room gets my message as typed, and so do I once the server acks it
+  it("shows my message exactly as I typed it once acked { ok: true }; any other answer is no ack", async () => {
     const r = await mount();
     await typeChat(r, "qué puta foto");
     await sendChat(r);
-    await ackChat(0, "qué p*** foto");
-    expect(chatShown(r)).toEqual([{ username: "alice", message: "qué p*** foto" }]);
+    await ackChat(0);
+    expect(chatShown(r)).toEqual([{ username: "alice", message: "qué puta foto" }]);
+
+    act(() => jest.advanceTimersByTime(CHAT_COOLDOWN_MS));
+    await typeChat(r, "otra");
+    await sendChat(r);
+    await ackChat(1, { message: "otra" });
+    await act(async () => { jest.advanceTimersByTime(CHAT_ACK_TIMEOUT_MS); });
+    expect(chatShown(r).map((m) => m.message)).toEqual(["qué puta foto"]);
+    expect(alertSpy).toHaveBeenCalledWith(en.error, en.chatMessageNotSent);
     act(() => r.unmount());
   });
 
@@ -145,7 +153,7 @@ describe("WaitingRoom: lobby chat (EXP-186)", () => {
     await act(async () => { jest.advanceTimersByTime(1); });
     expect(chatShown(r)).toEqual([]);
     expect(alertSpy).toHaveBeenCalledWith(en.error, en.chatMessageNotSent);
-    await ackChat(0, "qué p*** foto");
+    await ackChat(0);
     expect(chatShown(r)).toEqual([]);
     expect(alertSpy).toHaveBeenCalledTimes(1);
     act(() => r.unmount());
@@ -160,7 +168,7 @@ describe("WaitingRoom: lobby chat (EXP-186)", () => {
     await sendChat(r);
     mockCtx.gameCode = "Q2W3E4";
     await act(async () => { r.update(<WaitingRoom />); });
-    await ackChat(0, "uno");
+    await ackChat(0);
     await act(async () => { jest.advanceTimersByTime(CHAT_ACK_TIMEOUT_MS); }); // "dos" never acked
     expect(chatShown(r)).toEqual([]);
     expect(alertSpy).not.toHaveBeenCalled();
@@ -173,7 +181,7 @@ describe("WaitingRoom: lobby chat (EXP-186)", () => {
     await typeChat(r, "hola");
     act(() => { byId(r, TEST_IDS.chatInput).props.onSubmitEditing({ nativeEvent: { text: "hola" } }); });
     expect(mockSocket.emittedPayloads("chat-message")).toEqual([{ message: "hola" }]);
-    await ackChat(0, "hola");
+    await ackChat(0);
     expect(chatShown(r)).toEqual([{ username: "alice", message: "hola" }]);
     expect(byId(r, TEST_IDS.chatInput).props.value).toBe("");
     expect(dismissSpy).not.toHaveBeenCalled();
@@ -213,7 +221,7 @@ describe("WaitingRoom: lobby chat (EXP-186)", () => {
     mockSocket.connected = true;
     await sendChat(r); // no cooldown spent by the message that didn't go
     expect(mockSocket.emittedPayloads("chat-message").map((m) => m.message)).toEqual(["hola"]);
-    await ackChat(0, "hola");
+    await ackChat(0);
     expect(chatShown(r).map((m) => m.message)).toEqual(["hola"]);
     act(() => r.unmount());
   });
@@ -222,7 +230,7 @@ describe("WaitingRoom: lobby chat (EXP-186)", () => {
     const r = await mount();
     await typeChat(r, "uno");
     await sendChat(r);
-    await ackChat(0, "uno");
+    await ackChat(0);
 
     act(() => jest.advanceTimersByTime(CHAT_COOLDOWN_MS - 1));
     await typeChat(r, "dos");
@@ -234,7 +242,7 @@ describe("WaitingRoom: lobby chat (EXP-186)", () => {
     act(() => jest.advanceTimersByTime(1));
     await sendChat(r);
     expect(mockSocket.emittedPayloads("chat-message").map((m) => m.message)).toEqual(["uno", "dos"]);
-    await ackChat(1, "dos");
+    await ackChat(1);
     expect(chatShown(r).map((m) => m.message)).toEqual(["uno", "dos"]);
     expect(alertSpy).toHaveBeenCalledTimes(1);
     act(() => r.unmount());

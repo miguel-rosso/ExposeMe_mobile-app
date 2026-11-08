@@ -1,6 +1,7 @@
 import { NextFunction, Request, Response } from "express";
 import { clientIp, envInt, memberKey, UploadMemberLocals } from "./rateLimit";
 import { MAX_FILE_SIZE } from "./upload";
+import { markBodyBounded } from "./unreadBody";
 
 // ── Concurrency caps for POST /upload ──
 // multer buffers each upload in memory (up to MAX_FILE_SIZE) before sanitizeImage's own queue applies, and the
@@ -155,6 +156,9 @@ export function createInFlightLimiter(opts: {
     timer.unref();
     req.once("end", () => clearTimeout(timer));
     capBodyBytes(req, res);
+    // Answered early (403/429 after admission), its body is drained under this byte cap rather than cut after the
+    // unread-body grace period, so a member on a slow network still reads the answer (see middlewares/unreadBody)
+    markBodyBounded(res);
 
     let released = false;
     const release = () => {

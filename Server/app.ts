@@ -11,6 +11,7 @@ import { requireRoomMember, requireRoomUpload } from "./middlewares/uploadAccess
 import { socketHandshakeLimit, socketOriginGuard } from "./middlewares/socketOrigin";
 import { reportStore } from "./managers/reportStore";
 import { closeOnBinaryMessage, MAX_SOCKET_MESSAGE_BYTES } from "./middlewares/socketPayload";
+import { closeUnreadBodyAfterResponse } from "./middlewares/unreadBody";
 
 const app = express();
 app.disable("x-powered-by");
@@ -23,8 +24,8 @@ if (trustProxyHops > 0) app.set("trust proxy", trustProxyHops);
 app.use(securityHeaders);
 // No CORS: the only clients are the native app and Node bots, which don't enforce it, and the /join invite page is a
 // top-level navigation. Without Access-Control-* headers no other website can read these responses from a browser.
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// No JSON/urlencoded body parsers either: no route reads such a body (POST /upload is multipart, parsed by multer after
+// its limits), and body-parser reads a body it refuses to its very end before answering.
 
 // Uploads: exact /temp/<32 hex>.<ext> route only (no static directory listing of other files), and only to members
 // of the room the photo was uploaded in (session credential in headers, see middlewares/uploadAccess)
@@ -35,7 +36,7 @@ app.use("/temp", (_req, res) => {
 app.use("/", uploadRoutes);
 // Unknown routes: JSON 404 that never echoes the path
 app.use(notFound);
-// Last: JSON errors without stack traces or server paths (bad URL encoding, body parse errors, disk failures)
+// Last: JSON errors without stack traces or server paths (bad URL encoding, disk failures)
 app.use(errorHandler);
 
 // ── Socket heartbeat ──
@@ -87,6 +88,10 @@ const io = new Server(server, {
 io.engine.use(socketOriginGuard);
 io.engine.use(socketHandshakeLimit);
 io.engine.on("connection", closeOnBinaryMessage);
+// Every request, Express' and socket.io's alike (see middlewares/unreadBody). Must stay AFTER `new Server(server, …)`:
+// socket.io's attach() takes the 'request' listeners registered so far and only calls them for paths outside
+// /socket.io/, so registered before it this would never see socket.io's own requests.
+server.prependListener("request", closeUnreadBodyAfterResponse);
 
 // Deletes uploads past their TTL at startup (leftovers from a previous process) and periodically after that
 const uploadSweeper = startUploadSweeper(uploadPath);

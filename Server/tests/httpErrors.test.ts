@@ -5,7 +5,7 @@ import { setUploadRooms } from "../middlewares/uploadAccess";
 import type { Player, Room } from "../models/interfaces";
 import { useTestServer } from "./socketHarness";
 
-// Final HTTP error handling: whatever goes wrong (bad URL encoding, body parse errors, a failing disk write)
+// Final HTTP error handling: whatever goes wrong (bad URL encoding, an unparsed body, a failing disk write)
 // the client gets a short JSON error, never Express' default HTML page with a stack trace and server paths.
 
 const UPLOAD_DIR = vi.hoisted(() => {
@@ -42,24 +42,18 @@ describe("final error handler", () => {
     await expectSafeJson(await fetch(`${harness.url}${p}`), 400);
   });
 
-  it("malformed JSON body → 400 JSON, no trace", async () => {
+  // No JSON body parser (EXP-448): the route answers as for any other body, without reading it first
+  it.each([
+    ["malformed", "{not json"],
+    ["oversized", JSON.stringify({ x: "a".repeat(200_000) })],
+  ])("%s JSON body → the route's own answer (401), JSON, no trace", async (_what, body) => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const res = await fetch(`${harness.url}/upload`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: "{not json",
+      body,
     });
-    await expectSafeJson(res, 400);
-  });
-
-  it("oversized JSON body → 413 JSON", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    const res = await fetch(`${harness.url}/upload`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ x: "a".repeat(200_000) }),
-    });
-    await expectSafeJson(res, 413);
+    await expectSafeJson(res, 401);
   });
 
   it("disk write failure while saving an upload → 500 JSON without details, error logged server-side", async () => {

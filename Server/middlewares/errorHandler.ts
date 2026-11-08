@@ -2,9 +2,9 @@ import { NextFunction, Request, Response } from "express";
 
 /**
  * Final Express error handler: answers `{ error }` JSON and never sends the stack, messages or file paths
- * (Express' default handler does outside NODE_ENV=production). Client errors raised by Express/body-parser
- * (status 4xx, e.g. malformed percent-encoding in the URL or a bad JSON body) keep their status with a
- * generic message; anything else is a 500 and is logged server-side.
+ * (Express' default handler does outside NODE_ENV=production). Client errors raised by Express
+ * (status 4xx, e.g. malformed percent-encoding in the URL) keep their status with a generic message; anything
+ * else is a 500 and is logged server-side.
  */
 export function errorHandler(err: unknown, req: Request, res: Response, next: NextFunction) {
   const raw = (err as { status?: unknown; statusCode?: unknown } | null)?.status ?? (err as { statusCode?: unknown } | null)?.statusCode;

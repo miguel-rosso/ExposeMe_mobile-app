@@ -196,10 +196,14 @@ export default {
   iosConfirmFullAccess: 'Si eliges "Acceso total", confírmalo con "Permitir acceso total".',
   back: "Volver",
   openSettings: "Abrir Ajustes",
-  // Settings and home: the privacy policy page and the contact address (EXP-426)
+  // Information screen, opened from home's Info link (EXP-434): the privacy policy and terms of use pages, the contact
+  // address and the app version ({version})
+  info: "Info", // home: the short text of the link (its screen reader name is information)
+  information: "Información",
   privacyPolicy: "Política de privacidad",
-  privacy: "Privacidad", // home: the short text of the same link (its screen reader name is privacyPolicy)
+  termsOfUsePage: "Condiciones de uso",
   contactUs: "Contacto",
+  appVersion: "Versión {version}",
 
   // OwnPhotos
   next: "Siguiente",

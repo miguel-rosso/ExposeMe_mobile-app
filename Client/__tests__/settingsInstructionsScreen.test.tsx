@@ -1,6 +1,6 @@
 import React from "react";
 import TestRenderer, { act, ReactTestInstance, ReactTestRenderer } from "react-test-renderer";
-import { Alert, Image, Linking, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Image, Linking, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { TEST_IDS, settingsStepId } from "../src/utils/testIds";
 
 // EXP-123: "Open Settings" must use the public Linking.openSettings() on iOS too (never a private App-Prefs URL),
@@ -9,8 +9,8 @@ import { TEST_IDS, settingsStepId } from "../src/utils/testIds";
 // EXP-190: Android step 1 shows App info, so it must say to tap "Permissions", not a generic text shared with iOS.
 // EXP-196: the buttons sit in a fixed footer outside the ScrollView, padded by the bottom inset, so they are always
 // fully on screen above the Android gesture bar (inside the scroll content they started half under it).
-// EXP-426: a Privacy policy row opens the server's /privacy page in the app language, and a Contact row opens a mailto
-// to the build's EXPO_PUBLIC_CONTACT_EMAIL, hidden when the build has no valid address.
+// EXP-434: the privacy policy and contact rows (EXP-426) moved to the Information screen, reachable from home
+// (infoScreen.test.tsx): this screen is only the permission guide.
 
 jest.mock("expo-router", () => ({ useRouter: () => ({ replace: jest.fn(), push: jest.fn() }) }));
 jest.mock("@/assets/images/PermInstructions1.jpg", () => "PermInstructions1", { virtual: true });
@@ -117,8 +117,8 @@ describe("SettingsInstructionsScreen", () => {
     expect(stepDescription(tree, 1)).toBe(t.iosTapPhotosChooseAccess);
     expect(stepDescription(tree, 2)).toBe(t.iosConfirmFullAccess);
     expect(shown).not.toContain(t.step3);
-    // The steps never send to the Privacy path (the privacy policy row below them is another matter: EXP-426)
-    expect(shown.filter((text) => text !== t.privacyPolicy).join(" ")).not.toMatch(/privacy|privacidad/i);
+    // The steps never send to the Privacy path
+    expect(shown.join(" ")).not.toMatch(/privacy|privacidad/i);
   });
 
   it.each([
@@ -179,90 +179,5 @@ describe("SettingsInstructionsScreen", () => {
 
     // The frame leaves the bottom edge to the footer (padding it as well would count the inset twice)
     expect(frame.props.edges).toEqual(["top", "left", "right"]);
-  });
-
-  // ── EXP-426 ──
-  describe("privacy policy and contact", () => {
-    const savedServer = process.env.EXPO_PUBLIC_SERVER_URL;
-    const savedEmail = process.env.EXPO_PUBLIC_CONTACT_EMAIL;
-    beforeEach(() => {
-      process.env.EXPO_PUBLIC_SERVER_URL = "http://localhost:3999";
-      delete process.env.EXPO_PUBLIC_CONTACT_EMAIL;
-    });
-    afterEach(() => {
-      for (const [key, value] of [["EXPO_PUBLIC_SERVER_URL", savedServer], ["EXPO_PUBLIC_CONTACT_EMAIL", savedEmail]] as const) {
-        if (value === undefined) delete process.env[key];
-        else process.env[key] = value;
-      }
-    });
-
-    const press = async (tree: ReactTestRenderer, id: string) => {
-      await act(async () => {
-        await byTestID(tree, id).props.onPress();
-      });
-    };
-
-    it.each([
-      ["en", en],
-      ["es", es],
-    ] as const)("the Privacy policy row opens the server's policy in the app language (%s)", async (lang, t) => {
-      mockT = t;
-      mockLang = lang;
-      const { tree, restore } = await render("android");
-      restorePlatform = restore;
-      const row = byTestID(tree, TEST_IDS.settingsPrivacyLink);
-
-      expect(row.props.accessibilityRole).toBe("link");
-      expect(row.props.accessibilityLabel).toBe(t.privacyPolicy);
-      expect(texts(tree)).toContain(t.privacyPolicy);
-      await press(tree, TEST_IDS.settingsPrivacyLink);
-      expect(openURL).toHaveBeenCalledWith(`http://localhost:3999/privacy?lang=${lang}`);
-    });
-
-    it.each([undefined, "not-an-email"])("there is no Contact row without a valid address (%p)", async (email) => {
-      if (email !== undefined) process.env.EXPO_PUBLIC_CONTACT_EMAIL = email;
-      const { tree, restore } = await render("android");
-      restorePlatform = restore;
-
-      expect(byTestID(tree, TEST_IDS.settingsContactLink)).toBeUndefined();
-      expect(texts(tree)).not.toContain(en.contactUs);
-    });
-
-    it.each([
-      ["en", en],
-      ["es", es],
-    ] as const)("the Contact row opens a mail to the build's address (%s)", async (lang, t) => {
-      mockT = t;
-      mockLang = lang;
-      process.env.EXPO_PUBLIC_CONTACT_EMAIL = "contact@example.com";
-      const { tree, restore } = await render("ios");
-      restorePlatform = restore;
-      const row = byTestID(tree, TEST_IDS.settingsContactLink);
-
-      expect(row.props.accessibilityRole).toBe("link");
-      expect(row.props.accessibilityLabel).toBe(`${t.contactUs}: contact@example.com`);
-      expect(texts(tree)).toEqual(expect.arrayContaining([t.contactUs, "contact@example.com"]));
-      await press(tree, TEST_IDS.settingsContactLink);
-      expect(openURL).toHaveBeenCalledWith("mailto:contact@example.com");
-    });
-
-    it("shows the address when no mail app can open it", async () => {
-      process.env.EXPO_PUBLIC_CONTACT_EMAIL = "contact@example.com";
-      openURL.mockRejectedValue(new Error("No Activity found to handle Intent"));
-      const alert = jest.spyOn(Alert, "alert").mockImplementation(() => {});
-      const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
-      const { tree, restore } = await render("android");
-      restorePlatform = restore;
-
-      await press(tree, TEST_IDS.settingsContactLink);
-      expect(alert).toHaveBeenCalledWith(en.contactUs, "contact@example.com");
-      alert.mockRestore();
-      warn.mockRestore();
-    });
-
-    it("the labels are translated", () => {
-      expect(es.privacyPolicy).not.toBe(en.privacyPolicy);
-      expect(es.contactUs).not.toBe(en.contactUs);
-    });
   });
 });

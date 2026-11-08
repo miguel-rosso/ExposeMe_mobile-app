@@ -10,18 +10,18 @@ import {
   PHOTO_EXPLORER_BUTTON_SIZE,
   PHOTO_EXPLORER_ICON_SIZE,
   PHOTO_EXPLORER_LABEL_BOTTOM,
-  PRIVACY_LINK_BOTTOM,
-  PRIVACY_LINK_HIT_SLOP,
-  PRIVACY_LINK_LINE_HEIGHT,
-  PRIVACY_LINK_MAX_FONT_SCALE,
-  PRIVACY_LINK_MAX_LINES,
-  PRIVACY_LINK_PADDING_Y,
-  PRIVACY_LINK_RIGHT,
-  privacyLinkMaxWidth,
+  INFO_LINK_BOTTOM,
+  INFO_LINK_HIT_SLOP,
+  INFO_LINK_LINE_HEIGHT,
+  INFO_LINK_MAX_FONT_SCALE,
+  INFO_LINK_MAX_LINES,
+  INFO_LINK_PADDING_Y,
+  INFO_LINK_RIGHT,
+  infoLinkMaxWidth,
 } from "../src/utils/homeLayout";
 
-// EXP-426: home has a small Privacy link that opens the game server's /privacy page in the app language, in the
-// browser (no route is pushed). It shares the Photo Explorer label's row, in the strip right of the centred label and
+// EXP-434: home has a small Info link that opens the Information screen (privacy policy, terms of use, contact and
+// version), so they are always one tap away, not only after denying photo access for good. EXP-426: it shares the Photo Explorer label's row, in the strip right of the centred label and
 // dice button, sized from the label as laid out, so it never covers them (a link under the label once pushed the dice
 // into the Join game button). The Photo Explorer group keeps its place.
 
@@ -114,34 +114,35 @@ const layOutLabel = (root: ReactTestInstance, label: string, width: number) =>
     photoExplorerLabel(root, label).props.onLayout({ nativeEvent: { layout: { x: 0, y: 0, width, height: 26 } } });
   });
 
-/** The native views of the privacy link */
-const privacyLinks = (root: ReactTestInstance) =>
-  root.findAll((n) => typeof n.type === "string" && n.props.testID === TEST_IDS.homePrivacyLink);
+/** The native views of the Info link */
+const infoLinks = (root: ReactTestInstance) =>
+  root.findAll((n) => typeof n.type === "string" && n.props.testID === TEST_IDS.homeInfoLink);
 
-describe("Home: privacy policy link (EXP-426)", () => {
-  it.each([["en", en], ["es", es]] as const)("%s: opens the server's policy in the app language, without a route", async (lang, t) => {
+describe("Home: Info link (EXP-434, placed as EXP-426)", () => {
+  it.each([["en", en], ["es", es]] as const)("%s: opens the Information screen", async (lang, t) => {
     mockLang = lang;
     const r = await mount();
     layOutLabel(r.root, t.photoExplorer, LABEL_WIDTH_AT_1_3);
-    const [link] = privacyLinks(r.root);
+    const [link] = infoLinks(r.root);
 
-    expect(link.props.accessibilityRole).toBe("link");
-    expect(link.props.accessibilityLabel).toBe(t.privacyPolicy);
-    expect(link.findByType(Text).props.children).toBe(t.privacy);
-    const pressable = r.root.find((n) => n.props.testID === TEST_IDS.homePrivacyLink && typeof n.props.onPress === "function");
+    expect(link.props.accessibilityRole).toBe("button");
+    expect(link.props.accessibilityLabel).toBe(t.information);
+    expect(link.findByType(Text).props.children).toBe(t.info);
+    const pressable = r.root.find((n) => n.props.testID === TEST_IDS.homeInfoLink && typeof n.props.onPress === "function");
     await act(async () => { await pressable.props.onPress(); });
 
-    expect(openURL).toHaveBeenCalledWith(`http://localhost:3999/privacy?lang=${lang}`);
-    expect(mockRouter.push).not.toHaveBeenCalled();
+    expect(mockRouter.push).toHaveBeenCalledWith("/screens/InfoScreen");
     expect(mockRouter.replace).not.toHaveBeenCalled();
+    // The pages themselves open from that screen, not straight from home
+    expect(openURL).not.toHaveBeenCalled();
     act(() => r.unmount());
   });
 
   it("waits for the label's layout, so it is never drawn without its bound", async () => {
     const r = await mount();
-    expect(privacyLinks(r.root)).toHaveLength(0);
+    expect(infoLinks(r.root)).toHaveLength(0);
     layOutLabel(r.root, en.photoExplorer, LABEL_WIDTH_AT_1_3);
-    expect(privacyLinks(r.root)).toHaveLength(1);
+    expect(infoLinks(r.root)).toHaveLength(1);
     act(() => r.unmount());
   });
 
@@ -151,14 +152,14 @@ describe("Home: privacy policy link (EXP-426)", () => {
       mockLang = lang;
       const r = await mount();
       layOutLabel(r.root, t.photoExplorer, LABEL_WIDTH_AT_1_3);
-      const [link] = privacyLinks(r.root);
+      const [link] = infoLinks(r.root);
       const { maxWidth } = flatStyle(link);
-      const linkLeft = SCREEN.width - PRIVACY_LINK_RIGHT - maxWidth;
+      const linkLeft = SCREEN.width - INFO_LINK_RIGHT - maxWidth;
 
-      expect(maxWidth).toBe(privacyLinkMaxWidth(SCREEN.width, LABEL_WIDTH_AT_1_3));
+      expect(maxWidth).toBe(infoLinkMaxWidth(SCREEN.width, LABEL_WIDTH_AT_1_3));
       expect(linkLeft).toBeGreaterThan(SCREEN.width / 2 + Math.max(LABEL_WIDTH_AT_1_3, PHOTO_EXPLORER_BUTTON_SIZE) / 2);
-      expect(bottomOf(link)).toBe(PRIVACY_LINK_BOTTOM);
-      expect(styleAround(link, "right")).toBe(PRIVACY_LINK_RIGHT);
+      expect(bottomOf(link)).toBe(INFO_LINK_BOTTOM);
+      expect(styleAround(link, "right")).toBe(INFO_LINK_RIGHT);
       act(() => r.unmount());
     }
   );
@@ -166,16 +167,16 @@ describe("Home: privacy policy link (EXP-426)", () => {
   it("its height is bounded: padding, line count and font scale are the ones homeLayout counts", async () => {
     const r = await mount();
     layOutLabel(r.root, en.photoExplorer, LABEL_WIDTH_AT_1_3);
-    const [link] = privacyLinks(r.root);
+    const [link] = infoLinks(r.root);
     const text = link.findByType(Text);
 
-    expect(flatStyle(link)).toMatchObject({ paddingTop: PRIVACY_LINK_PADDING_Y, paddingBottom: PRIVACY_LINK_PADDING_Y });
-    expect(flatStyle(text).lineHeight).toBe(PRIVACY_LINK_LINE_HEIGHT);
-    expect(text.props.numberOfLines).toBe(PRIVACY_LINK_MAX_LINES);
-    expect(text.props.maxFontSizeMultiplier).toBe(PRIVACY_LINK_MAX_FONT_SCALE);
+    expect(flatStyle(link)).toMatchObject({ paddingTop: INFO_LINK_PADDING_Y, paddingBottom: INFO_LINK_PADDING_Y });
+    expect(flatStyle(text).lineHeight).toBe(INFO_LINK_LINE_HEIGHT);
+    expect(text.props.numberOfLines).toBe(INFO_LINK_MAX_LINES);
+    expect(text.props.maxFontSizeMultiplier).toBe(INFO_LINK_MAX_FONT_SCALE);
     // A taller touch area than its short text, never stretched sideways towards the label
     expect(link.props.hitSlop).toEqual({ top: 12, bottom: 12 });
-    expect(link.props.hitSlop).toBe(PRIVACY_LINK_HIT_SLOP);
+    expect(link.props.hitSlop).toBe(INFO_LINK_HIT_SLOP);
     act(() => r.unmount());
   });
 

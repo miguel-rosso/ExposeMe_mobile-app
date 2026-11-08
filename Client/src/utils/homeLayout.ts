@@ -30,7 +30,7 @@ export const logoEmojiScale = (logoTop: number | null, bannerBottom: number | nu
   return Math.min(1, Math.max(0, roomForFace / faceHeight));
 };
 
-// ── Home screen bottom: Photo Explorer (dice button + label), and the privacy policy link beside the label ──
+// ── Home screen bottom: Photo Explorer (dice button + label), and the Info link beside the label ──
 
 /** Where the Photo Explorer group sits, from the bottom edge (index.tsx: bottom-15 label, bottom-22 dice button) */
 export const PHOTO_EXPLORER_LABEL_BOTTOM = 60;
@@ -40,30 +40,30 @@ export const PHOTO_EXPLORER_ICON_SIZE = 44;
 export const PHOTO_EXPLORER_BUTTON_PADDING = 12;
 export const PHOTO_EXPLORER_BUTTON_SIZE = PHOTO_EXPLORER_ICON_SIZE + 2 * PHOTO_EXPLORER_BUTTON_PADDING;
 
-/** Privacy policy link: right-2 from the edge, py-1, text-xs (16 pt lines) */
-export const PRIVACY_LINK_RIGHT = 8;
-export const PRIVACY_LINK_PADDING_Y = 4;
-export const PRIVACY_LINK_LINE_HEIGHT = 16;
+/** Info link (opens the Information screen, EXP-434): right-2 from the edge, py-1, text-xs (16 pt lines) */
+export const INFO_LINK_RIGHT = 8;
+export const INFO_LINK_PADDING_Y = 4;
+export const INFO_LINK_LINE_HEIGHT = 16;
 /** Its text wraps to at most this many lines, and follows the system font scale up to this much */
-export const PRIVACY_LINK_MAX_LINES = 2;
-export const PRIVACY_LINK_MAX_FONT_SCALE = 1.5;
+export const INFO_LINK_MAX_LINES = 2;
+export const INFO_LINK_MAX_FONT_SCALE = 1.5;
 /** On the label's row: its text sits on the label's bottom line */
-export const PRIVACY_LINK_BOTTOM = PHOTO_EXPLORER_LABEL_BOTTOM - PRIVACY_LINK_PADDING_Y;
+export const INFO_LINK_BOTTOM = PHOTO_EXPLORER_LABEL_BOTTOM - INFO_LINK_PADDING_Y;
 /** Tallest it can get (every line at the largest font scale, plus its padding) */
-export const PRIVACY_LINK_MAX_HEIGHT =
-  PRIVACY_LINK_MAX_LINES * PRIVACY_LINK_LINE_HEIGHT * PRIVACY_LINK_MAX_FONT_SCALE + 2 * PRIVACY_LINK_PADDING_Y;
+export const INFO_LINK_MAX_HEIGHT =
+  INFO_LINK_MAX_LINES * INFO_LINK_LINE_HEIGHT * INFO_LINK_MAX_FONT_SCALE + 2 * INFO_LINK_PADDING_Y;
 /** Extra touch area above and below the short link (none sideways: it would reach towards the label) */
-export const PRIVACY_LINK_HIT_SLOP = { top: 12, bottom: 12 } as const;
+export const INFO_LINK_HIT_SLOP = { top: 12, bottom: 12 } as const;
 /** Space kept between the link and the centred label (or dice button, if wider) */
-const PRIVACY_LINK_SIDE_GAP = 8;
+const INFO_LINK_SIDE_GAP = 8;
 
 /**
- * Widest the privacy link may be, in the strip right of the centred Photo Explorer label and dice button (EXP-426).
+ * Widest the Info link may be, in the strip right of the centred Photo Explorer label and dice button (EXP-426).
  * `labelWidth` is the label as laid out (it grows with the system font). The link then never reaches the label or the
  * dice, whatever the screen width or font scale, and stays below the dice button's top, so it never comes near the
  * form above it either. The Photo Explorer group itself doesn't move.
  */
-export const privacyLinkMaxWidth = (screenWidth: number, labelWidth: number) => {
+export const infoLinkMaxWidth = (screenWidth: number, labelWidth: number) => {
   const centreColumn = Math.max(labelWidth, PHOTO_EXPLORER_BUTTON_SIZE);
-  return Math.max(0, (screenWidth - centreColumn) / 2 - PRIVACY_LINK_SIDE_GAP - PRIVACY_LINK_RIGHT);
+  return Math.max(0, (screenWidth - centreColumn) / 2 - INFO_LINK_SIDE_GAP - INFO_LINK_RIGHT);
 };

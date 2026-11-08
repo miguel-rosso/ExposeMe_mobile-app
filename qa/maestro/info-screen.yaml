@@ -1,0 +1,35 @@
+# EXP-434: home's Info link opens the Information screen (privacy policy, terms of use, contact and app version) with
+# photo access granted, so it never depends on denying the permission. The links leave the app for the browser or the
+# mail app, so they are only checked, not opened (Client/__tests__/infoScreen.test.tsx covers their URLs). The contact
+# row only exists when the build has EXPO_PUBLIC_CONTACT_EMAIL, so it is not asserted.
+# No server or bots needed:
+#   ~/.maestro/bin/maestro --device <id> test qa/maestro/info-screen.yaml -e USERNAME=<label> -e METRO_URL=<url-encoded>
+# env: USERNAME, METRO_URL (url-encoded)
+# Selectors are testIDs (Client/src/utils/testIds.ts), so the flow works in any UI language.
+appId: com.socketNull.ExposeMe
+---
+- runFlow: open-app.yaml
+- tapOn:
+    id: "home-info-link"
+- extendedWaitUntil:
+    visible:
+      id: "info-screen"
+    timeout: 10000
+- assertVisible:
+    id: "info-privacy-link"
+- assertVisible:
+    id: "info-terms-link"
+- assertVisible:
+    id: "info-version"
+# Fixed footer above the bottom inset: on screen without scrolling
+- assertVisible:
+    id: "info-back-button"
+- takeScreenshot: info-screen
+- tapOn:
+    id: "info-back-button"
+- extendedWaitUntil:
+    visible:
+      id: "join-game-button"
+    timeout: 10000
+- assertVisible:
+    id: "home-info-link"

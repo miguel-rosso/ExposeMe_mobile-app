@@ -65,6 +65,8 @@ export default function RootLayout() {
             <Stack.Screen name="screens/WaitingRoom" options={{ headerShown: false, gestureEnabled: false }} />
             <Stack.Screen name="screens/InitialScreen" options={{ headerShown: false }} />
             <Stack.Screen name="screens/SettingsInstructionsScreen" options={{ headerShown: false }} />
+            {/* At most one in the stack: a double tap on home's Info link pushes it twice, the second push reuses it */}
+            <Stack.Screen name="screens/InfoScreen" dangerouslySingular options={{ headerShown: false }} />
             <Stack.Screen name="screens/GameScreen" options={{ headerShown: false, gestureEnabled: false }} />
             {/* A link to a route the app doesn't have: gives way at once, so it neither slides in nor out (EXP-412) */}
             <Stack.Screen name="+not-found" options={{ headerShown: false, animation: "none" }} />

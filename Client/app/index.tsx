@@ -47,7 +47,6 @@ import { isRoomCode, sanitizeRoomCodeInput } from "../src/utils/roomCode";
 import { translateServerMessage } from "../src/utils/serverMessage";
 import { MAX_USERNAME_INPUT_LENGTH } from "../src/utils/protocolLimits";
 import { normalizeUsername } from "../src/utils/username";
-import { openExternalLink, privacyPolicyUrl } from "../src/utils/legalLinks";
 import {
   HOME_TOP_ROW_HEIGHT,
   HOME_TOP_ROW_TOP,
@@ -58,11 +57,11 @@ import {
   PHOTO_EXPLORER_BUTTON_BOTTOM,
   PHOTO_EXPLORER_ICON_SIZE,
   PHOTO_EXPLORER_LABEL_BOTTOM,
-  PRIVACY_LINK_BOTTOM,
-  PRIVACY_LINK_HIT_SLOP,
-  PRIVACY_LINK_MAX_FONT_SCALE,
-  PRIVACY_LINK_MAX_LINES,
-  privacyLinkMaxWidth,
+  INFO_LINK_BOTTOM,
+  INFO_LINK_HIT_SLOP,
+  INFO_LINK_MAX_FONT_SCALE,
+  INFO_LINK_MAX_LINES,
+  infoLinkMaxWidth,
 } from "../src/utils/homeLayout";
 
 SplashScreen.preventAutoHideAsync();
@@ -102,8 +101,8 @@ const Index = () => {
   const buttonRef = useRef<Animatable.View & View>(null);
   const textRef = useRef<Animatable.View & View>(null);
   const topLogoRef = useRef<Animatable.View & View>(null);
-  const privacyLinkRef = useRef<Animatable.View & View>(null);
-  const { t, lang } = useI18n();
+  const infoLinkRef = useRef<Animatable.View & View>(null);
+  const { t } = useI18n();
   // Playing needs photo access (full or limited) and at least one photo: checked on Create / Search room
   const galleryGuard = useGalleryAccessGuard({ watch: false });
   const ensureGalleryAccess = async () => (await galleryGuard.check({ ask: true }))?.status === "ok";
@@ -121,7 +120,7 @@ const Index = () => {
 
   // The logo's font size follows the screen width
   const { width } = Dimensions.get('window');
-  // The privacy link fits beside the Photo Explorer label, as laid out (null = not yet: the link waits for it)
+  // The Info link fits beside the Photo Explorer label, as laid out (null = not yet: the link waits for it)
   const [photoExplorerLabelWidth, setPhotoExplorerLabelWidth] = useState<number | null>(null);
   const handlePhotoExplorerLabelLayout = (e: LayoutChangeEvent) => setPhotoExplorerLabelWidth(e.nativeEvent.layout.width);
   const getTitleFontSize = () => {
@@ -275,13 +274,13 @@ const Index = () => {
     { ref: createGameButtonRef, exit: "fadeOut", enter: "fadeIn" },
     { ref: JoingameButtonRef, exit: "fadeOut", enter: "fadeIn" },
     { ref: topLogoRef, exit: "slideOutUpFar", enter: "slideInDownFar" },
-    { ref: privacyLinkRef, exit: "fadeOut", enter: "fadeIn" },
+    { ref: infoLinkRef, exit: "fadeOut", enter: "fadeIn" },
   ]);
   // Both the dice button and its "Photo Explorer" label open it
   const openPhotoExplorer = () => navigateWithExit("/screens/OwnPhotos");
 
-  // The privacy policy opens in the browser (EXP-426): an external page, not a route
-  const openPrivacyPolicy = () => openExternalLink(privacyPolicyUrl(lang));
+  // The Information screen: privacy policy, terms of use, contact and version (EXP-434), always one tap from home
+  const openInfo = () => router.push("/screens/InfoScreen");
 
   // Closes the join panel (tap outside it, or Android back); the home form animates back in (effect above)
   const handleCancelJoinGame = () => {
@@ -504,23 +503,23 @@ const Index = () => {
             <Text style={tw`text-white font-bold`}>{t.photoExplorer}</Text>
           </TouchableOpacity>
         </Animatable.View>
-        {/* Privacy policy: a small link on the Photo Explorer label's row, in the strip right of it */}
-        <Animatable.View ref={privacyLinkRef} style={[tw`absolute right-2`, { bottom: PRIVACY_LINK_BOTTOM }]}>
+        {/* Info: a small link on the Photo Explorer label's row, in the strip right of it */}
+        <Animatable.View ref={infoLinkRef} style={[tw`absolute right-2`, { bottom: INFO_LINK_BOTTOM }]}>
           {photoExplorerLabelWidth !== null && (
             <TouchableOpacity
-              testID={TEST_IDS.homePrivacyLink}
-              accessibilityRole="link"
-              accessibilityLabel={t.privacyPolicy}
-              style={[tw`py-1`, { maxWidth: privacyLinkMaxWidth(width, photoExplorerLabelWidth) }]}
-              hitSlop={PRIVACY_LINK_HIT_SLOP}
-              onPress={openPrivacyPolicy}
+              testID={TEST_IDS.homeInfoLink}
+              accessibilityRole="button"
+              accessibilityLabel={t.information}
+              style={[tw`py-1`, { maxWidth: infoLinkMaxWidth(width, photoExplorerLabelWidth) }]}
+              hitSlop={INFO_LINK_HIT_SLOP}
+              onPress={openInfo}
             >
               <Text
                 style={tw`text-white/70 text-xs text-right underline`}
-                numberOfLines={PRIVACY_LINK_MAX_LINES}
-                maxFontSizeMultiplier={PRIVACY_LINK_MAX_FONT_SCALE}
+                numberOfLines={INFO_LINK_MAX_LINES}
+                maxFontSizeMultiplier={INFO_LINK_MAX_FONT_SCALE}
               >
-                {t.privacy}
+                {t.info}
               </Text>
             </TouchableOpacity>
           )}

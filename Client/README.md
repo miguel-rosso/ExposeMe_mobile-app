@@ -42,6 +42,22 @@ npx eas-cli build:version:set --platform ios       # enter the highest build num
 `android.versionCode` stays in `app.json` only for local builds (`expo prebuild`, the QA lab's dev clients): EAS ignores
 it with the remote source. Lowering it would make `adb install -r` refuse the downgrade over the installed dev build.
 
+### Contact address (`EXPO_PUBLIC_CONTACT_EMAIL`)
+
+The Information screen (Info link on home) shows a "Contact" row only when the build has a valid
+`EXPO_PUBLIC_CONTACT_EMAIL`. Expo inlines it into the bundle at build time, and EAS Build does not upload git-ignored
+files, so a value in `.env.local` never reaches a store build. Before the first production build, store it in the EAS
+`production` environment (plain text: it is shown in the app anyway):
+
+```bash
+npx eas-cli env:set --name EXPO_PUBLIC_CONTACT_EMAIL --value <address> --environment production --visibility plaintext
+npx eas-cli env:list --environment production   # check it is there
+```
+
+The `production` profile in `eas.json` sets no `environment`, so EAS picks `production` from its store distribution
+(default). Use the same address as the server's `CONTACT_EMAIL` (`Server/README.md`), shown on `/privacy` and `/terms`.
+Deployment checklist: after a store build, open Info on the installed app and check the Contact row and the version.
+
 ## Get a fresh project
 
 When you're ready, run:

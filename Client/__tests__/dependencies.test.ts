@@ -13,7 +13,6 @@ const CONFIG_FILE = path.join(__dirname, "../config.ts");
 
 /** Dependencies the app needs without importing them, and why */
 const INDIRECT_DEPENDENCIES: Record<string, string> = {
-  "expo-constants": "required peer dependency of expo-router",
   "expo-linking": "required peer dependency of expo-router",
   "react-native-screens": "required peer dependency of expo-router (its native Stack)",
   "react-native-worklets": "required peer dependency of react-native-reanimated",

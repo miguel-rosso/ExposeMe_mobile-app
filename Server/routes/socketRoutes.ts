@@ -15,6 +15,7 @@ import {
   MAX_CONNECTIONS_PER_IP, prefix48,
 } from "../managers/socketGuards";
 import { createChatLog } from "../managers/chatLog";
+import { normalizeChatText } from "../managers/chatText";
 import { contentKey, parseReport, ReportContentAck, ReportContentData, resolveReport } from "../managers/contentReports";
 import { createReportLedger } from "../managers/reportLedger";
 import { reportStore } from "../managers/reportStore";
@@ -585,18 +586,23 @@ io.on("connection", (socket: Socket) => {
     } catch (e) { console.error("plant-photo error:", e); }
   });
 
-  // Relayed exactly as typed (no word filter, EXP-438: each player mutes or reports). Acked { ok: true } once the room
-  // got it, so the sender shows its own bubble; not acked when dropped
+  // Relayed as typed (no word filter, EXP-438: each player mutes or reports), but for the characters that break the
+  // bubble or hide or reorder the text (normalizeChatText, EXP-447). Acked { ok: true, message } with the text the room
+  // got, so the sender shows its own bubble with it; not acked when dropped
   socket.on("chat-message", (data: { message: string }, ack?: unknown) => {
     try {
       const s = session(socket);
-      const message = data?.message;
-      if (!s || typeof message !== "string" || !message.trim() || message.length > MAX_CHAT_LENGTH) return;
+      const typed = data?.message;
+      // A blank or too long message spends nothing; any other takes the rate limit's turn before the (costlier)
+      // normalising, so a flood never gets to it, even when nothing of the message is left to relay
+      if (!s || typeof typed !== "string" || !typed.trim() || typed.length > MAX_CHAT_LENGTH) return;
       if (!chatMessages.take(socket.id)) return;
+      const message = normalizeChatText(typed);
+      if (!message) return;
       socket.broadcast.to(s.room.gameCode).emit("chat-message", { username: s.player.username, message });
       // A report names a bubble by its author and text (EXP-423)
       chatLog.record(s.room, s.player.username, message);
-      if (typeof ack === "function") ack({ ok: true });
+      if (typeof ack === "function") ack({ ok: true, message });
     } catch (e) { console.error("chat error:", e); }
   });
 

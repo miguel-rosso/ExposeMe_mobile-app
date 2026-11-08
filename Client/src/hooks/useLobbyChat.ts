@@ -23,16 +23,26 @@ interface IncomingChatMessage {
 /** How long my message waits for chat-message's ack (the room got it) before it is not shown at all. */
 export const CHAT_ACK_TIMEOUT_MS = 3000;
 
-/** chat-message's ack: the room got my message, as typed (there is no word filter, EXP-438) */
-const isChatMessageAck = (answer: unknown): answer is { ok: true } => hasBooleanOk(answer) && answer.ok;
+/**
+ * chat-message's ack: the room got my message, as `message` says. That is the text as typed (there is no word filter,
+ * EXP-438) but for the invisible and layout-breaking characters the server normalises (EXP-447).
+ */
+interface ChatMessageAck {
+  ok: true;
+  message: string;
+}
+
+const isChatMessageAck = (answer: unknown): answer is ChatMessageAck =>
+  hasBooleanOk(answer) && answer.ok && "message" in answer && typeof answer.message === "string";
 
 /**
- * Sends `message` to the room and resolves true once the server acks it, false when there is no ack: not connected,
- * the connection dropped, the server dropped it (rate limit) or answered after CHAT_ACK_TIMEOUT_MS.
+ * Sends `message` to the room and resolves the text the room got once the server acks it, or null when there is no
+ * ack: not connected, the connection dropped, the server dropped it (rate limit, nothing visible) or answered after
+ * CHAT_ACK_TIMEOUT_MS.
  */
-export const sendChatMessage = (socket: AckSocket, message: string): Promise<boolean> =>
+export const sendChatMessage = (socket: AckSocket, message: string): Promise<string | null> =>
   emitAwaitingAck(socket, "chat-message", [{ message }], isChatMessageAck, { timeoutMs: CHAT_ACK_TIMEOUT_MS })
-    .then((ack) => ack !== null);
+    .then((ack) => ack?.message ?? null);
 
 const newChatMessage = (username: string, message: string): LobbyChatMessage => ({
   id: `${Date.now()}-${Math.random()}`,
@@ -42,8 +52,9 @@ const newChatMessage = (username: string, message: string): LobbyChatMessage => 
 
 /**
  * The lobby chat: the messages on screen (the newest MAX_CHAT_MESSAGES, each one removed once its bubble fades out) and
- * sending, at most one message per CHAT_COOLDOWN_MS. My own message shows once the server acks it, as I typed it (the
- * room gets it as typed too); without an ack it isn't shown and I'm told it wasn't sent. Other players' messages come
+ * sending, at most one message per CHAT_COOLDOWN_MS. My own message shows once the server acks it, as the room got it
+ * (as typed, but for invisible or layout-breaking characters, EXP-447); without an ack it isn't shown and I'm told it
+ * wasn't sent. Other players' messages come
  * in through `receive`, which the screen attaches with the rest of its socket handlers. The message being typed is the
  * chat footer's own state, so typing never re-renders the screen holding this hook (EXP-396). Players muted on this device (`muted`, EXP-422) are never shown: their messages are dropped as they
  * arrive, and muting removes the ones already on screen.
@@ -81,9 +92,9 @@ export const useLobbyChat = (
     // Offline it is not sent (nor shown): the text stays in the input to send once back
     if (!gameCode || !socket?.connected) return false;
     // The server doesn't echo it back to me: its ack says the room got it
-    sendChatMessage(socket, message).then((sent) => {
+    sendChatMessage(socket, message).then((relayed) => {
       if (currentGameCode.current !== gameCode) return; // left that room meanwhile: nothing to show there
-      if (sent) show(newChatMessage(username || "You", message));
+      if (relayed !== null) show(newChatMessage(username || "You", relayed));
       else Alert.alert(t.error, t.chatMessageNotSent);
     });
     setLastSentTime(now);

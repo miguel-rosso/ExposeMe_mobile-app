@@ -27,6 +27,10 @@ describe("isValidUsername", () => {
     ["Tibetan with three stacked marks (Drolma)", "\u0F66\u0F92\u0FB2\u0F7C\u0F63\u0F0B\u0F58"],
     ["pointed Hebrew with three marks", "\u05E9\u05B8\u05BC\u05C1"],
     ["four combining marks in a row", "bo\u0301\u0301\u0301\u0301b"],
+    // EXP-454: Burmese vowel signs are spacing marks (Mc), drawn beside the letter: they never count towards a pile
+    ["Burmese word with five marks, two of them stacking", "\u101C\u103B\u103E\u1031\u102C\u1037"],
+    ["two Burmese words", "\u101C\u103B\u103E\u1031\u102C\u1037\u1001\u103B"],
+    ["four stacking marks with spacing marks between", "\u101C\u1036\u103B\u1036\u1031\u1036\u1036"],
     ["Sinhala Sri with a zero-width joiner", "\u0DC1\u0DCA\u200D\u0DBB\u0DD3"],
     ["Persian with a zero-width non-joiner", "\u0645\u06CC\u200C\u062E\u0648\u0627\u0647\u0645"],
     ["Devanagari half form with a zero-width joiner", "\u0915\u094D\u200D\u0937"],
@@ -91,6 +95,12 @@ describe("isValidUsername", () => {
     ["private use", "bob\uE000"],
     ["lone surrogate", "bob\uD800"],
     ["five combining marks in a row (Zalgo)", "bo\u0301\u0301\u0301\u0301\u0301b"],
+    ["five stacking marks with spacing marks between (Zalgo)", "\u101C\u1036\u103B\u1036\u1031\u1036\u1036\u1036"],
+    // Spacing marks are bounded too: never doubled, and at most eight marks of any kind on a letter
+    ["five Devanagari visargas on a Latin letter", "bob\u0903\u0903\u0903\u0903\u0903"],
+    ["six Burmese medial ya", "a\u103B\u103B\u103B\u103B\u103B\u103B"],
+    ["five musical combining stems", "a\u{1D165}\u{1D165}\u{1D165}\u{1D165}\u{1D165}"],
+    ["nine marks on a letter, none doubled", "\u101C\u103B\u1036\u103C\u1036\u1031\u1036\u102C\u1036\u1038"],
     ["mark on a trailing space", "bob \u0323"],
     ["two marks on a trailing space", "bob \u0323\u0301"],
     ["zero-width joiner between Latin letters", "an\u200Da"],

@@ -3,6 +3,7 @@ import {
   UNASSIGNED_NON_EMOJI_RANGES,
 } from "./asciiConfusables";
 import { displayOrder } from "./displayOrder";
+import { BLANK_GLYPHS, codePointClass, MARK_PILE_SOURCE } from "./textGlyphs";
 
 /**
  * Player names (EXP-032): which names are accepted, and when two names count as the same one in a room.
@@ -23,10 +24,6 @@ export const MAX_USERNAME_LENGTH = 15;
 const MAX_NORMALIZED_LENGTH = 60;
 
 // ── Validation ──────────────────────────────────────
-
-/** A regex character class matching the [first, last] code point `ranges`. */
-const codePointClass = (ranges: ReadonlyArray<readonly [number, number]>) =>
-  `[${ranges.map(([first, last]) => `\\u{${first.toString(16)}}-\\u{${last.toString(16)}}`).join("")}]`;
 
 // Emoji, assigned or reserved, of Unicode 15.1 (Extended_Pictographic, a fixed list): Unicode 17 took 689 code points
 // out of the property, so the running Node's \p{Extended_Pictographic} would accept "★" + emoji selector on Node 20
@@ -67,8 +64,10 @@ const LEGACY_CHILLU_JOINER = new RegExp(`(?<=${CHILLU_CONSONANT}\\u0D4D)\\u200D(
 // line/paragraph separators, default-ignorable characters (fillers, variation selectors, combining grapheme joiner),
 // characters drawn blank (braille blank, Khitan filler, musical null notehead, object replacement) and every space
 // other than the plain one (no-break, ideographic, en/em spaces...). Unassigned code points: UNASSIGNED_IN_TABLES.
-const INVISIBLE =
-  /[\p{Cc}\p{Cf}\p{Co}\p{Cs}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}\u2800\u{16FE4}\u{1D159}\uFFFC]|(?!\u0020)\p{Zs}/u;
+const INVISIBLE = new RegExp(
+  `[\\p{Cc}\\p{Cf}\\p{Co}\\p{Cs}\\p{Zl}\\p{Zp}\\p{Default_Ignorable_Code_Point}${BLANK_GLYPHS}]|(?!\\u0020)\\p{Zs}`,
+  "u",
+);
 // Code points unassigned in the Unicode version of the lookalike tables (15.1, see asciiConfusables.ts), also those a
 // newer Node knows (EXP-284): the tables don't, so a letter added since could be drawn like another one without
 // sharing its keys. Not those Unicode 15.1 reserves for emoji, which the tables leave out anyway (drawn in colour):
@@ -81,9 +80,15 @@ const STRAY_SPACES = /^\u0020|\u0020$|\u0020\u0020/u;
 const LEADING_MARK = /^\p{M}/u;
 // A combining mark on a space at the end draws next to the name without changing how it reads ("bob" + space + dot)
 const TRAILING_MARK = /\u0020\p{M}+$/u;
-// Real spellings stack up to three or four marks on a letter (Tibetan, pointed Hebrew); more is "Zalgo" text
-const MAX_MARKS_IN_A_ROW = 4;
-const MARK_PILE = new RegExp(`\\p{M}{${MAX_MARKS_IN_A_ROW + 1},}`, "u");
+// Spacing marks (Mc) take room beside a letter like one: no script repeats one right after itself, and none puts more
+// than MAX_MARKS_ON_A_LETTER marks of any kind on a letter (a Burmese syllable carries up to five, EXP-454)
+const MAX_MARKS_ON_A_LETTER = 8;
+// More stacking marks on a letter than real spellings use ("Zalgo" text), more marks than any spelling, or a doubled
+// spacing mark
+const MARK_PILE = new RegExp(
+  `${MARK_PILE_SOURCE}|\\p{M}{${MAX_MARKS_ON_A_LETTER + 1}}|(\\p{Mc})\\1`,
+  "u",
+);
 
 /**
  * `text` without the format characters allowed where they belong: inside an emoji, between two joining letters, and the
@@ -101,9 +106,10 @@ const withoutAllowedFormatChars = (text: string) => text
  * A name the server accepts: a string of 1–15 UTF-16 units (at most 60 after NFKC), not blank, with no invisible
  * characters, characters the lookalike tables don't know (unassigned in their Unicode 15.1; newer emoji are fine, and
  * read alike by visualKey) or spaces other than U+0020, no space at either end or two in a row, no combining mark at
- * the start or on a trailing space, at most four combining marks in a row, no mark on a kana with a voiced form but
- * the voicing mark it takes (marksKanaOddly), no mix of Latin-lookalike scripts (see mixesLookalikeScripts), no Hangul
- * block of jamo that don't make one syllable (splitsHangulBlock), no vowel sign or virama on an Indic independent vowel
+ * the start or on a trailing space, at most four stacking marks on a letter (MARK_PILE_SOURCE: spacing marks don't
+ * count), no mark on a kana with a voiced form but the voicing mark it takes (marksKanaOddly), no mix of
+ * Latin-lookalike scripts (see mixesLookalikeScripts), no Hangul block of jamo that don't make one syllable
+ * (splitsHangulBlock), no vowel sign or virama on an Indic independent vowel
  * (marksIndependentVowelOddly) and no Indic vowel sign but one on a letter of its script, which carries only marks of
  * that script, no length mark left alone, no rare mark hiding a vowel sign and no virama but one ending the marks of a
  * letter, after nothing but a nukta, nor an archaic Malayalam one (marksIndicLetterOddly). Emoji, symbols, punctuation
@@ -188,7 +194,7 @@ const DEPENDENT_VOWEL_SIGN = `[${[
   "\\u0D3E-\\u0D4C\\u0D57\\u0D62\\u0D63", // Malayalam
   "\\u0DCF-\\u0DDF\\u0DF2\\u0DF3", // Sinhala
 ].join("")}]`;
-const VIRAMA = "[\\u094D\\u09CD\\u0A4D\\u0ACD\\u0B4D\\u0BCD\\u0C4D\\u0CCD\\u0D3B\\u0D3C\\u0D4D\\u0DCA]";
+export const VIRAMA = "[\\u094D\\u09CD\\u0A4D\\u0ACD\\u0B4D\\u0BCD\\u0C4D\\u0CCD\\u0D3B\\u0D3C\\u0D4D\\u0DCA]";
 // The one virama an independent vowel takes: the Bengali ya-phala on A or E (maybe through a joiner), which spells
 // the vowel of "Alex" and "Andrew" (অ্যা, এ্যা)
 const BENGALI_YA_PHALA_ON_VOWEL = "[\\u0985\\u098F]\\u09CD\\u200D?\\u09AF";
@@ -990,8 +996,8 @@ const orderKeys = (text: string): OrderKeys => ({ same: nameKey(text), similar: 
 
 /**
  * Keys of `name` (compute once per player: see RoomManager), only for a name isValidUsername accepted: the key regexes
- * rely on its bounds (15 units, at most four marks in a row), as KEPT_VIRAMA's lookbehind is quadratic in a run of
- * marks (tests/playerNameKeysAfterValidation.integration.test.ts).
+ * rely on its bounds (15 units, at most four stacking marks on a letter), as KEPT_VIRAMA's lookbehind is quadratic in
+ * a run of marks (tests/playerNameKeysAfterValidation.integration.test.ts).
  */
 export function nameKeys(name: string): NameKeys {
   return { stored: orderKeys(name), drawn: orderKeys(displayOrder(name)) };

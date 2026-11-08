@@ -207,10 +207,12 @@
 //                           go to the server's REPORTS_FILE (lab.sh server: qa/runs, git-ignored).
 //   node qa/lab/bots.mjs --bots 3 --host --rounds 3 --report
 //            --chat         like a player typing in the lobby chat (EXP-438): each bot sends one chat-message on joining
-//                           the room's lobby, with words the old filter (EXP-424) masked, which must be acked { ok: true }
-//                           within CHAT_ACK_TIMEOUT_MS; every chat-message a bot receives must be another bot's, exactly
-//                           as typed (no word filter, never an echo of its own). summary: chats_sent, chats_acked,
-//                           chats_received (a message reaches the bots already in the room: the last to join hears none).
+//                           the room's lobby, with words the old filter (EXP-424) masked, which must be acked
+//                           { ok: true, message } with the text as typed (EXP-447: only invisible or layout-breaking
+//                           characters are normalised) within CHAT_ACK_TIMEOUT_MS; every chat-message a bot receives
+//                           must be another bot's, exactly as typed (no word filter, never an echo of its own). summary:
+//                           chats_sent, chats_acked, chats_received (a message reaches the bots already in the room: the
+//                           last to join hears none).
 //   node qa/lab/bots.mjs --bots 3 --host --rounds 3 --chat
 //   Checks and metrics of each room: qa/lab/bots-analysis.mjs (tested on recorded events by qa/lab/tests/bots-analysis.test.sh).
 //   Every bot records waiting-photo { round, duration, gameNumber } (room-wide, owner secret; exactly WAITING_PHOTO_KEYS
@@ -301,8 +303,8 @@ Headless ExposeMe players (see the header of qa/lab/bots.mjs for every scenario)
                              emojis_sent, emojis_received, emojis_received_paused
   --report                   at each reveal a bot that doesn't own the photo reports it (report-content), which must be
                              acked ok; summary: reports_sent, reports_acked
-  --chat                     each bot sends one lobby chat message, which must be acked ok and reach the others exactly
-                             as typed; summary: chats_sent, chats_acked, chats_received
+  --chat                     each bot sends one lobby chat message, which must be acked ok with its text and reach the
+                             others exactly as typed; summary: chats_sent, chats_acked, chats_received
   --help, -h                 print this help and exit (no network)
 
 Exit codes: 0 pass, 1 fail, 2 bad arguments.`;
@@ -898,16 +900,20 @@ function runRoom(roomIdx, fixedCode) {
           if (priv.paused) emojis.receivedPaused++;
         });
       }
-      // --chat (EXP-438): like a player typing in the lobby, one message on joining, which the server must ack ok (a lost
-      // connection loses the ack: no fault). Every message heard must be another bot's, exactly as it typed it
+      // --chat (EXP-438): like a player typing in the lobby, one message on joining, which the server must ack ok with the
+      // text the room got, as typed (EXP-447; a lost connection loses the ack: no fault). Every message heard must be
+      // another bot's, exactly as it typed it
       const sendChat = async () => {
         bot.chatSent = true;
         chats.sent++;
+        const message = chatTextOf(name);
         const ack = await socket.timeout(CHAT_ACK_TIMEOUT_MS)
-          .emitWithAck("chat-message", { message: chatTextOf(name) })
+          .emitWithAck("chat-message", { message })
           .catch(() => null);
-        if (ack?.ok === true) chats.acked++;
-        else if (ack || socket.connected) errors.push(`${name}: chat-message answered ${JSON.stringify(ack)}, expected { ok: true }`);
+        if (ack?.ok === true && ack.message === message) chats.acked++;
+        else if (ack || socket.connected) {
+          errors.push(`${name}: chat-message answered ${JSON.stringify(ack)}, expected ${JSON.stringify({ ok: true, message })}`);
+        }
       };
       if (CHAT) {
         socket.on("chat-message", (d) => {

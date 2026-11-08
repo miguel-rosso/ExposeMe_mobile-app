@@ -13,6 +13,11 @@ const REPORT_ICON_SIZE = 12;
  * keeps that much room on its right for it; with its padding and two lines it is taller than the box.
  */
 export const REPORT_TOUCH_TARGET = 48;
+/**
+ * Lines of a message a bubble shows, the rest cut with an ellipsis (EXP-447): the server keeps at most 3 line breaks
+ * (Server/managers/chatText.ts), and a 100-character message still wraps, so one bubble never covers the chat area.
+ */
+export const MESSAGE_MAX_LINES = 4;
 
 interface ChatMessageProps {
   username: string;
@@ -72,8 +77,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ username, message, onAnimatio
       ]}
     >
       <View style={{ pointerEvents: "none" }}>
-        <Text style={tw`text-[#ff8605] font-bold text-sm`}>{username}</Text>
-        <Text style={tw`text-white text-sm`}>{message}</Text>
+        <Text style={tw`text-[#ff8605] font-bold text-sm`} numberOfLines={1}>{username}</Text>
+        <Text style={tw`text-white text-sm`} numberOfLines={MESSAGE_MAX_LINES}>{message}</Text>
       </View>
       {onReport && (
         <TouchableOpacity

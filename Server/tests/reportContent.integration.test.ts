@@ -140,7 +140,7 @@ describe("report-content: who may report what", () => {
     const relayed = once<{ username: string; message: string }>(bob.socket, "chat-message");
     const acked = alice.socket.timeout(ACK_TIMEOUT_MS).emitWithAck("chat-message", { message: "eres una puta" });
     expect((await relayed).message).toBe("eres una puta");
-    expect(await acked).toEqual({ ok: true });
+    expect(await acked).toEqual({ ok: true, message: "eres una puta" });
 
     expect(await report(bob.socket, { kind: "message", reason: "harassment", author: "alice", text: "eres una puta" }))
       .toEqual({ ok: true });
@@ -149,6 +149,21 @@ describe("report-content: who may report what", () => {
       .toEqual({ ok: false, reason: "not-found" });
     await vi.waitFor(() => expect(storedReports()).toHaveLength(1));
     expect(storedReports()[0]).toMatchObject({ reporter: "bob", reported: "alice", kind: "message", text: "eres una puta" });
+  });
+
+  // EXP-447: what the room got is the normalised text, so a report (and the reviewer reading it) never has bidi overrides
+  it("a message with a bidi override: reported and stored as the room got it, without the override", async () => {
+    const [alice, bob] = await createRoom("alice", "bob");
+    const relayed = once<{ username: string; message: string }>(bob.socket, "chat-message");
+    alice.socket.emit("chat-message", { message: "bob \u202Eetah I\u202C" });
+    expect((await relayed).message).toBe("bob etah I");
+
+    expect(await report(bob.socket, { kind: "message", reason: "harassment", author: "alice", text: "bob \u202Eetah I\u202C" }))
+      .toEqual({ ok: false, reason: "not-found" });
+    expect(await report(bob.socket, { kind: "message", reason: "harassment", author: "alice", text: "bob etah I" }))
+      .toEqual({ ok: true });
+    await vi.waitFor(() => expect(storedReports()).toHaveLength(1));
+    expect(storedReports()[0]).toMatchObject({ reported: "alice", kind: "message", text: "bob etah I" });
   });
 
   it("words nobody said, or the reporter's own message: not-found", async () => {

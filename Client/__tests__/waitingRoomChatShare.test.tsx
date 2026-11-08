@@ -98,10 +98,13 @@ const sendChat = (r: TestRenderer.ReactTestRenderer) => pressId(r, TEST_IDS.chat
 
 const chatShown = (r: TestRenderer.ReactTestRenderer) =>
   r.root.findAll((n) => (n.type as unknown) === "ChatMessage").map((n) => ({ username: n.props.username, message: n.props.message }));
-/** Plays the server's ack of the `index`-th chat-message I sent (`answer`: { ok: true } once the room got it). */
-const ackChat = (index: number, answer: unknown = { ok: true }) => act(async () => {
-  const [, , ack] = mockSocket.emitted.filter(([event]) => event === "chat-message")[index];
-  ack(answer);
+/**
+ * Plays the server's ack of the `index`-th chat-message I sent (`answer`: by default { ok: true, message } with the text
+ * I sent, once the room got it as typed).
+ */
+const ackChat = (index: number, answer?: unknown) => act(async () => {
+  const [, payload, ack] = mockSocket.emitted.filter(([event]) => event === "chat-message")[index];
+  ack(answer ?? { ok: true, message: payload.message });
   for (let i = 0; i < 5; i++) await Promise.resolve(); // the ack's promise chain
 });
 const notices = (r: TestRenderer.ReactTestRenderer) =>
@@ -127,7 +130,7 @@ describe("WaitingRoom: lobby chat (EXP-186)", () => {
   });
 
   // EXP-438 (DEC-060 A): no word filter; the room gets my message as typed, and so do I once the server acks it
-  it("shows my message exactly as I typed it once acked { ok: true }; any other answer is no ack", async () => {
+  it("shows my message exactly as I typed it once acked { ok: true, message }; any other answer is no ack", async () => {
     const r = await mount();
     await typeChat(r, "qué puta foto");
     await sendChat(r);
@@ -141,6 +144,26 @@ describe("WaitingRoom: lobby chat (EXP-186)", () => {
     await act(async () => { jest.advanceTimersByTime(CHAT_ACK_TIMEOUT_MS); });
     expect(chatShown(r).map((m) => m.message)).toEqual(["qué puta foto"]);
     expect(alertSpy).toHaveBeenCalledWith(en.error, en.chatMessageNotSent);
+
+    // { ok: true } without the text the room got is no ack either
+    act(() => jest.advanceTimersByTime(CHAT_COOLDOWN_MS));
+    await typeChat(r, "y otra");
+    await sendChat(r);
+    await ackChat(2, { ok: true });
+    await act(async () => { jest.advanceTimersByTime(CHAT_ACK_TIMEOUT_MS); });
+    expect(chatShown(r).map((m) => m.message)).toEqual(["qué puta foto"]);
+    expect(alertSpy).toHaveBeenCalledTimes(2);
+    act(() => r.unmount());
+  });
+
+  // EXP-447: the server drops invisible and layout-breaking characters; I see my bubble as the room got it
+  it("shows my message as the server's ack says the room got it, normalised, not as I typed it", async () => {
+    const r = await mount();
+    await typeChat(r, "h\u200Bola\u202E");
+    await sendChat(r);
+    expect(mockSocket.emittedPayloads("chat-message")).toEqual([{ message: "h\u200Bola\u202E" }]);
+    await ackChat(0, { ok: true, message: "hola" });
+    expect(chatShown(r)).toEqual([{ username: "alice", message: "hola" }]);
     act(() => r.unmount());
   });
 

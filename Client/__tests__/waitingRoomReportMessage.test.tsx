@@ -93,7 +93,7 @@ async function mountLobby() {
   press(r.root, TEST_IDS.chatSendButton);
   // The server acks my message once the room got it: only then is my bubble shown
   const [, , ackChat] = mockSocket.emitted.find(([event]) => event === "chat-message")!;
-  await act(async () => { ackChat({ ok: true }); });
+  await act(async () => { ackChat({ ok: true, message: "stop it" }); });
   return r;
 }
 

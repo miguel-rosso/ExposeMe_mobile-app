@@ -1,7 +1,7 @@
 import { useCallback, useSyncExternalStore } from "react";
 
-// Muting another player is local to this device (EXP-422, DEC-052 A): their chat, emoji reactions and round photos are
-// hidden here only, nothing is sent to the server. A mute lasts for the player's stay in the room: the lobby and the
+// Muting another player is local to this device (EXP-422, DEC-052 A): their chat messages and emoji reactions are
+// hidden here only (their round photo is shown like anyone's, DEC-063), nothing is sent to the server. A mute lasts for the player's stay in the room: the lobby and the
 // game screen share it, and it survives reconnecting, even on a new socket (e.g. "Play again" while reconnecting). The
 // stay ends when the app's room changes (GameContext's setGameCode calls endMutesOutsideRoom): every way out of the
 // room (Exit, kicked, room gone, an invite link's Join) forgets the room, so joining it again starts with nobody muted.

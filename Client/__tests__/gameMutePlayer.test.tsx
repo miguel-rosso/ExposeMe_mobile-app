@@ -9,9 +9,9 @@ import es from "../src/i18n/es";
 import GameScreen from "../app/screens/GameScreen";
 
 // EXP-422 / DEC-052 A: in the game, any player can mute another one from the scoreboard's rows and the pause modal.
-// A muted player's emoji reactions (the screenshot one included) are hidden, those on screen too, and their round
-// photo is covered from the reveal on (nobody is told whose photo it is before), with a Show that reveals it for that
-// round only. They stay an answer option and keep their points.
+// A muted player's emoji reactions (the screenshot one included) are hidden, those on screen too. Their round photo is
+// never covered (DEC-063: everyone sees it while answering, so covering it at the reveal protects nobody). They stay an
+// answer option and keep their points.
 
 jest.mock("@react-native-async-storage/async-storage", () =>
   require("@react-native-async-storage/async-storage/jest/async-storage-mock")
@@ -54,7 +54,6 @@ jest.mock("react-native-animatable", () => {
   return { View };
 });
 jest.mock("react-native-vector-icons/FontAwesome", () => "Icon");
-jest.mock("expo-blur", () => ({ BlurView: "BlurView" }));
 jest.mock("@/src/components/PhotoComponent", () => () => { mockScreenRenders.count++; return null; });
 jest.mock("@/src/components/modals/FinalScoreModal", () => () => null);
 jest.mock("@/src/components/modals/WinnerModal", () => () => null);
@@ -79,6 +78,9 @@ const reveal = (owner: string) => ({ correctAnswer: owner, duration: 3_000, your
 
 const find = (root: ReactTestInstance, id: string) => root.findAll((n) => n.props.testID === id, { deep: true });
 const has = (root: ReactTestInstance, id: string) => find(root, id).length > 0;
+/** Every testID on screen, once each, sorted */
+const screenIds = (root: ReactTestInstance) =>
+  [...new Set(root.findAll((n) => typeof n.props.testID === "string").map((n) => n.props.testID as string))].sort();
 /** The innermost touchable with that testID (the one the press goes to) */
 const pressable = (root: ReactTestInstance, id: string) => {
   const target = find(root, id).filter((n) => typeof n.props.onPress === "function").pop();
@@ -194,88 +196,29 @@ describe("GameScreen: muting a player (EXP-422)", () => {
     expect(textOf(find(r.root, TEST_IDS.scoreList)[0])).toContain("300");
   });
 
-  it("covers a muted player's photo from the reveal on, held too, until Show; their next photo is covered again", async () => {
+  it("leaves a muted player's revealed photo on screen as anyone's: nothing covers it, held or not (DEC-063)", async () => {
     await mount();
-    act(() => mockSocket.fire("round-scores", roundScores(1)));
+    // bob's round before he is muted, then after: the screen reads the same from the reveal to the hold
+    const screenOfBobsRound = (round: number) => {
+      act(() => mockSocket.fire("waiting-photo", { round, duration: 15_000, gameNumber: 1 }));
+      act(() => mockSocket.fire("round-start", roundStart(round)));
+      act(() => mockSocket.fire("round-reveal", reveal("bob")));
+      const revealed = screenIds(r.root);
+      act(() => mockSocket.fire("round-scores", roundScores(round)));
+      const scoreboard = screenIds(r.root);
+      act(() => mockSocket.fire("hold-start"));
+      const held = screenIds(r.root);
+      act(() => mockSocket.fire("hold-end", { holdsLeft: 1 }));
+      return { revealed, scoreboard, held };
+    };
+
+    const beforeMute = screenOfBobsRound(2);
     press(r.root, scoreMuteId("bob"));
+    const afterMute = screenOfBobsRound(3);
 
-    act(() => mockSocket.fire("waiting-photo", { round: 2, duration: 15_000, gameNumber: 1 }));
-    act(() => mockSocket.fire("round-start", roundStart(2)));
-    // Whose photo it is is not known while answering: nothing to cover yet
-    expect(has(r.root, TEST_IDS.mutedPhotoCover)).toBe(false);
-    act(() => mockSocket.fire("round-reveal", reveal("bob")));
-    expect(textOf(find(r.root, TEST_IDS.mutedPhotoCover)[0])).toContain("Photo from a muted player");
-    expect(has(r.root, TEST_IDS.mutedPhotoShowButton)).toBe(true);
-    // The scoreboard covers the cover: its Show is the scoreboard's
-    act(() => mockSocket.fire("round-scores", roundScores(2)));
-    expect(has(r.root, TEST_IDS.mutedPhotoCover)).toBe(true);
-    expect(has(r.root, TEST_IDS.mutedPhotoShowButton)).toBe(false);
-    expect(has(r.root, TEST_IDS.scoreShowMutedPhoto)).toBe(true);
-    act(() => mockSocket.fire("hold-start"));
-    expect(has(r.root, TEST_IDS.gameHeld)).toBe(true);
-    expect(has(r.root, TEST_IDS.mutedPhotoCover)).toBe(true);
-
-    press(r.root, TEST_IDS.mutedPhotoShowButton);
-    expect(has(r.root, TEST_IDS.mutedPhotoCover)).toBe(false);
-    act(() => mockSocket.fire("hold-end", { holdsLeft: 1 }));
-    expect(has(r.root, TEST_IDS.mutedPhotoCover)).toBe(false);
-
-    act(() => mockSocket.fire("waiting-photo", { round: 3, duration: 15_000, gameNumber: 1 }));
-    act(() => mockSocket.fire("round-start", roundStart(3)));
-    act(() => mockSocket.fire("round-reveal", reveal("bob")));
-    expect(has(r.root, TEST_IDS.mutedPhotoCover)).toBe(true);
-  });
-
-  it("the scoreboard's Show reveals the photo behind it, for this round only", async () => {
-    await mount();
-    act(() => mockSocket.fire("round-scores", roundScores(1)));
-    press(r.root, scoreMuteId("bob"));
-    act(() => mockSocket.fire("waiting-photo", { round: 2, duration: 15_000, gameNumber: 1 }));
-    act(() => mockSocket.fire("round-start", roundStart(2)));
-    act(() => mockSocket.fire("round-reveal", reveal("bob")));
-    act(() => mockSocket.fire("round-scores", roundScores(2)));
-    expect(textOf(pressable(r.root, TEST_IDS.scoreShowMutedPhoto))).toBe("Show");
-
-    press(r.root, TEST_IDS.scoreShowMutedPhoto);
-    expect(has(r.root, TEST_IDS.mutedPhotoCover)).toBe(false);
-    expect(has(r.root, TEST_IDS.scoreShowMutedPhoto)).toBe(false);
-    // Not muted players' rounds never get one
-    act(() => mockSocket.fire("waiting-photo", { round: 3, duration: 15_000, gameNumber: 1 }));
-    act(() => mockSocket.fire("round-start", roundStart(3)));
-    act(() => mockSocket.fire("round-reveal", reveal("carol")));
-    act(() => mockSocket.fire("round-scores", roundScores(3)));
-    expect(has(r.root, TEST_IDS.scoreShowMutedPhoto)).toBe(false);
-  });
-
-  it("says it in Spanish, and leaves the photos of players not muted alone", async () => {
-    mockT = es;
-    await mount();
-    act(() => mockSocket.fire("round-scores", roundScores(1)));
-    press(r.root, scoreMuteId("bob"));
-    act(() => mockSocket.fire("waiting-photo", { round: 2, duration: 15_000, gameNumber: 1 }));
-    act(() => mockSocket.fire("round-start", roundStart(2)));
-    act(() => mockSocket.fire("round-reveal", reveal("carol")));
-    expect(has(r.root, TEST_IDS.mutedPhotoCover)).toBe(false);
-
-    act(() => mockSocket.fire("waiting-photo", { round: 3, duration: 15_000, gameNumber: 1 }));
-    act(() => mockSocket.fire("round-start", roundStart(3)));
-    act(() => mockSocket.fire("round-reveal", reveal("bob")));
-    const cover = textOf(find(r.root, TEST_IDS.mutedPhotoCover)[0]);
-    expect(cover).toContain("Foto de un jugador silenciado");
-    expect(cover).toContain("Ver");
-  });
-
-  it("unmuting uncovers the photo", async () => {
-    await mount();
-    act(() => mockSocket.fire("round-scores", roundScores(1)));
-    press(r.root, scoreMuteId("bob"));
-    act(() => mockSocket.fire("waiting-photo", { round: 2, duration: 15_000, gameNumber: 1 }));
-    act(() => mockSocket.fire("round-start", roundStart(2)));
-    act(() => mockSocket.fire("round-reveal", reveal("bob")));
-    act(() => mockSocket.fire("round-scores", roundScores(2)));
-    expect(has(r.root, TEST_IDS.mutedPhotoCover)).toBe(true);
-    press(r.root, scoreMuteId("bob"));
-    expect(has(r.root, TEST_IDS.mutedPhotoCover)).toBe(false);
+    expect(afterMute).toEqual(beforeMute);
+    expect(afterMute.held).toContain(TEST_IDS.gameHeld);
+    expect(pressable(r.root, scoreMuteId("bob")).props.accessibilityLabel).toBe("Unmute bob");
   });
 
   it("the pause modal lets anyone mute an awaited player", async () => {

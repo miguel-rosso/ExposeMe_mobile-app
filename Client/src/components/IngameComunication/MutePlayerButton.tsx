@@ -26,7 +26,7 @@ interface MutePlayerButtonProps {
 }
 
 /**
- * Mutes another player on this device (EXP-422): their chat, emojis and photos are hidden here only. The icon is the
+ * Mutes another player on this device (EXP-422): their chat and emojis are hidden here only. The icon is the
  * row's muted mark too, and the button is named "Mute <name>" / "Unmute <name>" for screen readers.
  */
 const MutePlayerButton: React.FC<MutePlayerButtonProps> = ({

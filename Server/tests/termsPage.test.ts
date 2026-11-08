@@ -60,13 +60,20 @@ describe("renderTermsPage", () => {
 
   it("states the consequences: report, mute and kick, and reported illegal content", () => {
     const en = section(render("en"), "What happens if someone breaks these terms");
-    expect(en).toContain("Any player can report a photo or a chat message, and mute a player");
+    expect(en).toContain(
+      "Any player can report a photo or a chat message, and mute a player to stop seeing their chat messages and emoji reactions.",
+    );
     expect(en).toContain("The host can kick a player out of the room.");
     expect(en).toContain("We review reports.");
     // A possibility, not a commitment (pending the owner's wording)
     expect(en).toContain("Illegal content, such as child sexual abuse material, may be reported to the authorities.");
     const es = section(render("es"), "Qué pasa si alguien incumple estas condiciones");
-    expect(es).toContain("Cualquier jugador puede denunciar una foto o un mensaje del chat, y silenciar a un jugador");
+    expect(es).toContain(
+      "Cualquier jugador puede denunciar una foto o un mensaje del chat, y silenciar a un jugador para dejar de ver sus mensajes del chat y sus reacciones con emojis.",
+    );
+    // Muting hides no photo (DEC-063): the round photo is everyone's while answering
+    expect(en).not.toContain("photos and messages");
+    expect(es).not.toContain("fotos y mensajes");
     expect(es).toContain("El anfitrión puede expulsar a un jugador de la sala.");
     expect(es).toContain("Revisamos las denuncias.");
     expect(es).toContain("El contenido ilegal, como el material de abuso sexual infantil, puede denunciarse ante las autoridades.");

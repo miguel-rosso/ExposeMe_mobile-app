@@ -2,18 +2,13 @@
 # room, the bots join its code. In the lobby it mutes bot1 from its row: the host's tap on a row asks to remove that
 # player, the mute button next to it never does. bot1 stays muted into the game (its scoreboard row says "Unmute bot1"),
 # and the device mutes bot2 from the first scoreboard it reads. The bots send emoji reactions during every reveal and
-# scoreboard: bot3's keep showing, bot1's and bot2's never do. Then, on a round whose photo was a muted bot's (bot1 and
-# bot2 plant one each, and own about half the uploaded rounds), the photo is covered from its reveal on ("Photo from a
-# muted player" / "Foto de un jugador silenciado": its wording and the round-only Show are checked by
-# Client/__tests__/gameMutePlayer.test.tsx), and Show / Ver (the cover's, or the scoreboard's while it is up) takes the
-# cover away. The flow ends there; the bots play on to game over. The device never answers (it
-# scores nothing, which changes nothing here).
-#   qa/lab/lab.sh play --device-host --flow mute-player --devices <label> --bots 3 --bot-args "--emoji-rate 2 --plant 2"
+# scoreboard: bot3's keep showing, bot1's and bot2's never do. A muted bot's round photo is shown like anyone's
+# (DEC-063, checked by Client/__tests__/gameMutePlayer.test.tsx). The flow ends there; the bots play on to game over.
+# The device never answers (it scores nothing, which changes nothing here).
+#   qa/lab/lab.sh play --device-host --flow mute-player --devices <label> --bots 3 --bot-args "--emoji-rate 2"
 # A reaction pill lasts 2.6 s and each bot sends 2 a second, so a look that finds bot3's pill would find a muted bot's
 # too if the app showed them. Their absence is read in the next screen read, which may fall after the scoreboard
-# (nothing is sent while answering): a few rounds of looks make it hold. Planted rounds and owners are drawn at random:
-# a game without any muted bot's photo after the reaction looks (about 1 in 100 with these flags) times out the cover
-# wait; run it again.
+# (nothing is sent while answering): a few rounds of looks make it hold.
 # env: USERNAME, METRO_URL (url-encoded), CODE_SINK_URL
 # Selectors are testIDs (Client/src/utils/testIds.ts), so the flow works in any UI language; a mute button's state is
 # its screen reader name ("Mute bot1" / "Silenciar a bot1", "Unmute bot1" / "Quitar silencio a bot1"), read in both.
@@ -101,33 +96,3 @@ appId: com.socketNull.ExposeMe
           label: "The bots' reactions reach the device (bot3, not muted)"
       - assertNotVisible:
           id: "reaction-bot1|reaction-bot2"
-# ── A muted bot's photo: covered from the reveal on, until Show ──
-# The cover shows for the reveal and the scoreboard (8 s), a few screen reads on a slow phone, so a tap can come as
-# the round ends (the cover then goes with the round, not with the Show). A Show counts only when that round's
-# scoreboard is up with neither the cover nor its Show; otherwise the next covered round is tried
-- evalScript: "${output.show = { tries: 0, done: false }}"
-- repeat:
-    while:
-      true: ${!output.show.done && ++output.show.tries <= 3}
-    commands:
-      - extendedWaitUntil:
-          visible:
-            id: "muted-photo-cover"
-          timeout: 420000
-          label: "A round whose photo was a muted bot's (planted or uploaded) is covered once revealed"
-      # The cover's Show in the reveal, the scoreboard's while it covers the cover
-      - tapOn:
-          id: "muted-photo-show-button|score-show-muted-photo"
-          optional: true
-      - runFlow:
-          when:
-            visible:
-              id: "score-modal"
-            notVisible:
-              id: "muted-photo-cover|score-show-muted-photo"
-          commands:
-            - evalScript: ${output.show.done = true}
-- assertTrue:
-    condition: ${output.show.done}
-    label: "Show took the cover off a muted bot's photo, for the rest of its round"
-- takeScreenshot: mute-player-shown-${USERNAME}

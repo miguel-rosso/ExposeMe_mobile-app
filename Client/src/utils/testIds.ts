@@ -77,10 +77,6 @@ export const TEST_IDS = {
   leaveGameConfirm: "leave-game-confirm", // its Cancel / Leave are alertModalCancel / alertModalConfirm
   // The host removing a player during the game (EXP-425): its Cancel / Remove are alertModalCancel / alertModalConfirm
   removePlayerConfirm: "remove-player-confirm",
-  // Over a muted player's round photo (EXP-422), until its Show reveals it for this round
-  mutedPhotoCover: "muted-photo-cover",
-  mutedPhotoShowButton: "muted-photo-show-button",
-  scoreShowMutedPhoto: "score-show-muted-photo", // the same Show on the scoreboard, which covers the cover's
   // Reporting content (EXP-423): the round photo's button, then the dialog (reasons: reportReasonId), the lobby chat
   // bubbles' button is chatReportId
   reportPhotoButton: "report-photo-button",

@@ -14,7 +14,6 @@ import { usePhotoContext } from "../../src/providers/PhotoContext";
 import { useRouter } from "expo-router";
 import getEnvVars from "@/config";
 import PhotoComponent from "@/src/components/PhotoComponent";
-import MutedPhotoCover from "@/src/components/MutedPhotoCover";
 import ScoreModal from "@/src/components/modals/ScoreModal";
 import { TEST_IDS } from "@/src/utils/testIds";
 import ProgressBar from "@/src/components/ProgressBar";
@@ -46,7 +45,6 @@ import LeaveGameConfirm from "@/src/components/modals/LeaveGameConfirm";
 import RemovePlayerConfirm from "@/src/components/modals/RemovePlayerConfirm";
 import { useRemovePlayerQuestion } from "../../src/hooks/useRemovePlayerQuestion";
 import { useMutedPlayers } from "../../src/hooks/useMutedPlayers";
-import { useMutedPhotoReveal } from "../../src/hooks/useMutedPhotoReveal";
 import { useContentReport } from "../../src/hooks/useContentReport";
 import { roundPhotoReport } from "../../src/utils/contentReport";
 import ReportContentModal from "@/src/components/modals/ReportContentModal";
@@ -180,8 +178,6 @@ const GameScreen = () => {
   const holdButtonMounted = phase === "scores" && isRevealedOwner(correctAnswer, safeUsername);
   // The scoreboard covers the photo in scores: the answer options are not drawn under it
   const showAnswers = phase !== "scores";
-  // Drawn over the photo (and a muted player's photo cover) unless the photo is held
-  const scoreboardShown = phase === "scores" && !!scores && !gameHeld;
   // A resumed phase's bar starts where it was, not empty (EXP-080)
   const phaseBarElapsed = phaseElapsed(roundView);
 
@@ -263,10 +259,9 @@ const GameScreen = () => {
 
   // ── Muting a player on this device (EXP-422, DEC-052 A) ─
   // From the scoreboard's rows and the pause modal, kept from the lobby for the room's lifetime. Their emoji reactions
-  // are not shown, and their round photo is covered from the reveal on (whose photo it is is only known then). They
-  // stay an answer option and keep their points: the game is the same for everyone
+  // are not shown, but their round photo is, like anyone's (DEC-063: everyone sees it while answering, so covering it
+  // once revealed protects nobody). They stay an answer option and keep their points: the game is the same for everyone
   const mutes = useMutedPlayers(gameCode);
-  const mutedPhoto = useMutedPhotoReveal(photo, mutes.muted.has(correctAnswer));
   // Reporting the round photo (EXP-423): the round on screen, its owner once revealed (then muted for me by the report,
   // EXP-438, also when the reveal comes while the reason picker is open); none when the photo is mine
   const photoReport = roundPhotoReport(roundView, safeUsername);
@@ -677,9 +672,6 @@ const GameScreen = () => {
           <>
             {/* Server photos need the room credentials: never request one without them (black until ready) */}
             {photoHeaders && <PhotoComponent photoUrl={photo} headers={photoHeaders} />}
-            {/* A muted player's photo: covered, held too, until a Show: the cover's (under the overlay, which lets
-                taps through), or the scoreboard's while it covers this one */}
-            <MutedPhotoCover covered={mutedPhoto.covered} onShow={scoreboardShown ? undefined : mutedPhoto.show} />
 
             {/* Held marker for the device flows (qa/maestro/play-rounds.yaml): invisible and untouchable; kept out of
                 view flattening so it reaches the native view tree */}
@@ -687,8 +679,7 @@ const GameScreen = () => {
               <View testID={TEST_IDS.gameHeld} style={tw`absolute inset-0`} pointerEvents="none" collapsable={false} />
             )}
 
-            {/* Game overlay — hidden during hold so photo is visible. Its empty space lets taps through to the muted
-                photo's cover */}
+            {/* Game overlay — hidden during hold so photo is visible. Its empty space lets taps through to the photo */}
             {!gameHeld && (
               <View style={tw`z-8 absolute w-full h-full`} pointerEvents="box-none">
                 {/* Progress bar during answering or scores */}
@@ -735,7 +726,6 @@ const GameScreen = () => {
                   removable={removablePlayers}
                   muted={mutes.muted}
                   onToggleMute={mutes.toggle}
-                  onShowMutedPhoto={mutedPhoto.covered ? mutedPhoto.show : undefined}
                 />
               </View>
             )}

@@ -65,7 +65,7 @@ const TEXT: Record<InviteLanguage, TermsText> = {
       {
         heading: "What happens if someone breaks these terms",
         paragraphs: [
-          "Any player can report a photo or a chat message, and mute a player so they no longer see their photos and messages. The host can kick a player out of the room.",
+          "Any player can report a photo or a chat message, and mute a player to stop seeing their chat messages and emoji reactions. The host can kick a player out of the room.",
           "We review reports. Illegal content, such as child sexual abuse material, may be reported to the authorities.",
         ],
       },
@@ -119,7 +119,7 @@ const TEXT: Record<InviteLanguage, TermsText> = {
       {
         heading: "Qué pasa si alguien incumple estas condiciones",
         paragraphs: [
-          "Cualquier jugador puede denunciar una foto o un mensaje del chat, y silenciar a un jugador para dejar de ver sus fotos y mensajes. El anfitrión puede expulsar a un jugador de la sala.",
+          "Cualquier jugador puede denunciar una foto o un mensaje del chat, y silenciar a un jugador para dejar de ver sus mensajes del chat y sus reacciones con emojis. El anfitrión puede expulsar a un jugador de la sala.",
           "Revisamos las denuncias. El contenido ilegal, como el material de abuso sexual infantil, puede denunciarse ante las autoridades.",
         ],
       },

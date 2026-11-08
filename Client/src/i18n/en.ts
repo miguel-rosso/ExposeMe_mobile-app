@@ -46,9 +46,6 @@ export default {
   // Muting a player on this device (EXP-422): lobby and game player rows, named for screen readers
   mutePlayerNamed: "Mute {name}",
   unmutePlayerNamed: "Unmute {name}",
-  // GameScreen: over the round's photo when it is a muted player's, until "Show" reveals it for this round
-  mutedPlayerPhoto: "Photo from a muted player",
-  showMutedPhoto: "Show",
   // Reporting the round photo or another player's chat message (EXP-423): the buttons, named for screen readers
   reportPhoto: "Report photo",
   reportMessageFrom: "Report message from {name}",

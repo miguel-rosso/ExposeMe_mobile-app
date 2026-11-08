@@ -3,7 +3,7 @@ import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import { BackHandler } from "react-native";
 import { FakeSocket } from "../testUtils/fakeSocket";
 import { Player } from "../src/models/interfaces";
-import { reportReasonId, TEST_IDS } from "../src/utils/testIds";
+import { reportReasonId, scoreMuteId, TEST_IDS } from "../src/utils/testIds";
 import { REPORT_ACK_TIMEOUT_MS, REPORT_REASONS } from "../src/utils/contentReport";
 import en from "../src/i18n/en";
 import es from "../src/i18n/es";
@@ -53,7 +53,6 @@ jest.mock("react-native-animatable", () => {
   return { View };
 });
 jest.mock("react-native-vector-icons/FontAwesome", () => "Icon");
-jest.mock("expo-blur", () => ({ BlurView: "BlurView" }));
 jest.mock("@/src/components/PhotoComponent", () => () => null);
 jest.mock("@/src/components/modals/FinalScoreModal", () => () => null);
 jest.mock("@/src/components/modals/WinnerModal", () => () => null);
@@ -80,6 +79,9 @@ const pressable = (root: ReactTestInstance, id: string) => {
   return target;
 };
 const press = (root: ReactTestInstance, id: string) => act(() => pressable(root, id).props.onPress());
+/** A scoreboard row's mute button, by its screen reader name: "Mute <name>" or, once muted, "Unmute <name>" */
+const muteLabelOf = (root: ReactTestInstance, username: string): string =>
+  pressable(root, scoreMuteId(username)).props.accessibilityLabel;
 const textOf = (node: ReactTestInstance): string =>
   node.children.map((c) => (typeof c === "string" ? c : textOf(c))).join("");
 
@@ -156,32 +158,32 @@ describe("GameScreen: reporting the round photo (EXP-423)", () => {
     expect(reports()).toEqual([]);
   });
 
-  it("once revealed, picking the reason mutes the photo's owner, which covers their photo, and the thanks says so", async () => {
+  it("once revealed, picking the reason mutes the photo's owner, and the thanks says so", async () => {
     await mount();
     act(() => mockSocket.fire("round-reveal", reveal("bob")));
     press(r.root, TEST_IDS.reportPhotoButton);
-    expect(has(r.root, TEST_IDS.mutedPhotoCover)).toBe(false);
     press(r.root, reportReasonId("sexual"));
-    // bob is muted now: his revealed photo is covered
-    expect(has(r.root, TEST_IDS.mutedPhotoCover)).toBe(true);
 
     await answerLastReport({ ok: true });
     expect(textOf(find(r.root, TEST_IDS.reportMutedNotice)[0])).toBe("You muted bob");
     press(r.root, TEST_IDS.reportCloseButton);
     expect(has(r.root, TEST_IDS.reportModal)).toBe(false);
-    expect(has(r.root, TEST_IDS.mutedPhotoCover)).toBe(true);
+    act(() => mockSocket.fire("round-scores", roundScores(1)));
+    expect(muteLabelOf(r.root, "bob")).toBe("Unmute bob");
+    expect(muteLabelOf(r.root, "carol")).toBe("Mute carol");
   });
 
   it("opened while answering, the reveal coming before the reason: picking it mutes the owner revealed meanwhile", async () => {
     await mount();
     press(r.root, TEST_IDS.reportPhotoButton);
     act(() => mockSocket.fire("round-reveal", reveal("bob")));
-    expect(has(r.root, TEST_IDS.mutedPhotoCover)).toBe(false);
     press(r.root, reportReasonId("sexual"));
     expect(reports().map((x) => x.payload)).toEqual([{ kind: "photo", round: 1, reason: "sexual" }]);
-    expect(has(r.root, TEST_IDS.mutedPhotoCover)).toBe(true);
     await answerLastReport({ ok: true });
     expect(textOf(find(r.root, TEST_IDS.reportMutedNotice)[0])).toBe("You muted bob");
+    press(r.root, TEST_IDS.reportCloseButton);
+    act(() => mockSocket.fire("round-scores", roundScores(1)));
+    expect(muteLabelOf(r.root, "bob")).toBe("Unmute bob");
   });
 
   it("opened while answering, the photo then revealed as mine: picking the reason mutes nobody", async () => {

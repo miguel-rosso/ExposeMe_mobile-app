@@ -11,7 +11,6 @@ import { isRevealedOwner } from "@/src/utils/roundState";
 import PhotoOwnerCard from "@/src/components/PhotoOwnerCard";
 import RemovePlayerButton from "@/src/components/RemovePlayerButton";
 import MutePlayerButton from "@/src/components/IngameComunication/MutePlayerButton";
-import { ShowMutedPhotoButton } from "@/src/components/MutedPhotoCover";
 import { MutedNames, NOBODY_MUTED } from "@/src/hooks/useMutedPlayers";
 import { useReduceMotion } from "@/src/hooks/useReduceMotion";
 import { topClearOfInset } from "@/src/utils/safeAreaRows";
@@ -63,8 +62,6 @@ interface ScoreModalProps {
   muted?: MutedNames;
   /** Every other player's row gets a mute / unmute button (keep it stable: memo) */
   onToggleMute?: (username: string) => void;
-  /** The photo behind is a muted player's, covered: a Show under the owner card reveals it (keep it stable: memo) */
-  onShowMutedPhoto?: () => void;
 }
 
 const ScoreModal: React.FC<ScoreModalProps> = ({
@@ -78,7 +75,6 @@ const ScoreModal: React.FC<ScoreModalProps> = ({
   removable,
   muted = NOBODY_MUTED,
   onToggleMute,
-  onShowMutedPhoto,
 }) => {
   const { t } = useI18n();
   const insets = useSafeAreaInsets();
@@ -121,12 +117,6 @@ const ScoreModal: React.FC<ScoreModalProps> = ({
           isMine={isRevealedOwner(correctAnswer, myUsername)}
           animate={!reduceMotion}
         />
-      )}
-
-      {onShowMutedPhoto && (
-        <View style={tw`mb-3`}>
-          <ShowMutedPhotoButton testID={TEST_IDS.scoreShowMutedPhoto} onPress={onShowMutedPhoto} />
-        </View>
       )}
 
       {/* Shrinks to the space left (never grows past its rows) and scrolls: 12 players don't fit small phones */}

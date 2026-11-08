@@ -9,7 +9,10 @@ const ROOM_CLEANUP_DELAY = 30 * 60 * 1000;
 /** Cleanup delay for rooms that never had a second player (created and abandoned). */
 const SOLO_ROOM_CLEANUP_DELAY = 2 * 60 * 1000;
 export const MAX_PLAYERS_PER_ROOM = 12;
-/** Global cap on rooms held in memory; creating beyond it is refused with "Server is busy". */
+/**
+ * Global cap on rooms held in memory; creating beyond it is refused with "Server is busy", unless an abandoned room can
+ * make way for the new one (see roomToEvict).
+ */
 export const MAX_ROOMS = 5000;
 /**
  * Live rooms created from one IP key at once (EXP-441), so one address can't fill MAX_ROOMS: several hosts behind one
@@ -23,6 +26,11 @@ export const MAX_ROOMS_PER_IPV6_PREFIX = envInt("ROOMS_PER_IPV6_PREFIX_MAX", 100
  * role over, and a game start removes them. Shorter absences (app switch, brief signal loss) go unnoticed (DEC-009).
  */
 export const DISCONNECT_GRACE = 15_000;
+/**
+ * Only on a full server (MAX_ROOMS): a room with no game in progress whose players have all been disconnected this long
+ * is deleted to make way for a new room (EXP-450). Long enough to share the code in another app and come back.
+ */
+export const EVICTABLE_AFTER_DISCONNECT = 60_000;
 /** Round counts the host can pick in the app. */
 export const ROUND_OPTIONS = [10, 15, 20];
 /** QA-only short game (EXP-100): accepted only when the server runs with ALLOW_QA_ROUNDS=1; never offered in the app. */
@@ -102,14 +110,45 @@ export class RoomManager {
       _holdSafetyTimer: null,
       _lobbyTimer: null,
     };
+    this.makeWayForNewRoom();
     this.rooms.set(gameCode, room);
     this.countQuotas(gameCode, quotas);
     return room;
   }
 
-  /** True when no more rooms may be created (MAX_ROOMS). */
+  /** True when no more rooms may be created: MAX_ROOMS are held and none of them can make way (see roomToEvict). */
   isAtCapacity(): boolean {
-    return this.rooms.size >= MAX_ROOMS;
+    return this.rooms.size >= MAX_ROOMS && !this.roomToEvict();
+  }
+
+  /** On a full server, the room picked by roomToEvict is deleted so a new one fits. */
+  private makeWayForNewRoom(): void {
+    if (this.rooms.size < MAX_ROOMS) return;
+    const abandoned = this.roomToEvict();
+    if (abandoned) this.deleteRoom(abandoned.gameCode);
+  }
+
+  /**
+   * The room to delete on a full server: among the evictable ones (see isEvictable), a lobby that never played a game
+   * before one whose game is over, and the oldest first. Undefined if none is.
+   */
+  private roomToEvict(): Room | undefined {
+    const now = Date.now();
+    let finishedGame: Room | undefined;
+    for (const room of this.rooms.values()) { // Map order: oldest room first
+      if (!this.isEvictable(room, now)) continue;
+      if (room.gameNumber === 0) return room;
+      finishedGame ??= room;
+    }
+    return finishedGame;
+  }
+
+  /**
+   * No game in progress (one with everyone away pauses and ends by itself) and every player disconnected for
+   * EVICTABLE_AFTER_DISCONNECT.
+   */
+  private isEvictable(room: Room, now: number): boolean {
+    return !room.started && room.players.every((p) => this.disconnectedFor(p, EVICTABLE_AFTER_DISCONNECT, now));
   }
 
   /** Every quota has room for one more live room. */
@@ -256,7 +295,12 @@ export class RoomManager {
 
   /** Disconnected for longer than DISCONNECT_GRACE (a short absence doesn't count; no disconnect time = just now). */
   isGone(player: Player, now = Date.now()): boolean {
-    return !player.connected && now - (player.disconnectedAt ?? now) >= DISCONNECT_GRACE;
+    return this.disconnectedFor(player, DISCONNECT_GRACE, now);
+  }
+
+  /** Disconnected for at least `ms` (no disconnect time = just now). */
+  private disconnectedFor(player: Player, ms: number, now: number): boolean {
+    return !player.connected && now - (player.disconnectedAt ?? now) >= ms;
   }
 
   /** The host is gone: the first connected player becomes host (returned). The old host stays as a normal player. */

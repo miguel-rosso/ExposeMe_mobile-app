@@ -112,7 +112,10 @@ export interface Room {
   _pauseWaitingFor: string[];
   /** Rounds skipped in a row (photo timeout); reset when a round is actually played */
   _consecutiveSkips: number;
-  /** A second player joined at some point (abandoned solo rooms are cleaned up sooner) */
+  /**
+   * A second player joined at some point: once nobody is connected the room is kept 30 min instead of 2
+   * (RoomManager.scheduleRoomDeletion)
+   */
   _hadGuests: boolean;
 
   // Timer: only ONE active timer at a time

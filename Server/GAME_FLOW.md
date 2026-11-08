@@ -473,7 +473,8 @@ After last round: game-over
   `"Room is full"`. Rejoins of existing players are always accepted.
 - Limits: at most **5 `join-create-game` per socket in any 10 s** (excess answered with
   `{ success: false, message: "Too many attempts" }`), and at most **5000 rooms** in memory (`MAX_ROOMS`;
-  creating beyond it answers `"Server is busy"`, joining existing rooms still works). Rooms also count against the
+  creating beyond it answers `"Server is busy"`, joining existing rooms still works; but an abandoned room may make
+  way for the new one, see "Disconnected players"). Rooms also count against the
   IP key of the socket that created them for as long as they live (also once their creator left them to the guests):
   at most **20 live rooms per IP** (IPv6: per /64, env `ROOMS_PER_IP_MAX`) and **100 per IPv6 /48** (all its /64s
   together, env `ROOMS_PER_IPV6_PREFIX_MAX`); creating beyond either also answers `"Server is busy"` (EXP-441), while
@@ -629,6 +630,12 @@ After last round: game-over
   someone successfully rejoins/joins first (rejected joins do not postpone the deletion). A running game in such a
   room pauses and ends when the pause expires (5 min, below), so no game timers outlive it; deleting a room
   clears its timers.
+- Only when the server is full (`MAX_ROOMS`), creating a room first deletes one such abandoned room to make way
+  (EXP-450): a room with **no game in progress** whose players have **all been disconnected for 60 s**
+  (`EVICTABLE_AFTER_DISCONNECT`), a lobby that never played a game before one whose game is over, the oldest first.
+  A game in progress is never deleted this way (with everyone away it ends by itself when its pause expires, and
+  only then can its room go). Its code then answers `"Game not found"`, as after the timed deletion; only if no room
+  qualifies does creating answer `"Server is busy"`.
 - Photo-wait timeouts and `photo-unavailable` skip the round (`round-skipped`), but after **3 consecutive skips**
   (`MAX_CONSECUTIVE_SKIPS`) the server ends the game (`game-over`) instead of skipping forever.
   Any round that is actually played (uploaded or planted photo) resets the counter. An owner going away (left, or

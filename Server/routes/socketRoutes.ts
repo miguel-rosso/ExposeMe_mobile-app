@@ -388,9 +388,10 @@ io.on("connection", (socket: Socket) => {
       };
 
       if (gameCode === null) {
-        // Server full, or this IP (IPv6: its /64 or its /48) already created its share of the live rooms
+        // This IP (IPv6: its /64 or its /48) already created its share of the live rooms, or the server is full (checked
+        // second: on a full server it looks for an abandoned room to make way)
         const quotas = roomQuotasOf(ip);
-        if (roomManager.isAtCapacity() || !roomManager.withinQuotas(quotas)) return refuse("Server is busy");
+        if (!roomManager.withinQuotas(quotas) || roomManager.isAtCapacity()) return refuse("Server is busy");
         const room = roomManager.createRoom(username, socket.id, quotas);
         bindTo(room.gameCode);
         replyJoined(room, room.players[0]);
@@ -448,8 +449,8 @@ io.on("connection", (socket: Socket) => {
         return;
       }
 
-      // Keep all players in room on disconnect — they can rejoin.
-      // Room gets cleaned up after 30min inactivity.
+      // Keep all players in room on disconnect — they can rejoin. With nobody connected the room is deleted later
+      // (RoomManager.scheduleRoomDeletion, GAME_FLOW.md "Disconnected players").
       console.log(`[${gameCode}] ${username} disconnected — keeping in room`);
       gameEngine.checkReady(room); // ready phase: don't wait for a player who is gone
       // Lobby: after DISCONNECT_GRACE they are shown as gone and a gone host hands over; mid-game: pause if fewer than 2

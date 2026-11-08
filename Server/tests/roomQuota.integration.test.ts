@@ -56,6 +56,13 @@ describe("live rooms per IP (EXP-441)", () => {
     expect((await joinAs(guest, other.answer.room!.gameCode, "guest")).success).toBe(true);
   });
 
+  it("an IP past its quota is refused before the server looks for a full-server eviction (EXP-450)", async () => {
+    await fill("203.0.113.10", 3);
+    const capacityCheck = vi.spyOn(roomManager, "isAtCapacity");
+    expect((await createFrom("203.0.113.10")).answer).toEqual({ success: false, message: "Server is busy" });
+    expect(capacityCheck).not.toHaveBeenCalled();
+  });
+
   it("a host leaving its room (now empty, so deleted at once) frees the slot", async () => {
     const [first] = await fill("203.0.113.8", 3);
     expect(roomManager.stats().rooms).toBe(3);

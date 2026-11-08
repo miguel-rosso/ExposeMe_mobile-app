@@ -1,6 +1,7 @@
 import React from "react";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { recordTermsAccepted } from "../src/utils/termsAcceptance";
 import { TEST_IDS } from "../src/utils/testIds";
 
 // EXP-342: leaving the game flow forgets the room (GameContext's gameCode), but not the code typed in home's join
@@ -68,7 +69,7 @@ const showHome = async (key: number) => {
 
 beforeEach(async () => {
   await AsyncStorage.clear();
-  await AsyncStorage.setItem("hasSeenInitialScreen", "true");
+  await recordTermsAccepted();
   await AsyncStorage.setItem("username", "ana");
   mockPush.mockReset();
 });

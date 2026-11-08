@@ -44,7 +44,11 @@ appId: com.socketNull.ExposeMe
                         text: ${output.languageSwitch.to}
                       timeout: 10000
             - evalScript: "${output.languageSwitch = { from: output.languageSwitch.to, to: output.languageSwitch.from }}"
-      # Fixed footer above the bottom inset: on screen without scrolling (a scroll would hide a sliver regression)
+      # Fixed footer above the bottom inset: on screen without scrolling (a scroll would hide a sliver regression).
+      # EXP-433: the terms consent line sits right above «Accept and continue», whose tap accepts the terms
+      - assertVisible:
+          id: "terms-consent"
+          text: "By continuing you accept the Terms and the Privacy policy|Al continuar aceptas las Condiciones y la Pol.tica de privacidad"
       - assertVisible:
           id: "initial-continue-button"
       - tapOn:

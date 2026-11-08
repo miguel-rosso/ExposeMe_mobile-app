@@ -6,6 +6,9 @@ import { useKeyboardPadding } from "@/src/hooks/useKeyboardPadding";
 import { TEST_IDS } from "@/src/utils/testIds";
 import { MAX_USERNAME_INPUT_LENGTH } from "@/src/utils/protocolLimits";
 import { normalizeUsername } from "@/src/utils/username";
+import { recordTermsAccepted } from "@/src/utils/termsAcceptance";
+import { useTermsAccepted } from "@/src/hooks/useTermsAccepted";
+import TermsConsent from "@/src/components/TermsConsent";
 
 interface InviteConfirmModalProps {
   /** Room the invite link points to */
@@ -30,14 +33,19 @@ const InviteConfirmModal: React.FC<InviteConfirmModalProps> = ({ roomCode, initi
   const [joining, setJoining] = useState(false);
   // A second tap before the state update renders must not join twice
   const joiningRef = useRef(false);
+  // An invite link that cold-starts the app skips the first screen, where the terms are accepted (EXP-433): a device
+  // that never accepted the current ones accepts them here, with Join. Join waits until that is known.
+  const [termsAccepted] = useTermsAccepted();
+  const asksForTerms = termsAccepted === false;
   const normalizedName = normalizeUsername(name);
-  const canJoin = normalizedName !== "" && !joining;
+  const canJoin = normalizedName !== "" && !joining && termsAccepted !== undefined;
 
   const join = async () => {
-    if (!normalizedName || joiningRef.current) return;
+    if (!normalizedName || termsAccepted === undefined || joiningRef.current) return;
     joiningRef.current = true;
     setJoining(true);
     try {
+      if (asksForTerms) await recordTermsAccepted();
       await onJoin(normalizedName);
     } finally {
       joiningRef.current = false;
@@ -74,6 +82,11 @@ const InviteConfirmModal: React.FC<InviteConfirmModalProps> = ({ roomCode, initi
             returnKeyType="done"
             style={tw`h-14 rounded-xl bg-white font-bold text-center text-lg mb-5`}
           />
+          {asksForTerms && (
+            <View style={tw`mb-4`}>
+              <TermsConsent />
+            </View>
+          )}
           <View style={tw`flex-row`}>
             <TouchableOpacity
               testID={TEST_IDS.inviteCancelButton}

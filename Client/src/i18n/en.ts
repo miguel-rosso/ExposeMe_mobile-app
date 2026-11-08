@@ -183,7 +183,6 @@ export default {
   step1: "Step 1",
   step2: "Step 2",
   step3: "Step 3",
-  continue_: "Continue",
 
   // SettingsInstructionsScreen
   careful: "⚠️ Careful ⚠️",
@@ -238,4 +237,10 @@ export default {
 
   // GameScreen: shown next to a player's name when they take a screenshot
   tookScreenshot: "took a screenshot",
+
+  // InitialScreen: the terms of use the player accepts before sharing anything (EXP-433, DEC-058). {terms} and
+  // {privacy} are the two links, labelled termsOfUse and privacyPolicy
+  termsAcceptAndContinue: "Accept and continue",
+  termsConsent: "By continuing you accept the {terms} and the {privacy}",
+  termsOfUse: "Terms",
 } as const;

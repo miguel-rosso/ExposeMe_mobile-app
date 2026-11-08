@@ -1,6 +1,6 @@
 import React from "react";
 import TestRenderer, { act, ReactTestInstance, ReactTestRenderer } from "react-test-renderer";
-import { AccessibilityInfo, Animated, Image, Platform, ScrollView, StyleSheet, Text, TouchableOpacity } from "react-native";
+import { AccessibilityInfo, Animated, Image, Linking, Platform, ScrollView, StyleSheet, Text, TouchableOpacity } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Haptics from "expo-haptics";
 
@@ -30,9 +30,11 @@ jest.mock("react-native-safe-area-context", () => {
 const en = require("../src/i18n/en").default;
 const es = require("../src/i18n/es").default;
 let mockT = en;
-jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: mockT }) }));
+const mockEs = es; // the factory below may only read mock-prefixed variables
+jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: mockT, lang: mockT === mockEs ? "es" : "en" }) }));
 
 import InitialScreen from "../app/screens/InitialScreen";
+import { ACCEPTED_TERMS_KEY, TERMS_VERSION } from "../src/utils/termsAcceptance";
 import PhotoFanHero, { CARD_BLUR_RADIUS, FAN_CARDS, HERO_HEIGHT } from "../src/components/PhotoFanHero";
 import { TEST_IDS } from "../src/utils/testIds";
 import { resetReduceMotionSettingForTests, useReduceMotion, useReduceMotionSetting } from "../src/hooks/useReduceMotion";
@@ -49,8 +51,19 @@ const render = async (element: React.ReactElement = <InitialScreen />) => {
   return tree;
 };
 
+/** The text a Text element shows, with its nested Text (links) inlined */
+const plainText = (children: unknown): string =>
+  ([] as unknown[])
+    .concat(children)
+    .map((c) => (typeof c === "string" ? c : React.isValidElement(c) ? plainText((c.props as any).children) : ""))
+    .join("");
+const isNestedText = (n: ReactTestInstance) => {
+  for (let p = n.parent; p; p = p.parent) if (p.type === Text) return true;
+  return false;
+};
+/** Every line of text on screen: each outermost Text, links inlined */
 const texts = (tree: ReactTestRenderer) =>
-  tree.root.findAllByType(Text).map((n) => [].concat(n.props.children).join(""));
+  tree.root.findAllByType(Text).filter((n) => !isNestedText(n)).map((n) => plainText(n.props.children));
 const byTestID = (tree: ReactTestRenderer, id: string) =>
   tree.root.find((n) => n.props.testID === id && typeof n.type !== "string");
 const flat = (n: ReactTestInstance) => StyleSheet.flatten(n.props.style);
@@ -86,7 +99,7 @@ describe("InitialScreen copy", () => {
   it.each([
     ["es", es, "TU GALERÍA\nES EL JUEGO"],
     ["en", en, "YOUR GALLERY\nIS THE GAME"],
-  ])("shows the %s title, subtitle, the three promises, the CTA and the footnote", async (_lang, t, title) => {
+  ])("shows the %s title, subtitle, the three promises, the terms consent, the CTA and the footnote", async (_lang, t, title) => {
     mockT = t;
     const tree = await render();
     expect(texts(tree)).toEqual([
@@ -96,7 +109,10 @@ describe("InitialScreen copy", () => {
       t.initialPointRandom,
       t.initialPointRoom,
       t.initialPointDeleted,
-      t.continue_,
+      t === es
+        ? "Al continuar aceptas las Condiciones y la Política de privacidad"
+        : "By continuing you accept the Terms and the Privacy policy",
+      t.termsAcceptAndContinue,
       t.initialFootnote,
     ]);
     expect(byTestID(tree, TEST_IDS.initialTitle).props.children).toBe(title);
@@ -117,7 +133,8 @@ describe("InitialScreen copy", () => {
       "Deleted when the game ends",
       "You can share all your photos or just some.",
     ]);
-    expect([es.continue_, en.continue_]).toEqual(["Continuar", "Continue"]);
+    // EXP-433 (DEC-058): «Continuar» became «Aceptar y continuar»
+    expect([es.termsAcceptAndContinue, en.termsAcceptAndContinue]).toEqual(["Aceptar y continuar", "Accept and continue"]);
   });
 
   it.each([["es", es], ["en", en]])("has no warning banner or system-dialog instructions (%s)", async (_lang, t) => {
@@ -193,16 +210,57 @@ describe("InitialScreen continue", () => {
     expect(buttons[0].props.testID).toBe(TEST_IDS.initialContinueButton);
   });
 
-  it("taps lightly, remembers the screen was seen, asks for photo access and goes home", async () => {
+  it("taps lightly, records the accepted terms version, asks for photo access and goes home", async () => {
     const order: string[] = [];
     mockHandleContinue.mockImplementation(async () => {
-      order.push(`ask (seen=${await AsyncStorage.getItem("hasSeenInitialScreen")})`);
+      order.push(`ask (accepted=${await AsyncStorage.getItem(ACCEPTED_TERMS_KEY)})`);
     });
     mockReplace.mockImplementation((path: string) => order.push(`replace ${path}`));
     const tree = await render();
     await act(async () => byTestID(tree, TEST_IDS.initialContinueButton).props.onPress());
     expect(Haptics.impactAsync).toHaveBeenCalledWith(Haptics.ImpactFeedbackStyle.Light);
-    expect(order).toEqual(["ask (seen=true)", "replace /"]);
+    expect(order).toEqual([`ask (accepted=${TERMS_VERSION})`, "replace /"]);
+  });
+});
+
+// EXP-433 (DEC-058): the consent line above the button links the server's /terms and /privacy pages in the app's
+// language; opening them neither accepts the terms nor leaves the screen
+describe("InitialScreen terms consent", () => {
+  let openURL: jest.SpyInstance;
+  beforeEach(() => {
+    process.env.EXPO_PUBLIC_SERVER_URL = "http://localhost:3999";
+    openURL = jest.spyOn(Linking, "openURL").mockResolvedValue(undefined);
+  });
+  afterEach(() => {
+    delete process.env.EXPO_PUBLIC_SERVER_URL;
+  });
+
+  it.each([
+    ["es", es, TEST_IDS.termsLink, "Condiciones", "http://localhost:3999/terms?lang=es"],
+    ["es", es, TEST_IDS.termsPrivacyLink, "Política de privacidad", "http://localhost:3999/privacy?lang=es"],
+    ["en", en, TEST_IDS.termsLink, "Terms", "http://localhost:3999/terms?lang=en"],
+    ["en", en, TEST_IDS.termsPrivacyLink, "Privacy policy", "http://localhost:3999/privacy?lang=en"],
+  ])("(%s) the %s link «%s» opens %s", async (_lang, t, testID, label, url) => {
+    mockT = t;
+    const tree = await render();
+    const link = byTestID(tree, testID);
+    expect(link.type).toBe(Text);
+    expect(link.props.children).toBe(label);
+    expect(link.props.accessibilityRole).toBe("link");
+    await act(async () => link.props.onPress());
+    expect(openURL).toHaveBeenCalledWith(url);
+    expect(await AsyncStorage.getItem(ACCEPTED_TERMS_KEY)).toBeNull();
+    expect(mockHandleContinue).not.toHaveBeenCalled();
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
+
+  it("sits in the fixed footer, right above the button", async () => {
+    const tree = await render();
+    const scroll = tree.root.findByType(ScrollView);
+    const termsLink = byTestID(tree, TEST_IDS.termsLink);
+    expect(scroll.findAll((n) => n === termsLink)).toHaveLength(0);
+    const lines = texts(tree);
+    expect(lines.indexOf(en.termsAcceptAndContinue) - lines.indexOf("By continuing you accept the Terms and the Privacy policy")).toBe(1);
   });
 });
 
@@ -348,7 +406,7 @@ describe("InitialScreen i18n", () => {
     expect(Object.keys(es).sort()).toEqual(Object.keys(en).sort());
     for (const removed of [
       "warning", "permissionExplanation", "requiredPermission", "allowAll", "howToEnableAndroid", "howToEnableIOS",
-      "tapAllowAll", "tapToProceed",
+      "tapAllowAll", "tapToProceed", "continue_",
     ]) {
       expect(en).not.toHaveProperty(removed);
       expect(es).not.toHaveProperty(removed);

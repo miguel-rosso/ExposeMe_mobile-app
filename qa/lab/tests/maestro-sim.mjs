@@ -311,14 +311,17 @@ function loadErrorScreen(platform) {
 const LATE_TAP_MS = 12000; // a late switch shows after the flow's 10 s wait for it (and the tap's own step)
 function onboarding(startLang, fate) {
   const load = (f) => new Function(fs.readFileSync(f, "utf8").replace(/^export default/m, "return").replace(/\}\s*as const;\s*$/, "}"))();
-  const titles = { en: load(`${clientApp}/i18n/en.ts`).initialTitle, es: load(`${clientApp}/i18n/es.ts`).initialTitle };
+  const t = { en: load(`${clientApp}/i18n/en.ts`), es: load(`${clientApp}/i18n/es.ts`) };
+  const titles = { en: t.en.initialTitle, es: t.es.initialTitle };
+  // The terms consent line as it reads on screen, its two links inlined (EXP-433)
+  const consent = (lang) => t[lang].termsConsent.replace("{terms}", t[lang].termsOfUse).replace("{privacy}", t[lang].privacyPolicy);
   const state = { lang: startLang, home: false, taps: 0 };
   const switchLang = () => { state.lang = state.lang === "en" ? "es" : "en"; };
   const d = device(
     "ios",
     () => (state.home ? [{ id: "join-game-button" }] : [
       { id: "initial-screen" }, { id: "initial-title", text: titles[state.lang] }, { id: "language-toggle" },
-      { id: "initial-continue-button" },
+      { id: "terms-consent", text: consent(state.lang) }, { id: "initial-continue-button" },
     ]),
     (dev, sel) => {
       if (sel.id && matches(sel.id, "initial-continue-button")) state.home = true;

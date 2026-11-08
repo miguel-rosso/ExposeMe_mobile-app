@@ -1,16 +1,16 @@
 import { Request, Response } from "express";
-import { STATIC_PAGE_CSP } from "../middlewares/securityHeaders";
 import { UPLOAD_TTL_MS } from "../middlewares/uploadSweeper";
 import { REPORT_RETENTION_DAYS, REPORT_WEBHOOK_URL } from "../managers/reportConfig";
-import { escapeHtml, INVITE_LANGUAGES, InviteLanguage, pickInviteLanguage } from "./joinPage";
+import { escapeHtml, InviteLanguage } from "./joinPage";
+import { LegalSection, legalPageLanguageOf, mailtoLink, renderLegalPage, sendLegalPage } from "./legalPage";
 
 // ── Privacy policy page (/privacy) ──
-// The policy both stores require, in Spanish or English (Accept-Language, or ?lang=es|en to link one directly). Plain
-// HTML with an inline style and no script. Every fact in it comes from the code: keep it in sync when what the app
+// The policy both stores require, in Spanish or English (Accept-Language, or ?lang=es|en to link one directly), in the
+// shared legal page shell (routes/legalPage). Every fact in it comes from the code: keep it in sync when what the app
 // sends, who sees it or how long the server keeps it changes, and bump PRIVACY_LAST_UPDATED.
 
 /** Date of the last change to what the policy says (ISO, shown in the page language). */
-export const PRIVACY_LAST_UPDATED = "2026-11-03";
+export const PRIVACY_LAST_UPDATED = "2026-11-08";
 
 /** Photos are deleted from the server at the latest this long after upload (the upload sweeper's TTL). */
 const PHOTO_TTL_MINUTES = Math.round(UPLOAD_TTL_MS / 60_000);
@@ -44,14 +44,6 @@ export function parseControllerName(raw: string | undefined, production: boolean
 export const CONTACT_EMAIL = parseContactEmail(process.env.CONTACT_EMAIL);
 export const CONTROLLER_NAME = parseControllerName(process.env.CONTROLLER_NAME, process.env.NODE_ENV === "production");
 
-// ── Language ──
-
-/** `?lang=es|en` wins; anything else (missing, unknown, repeated) falls back to the browser's Accept-Language. */
-export function pickPrivacyLanguage(langQuery: unknown, accepted: string | false): InviteLanguage {
-  const requested = INVITE_LANGUAGES.find((language) => language === langQuery);
-  return requested ?? pickInviteLanguage(accepted);
-}
-
 // ── Text ──
 
 interface PolicyFacts {
@@ -66,16 +58,10 @@ interface PolicyFacts {
   reportWebhook: boolean;
 }
 
-interface Section {
-  heading: string;
-  /** HTML paragraphs */
-  paragraphs: string[];
-}
-
 interface PolicyText {
   title: string;
   lastUpdated: string;
-  sections: (facts: PolicyFacts) => Section[];
+  sections: (facts: PolicyFacts) => LegalSection[];
 }
 
 const TEXT: Record<InviteLanguage, PolicyText> = {
@@ -104,7 +90,7 @@ const TEXT: Record<InviteLanguage, PolicyText> = {
       {
         heading: "Your photo gallery",
         paragraphs: [
-          "The app asks for permission to read your photo gallery, because the game is played with photos from the players' galleries. It only reads photos (no videos) and doesn't use the camera, the microphone or your location. On iPhone you can allow only a selection of photos; the app then picks only among those.",
+          "The app asks for permission to read your photo gallery, because the game is played with photos from the players' galleries. It only reads photos (no videos) and doesn't use the camera, the microphone or your location. On iPhone, and on Android 14 or later, you can allow only a selection of photos (\"Limited Access\" or \"Select photos\"); the app then picks only among those.",
           "Your gallery is browsed on your phone. The only photos that leave it are the one the app picks at random from the photos it can access when it is your turn, and the one you choose yourself to plant in the game. Before sending a photo the app makes a smaller JPEG copy of it, and the server removes all its metadata (such as the date, the camera or the GPS location) before storing it.",
           "You can withdraw the permission at any time in your phone's settings; without it you can't take part in a game.",
         ],
@@ -115,7 +101,7 @@ const TEXT: Record<InviteLanguage, PolicyText> = {
           "<strong>Your player name</strong>: the one you type. The other players in your room see it, and the server's game logs record it with the room code (who joined, whose photo each round showed).",
           "<strong>Chat messages and reactions</strong>: sent to the players in your room at that moment. The server doesn't store them; it only holds a room's latest messages in its memory while the room exists, to check the reports about them (see \"Reports\"). If you take a screenshot during a game, the other players get a reaction saying so; the screenshot itself is not sent.",
           "<strong>Your IP address</strong>: like any internet service, the server sees it. It only uses it in memory, to limit abuse (too many requests or connections), and doesn't write it to its logs. Our hosting provider may record it in its own request logs.",
-          "<strong>On your phone</strong>: the app saves your name, your language and a code to rejoin your last game. They stay on your phone.",
+          "<strong>On your phone</strong>: the app saves your name, your language, a code to rejoin your last game and which version of the terms you accepted. They stay on your phone.",
         ],
       },
       {
@@ -192,7 +178,7 @@ const TEXT: Record<InviteLanguage, PolicyText> = {
       {
         heading: "Tu galería de fotos",
         paragraphs: [
-          "La app pide permiso para leer tu galería, porque el juego se juega con fotos de las galerías de los jugadores. Solo lee fotos (no vídeos) y no usa la cámara, el micrófono ni tu ubicación. En iPhone puedes permitir solo una selección de fotos; la app elige entonces solo entre esas.",
+          "La app pide permiso para leer tu galería, porque el juego se juega con fotos de las galerías de los jugadores. Solo lee fotos (no vídeos) y no usa la cámara, el micrófono ni tu ubicación. En iPhone, y en Android 14 o posterior, puedes permitir solo una selección de fotos («Acceso limitado» o «Seleccionar fotos»); la app elige entonces solo entre esas.",
           "Tu galería se recorre en tu móvil. Las únicas fotos que salen de él son la que la app elige al azar entre las que puede ver cuando te toca, y la que eliges tú para colar en la partida. Antes de enviar una foto la app hace una copia JPEG más pequeña, y el servidor le quita todos los metadatos (como la fecha, la cámara o la ubicación GPS) antes de guardarla.",
           "Puedes retirar el permiso cuando quieras en los ajustes del móvil; sin él no puedes jugar una partida.",
         ],
@@ -203,7 +189,7 @@ const TEXT: Record<InviteLanguage, PolicyText> = {
           "<strong>Tu nombre de jugador</strong>: el que escribes. Lo ven los demás jugadores de tu sala, y los registros de partida del servidor lo anotan junto al código de la sala (quién entra, de quién es la foto de cada ronda).",
           "<strong>Mensajes del chat y reacciones</strong>: se envían a los jugadores de tu sala en ese momento. El servidor no los guarda; solo tiene los últimos mensajes de cada sala en su memoria mientras existe la sala, para comprobar las denuncias sobre ellos (ver «Denuncias»). Si haces una captura de pantalla durante una partida, los demás jugadores reciben una reacción que lo indica; la captura en sí no se envía.",
           "<strong>Tu dirección IP</strong>: como cualquier servicio de internet, el servidor la ve. Solo la usa en memoria, para limitar abusos (demasiadas peticiones o conexiones), y no la escribe en sus registros. Nuestro proveedor de alojamiento puede anotarla en sus propios registros de peticiones.",
-          "<strong>En tu móvil</strong>: la app guarda tu nombre, tu idioma y un código para volver a tu última partida. Se quedan en tu móvil.",
+          "<strong>En tu móvil</strong>: la app guarda tu nombre, tu idioma, un código para volver a tu última partida y qué versión de las condiciones aceptaste. Se quedan en tu móvil.",
         ],
       },
       {
@@ -271,69 +257,32 @@ export interface PrivacyPageOptions {
   reportWebhook?: boolean;
 }
 
-const formatDate = (isoDate: string, language: InviteLanguage) =>
-  new Intl.DateTimeFormat(language, { dateStyle: "long", timeZone: "UTC" }).format(new Date(isoDate));
-
-const mailtoLink = (email: string) => `<a href="mailto:${escapeHtml(email)}">${escapeHtml(email)}</a>`;
-
-const renderSection = ({ heading, paragraphs }: Section) =>
-  `<h2>${heading}</h2>${paragraphs.map((paragraph) => `<p>${paragraph}</p>`).join("")}`;
-
 export function renderPrivacyPage({
   language, controllerName, contactEmail, reportRetentionDays = REPORT_RETENTION_DAYS,
   reportWebhook = REPORT_WEBHOOK_URL !== null,
 }: PrivacyPageOptions): string {
   const text = TEXT[language];
-  const sections = text.sections({
-    controller: controllerName ? escapeHtml(controllerName) : null,
-    contactLink: contactEmail ? mailtoLink(contactEmail) : null,
-    photoTtlMinutes: PHOTO_TTL_MINUTES,
-    reportRetentionDays,
-    reportWebhook,
+  return renderLegalPage({
+    language,
+    title: text.title,
+    lastUpdatedLabel: text.lastUpdated,
+    lastUpdated: PRIVACY_LAST_UPDATED,
+    sections: text.sections({
+      controller: controllerName ? escapeHtml(controllerName) : null,
+      contactLink: contactEmail ? mailtoLink(contactEmail) : null,
+      photoTtlMinutes: PHOTO_TTL_MINUTES,
+      reportRetentionDays,
+      reportWebhook,
+    }),
   });
-  return `
-    <!DOCTYPE html>
-    <html lang="${language}">
-    <head>
-      <meta charset="utf-8">
-      <meta name="viewport" content="width=device-width,initial-scale=1">
-      <title>${text.title}</title>
-      <style>
-        body { font-family: -apple-system, sans-serif; background: #111; color: #eee; margin: 0; line-height: 1.55; }
-        main { max-width: 42rem; margin: 0 auto; padding: 2rem 1.25rem 3rem; }
-        h1 { color: #fff; margin-bottom: 0.25rem; }
-        h2 { color: #fff; font-size: 1.15rem; margin-top: 2rem; }
-        a { color: #ff5c7a; }
-        .updated { opacity: 0.6; font-size: 0.9rem; margin-top: 0; }
-      </style>
-    </head>
-    <body>
-      <main>
-        <h1>${text.title}</h1>
-        <p class="updated">${text.lastUpdated} <time datetime="${PRIVACY_LAST_UPDATED}">${formatDate(PRIVACY_LAST_UPDATED, language)}</time></p>
-        ${sections.map(renderSection).join("\n        ")}
-      </main>
-    </body>
-    </html>
-  `;
 }
 
 // ── Route ──
 
-/** How long browsers and caches may reuse the page: it only changes with a deploy. */
-const PRIVACY_CACHE_CONTROL = "public, max-age=3600";
-
 /** GET /privacy: the policy in the visitor's language (?lang=es|en overrides Accept-Language). */
 export function servePrivacyPage(req: Request, res: Response): void {
-  // Same URL, different language per Accept-Language: a cache must keep one copy per language
-  res.vary("Accept-Language");
-  res.setHeader("Cache-Control", PRIVACY_CACHE_CONTROL);
-  res.setHeader("Content-Security-Policy", STATIC_PAGE_CSP);
-  res.type("html").send(
-    renderPrivacyPage({
-      language: pickPrivacyLanguage(req.query.lang, req.acceptsLanguages(...INVITE_LANGUAGES)),
-      controllerName: CONTROLLER_NAME,
-      contactEmail: CONTACT_EMAIL,
-    }),
+  sendLegalPage(
+    res,
+    renderPrivacyPage({ language: legalPageLanguageOf(req), controllerName: CONTROLLER_NAME, contactEmail: CONTACT_EMAIL }),
   );
 }

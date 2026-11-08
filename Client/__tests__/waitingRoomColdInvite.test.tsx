@@ -6,6 +6,7 @@ import WaitingRoom from "../app/screens/WaitingRoom";
 import { GameProvider, useGameContext } from "../src/providers/GameContext";
 import { TEST_IDS } from "../src/utils/testIds";
 import { inviteNameInput, pressInviteJoin, showsInviteDialog } from "../testUtils/inviteConfirm";
+import { ACCEPTED_TERMS_KEY, recordTermsAccepted, TERMS_VERSION } from "../src/utils/termsAcceptance";
 
 // EXP-334: an invite link that cold-starts the app mounts the waiting room (home is only an unfocused screen under it),
 // with the real GameProvider and nothing in memory. Its invite dialog (EXP-347) must offer the name saved on this
@@ -242,6 +243,47 @@ describe("WaitingRoom opened without a room code (EXP-334)", () => {
 
     expect(mockDismissTo).toHaveBeenCalledWith("/");
     expect(mockSockets).toHaveLength(0);
+  });
+});
+
+// EXP-433 (DEC-058): a cold-start invite link skips the first screen, where the terms are accepted. The invite dialog
+// asks for them instead on a device that never accepted the current ones, and its Join accepts them.
+describe("WaitingRoom cold invite link and the terms of use (EXP-433)", () => {
+  const showsTermsConsent = (r: TestRenderer.ReactTestRenderer) =>
+    r.root.findAll((n) => n.props.testID === TEST_IDS.termsConsent).length > 0;
+
+  it.each([
+    ["a fresh install", null],
+    ["a device that only passed the old onboarding (no terms)", "hasSeenInitialScreen"],
+  ])("on %s the dialog shows the terms consent, and Join accepts them before joining", async (_, legacyKey) => {
+    await AsyncStorage.setItem("username", "bob");
+    if (legacyKey) await AsyncStorage.setItem(legacyKey, "true");
+    const r = await openColdInviteLink();
+    expect(showsInviteDialog(r)).toBe(true);
+    expect(showsTermsConsent(r)).toBe(true);
+    expect(await AsyncStorage.getItem(ACCEPTED_TERMS_KEY)).toBeNull();
+
+    await pressInviteJoin(r);
+    expect(await AsyncStorage.getItem(ACCEPTED_TERMS_KEY)).toBe(TERMS_VERSION);
+    const socket = await connectSocket();
+    expect(joins(socket)).toEqual([{ gameCode: LINKED_ROOM, username: "bob" }]);
+  });
+
+  it("Cancel accepts nothing", async () => {
+    await AsyncStorage.setItem("username", "bob");
+    const r = await openColdInviteLink();
+    act(() => { r.root.find((n) => n.props.testID === TEST_IDS.inviteCancelButton && n.props.onPress).props.onPress(); });
+    await flush();
+    expect(await AsyncStorage.getItem(ACCEPTED_TERMS_KEY)).toBeNull();
+    expect(mockSockets).toHaveLength(0);
+  });
+
+  it("a device that accepted the current terms is not asked again", async () => {
+    await AsyncStorage.setItem("username", "bob");
+    await recordTermsAccepted();
+    const r = await openColdInviteLink();
+    expect(showsInviteDialog(r)).toBe(true);
+    expect(showsTermsConsent(r)).toBe(false);
   });
 });
 

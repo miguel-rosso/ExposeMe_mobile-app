@@ -5,6 +5,12 @@ export const TEST_IDS = {
   initialScreen: "initial-screen",
   initialContinueButton: "initial-continue-button",
   initialTitle: "initial-title",
+  // «By continuing you accept the Terms and the Privacy policy»: on the first screen, and in the invite dialog of a
+  // device that never accepted them (a cold-start invite link skips the first screen)
+  termsConsent: "terms-consent",
+  // Links nested in the consent line: not separate views on device (Maestro can't tap them by id), for unit tests
+  termsLink: "terms-link",
+  termsPrivacyLink: "terms-privacy-link",
   // ── Home ──
   usernameInput: "username-input",
   usernameClearButton: "username-clear-button",

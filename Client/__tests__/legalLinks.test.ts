@@ -5,6 +5,7 @@ import {
   openExternalLink,
   parseContactEmail,
   privacyPolicyUrl,
+  termsOfUseUrl,
 } from "../src/utils/legalLinks";
 
 // EXP-426: the privacy policy is the game server's /privacy page in the app's language, and the contact address comes
@@ -28,6 +29,24 @@ describe("privacyPolicyUrl", () => {
   it("defaults to the server the app plays on (EXPO_PUBLIC_SERVER_URL)", () => {
     process.env.EXPO_PUBLIC_SERVER_URL = "http://localhost:3999";
     expect(privacyPolicyUrl("es")).toBe("http://localhost:3999/privacy?lang=es");
+  });
+});
+
+// EXP-433: the terms of use are the server's /terms page, served like /privacy
+describe("termsOfUseUrl", () => {
+  const savedServer = process.env.EXPO_PUBLIC_SERVER_URL;
+  afterEach(() => {
+    if (savedServer === undefined) delete process.env.EXPO_PUBLIC_SERVER_URL;
+    else process.env.EXPO_PUBLIC_SERVER_URL = savedServer;
+  });
+
+  it.each(["es", "en"] as const)("is the server's /terms page with the app language (%s)", (lang) => {
+    expect(termsOfUseUrl(lang, "https://game.example/")).toBe(`https://game.example/terms?lang=${lang}`);
+  });
+
+  it("defaults to the server the app plays on (EXPO_PUBLIC_SERVER_URL)", () => {
+    process.env.EXPO_PUBLIC_SERVER_URL = "http://localhost:3999";
+    expect(termsOfUseUrl("en")).toBe("http://localhost:3999/terms?lang=en");
   });
 });
 

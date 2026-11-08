@@ -2,16 +2,27 @@ import { Linking } from "react-native";
 import getEnvVars from "../../config";
 import type { Lang } from "../i18n/context";
 
-// ── Privacy policy and contact (EXP-426) ──
-// The game server serves the privacy policy at /privacy (in Spanish or English with ?lang=), so the app links the
-// server it plays on: production in store builds, the QA lab server when EXPO_PUBLIC_SERVER_URL points at it.
+// ── Privacy policy, terms of use and contact (EXP-426, EXP-433) ──
+// The game server serves the privacy policy at /privacy and the terms of use at /terms (in Spanish or English with
+// ?lang=), so the app links the server it plays on: production in store builds, the QA lab server when
+// EXPO_PUBLIC_SERVER_URL points at it.
 
 /** Path of the privacy policy page on the game server */
 const PRIVACY_PATH = "/privacy";
+/** Path of the terms of use page on the game server */
+const TERMS_PATH = "/terms";
+
+/** A legal page of the game server in the app's language. */
+const serverPageUrl = (path: string, lang: Lang, serverUrl: string): string =>
+  `${serverUrl.replace(/\/+$/, "")}${path}?lang=${lang}`;
 
 /** The privacy policy page in the app's language, on the given game server (by default the one the app plays on). */
 export const privacyPolicyUrl = (lang: Lang, serverUrl: string = getEnvVars().SERVER_URL): string =>
-  `${serverUrl.replace(/\/+$/, "")}${PRIVACY_PATH}?lang=${lang}`;
+  serverPageUrl(PRIVACY_PATH, lang, serverUrl);
+
+/** The terms of use page in the app's language, on the given game server (by default the one the app plays on). */
+export const termsOfUseUrl = (lang: Lang, serverUrl: string = getEnvVars().SERVER_URL): string =>
+  serverPageUrl(TERMS_PATH, lang, serverUrl);
 
 // ── Contact address ──
 

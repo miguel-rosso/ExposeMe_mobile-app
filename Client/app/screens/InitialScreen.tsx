@@ -1,6 +1,5 @@
 import React from "react";
 import { View, Text, TouchableOpacity, Image, StatusBar, ScrollView } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
@@ -12,6 +11,8 @@ import { usePhotoContext } from "@/src/providers/PhotoContext";
 import { useI18n } from "../../src/i18n";
 import LanguageToggle from "../../src/components/LanguageToggle";
 import PhotoFanHero, { HERO_HEIGHT } from "../../src/components/PhotoFanHero";
+import TermsConsent from "../../src/components/TermsConsent";
+import { recordTermsAccepted } from "../../src/utils/termsAcceptance";
 import { useReduceMotionSetting } from "../../src/hooks/useReduceMotion";
 import { TEST_IDS } from "../../src/utils/testIds";
 import { BRAND_DISPLAY_FONT, BRAND_GRADIENT, brandTitleShadow } from "../../src/theme/brand";
@@ -49,14 +50,16 @@ const InitialScreen: React.FC = () => {
   const { handleContinue } = usePhotoContext();
   // Undefined until the system answers: the hero waits for it so it never starts animating and then jumps
   const reduceMotion = useReduceMotionSetting();
-  // "Continue" lives in a fixed footer outside the ScrollView, padded by the bottom inset: on short gesture-nav
-  // phones a button at the end of the scroll content could be left as a sliver above the gesture bar (EXP-196)
+  // "Accept and continue" lives in a fixed footer outside the ScrollView, padded by the bottom inset: on short
+  // gesture-nav phones a button at the end of the scroll content could be left as a sliver above the gesture bar
+  // (EXP-196)
   const insets = useSafeAreaInsets();
 
-  // Asks for photo access (whatever the answer, the home gate handles it) and goes home
+  // Accepts the terms (the consent line above the button), asks for photo access (whatever the answer, the home gate
+  // handles it) and goes home
   const handleContinuePress = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-    await AsyncStorage.setItem("hasSeenInitialScreen", "true");
+    await recordTermsAccepted();
     await handleContinue();
     router.replace("/");
   };
@@ -120,9 +123,12 @@ const InitialScreen: React.FC = () => {
           </View>
         </ScrollView>
 
-        {/* The only action, fixed above the bottom inset: ask for photo access */}
+        {/* The only action, fixed above the bottom inset: accept the terms and ask for photo access */}
         <View style={[tw`px-6 pt-4`, { paddingBottom: insets.bottom + FOOTER_BOTTOM_GAP }]}>
           <View style={tw`w-full max-w-[500px] self-center`}>
+            <View style={tw`mb-3`}>
+              <TermsConsent />
+            </View>
             <LinearGradient
               colors={BRAND_GRADIENT}
               start={{ x: 0, y: 0 }}
@@ -136,7 +142,7 @@ const InitialScreen: React.FC = () => {
                 onPress={handleContinuePress}
                 activeOpacity={0.8}
               >
-                <Text style={tw`text-white text-lg font-bold`}>{t.continue_}</Text>
+                <Text style={tw`text-white text-lg font-bold`}>{t.termsAcceptAndContinue}</Text>
               </TouchableOpacity>
             </LinearGradient>
             <Text style={tw`text-[13px] text-white/50 text-center mt-4`}>{t.initialFootnote}</Text>

@@ -15,8 +15,8 @@ import {
 } from "react-native";
 import tw from "twrnc";
 import { useRouter } from "expo-router";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import InitialScreen from "@/app/screens/InitialScreen";
+import { useTermsAccepted } from "@/src/hooks/useTermsAccepted";
 import { useGameContext } from "@/src/providers/GameContext";
 import { StatusBar } from "react-native";
 import * as Animatable from "react-native-animatable";
@@ -76,8 +76,9 @@ registerHomeAnimations();
 
 const Index = () => {
   const router = useRouter();
-  const [isLoading, setIsLoading] = useState(true);
-  const [hasSeenInitialScreen, setHasSeenInitialScreen] = useState(false);
+  // Initial data: whether this device accepted the current terms (undefined while it is read). The saved name is
+  // loaded by GameProvider at app start.
+  const [termsAccepted, refreshTermsAccepted] = useTermsAccepted();
   const {
     saveUsername,
     username,
@@ -134,17 +135,13 @@ const Index = () => {
     }
   };
 
-  // Initial data: whether the first-run screen was seen
-  useEffect(() => {
-    const checkInitialScreen = async () => {
-      const value = await AsyncStorage.getItem("hasSeenInitialScreen");
-      setHasSeenInitialScreen(value === "true");
-      setIsLoading(false);
-    };
-
-    // The saved name is loaded by GameProvider at app start
-    checkInitialScreen();
-  }, []);
+  // The terms may be accepted elsewhere while this home waits under another screen (a cold-start invite link's dialog,
+  // EXP-433): read again when it is focused, so it doesn't show the first-run screen once they are
+  useFocusEffect(
+    useCallback(() => {
+      if (termsAccepted === false) refreshTermsAccepted();
+    }, [termsAccepted, refreshTermsAccepted])
+  );
 
   // The server's reason for sending us home (room-of-game refusal, connection refused, kicked), in our language: the
   // screens over home hand it over in memory (useGoHome) as they pop back to it, and it is shown once. Never read from
@@ -327,7 +324,7 @@ const Index = () => {
   );
 
   // Spinner while the initial data loads
-  if (isLoading) {
+  if (termsAccepted === undefined) {
     return (
       <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
         <ActivityIndicator size="large" />
@@ -335,8 +332,9 @@ const Index = () => {
     );
   }
 
-  // First run: the welcome screen that asks for photo access
-  if (!hasSeenInitialScreen) {
+  // First run, or terms changed since they were accepted: the welcome screen that asks to accept the terms and for
+  // photo access
+  if (!termsAccepted) {
     return <InitialScreen />;
   }
 

@@ -1,12 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { UPLOAD_TTL_MS } from "../middlewares/uploadSweeper";
-import {
-  parseContactEmail,
-  parseControllerName,
-  pickPrivacyLanguage,
-  PRIVACY_LAST_UPDATED,
-  renderPrivacyPage,
-} from "../routes/privacyPage";
+import { pickLegalPageLanguage } from "../routes/legalPage";
+import { parseContactEmail, parseControllerName, PRIVACY_LAST_UPDATED, renderPrivacyPage } from "../routes/privacyPage";
 
 // EXP-427: the privacy policy both stores require, in Spanish and English. These cover the rendered text and its
 // configuration; privacyRoute.test.ts covers the served page (headers, language negotiation, CONTACT_EMAIL).
@@ -106,9 +101,29 @@ describe("renderPrivacyPage", () => {
     });
   });
 
+  // EXP-433: Android 14+ also offers partial access («Select photos»), not only iPhone
+  it("says a selection of photos can be allowed on iPhone and on Android 14 or later", () => {
+    expect(render("en")).toContain(
+      'On iPhone, and on Android 14 or later, you can allow only a selection of photos ("Limited Access" or "Select photos")',
+    );
+    expect(render("es")).toContain(
+      "En iPhone, y en Android 14 o posterior, puedes permitir solo una selección de fotos («Acceso limitado» o «Seleccionar fotos»)",
+    );
+  });
+
+  // EXP-433: the phone also keeps which version of the terms of use was accepted
+  it("lists the accepted terms version among what stays on the phone", () => {
+    expect(render("en")).toContain(
+      "the app saves your name, your language, a code to rejoin your last game and which version of the terms you accepted.",
+    );
+    expect(render("es")).toContain(
+      "la app guarda tu nombre, tu idioma, un código para volver a tu última partida y qué versión de las condiciones aceptaste.",
+    );
+  });
+
   it("shows the last-updated date in the page language", () => {
-    expect(render("en")).toContain(`<time datetime="${PRIVACY_LAST_UPDATED}">November 3, 2026</time>`);
-    expect(render("es")).toContain(`<time datetime="${PRIVACY_LAST_UPDATED}">3 de noviembre de 2026</time>`);
+    expect(render("en")).toContain(`<time datetime="${PRIVACY_LAST_UPDATED}">November 8, 2026</time>`);
+    expect(render("es")).toContain(`<time datetime="${PRIVACY_LAST_UPDATED}">8 de noviembre de 2026</time>`);
   });
 
   it("without a contact address → a neutral pointer to the store page, no mailto", () => {
@@ -144,17 +159,17 @@ describe("renderPrivacyPage", () => {
   });
 });
 
-describe("pickPrivacyLanguage", () => {
+describe("pickLegalPageLanguage", () => {
   it("?lang=es|en wins over Accept-Language", () => {
-    expect(pickPrivacyLanguage("es", "en")).toBe("es");
-    expect(pickPrivacyLanguage("en", "es")).toBe("en");
+    expect(pickLegalPageLanguage("es", "en")).toBe("es");
+    expect(pickLegalPageLanguage("en", "es")).toBe("en");
   });
 
   it("unknown, missing or repeated ?lang → Accept-Language, then English", () => {
-    expect(pickPrivacyLanguage("fr", "es")).toBe("es");
-    expect(pickPrivacyLanguage(undefined, "es")).toBe("es");
-    expect(pickPrivacyLanguage(["es", "en"], "en")).toBe("en");
-    expect(pickPrivacyLanguage(undefined, false)).toBe("en");
+    expect(pickLegalPageLanguage("fr", "es")).toBe("es");
+    expect(pickLegalPageLanguage(undefined, "es")).toBe("es");
+    expect(pickLegalPageLanguage(["es", "en"], "en")).toBe("en");
+    expect(pickLegalPageLanguage(undefined, false)).toBe("en");
   });
 });
 

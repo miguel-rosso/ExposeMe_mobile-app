@@ -27,7 +27,7 @@ import {
 
 jest.mock("@react-native-async-storage/async-storage", () => {
   const mock = require("@react-native-async-storage/async-storage/jest/async-storage-mock");
-  mock.getItem = jest.fn(async (k: string) => (k === "hasSeenInitialScreen" ? "true" : k === "username" ? "ana" : null));
+  mock.getItem = jest.fn(async (k: string) => (k === "acceptedTermsVersion" ? require("../src/utils/termsAcceptance").TERMS_VERSION : k === "username" ? "ana" : null));
   return mock;
 });
 const mockRouter = { push: jest.fn(), replace: jest.fn(), back: jest.fn(), dismissTo: jest.fn() };

@@ -9,6 +9,7 @@ import { joinPageCsp } from "../middlewares/securityHeaders";
 import { isRoomCode, normalizeRoomCode } from "../managers/roomCode";
 import { APP_STORE_ID, INVITE_LANGUAGES, pickInviteLanguage, platformOf, renderJoinPage } from "./joinPage";
 import { servePrivacyPage } from "./privacyPage";
+import { serveTermsPage } from "./termsPage";
 
 const router = express.Router();
 
@@ -52,6 +53,9 @@ router.get("/join/:code", (req, res) => {
 
 // Privacy policy (see routes/privacyPage), linked from the stores and the app
 router.get("/privacy", servePrivacyPage);
+
+// Terms of use (see routes/termsPage), accepted on the app's first screen
+router.get("/terms", serveTermsPage);
 
 // Liveness only: no uptime, memory or other process details for anonymous callers
 router.get("/health", (_req, res) => {

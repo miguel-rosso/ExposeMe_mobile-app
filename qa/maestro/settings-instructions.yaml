@@ -17,7 +17,7 @@ appId: com.socketNull.ExposeMe
       photos: deny
       medialibrary: deny
 - runFlow: dev-client-boot.yaml
-# First-run explainer: Continue asks for access. iOS answers "denied" without a prompt; Android shows its dialog.
+# First-run explainer: Accept and continue (accepts the terms) asks for access. iOS answers "denied" without a prompt; Android shows its dialog.
 - runFlow:
     when:
       visible:

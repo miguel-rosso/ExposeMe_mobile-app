@@ -29,3 +29,11 @@ jest.mock("react-native-safe-area-context", () => require("react-native-safe-are
 // (the game screen's report flag, EXP-423) would fail to render. They render as a host "Icon" element instead, its
 // props (name, size, color) kept for assertions; a test file may still mock the module its own way.
 jest.mock("react-native-vector-icons/FontAwesome", () => "Icon");
+
+// ── Async storage ──
+// The native module is missing under jest: the library's in-memory mock stands in (its documented jest setup), so a
+// component that reads a stored flag (e.g. the invite dialog's terms check, EXP-433) renders in any screen test. A test
+// file may still mock the module its own way (e.g. to answer some keys).
+jest.mock("@react-native-async-storage/async-storage", () =>
+  require("@react-native-async-storage/async-storage/jest/async-storage-mock")
+);

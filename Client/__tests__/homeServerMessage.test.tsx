@@ -8,7 +8,7 @@ import TestRenderer, { act } from "react-test-renderer";
 
 jest.mock("@react-native-async-storage/async-storage", () => {
   const mock = require("@react-native-async-storage/async-storage/jest/async-storage-mock");
-  mock.getItem = jest.fn(async (k: string) => (k === "hasSeenInitialScreen" ? "true" : k === "username" ? "ana" : null));
+  mock.getItem = jest.fn(async (k: string) => (k === "acceptedTermsVersion" ? require("../src/utils/termsAcceptance").TERMS_VERSION : k === "username" ? "ana" : null));
   return mock;
 });
 

@@ -2,6 +2,7 @@ import React from "react";
 import TestRenderer, { act } from "react-test-renderer";
 import { Alert, AppState, BackHandler } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { recordTermsAccepted } from "../src/utils/termsAcceptance";
 // Loaded with the file (jest.mock calls below are hoisted above it), not inside a test
 import Index from "../app/index";
 import NotFound from "../app/+not-found";
@@ -160,7 +161,7 @@ const expectStillInRoom = (socket: FakeSocket) => {
 beforeEach(async () => {
   jest.useFakeTimers();
   await AsyncStorage.clear();
-  await AsyncStorage.setItem("hasSeenInitialScreen", "true");
+  await recordTermsAccepted();
   await AsyncStorage.setItem("username", "bob");
   mockSockets.length = 0;
   alertSpy.mockClear();

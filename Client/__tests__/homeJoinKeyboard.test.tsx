@@ -2,6 +2,7 @@ import React from "react";
 import TestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import { Keyboard, Platform, StyleSheet, TouchableWithoutFeedback } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { recordTermsAccepted } from "../src/utils/termsAcceptance";
 import { TEST_IDS } from "../src/utils/testIds";
 
 // EXP-378: the join panel works with the keyboard. The room code field opens focused, its return key ("go") searches
@@ -106,7 +107,7 @@ const openJoinPanel = async () => {
 
 beforeEach(async () => {
   await AsyncStorage.clear();
-  await AsyncStorage.setItem("hasSeenInitialScreen", "true");
+  await recordTermsAccepted();
   await AsyncStorage.setItem("username", "ana");
   mockPush.mockReset();
   mockHomeFocused = true;

@@ -8,7 +8,7 @@ import { TEST_IDS } from "../src/utils/testIds";
 
 jest.mock("@react-native-async-storage/async-storage", () => {
   const mock = require("@react-native-async-storage/async-storage/jest/async-storage-mock");
-  mock.getItem = jest.fn(async (k: string) => (k === "hasSeenInitialScreen" ? "true" : null));
+  mock.getItem = jest.fn(async (k: string) => (k === "acceptedTermsVersion" ? require("../src/utils/termsAcceptance").TERMS_VERSION : null));
   return mock;
 });
 jest.mock("expo-router", () => ({

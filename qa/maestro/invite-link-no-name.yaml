@@ -32,6 +32,10 @@ appId: com.socketNull.ExposeMe
     id: "invite-name-input"
 - assertNotVisible:
     id: "lobby-waiting"
+# EXP-433: the terms were accepted on the first-run screen (open-app.yaml), so the dialog doesn't ask for them again
+# (a cold-start link on a device that never accepted them is covered by waitingRoomColdInvite.test.tsx)
+- assertNotVisible:
+    id: "terms-consent"
 - takeScreenshot: invite-no-name-dialog-${USERNAME}
 - tapOn:
     id: "invite-name-input"

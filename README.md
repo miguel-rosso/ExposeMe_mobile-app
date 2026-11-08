@@ -20,7 +20,7 @@ Expose Me is a mobile game that shows random photos and challenges players to gu
 <p align="center">
   <img src="assets/screenshot-inicio.jpg" width="250" alt="Home screen" />
   <img src="assets/screenshot-crear-partida.jpg" width="250" alt="Create or join a game" />
-  <img src="assets/screenshot-galeria.jpg" width="250" alt="Random gallery photo" />
+  <img src="assets/screenshot-ronda.jpg" width="250" alt="A round: guess whose photo it is" />
 </p>
 
 ## Status

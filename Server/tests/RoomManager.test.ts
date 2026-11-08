@@ -268,9 +268,9 @@ describe("removePlayer", () => {
     expect(room.players[0].isHost).toBe(true);
   });
 
-  it("resets an emptied room and deletes it after 30 minutes", () => {
+  it("resets an emptied room and deletes it at once (EXP-441)", () => {
     const room = rm.createRoom("alice", "sock-alice");
-    rm.joinRoom(room.gameCode, "bob", "sock-bob"); // had a second player → 30 min (solo rooms: see roomLifecycle)
+    rm.joinRoom(room.gameCode, "bob", "sock-bob"); // had a second player: not kept 30 min either
     rm.removePlayer(room.gameCode, "bob");
     room.started = true;
     room.round = 4;
@@ -278,24 +278,19 @@ describe("removePlayer", () => {
     const res = rm.removePlayer(room.gameCode, "alice");
     expect(res).toMatchObject({ removed: true, isEmpty: true });
     expect(room).toMatchObject({ started: false, round: 0, phase: null, currentPlayer: null, plantedPhotosShown: 0 });
+    expect(rm.getRoom(room.gameCode)).toBeUndefined();
+    expect(rm.stats()).toEqual({ rooms: 0, pendingDeletions: 0 });
+  });
 
+  it("a room whose remaining players are only disconnected is kept for them until its deletion", () => {
+    const room = rm.createRoom("alice", "sock-alice");
+    rm.joinRoom(room.gameCode, "carol", "sock-carol");
+    rm.markDisconnected(room.gameCode, "carol", "sock-carol");
+    rm.removePlayer(room.gameCode, "alice");
     vi.advanceTimersByTime(ROOM_CLEANUP_DELAY - 1);
     expect(rm.getRoom(room.gameCode)).toBe(room);
     vi.advanceTimersByTime(1);
     expect(rm.getRoom(room.gameCode)).toBeUndefined();
-  });
-
-  it("cancels scheduled deletion when someone joins the emptied room (and they become host)", () => {
-    const room = rm.createRoom("alice", "sock-alice");
-    rm.joinRoom(room.gameCode, "carol", "sock-carol");
-    rm.removePlayer(room.gameCode, "carol");
-    rm.removePlayer(room.gameCode, "alice");
-    vi.advanceTimersByTime(ROOM_CLEANUP_DELAY / 2);
-    const res = rm.joinRoom(room.gameCode, "bob", "sock-bob");
-    expect(res.success).toBe(true);
-    expect(room.players[0]).toMatchObject({ username: "bob", isHost: true });
-    vi.advanceTimersByTime(ROOM_CLEANUP_DELAY);
-    expect(rm.getRoom(room.gameCode)).toBe(room);
   });
 });
 

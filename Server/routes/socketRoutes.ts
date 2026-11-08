@@ -1,6 +1,6 @@
 import { Socket } from "socket.io";
 import { io } from "../app";
-import { isAllowedRounds, RoomManager } from "../managers/RoomManager";
+import { isAllowedRounds, MAX_ROOMS_PER_IP, MAX_ROOMS_PER_IPV6_PREFIX, RoomManager, RoomQuota } from "../managers/RoomManager";
 import { GameEngine } from "../managers/GameEngine";
 import { isValidUsername, MAX_USERNAME_LENGTH } from "../managers/playerName";
 import { isRoomCode, normalizeRoomCode } from "../managers/roomCode";
@@ -12,7 +12,7 @@ import {
   createTokenBucket, EMOJI_BURST, EMOJI_RATE_PER_S, GAME_EVENT_LIMITS, handshakeKey,
   HOLD_START_BURST, HOLD_START_RATE_PER_S, JOIN_EXEMPT_MAX, JOIN_MISS_GLOBAL_MAX, JOIN_MISS_HARD_FACTOR, JOIN_MISS_MAX,
   JOIN_ATTEMPT_LIMIT, JOIN_MISS_PREFIX_MAX, JOIN_MISS_PRESSURE_MAX, JOIN_MISS_SOCKET_INTERVAL_MS, JOIN_MISS_WINDOW_MS,
-  MAX_CONNECTIONS_PER_IP,
+  MAX_CONNECTIONS_PER_IP, prefix48,
 } from "../managers/socketGuards";
 import { createChatLog } from "../managers/chatLog";
 import { contentKey, parseReport, ReportContentAck, ReportContentData, resolveReport } from "../managers/contentReports";
@@ -51,6 +51,14 @@ const connsWithSocket = new WeakSet<object>();
 const qaTelemetry = createQaTelemetry();
 /** Exported for tests: open connections and join misses per IP key, join attempts and chat messages per socket. */
 export { chatMessages, connections, joinAttempts, joinMisses };
+
+/** The live-room quotas a room created from IP key `ip` counts against (EXP-441): the IP key, and an IPv6 key's /48. */
+function roomQuotasOf(ip: string): RoomQuota[] {
+  const quotas: RoomQuota[] = [{ key: ip, max: MAX_ROOMS_PER_IP }];
+  const prefix = prefix48(ip);
+  if (prefix) quotas.push({ key: prefix, max: MAX_ROOMS_PER_IPV6_PREFIX });
+  return quotas;
+}
 
 /** Some connected player of `room` is on the same IP key as the sender (that network already knows the code). */
 function hasMemberOnIp(room: Room, ip: string): boolean {
@@ -380,8 +388,10 @@ io.on("connection", (socket: Socket) => {
       };
 
       if (gameCode === null) {
-        if (roomManager.isAtCapacity()) return refuse("Server is busy");
-        const room = roomManager.createRoom(username, socket.id);
+        // Server full, or this IP (IPv6: its /64 or its /48) already created its share of the live rooms
+        const quotas = roomQuotasOf(ip);
+        if (roomManager.isAtCapacity() || !roomManager.withinQuotas(quotas)) return refuse("Server is busy");
+        const room = roomManager.createRoom(username, socket.id, quotas);
         bindTo(room.gameCode);
         replyJoined(room, room.players[0]);
         return;

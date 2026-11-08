@@ -123,13 +123,14 @@ describe("abandoned rooms", () => {
     expect(rm.getRoom(room.gameCode)).toBeUndefined();
   });
 
-  it("does not stack deletion timers (disconnect all, then the last one leaves)", () => {
+  it("does not stack deletion timers (disconnect all, then one leaves)", () => {
     const room = lobby();
     rm.markDisconnected(room.gameCode, "alice", "sock-alice");
     rm.markDisconnected(room.gameCode, "bob", "sock-bob");
     rm.removePlayer(room.gameCode, "bob");
-    rm.removePlayer(room.gameCode, "alice");
     expect(vi.getTimerCount()).toBe(1);
+    rm.removePlayer(room.gameCode, "alice"); // emptied: deleted at once, its pending deletion cancelled (EXP-441)
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("a running game with nobody connected pauses at the next boundary, ends after the pause and leaves only the deletion timer (waiting-photo)", () => {
@@ -210,11 +211,11 @@ describe("solo rooms and global cap (EXP-034)", () => {
     expect(rm.getRoom(room.gameCode)).toBeUndefined();
   });
 
-  it("an emptied solo room (creator left) also uses the 2 min delay", () => {
+  it("an emptied solo room (creator left) is deleted at once, with no deletion timer (EXP-441)", () => {
     const room = rm.createRoom("alice", "sock-alice");
     rm.removePlayer(room.gameCode, "alice");
-    vi.advanceTimersByTime(SOLO_ROOM_CLEANUP_DELAY);
     expect(rm.getRoom(room.gameCode)).toBeUndefined();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("a room that had a second player keeps the 30 min delay even after the guest left", () => {
@@ -247,8 +248,8 @@ describe("clear", () => {
   it("removes every room and leaves no live timers", () => {
     const a = startedRoom();
     const b = lobby();
-    rm.removePlayer(b.gameCode, "alice");
-    rm.removePlayer(b.gameCode, "bob"); // b pending deletion
+    rm.markDisconnected(b.gameCode, "alice", "sock-alice");
+    rm.markDisconnected(b.gameCode, "bob", "sock-bob"); // b pending deletion
     expect(vi.getTimerCount()).toBeGreaterThan(1);
 
     rm.clear();

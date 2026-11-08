@@ -44,6 +44,7 @@ beforeAll(async () => {
 });
 
 afterEach(() => {
+  roomManager.clear(); // tests share no room; leftover rooms would count against 127.0.0.1's room quota (EXP-441)
   clients.splice(0).forEach((c) => c.disconnect());
 });
 

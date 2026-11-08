@@ -448,7 +448,7 @@ After last round: game-over
   with **`"Removed by host"`** (checked before `"Game already started"`, so it is told even if a game started
   meanwhile), nobody is told, and the app shows the same notice and forgets the token. Only a join carrying that token
   is refused: joining again by hand, with no token, is a normal new player, right away and with the same name if it is
-  free (DEC-016). Revoked tokens live as long as the room (also through an emptied room's reset), at most 24 per room
+  free (DEC-016). Revoked tokens live as long as the room (an emptied room is deleted, and its revoked tokens with it), at most 24 per room
   (`MAX_REVOKED_TOKENS_PER_ROOM`, twice a full room; past it the oldest is forgotten and a join with it enters as a new
   player, as before EXP-337). A player who left or was removed as gone at game start keeps no such mark: a join with
   their old token is a new player.
@@ -468,7 +468,11 @@ After last round: game-over
   `"Room is full"`. Rejoins of existing players are always accepted.
 - Limits: at most **5 `join-create-game` per socket in any 10 s** (excess answered with
   `{ success: false, message: "Too many attempts" }`), and at most **5000 rooms** in memory (`MAX_ROOMS`;
-  creating beyond it answers `"Server is busy"`, joining existing rooms still works).
+  creating beyond it answers `"Server is busy"`, joining existing rooms still works). Rooms also count against the
+  IP key of the socket that created them for as long as they live (also once their creator left them to the guests):
+  at most **20 live rooms per IP** (IPv6: per /64, env `ROOMS_PER_IP_MAX`) and **100 per IPv6 /48** (all its /64s
+  together, env `ROOMS_PER_IPV6_PREFIX_MAX`); creating beyond either also answers `"Server is busy"` (EXP-441), while
+  joining rooms from that IP still works.
 - **Room codes** are 6 characters from the 31-symbol alphabet `23456789ABCDEFGHJKMNPQRSTUVWXYZ` (uppercase
   alphanumerics without the look-alikes 0/O and 1/I/L, ≈ 8.9e8 codes; e.g. `K7MQ4X`), each drawn with
   `crypto.randomInt` (not predictable from earlier codes) and unique among live rooms (`Server/managers/roomCode.ts`;
@@ -613,7 +617,9 @@ After last round: game-over
   `PING_INTERVAL + PING_TIMEOUT` (**10 s + 15 s**, `Server/app.ts`), overridable with
   `SOCKET_PING_INTERVAL_MS` / `SOCKET_PING_TIMEOUT_MS` (clamped to 1 s..300 s).
 - Each round's photo owner is picked only among **connected** players.
-- When no connected player is left (everyone disconnected, or the last connected one left), the room is
+- When the last player leaves or is removed, the emptied room is deleted **at once** (nobody holds a rejoin token for
+  it any more): its code then answers `"Game not found"`. When players are left but none of them is connected
+  (everyone disconnected, or the last connected one left), the room is
   deleted after **30 min** (`ROOM_CLEANUP_DELAY`), or **2 min** if it never had a second player, unless
   someone successfully rejoins/joins first (rejected joins do not postpone the deletion). A running game in such a
   room pauses and ends when the pause expires (5 min, below), so no game timers outlive it; deleting a room

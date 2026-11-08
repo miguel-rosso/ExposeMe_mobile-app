@@ -79,7 +79,7 @@ describe("leave-room removes the player (EXP-213)", () => {
     expect(eventNames(atAlice)).toEqual(["new-host", "player-left"]);
   });
 
-  it("the last player's leave empties the room and schedules its deletion (no broadcast)", async () => {
+  it("the last player's leave deletes the emptied room at once (no broadcast, EXP-441)", async () => {
     const { gameCode, sockets: [alice] } = await lobby(["alice"]);
     const atAlice = record(alice);
     const pendingBefore = roomManager.stats().pendingDeletions;
@@ -87,8 +87,8 @@ describe("leave-room removes the player (EXP-213)", () => {
     await alice.timeout(ACK_TIMEOUT_MS).emitWithAck("leave-room");
     await quiet();
 
-    expect(playerNames(gameCode)).toEqual([]);
-    expect(roomManager.stats().pendingDeletions).toBe(pendingBefore + 1);
+    expect(roomManager.getRoom(gameCode)).toBeUndefined();
+    expect(roomManager.stats().pendingDeletions).toBe(pendingBefore);
     expect(atAlice).toEqual([]);
   });
 

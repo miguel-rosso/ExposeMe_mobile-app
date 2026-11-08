@@ -226,7 +226,8 @@ export class GameEngine {
 
   /**
    * Takes `username` out of the room (uploads released, a removed host's role handed over, the room deleted later if
-   * nobody connected is left) and tells the room, by `reason`:
+   * nobody connected is left) and tells the room, by `reason`. If that empties the room, it is already reset and
+   * deleted (RoomManager.removePlayer) when the review below runs, which then must do nothing:
    * - "left" (leave-room, or a socket joining another room): `new-host` if the host left, then `player-left`; then the
    *   game reviews who is left (ready phase: start if all are ready, or end if one is left alone for good; mid-game:
    *   pause or end; lobby: reviewLobby).

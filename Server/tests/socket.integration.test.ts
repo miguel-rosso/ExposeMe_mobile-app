@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Socket as ClientSocket } from "socket.io-client";
 import { roomManager } from "../routes/socketRoutes";
 import { registerTurnUpload } from "./helpers";
@@ -63,12 +63,8 @@ describe("socket flow", () => {
     const created = once(c, "room-of-game");
     c.emit("join-create-game", { gameCode: null, username: "dave" });
     await created;
-    c.emit("leave-room"); // empty room → deletion scheduled
-    // Events of one socket are handled in order: this answer means leave-room was processed
-    const probe = once<{ success: boolean }>(c, "room-of-game");
-    c.emit("join-create-game", { gameCode: "000000", username: "dave" });
-    expect((await probe).success).toBe(false);
-    expect(roomManager.stats().pendingDeletions).toBeGreaterThan(0);
+    c.disconnect(); // nobody connected → deletion scheduled (dave can still rejoin with his token)
+    await vi.waitFor(() => expect(roomManager.stats().pendingDeletions).toBeGreaterThan(0));
 
     roomManager.clear();
     expect(roomManager.stats()).toEqual({ rooms: 0, pendingDeletions: 0 });

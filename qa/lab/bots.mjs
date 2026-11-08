@@ -8,7 +8,9 @@
 //   node qa/lab/bots.mjs --bots 3 --code K7MQ4X          # join an existing room (code in any case)
 //   node qa/lab/bots.mjs --rooms 20 --bots 4 --host       # load: 20 parallel rooms
 //   node qa/lab/bots.mjs --bots 2 --code K7MQ4X --name-prefix b-   # 2nd process in a room: names b-bot1, b-bot2
-//            (all bots share one IP: use a server started by lab.sh, which lifts the per-IP socket limits)
+//            (all bots share one IP: use a server started by lab.sh, which lifts the per-IP socket limits and the
+//            per-IP cap on live rooms, ROOMS_PER_IP_MAX: elsewhere it defaults to 20 and creating beyond it answers
+//            "Server is busy", so --rooms above it, or finished runs' rooms still held 30 min, are refused)
 //   --help prints the options (no network); unknown options exit 2. The server in use is printed at start.
 //   The host bot starts each game like the app: start-game with an ack, recorded as "start-ack" ({ ok, reason?,
 //   removed? }); a refusal, or no ack within START_ACK_TIMEOUT_MS on a live connection, is an error (EXP-379).
@@ -915,7 +917,12 @@ function runRoom(roomIdx, fixedCode) {
         });
       }
       socket.on("room-of-game", (d) => {
-        if (!d.success) { errors.push(`${name} join failed: ${d.message}`); return; }
+        if (!d.success) {
+          errors.push(`${name} join failed: ${d.message}`);
+          // No room was created (e.g. "Server is busy": the live-room cap per IP, EXP-441): nothing to wait for
+          if (isHost && !code) done("create-refused");
+          return;
+        }
         // Play again on the same socket after game-over (EXP-172): same token, still in the room, host kept
         if (bot.playAgainPending) {
           bot.playAgainPending = false;

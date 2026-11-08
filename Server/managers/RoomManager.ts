@@ -1,5 +1,6 @@
 import { randomBytes, timingSafeEqual } from "crypto";
 import { Player, PublicPlayer, Room, SafeRoom } from "../models/interfaces";
+import { envInt } from "../middlewares/rateLimit";
 import { uploadNameOf, uploadStore } from "../middlewares/uploadStore";
 import { nameClash, NameKeys, nameKeys } from "./playerName";
 import { randomRoomCode } from "./roomCode";
@@ -10,6 +11,13 @@ const SOLO_ROOM_CLEANUP_DELAY = 2 * 60 * 1000;
 export const MAX_PLAYERS_PER_ROOM = 12;
 /** Global cap on rooms held in memory; creating beyond it is refused with "Server is busy". */
 export const MAX_ROOMS = 5000;
+/**
+ * Live rooms created from one IP key at once (EXP-441), so one address can't fill MAX_ROOMS: several hosts behind one
+ * Wi-Fi or carrier NAT still fit. Past it, creating answers "Server is busy" too.
+ */
+export const MAX_ROOMS_PER_IP = envInt("ROOMS_PER_IP_MAX", 20, 1, MAX_ROOMS);
+/** Same, for all the IPv6 /64s of one /48 together: rotating /64s inside one's own /48 doesn't get around it. */
+export const MAX_ROOMS_PER_IPV6_PREFIX = envInt("ROOMS_PER_IPV6_PREFIX_MAX", 100, 1, MAX_ROOMS);
 /**
  * A player disconnected for longer than this is "gone": the lobby shows them as disconnected, a gone host hands the
  * role over, and a game start removes them. Shorter absences (app switch, brief signal loss) go unnoticed (DEC-009).
@@ -40,6 +48,12 @@ export function isAllowedRounds(rounds: unknown, env: NodeJS.ProcessEnv = proces
   return rounds === QA_ROUNDS && env.ALLOW_QA_ROUNDS === "1";
 }
 
+/** A count of live rooms (by their creator's IP key or IPv6 /48) that creating one more must not take past `max`. */
+export interface RoomQuota {
+  key: string;
+  max: number;
+}
+
 /** RoomManager.removePlayer: the removed player, who got the host role from them, and whether the room is now empty. */
 export type RemovePlayerResult =
   | { removed: false; player?: undefined; newHost?: undefined; isEmpty: false }
@@ -52,8 +66,12 @@ export class RoomManager {
   private playerNameKeys = new WeakMap<Player, NameKeys>();
   // Rejoin tokens of the players the host removed, oldest first (EXP-337); they go with the room
   private revokedTokens = new WeakMap<Room, string[]>();
+  // Live rooms per quota key, and the quota keys each live room counts against (EXP-441)
+  private roomsPerQuotaKey = new Map<string, number>();
+  private quotaKeysOfRoom = new Map<string, readonly string[]>();
 
-  createRoom(username: string, socketId: string): Room {
+  /** A new room, counted against `quotas` (see withinQuotas) until it is deleted. */
+  createRoom(username: string, socketId: string, quotas: readonly RoomQuota[] = []): Room {
     const gameCode = this.generateRoomCode();
     const room: Room = {
       gameCode,
@@ -85,12 +103,39 @@ export class RoomManager {
       _lobbyTimer: null,
     };
     this.rooms.set(gameCode, room);
+    this.countQuotas(gameCode, quotas);
     return room;
   }
 
   /** True when no more rooms may be created (MAX_ROOMS). */
   isAtCapacity(): boolean {
     return this.rooms.size >= MAX_ROOMS;
+  }
+
+  /** Every quota has room for one more live room. */
+  withinQuotas(quotas: readonly RoomQuota[]): boolean {
+    return quotas.every(({ key, max }) => this.roomsCreatedBy(key) < max);
+  }
+
+  /** Live rooms counted against quota key `key`. */
+  roomsCreatedBy(key: string): number {
+    return this.roomsPerQuotaKey.get(key) ?? 0;
+  }
+
+  private countQuotas(gameCode: string, quotas: readonly RoomQuota[]): void {
+    const keys = quotas.map((q) => q.key);
+    this.quotaKeysOfRoom.set(gameCode, keys);
+    for (const key of keys) this.roomsPerQuotaKey.set(key, this.roomsCreatedBy(key) + 1);
+  }
+
+  /** A deleted room no longer counts against the quotas it was created under. */
+  private releaseQuotas(gameCode: string): void {
+    for (const key of this.quotaKeysOfRoom.get(gameCode) ?? []) {
+      const left = this.roomsCreatedBy(key) - 1;
+      if (left > 0) this.roomsPerQuotaKey.set(key, left);
+      else this.roomsPerQuotaKey.delete(key);
+    }
+    this.quotaKeysOfRoom.delete(gameCode);
   }
 
   /** Counts for health checks and test teardown. */
@@ -174,7 +219,8 @@ export class RoomManager {
 
   /**
    * Takes `username` out of the room: their uploads are released, a removed host hands the role to the first connected
-   * player (`newHost`), and the room is deleted later if nobody connected is left (reset right away when empty).
+   * player (`newHost`), and the room is deleted later if nobody connected is left. An emptied room is reset and deleted
+   * at once: nobody holds a token to come back with, so keeping it would only hold a room slot (EXP-441).
    * Telling the room is up to the caller (GameEngine.removePlayer).
    */
   removePlayer(gameCode: string, username: string): RemovePlayerResult {
@@ -190,8 +236,8 @@ export class RoomManager {
       newHost.isHost = true;
     }
     if (room.players.length === 0) {
-      this.resetRoom(room);
-      this.scheduleRoomDeletion(gameCode);
+      this.resetRoom(room); // the caller still reviews this room object: nothing left running
+      this.deleteRoom(gameCode);
       return { removed: true, player, isEmpty: true };
     }
     this.scheduleDeletionIfAbandoned(room);
@@ -322,6 +368,7 @@ export class RoomManager {
     const room = this.rooms.get(gameCode);
     if (room) this.clearAllTimers(room);
     this.rooms.delete(gameCode);
+    this.releaseQuotas(gameCode);
     this.cancelRoomDeletion(gameCode);
     uploadStore.dropRoom(gameCode); // its photos go with it
   }

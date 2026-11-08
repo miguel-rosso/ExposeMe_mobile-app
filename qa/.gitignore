@@ -4,5 +4,6 @@ runs/
 # Backlog and dashboard exports describe unfixed vulnerabilities and exploits
 backlog.json
 dashboard/*.json
+dashboard/store/
 # Machine-specific
 claude-settings.suggested.json

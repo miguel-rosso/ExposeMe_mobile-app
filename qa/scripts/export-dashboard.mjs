@@ -1,17 +1,42 @@
 #!/usr/bin/env node
-// Splits qa/backlog.json into the files the QA dashboard reads under qa/dashboard/.
-// After running, upload each changed file to the dashboard artifact (see the exposeme-qa-loop skill).
-//   --status          export, then print the datasets that differ from the last published copy
-//   --mark-published  record the current exports as published (run after the dataset batch succeeds)
+// Builds the QA dashboard from qa/backlog.json as the files its page loads, under qa/dashboard/store/:
+//   index.html                 copy of qa/dashboard/index.html (the page)
+//   qa-data-<dataset>-<n>.js   the dataset's rows, split over a fixed number of slots (SLOTS)
+//   qa-data-meta.js            generation time and slot counts, so the page can tell a complete load
+// Each file is published as the artifact store document files/<name> = {text} (see the exposeme-qa-loop skill, step 6).
+//   (no flag)           export, then list the files not yet published
+//   --status            export, then print {"stale": [file names]} (read by qa/scripts/dashboard-hook.sh)
+//   --batch <out.json>  export, then write the ArtifactData batches that publish the stale files
+//   --mark-published    record the files the last --batch wrote as published (run after all its batches succeeded)
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const qa = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const backlog = JSON.parse(fs.readFileSync(path.join(qa, "backlog.json"), "utf8"));
-const out = path.join(qa, "dashboard");
-fs.mkdirSync(out, { recursive: true });
+const pageSource = path.join(qa, "dashboard", "index.html");
+const store = path.join(qa, "dashboard", "store");
+const docsDir = path.join(store, "docs");
+const published = path.join(qa, "runs", ".dash", "published");
 
+// ── Limits of the artifact store ──
+const KB = 1024;
+const DOC_LIMIT = 240 * KB; // a files/ document may hold 256 KB: keep headroom
+const BATCH_LIMIT = 900 * KB; // one ArtifactData batch may carry 1 MiB
+const BATCH_MAX_WRITES = 50;
+
+// Fixed slots per dataset (each one is a <script src> in index.html). Sized for growth: about 2x the data
+// of 08-11. Activity is newest-first, so it fills from its last slot: new rows only touch the first slots.
+const SLOTS = {
+  issues: { count: 5 },
+  pending: { count: 2 },
+  activity: { count: 5, fillFromEnd: true },
+  features: { count: 1 },
+  changes: { count: 2 },
+  runs: { count: 2 },
+};
+
+// ── Rows (same shape the page has always read) ──
 const sevRank = { critical: 0, high: 1, medium: 2, low: 3 };
 // The dashboard is in Spanish: add display labels next to the raw enum values
 const ES = {
@@ -21,28 +46,143 @@ const ES = {
   server: "servidor", client: "cliente", both: "ambos", lab: "laboratorio", pass: "OK", fail: "fallo",
 };
 const es = (v) => ES[v] ?? v;
-const issues = backlog.issues
-  .map((i) => ({ ...i, severity_rank: sevRank[i.severity] ?? 9, severity_es: es(i.severity), status_es: es(i.status), type_es: es(i.type), area_es: es(i.area) }))
-  .sort((a, b) => a.severity_rank - b.severity_rank || a.id.localeCompare(b.id));
+const datasets = {
+  issues: backlog.issues
+    .map((i) => ({ ...i, severity_rank: sevRank[i.severity] ?? 9, severity_es: es(i.severity), status_es: es(i.status), type_es: es(i.type), area_es: es(i.area) }))
+    .sort((a, b) => a.severity_rank - b.severity_rank || a.id.localeCompare(b.id)),
+  pending: (backlog.pending || []).map((d) => ({ ...d, options_text: (d.options || []).join("\n") })),
+  activity: backlog.activity || [],
+  features: backlog.features || [],
+  changes: backlog.changes || [],
+  runs: (backlog.runs || []).map((r) => ({ ...r, result_es: es(r.result) })),
+};
 
-const published = path.join(qa, "runs", ".dash", "published");
-const args = process.argv.slice(2);
-const quiet = args.includes("--status") || args.includes("--mark-published");
+// ── Store documents ──
+const slotFile = (name, n) => `qa-data-${name}-${n}.js`;
+const META_FILE = "qa-data-meta.js";
+const PAGE_FILE = "index.html";
+const docJson = (text, at) => JSON.stringify({ text, edit: { via: "claude", at } });
+const docBytes = (text) => Buffer.byteLength(docJson(text, new Date(0).toISOString()));
+// Bytes a piece of text takes inside the document's JSON string (quotes and non-ASCII escapes included)
+const escapedBytes = (text) => Buffer.byteLength(JSON.stringify(text)) - 2;
 
-for (const [name, rows] of Object.entries({ issues, pending: (backlog.pending || []).map((d) => ({ ...d, options_text: (d.options || []).join("\n") })), activity: backlog.activity || [], features: backlog.features || [], changes: backlog.changes, runs: backlog.runs.map((r) => ({ ...r, result_es: es(r.result) })) })) {
-  fs.writeFileSync(path.join(out, `${name}.json`), JSON.stringify(rows, null, 2));
-  if (!quiet) console.log(`${name}.json: ${rows.length} rows`);
+const slotScript = (name, n, count, rowsJson) =>
+  `// Generated by qa/scripts/export-dashboard.mjs from qa/backlog.json: "${name}" rows, slot ${n} of ${count}. Do not edit.\n` +
+  `((window.QA_DATA ||= {}).${name} ||= []).push(...[${rowsJson.join(",")}]);\n` +
+  `(window.QA_DATA_SLOTS ||= {}).${name} = (window.QA_DATA_SLOTS.${name} || 0) + 1;\n`;
+
+// Greedy split by serialized size; throws when the rows outgrow the dataset's slots
+function splitIntoSlots(name, rows, { count, fillFromEnd = false }) {
+  const ordered = fillFromEnd ? [...rows].reverse() : rows;
+  const budget = DOC_LIMIT - docBytes(slotScript(name, count, count, []));
+  const chunks = Array.from({ length: count }, () => ({ rows: [], bytes: 0 }));
+  let slot = 0;
+  for (const row of ordered) {
+    const json = JSON.stringify(row);
+    const cost = escapedBytes(json) + 1; // + the separating comma
+    if (cost > budget) throw new Error(`${name}: row ${row.id ?? "?"} alone is ${Math.ceil(cost / KB)} KB, over the ${DOC_LIMIT / KB} KB slot limit`);
+    if (chunks[slot].bytes + cost > budget) slot++;
+    if (slot === count) {
+      const total = Math.ceil(rows.reduce((s, r) => s + escapedBytes(JSON.stringify(r)) + 1, 0) / KB);
+      throw new Error(
+        `${name}: ${total} KB of rows do not fit in ${count} slots of ${DOC_LIMIT / KB} KB. ` +
+          `Raise SLOTS.${name}.count in qa/scripts/export-dashboard.mjs and add the new <script src="${slotFile(name, count + 1)}"> tags to qa/dashboard/index.html.`,
+      );
+    }
+    chunks[slot].rows.push(json);
+    chunks[slot].bytes += cost;
+  }
+  const slots = chunks.map((c) => (fillFromEnd ? c.rows.reverse() : c.rows));
+  return fillFromEnd ? slots.reverse() : slots;
 }
 
-const names = ["issues", "pending", "activity", "features", "changes", "runs"];
 const read = (f) => (fs.existsSync(f) ? fs.readFileSync(f, "utf8") : null);
-const stale = names.filter((n) => read(path.join(out, `${n}.json`)) !== read(path.join(published, `${n}.json`)));
+
+function buildStore() {
+  const files = new Map(); // file name → text, in the order the page loads them
+  for (const [name, config] of Object.entries(SLOTS)) {
+    splitIntoSlots(name, datasets[name], config).forEach((rowsJson, i) => files.set(slotFile(name, i + 1), slotScript(name, i + 1, config.count, rowsJson)));
+  }
+  // The generation time only moves when some data file changed, so an unchanged backlog stays published
+  const dataChanged = [...files].some(([file, text]) => read(path.join(store, file)) !== text);
+  const previous = read(path.join(store, META_FILE))?.match(/"generated_at":"([^"]+)"/)?.[1];
+  const meta = { generated_at: !dataChanged && previous ? previous : new Date().toISOString(), slots: Object.fromEntries(Object.entries(SLOTS).map(([n, c]) => [n, c.count])) };
+  files.set(META_FILE, `// Generated by qa/scripts/export-dashboard.mjs. Do not edit.\nwindow.QA_DATA_META = ${JSON.stringify(meta)};\n`);
+  files.set(PAGE_FILE, fs.readFileSync(pageSource, "utf8"));
+  checkPageLoadsData(files.get(PAGE_FILE), [...files.keys()].filter((f) => f.startsWith("qa-data-")));
+  for (const [file, text] of files) {
+    if (docBytes(text) > DOC_LIMIT) throw new Error(`${file} is ${Math.ceil(docBytes(text) / KB)} KB as a document, over the ${DOC_LIMIT / KB} KB limit`);
+  }
+  return files;
+}
+
+// The page must load exactly the data files this script writes, or a dataset would come out partial
+function checkPageLoadsData(html, dataFiles) {
+  const loaded = [...html.matchAll(/<script src="(qa-data-[^"]+)"><\/script>/g)].map((m) => m[1]);
+  const missing = dataFiles.filter((f) => !loaded.includes(f));
+  const unknown = loaded.filter((f) => !dataFiles.includes(f));
+  if (missing.length || unknown.length) {
+    throw new Error(`qa/dashboard/index.html and SLOTS disagree. Missing <script src> tags: ${missing.join(", ") || "none"}; tags for files that are not written: ${unknown.join(", ") || "none"}.`);
+  }
+}
+
+function writeStore(files) {
+  fs.mkdirSync(store, { recursive: true });
+  const keep = new Set(files.keys());
+  for (const f of fs.readdirSync(store)) if (f !== "docs" && !keep.has(f)) fs.rmSync(path.join(store, f));
+  for (const [file, text] of files) if (read(path.join(store, file)) !== text) fs.writeFileSync(path.join(store, file), text);
+}
+
+// ArtifactData writes for the stale files: one document JSON per file, grouped into batches within the store limits
+function writeBatches(files, stale, out) {
+  const at = new Date().toISOString();
+  fs.rmSync(docsDir, { recursive: true, force: true });
+  fs.mkdirSync(docsDir, { recursive: true });
+  const batches = [];
+  let current = null;
+  for (const file of stale) {
+    const docPath = path.join(docsDir, `${file}.json`);
+    const json = docJson(files.get(file), at);
+    fs.writeFileSync(docPath, json);
+    const bytes = Buffer.byteLength(json);
+    if (!current || current.bytes + bytes > BATCH_LIMIT || current.writes.length === BATCH_MAX_WRITES) batches.push((current = { bytes: 0, writes: [] }));
+    current.writes.push({ op: "set", collection: "files", doc_id: file, file_path: docPath });
+    current.bytes += bytes;
+  }
+  fs.mkdirSync(path.dirname(path.resolve(out)), { recursive: true });
+  fs.writeFileSync(out, JSON.stringify({ at, batches: batches.map((b) => b.writes) }, null, 2));
+  return batches;
+}
+
+// ── Main ──
+const args = process.argv.slice(2);
+const batchOut = args.includes("--batch") ? args[args.indexOf("--batch") + 1] : null;
+if (args.includes("--batch") && !batchOut) {
+  console.error("usage: export-dashboard.mjs --batch <out.json>");
+  process.exit(2);
+}
+
+const files = buildStore();
+writeStore(files);
+const stale = [...files.keys()].filter((f) => read(path.join(store, f)) !== read(path.join(published, f)));
+
 if (args.includes("--mark-published")) {
+  // Mark what the last --batch sent, not the current export: rows added since then stay stale
+  const sent = fs.existsSync(docsDir) ? fs.readdirSync(docsDir).filter((f) => f.endsWith(".json")) : [];
+  if (!sent.length) {
+    console.error("nothing to mark: run --batch and publish its batches first");
+    process.exit(1);
+  }
   fs.mkdirSync(published, { recursive: true });
-  for (const n of names) fs.copyFileSync(path.join(out, `${n}.json`), path.join(published, `${n}.json`));
-  console.log("dashboard marked as published");
+  for (const f of sent) fs.writeFileSync(path.join(published, f.replace(/\.json$/, "")), JSON.parse(fs.readFileSync(path.join(docsDir, f), "utf8")).text);
+  fs.rmSync(docsDir, { recursive: true, force: true });
+  console.log(`dashboard marked as published: ${sent.length} file(s)`);
 } else if (args.includes("--status")) {
   console.log(JSON.stringify({ stale }));
-} else if (stale.length) {
-  console.log(`not yet published: ${stale.join(", ")}`);
+} else if (batchOut) {
+  const batches = writeBatches(files, stale, batchOut);
+  console.log(JSON.stringify({ out: path.resolve(batchOut), stale, batches: batches.map((b) => ({ writes: b.writes.length, kb: Math.ceil(b.bytes / KB) })) }));
+} else {
+  for (const [file, text] of files) console.log(`${file}: ${Math.ceil(docBytes(text) / KB)} KB`);
+  if (stale.length) console.log(`not yet published: ${stale.join(", ")}`);
 }

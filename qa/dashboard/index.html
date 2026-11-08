@@ -158,8 +158,6 @@
 #dash-root .res-fail { background: var(--qa-red); }
 #dash-root .act-live { background: var(--qa-blue); }
 #dash-root .act-done { background: var(--qa-green); }
-#dash-root [data-dash-source-state=empty] { color: transparent; }
-#dash-root [data-dash-source-state=refreshing] { opacity: .5; transition: opacity var(--cds-dur-slow); }
 #dash-root .qa-fail { display: flex; align-items: center; justify-content: center; gap: 0.5rem; min-height: 120px; color: var(--color-fg-muted); }
 #dash-root .qa-fail::before { content: ""; width: 0.45rem; height: 0.45rem; border-radius: 50%; background: var(--color-bad); }
 #dash-root .qa-empty { color: var(--color-fg-muted); margin: 0; }
@@ -246,15 +244,15 @@
   <header id="overview">
     <h1>ExposeMe QA Lab<span class="dot">.</span></h1>
     <p class="qa-take" id="takeaway">
-      <b data-source="kpis" data-field="open" data-row="0" class="dash-skeleton">—</b> incidencias abiertas, <b data-source="kpis" data-field="open_high" data-row="0" class="dash-skeleton">—</b> de ellas altas o críticas.
-      <b data-source="kpis" data-field="done" data-row="0" class="dash-skeleton">—</b> resueltas en <b data-source="kpis" data-field="changes" data-row="0" class="dash-skeleton">—</b> cambios.
-      Te esperan <b data-source="kpis" data-field="pending" data-row="0" class="dash-skeleton">—</b> respuestas o acciones.
+      <b data-qa-kpi-field="open" class="dash-skeleton">—</b> incidencias abiertas, <b data-qa-kpi-field="open_high" class="dash-skeleton">—</b> de ellas altas o críticas.
+      <b data-qa-kpi-field="done" class="dash-skeleton">—</b> resueltas en <b data-qa-kpi-field="changes" class="dash-skeleton">—</b> cambios.
+      Te esperan <b data-qa-kpi-field="pending" class="dash-skeleton">—</b> respuestas o acciones.
     </p>
   </header>
 
   <section id="now">
     <h2>Ahora mismo</h2>
-    <div class="qa-now" id="now-box" data-source="activity"></div>
+    <div class="qa-now" id="now-box"></div>
   </section>
 
   <section id="pendiente">
@@ -262,45 +260,45 @@
       <h2>Necesito tu respuesta</h2>
       <p class="qa-hint">Para responder, deja un comentario en la tarjeta y envíalo a Claude (o menciona @claude).</p>
     </div>
-    <div class="qa-pending" id="pending-list" data-source="pending"></div>
+    <div class="qa-pending" id="pending-list"></div>
     <details class="qa-archive" id="archivadas">
       <summary>Archivadas (<span id="archive-count">0</span>)</summary>
-      <div class="qa-pending" id="archive-list" data-source="pending"></div>
+      <div class="qa-pending" id="archive-list"></div>
     </details>
   </section>
 
   <section id="cifras">
     <h2>Cifras principales</h2>
     <div class="qa-kpis">
-    <div class="qa-kpi c-yellow" id="kpi-open" data-kpi="open" role="button" tabindex="0" title="Ver en la tabla de incidencias"><div class="lbl">Incidencias abiertas</div><div class="val dash-skeleton" data-source="kpis" data-field="open" data-row="0">—</div><div class="sub">abiertas, en curso o bloqueadas</div></div>
-    <div class="qa-kpi c-red" id="kpi-high" data-kpi="high" role="button" tabindex="0" title="Ver en la tabla de incidencias"><div class="lbl">Altas o críticas</div><div class="val dash-skeleton" data-source="kpis" data-field="open_high" data-row="0">—</div><div class="sub">se arreglan primero</div></div>
-    <div class="qa-kpi c-green" id="kpi-done" data-kpi="done" role="button" tabindex="0" title="Ver en la tabla de incidencias"><div class="lbl">Resueltas</div><div class="val dash-skeleton" data-source="kpis" data-field="done" data-row="0">—</div><div class="sub"><span data-source="kpis" data-field="verified" data-row="0">—</span> verificadas en móviles</div></div>
-    <div class="qa-kpi c-blue" id="kpi-skew"><div class="lbl">Desfase entre jugadores</div><div class="val dash-skeleton" data-source="kpis" data-field="last_p95_skew" data-row="0">—</div><div class="sub">ms (p95) en la última partida, <span data-source="kpis" data-field="last_run" data-row="0">—</span></div></div>
+    <div class="qa-kpi c-yellow" id="kpi-open" data-kpi="open" role="button" tabindex="0" title="Ver en la tabla de incidencias"><div class="lbl">Incidencias abiertas</div><div class="val dash-skeleton" data-qa-kpi-field="open">—</div><div class="sub">abiertas, en curso o bloqueadas</div></div>
+    <div class="qa-kpi c-red" id="kpi-high" data-kpi="high" role="button" tabindex="0" title="Ver en la tabla de incidencias"><div class="lbl">Altas o críticas</div><div class="val dash-skeleton" data-qa-kpi-field="open_high">—</div><div class="sub">se arreglan primero</div></div>
+    <div class="qa-kpi c-green" id="kpi-done" data-kpi="done" role="button" tabindex="0" title="Ver en la tabla de incidencias"><div class="lbl">Resueltas</div><div class="val dash-skeleton" data-qa-kpi-field="done">—</div><div class="sub"><span data-qa-kpi-field="verified">—</span> verificadas en móviles</div></div>
+    <div class="qa-kpi c-blue" id="kpi-skew"><div class="lbl">Desfase entre jugadores</div><div class="val dash-skeleton" data-qa-kpi-field="last_p95_skew">—</div><div class="sub">ms (p95) en la última partida, <span data-qa-kpi-field="last_run">—</span></div></div>
   </div>
   </section>
 
   <section class="qa-card" id="issues">
-    <h2>Incidencias <span class="qa-total"><span data-source="kpis" data-field="total" data-row="0" class="dash-skeleton">—</span> en total</span></h2>
+    <h2>Incidencias <span class="qa-total"><span data-qa-kpi-field="total" class="dash-skeleton">—</span> en total</span></h2>
     <p class="qa-hint">Encontradas por el auditor, el revisor de seguridad, los bots y las partidas en dispositivos.</p>
     <div class="qa-tools">
       <input id="issue-search" type="search" placeholder="Buscar incidencias" aria-label="Buscar incidencias">
-      <button class="qa-chip" data-filter="active" aria-pressed="true">Abiertas · <span data-source="kpis" data-field="open" data-row="0"></span></button>
-      <button class="qa-chip" data-filter="in-progress" aria-pressed="false" hidden>En curso · <span data-source="kpis" data-field="in_progress" data-row="0"></span></button>
-      <button class="qa-chip" data-filter="blocked" aria-pressed="false" hidden>Bloqueadas · <span data-source="kpis" data-field="blocked" data-row="0"></span></button>
-      <button class="qa-chip" data-filter="done" aria-pressed="false">Resueltas · <span data-source="kpis" data-field="done" data-row="0"></span></button>
-      <button class="qa-chip" data-filter="wontfix" aria-pressed="false" hidden>Descartadas · <span data-source="kpis" data-field="wontfix" data-row="0"></span></button>
+      <button class="qa-chip" data-filter="active" aria-pressed="true">Abiertas · <span data-qa-kpi-field="open"></span></button>
+      <button class="qa-chip" data-filter="in-progress" aria-pressed="false" hidden>En curso · <span data-qa-kpi-field="in_progress"></span></button>
+      <button class="qa-chip" data-filter="blocked" aria-pressed="false" hidden>Bloqueadas · <span data-qa-kpi-field="blocked"></span></button>
+      <button class="qa-chip" data-filter="done" aria-pressed="false">Resueltas · <span data-qa-kpi-field="done"></span></button>
+      <button class="qa-chip" data-filter="wontfix" aria-pressed="false" hidden>Descartadas · <span data-qa-kpi-field="wontfix"></span></button>
       <button class="qa-chip" data-filter="all" aria-pressed="false">Todas</button>
       <span id="issue-extra" class="qa-tools"></span>
     </div>
     <div class="qa-tbl">
-      <table id="issues-table" data-source="issues" data-row-key="id">
+      <table id="issues-table">
         <thead><tr>
-          <th data-field="id"><button data-sort="id">ID</button></th>
-          <th data-field="title"><button data-sort="title">Incidencia</button></th>
-          <th data-field="severity_es"><button data-sort="severity_rank">Severidad</button></th>
-          <th data-field="status_es"><button data-sort="status_es">Estado</button></th>
-          <th data-field="type_es" class="hide-narrow"><button data-sort="type_es">Tipo</button></th>
-          <th data-field="evidence" class="hide-narrow">Dónde</th>
+          <th><button data-sort="id">ID</button></th>
+          <th><button data-sort="title">Incidencia</button></th>
+          <th><button data-sort="severity_rank">Severidad</button></th>
+          <th><button data-sort="status_es">Estado</button></th>
+          <th class="hide-narrow"><button data-sort="type_es">Tipo</button></th>
+          <th class="hide-narrow">Dónde</th>
         </tr></thead>
         <tbody></tbody>
       </table>
@@ -313,31 +311,31 @@
     <div class="qa-card" id="by-type">
       <h2>Abiertas por tipo</h2>
       <p class="qa-hint">Apiladas por severidad.</p>
-      <div class="qa-chart" id="chart-types" data-source="by_type"></div>
-      <div class="qa-legend" id="legend-types" data-source="by_type"></div>
+      <div class="qa-chart" id="chart-types"></div>
+      <div class="qa-legend" id="legend-types"></div>
     </div>
     <div class="qa-card" id="pace">
       <h2>Ritmo de trabajo</h2>
       <p class="qa-hint">Tareas de agentes lanzadas por hora en las últimas 24 h. Si las barras bajan con el tiempo, el flujo está perdiendo ritmo.</p>
-      <div class="qa-pace-kpis" id="pace-kpis" data-source="activity"></div>
-      <div class="qa-chart" id="chart-pace" data-source="activity"></div>
-      <div class="qa-legend" id="legend-pace" data-source="activity"></div>
+      <div class="qa-pace-kpis" id="pace-kpis"></div>
+      <div class="qa-chart" id="chart-pace"></div>
+      <div class="qa-legend" id="legend-pace"></div>
     </div>
   </section>
 
   <section class="qa-card" id="historial">
     <h2>Historial</h2>
     <p class="qa-hint" id="history-hint">Todo lo que han hecho los agentes, lo más reciente arriba.</p>
-    <div class="qa-tools" id="history-filter" data-source="activity"></div>
+    <div class="qa-tools" id="history-filter"></div>
     <div class="qa-tbl" id="history-all">
-      <table id="activity-table" data-source="activity" data-row-key="id">
-        <thead><tr><th data-field="at">Hora</th><th data-field="agent">Agente</th><th data-field="task">Tarea</th><th data-field="state">Estado</th></tr></thead>
+      <table id="activity-table">
+        <thead><tr><th>Hora</th><th>Agente</th><th>Tarea</th><th>Estado</th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
     <div class="qa-tbl" id="history-merged" hidden>
-      <table id="changes-table" data-source="changes" data-row-key="id">
-        <thead><tr><th data-field="issue">Incidencia</th><th data-field="title">Cambio</th><th data-field="commit" class="hide-narrow">Commit</th><th data-field="tests" class="hide-narrow">Pruebas</th></tr></thead>
+      <table id="changes-table">
+        <thead><tr><th>Incidencia</th><th>Cambio</th><th class="hide-narrow">Commit</th><th class="hide-narrow">Pruebas</th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
@@ -348,18 +346,18 @@
       <h2>Estado del juego</h2>
       <p class="qa-hint">Qué funciona ya, qué se ha probado en móviles y qué viene después.</p>
     </div>
-    <div class="qa-fsum" id="features-summary" data-source="features"></div>
-    <div class="qa-areas" id="features-list" data-source="features"></div>
+    <div class="qa-fsum" id="features-summary"></div>
+    <div class="qa-areas" id="features-list"></div>
   </section>
 
   <section>
     <div class="qa-card" id="runs">
       <h2>Partidas y pruebas</h2>
       <p class="qa-hint">Bots, móviles y baterías de tests.</p>
-      <div class="qa-tools" id="runs-filter" data-source="runs"></div>
+      <div class="qa-tools" id="runs-filter"></div>
       <div class="qa-tbl">
-        <table id="runs-table" data-source="runs" data-row-key="id">
-          <thead><tr><th data-field="id">ID</th><th data-field="devices">Jugadores</th><th data-field="result_es">Resultado</th><th data-field="notes" class="hide-narrow">Notas</th></tr></thead>
+        <table id="runs-table">
+          <thead><tr><th>ID</th><th>Jugadores</th><th>Resultado</th><th class="hide-narrow">Notas</th></tr></thead>
           <tbody></tbody>
         </table>
       </div>
@@ -512,6 +510,25 @@
   </section>
 </div>
 
+<!-- Data: files/qa-data-*.js, generated from qa/backlog.json by qa/scripts/export-dashboard.mjs (keep in sync with its SLOTS) -->
+<script src="qa-data-meta.js"></script>
+<script src="qa-data-issues-1.js"></script>
+<script src="qa-data-issues-2.js"></script>
+<script src="qa-data-issues-3.js"></script>
+<script src="qa-data-issues-4.js"></script>
+<script src="qa-data-issues-5.js"></script>
+<script src="qa-data-pending-1.js"></script>
+<script src="qa-data-pending-2.js"></script>
+<script src="qa-data-activity-1.js"></script>
+<script src="qa-data-activity-2.js"></script>
+<script src="qa-data-activity-3.js"></script>
+<script src="qa-data-activity-4.js"></script>
+<script src="qa-data-activity-5.js"></script>
+<script src="qa-data-features-1.js"></script>
+<script src="qa-data-changes-1.js"></script>
+<script src="qa-data-changes-2.js"></script>
+<script src="qa-data-runs-1.js"></script>
+<script src="qa-data-runs-2.js"></script>
 <script>
   // Every block folds from its title; each viewer's choice is remembered in this browser
   (function foldable() {
@@ -551,47 +568,52 @@ const DONE = ["fixed", "verified"];
 const SEVS = ["critical", "high", "medium", "low"];
 const SEV_ES = { critical: "crítica", high: "alta", medium: "media", low: "baja" };
 
-dash.calc("kpis", {
-  inputs: ["issues", "changes", "runs", "pending"],
-  title: "Cifras principales de QA",
-  description: "Cuenta incidencias por estado y severidad, peticiones pendientes y lee la última partida con medida de sincronización.",
-  fn: (issues, changes, runs, pending) => {
-    const active = issues.filter((i) => ["open", "in-progress", "blocked"].includes(i.status));
-    const measured = runs.filter((r) => r.p95_skew_ms !== null && r.p95_skew_ms !== undefined);
-    const last = measured[measured.length - 1] || {};
-    return [{
-      total: issues.length,
-      wontfix: issues.filter((i) => i.status === "wontfix").length,
-      open: active.length,
-      in_progress: issues.filter((i) => i.status === "in-progress").length,
-      blocked: issues.filter((i) => i.status === "blocked").length,
-      open_high: active.filter((i) => i.severity === "critical" || i.severity === "high").length,
-      done: issues.filter((i) => i.status === "fixed" || i.status === "verified").length,
-      verified: issues.filter((i) => i.status === "verified").length,
-      changes: changes.length,
-      pending: pending.filter((p) => p.status !== "resuelta").length,
-      last_run: last.id || "ninguna aún",
-      last_p95_skew: last.p95_skew_ms ?? null,
-    }];
-  },
+// ── Data: rows pushed by the qa-data-*.js scripts above; a dataset counts only if all its slots loaded ──
+function dataset(name) {
+  const meta = window.QA_DATA_META;
+  const complete = !!meta && (window.QA_DATA_SLOTS || {})[name] === meta.slots[name];
+  return complete ? { status: "ok", data: (window.QA_DATA || {})[name] || [] } : { status: "error" };
+}
+
+// Derived rows answer like a dataset: ok only when every input is
+function derived(inputs, fn) {
+  const results = inputs.map(dataset);
+  return results.every((r) => r.status === "ok") ? { status: "ok", data: fn(...results.map((r) => r.data)) } : { status: "error" };
+}
+
+// Main QA figures: issues by status and severity, open user requests, last run with a sync measurement
+const kpis = () => derived(["issues", "changes", "runs", "pending"], (issues, changes, runs, pending) => {
+  const active = issues.filter((i) => ["open", "in-progress", "blocked"].includes(i.status));
+  const measured = runs.filter((r) => r.p95_skew_ms !== null && r.p95_skew_ms !== undefined);
+  const last = measured[measured.length - 1] || {};
+  return [{
+    total: issues.length,
+    wontfix: issues.filter((i) => i.status === "wontfix").length,
+    open: active.length,
+    in_progress: issues.filter((i) => i.status === "in-progress").length,
+    blocked: issues.filter((i) => i.status === "blocked").length,
+    open_high: active.filter((i) => i.severity === "critical" || i.severity === "high").length,
+    done: issues.filter((i) => i.status === "fixed" || i.status === "verified").length,
+    verified: issues.filter((i) => i.status === "verified").length,
+    changes: changes.length,
+    pending: pending.filter((p) => p.status !== "resuelta").length,
+    last_run: last.id || "ninguna aún",
+    last_p95_skew: last.p95_skew_ms ?? null,
+  }];
 });
 
-dash.calc("by_type", {
-  inputs: ["issues"],
-  title: "Incidencias abiertas por tipo y severidad",
-  description: "Incidencias abiertas, en curso y bloqueadas contadas por tipo y separadas por severidad.",
-  fn: (issues) => {
-    const order = ["sync", "bug", "security", "perf", "ux", "test", "infra", "cleanup"];
-    const labels = { sync: "sincronización", bug: "bug", security: "seguridad", perf: "rendimiento", ux: "UX", test: "tests", infra: "infra", cleanup: "limpieza" };
-    const active = issues.filter((i) => ["open", "in-progress", "blocked"].includes(i.status));
-    return order
-      .map((type) => {
-        const row = { type: labels[type], critical: 0, high: 0, medium: 0, low: 0, total: 0 };
-        active.filter((i) => i.type === type).forEach((i) => { row[i.severity] = (row[i.severity] || 0) + 1; row.total++; });
-        return row;
-      })
-      .filter((r) => r.total > 0);
-  },
+// Open, in-progress and blocked issues counted by type, split by severity
+const byType = () => derived(["issues"], (issues) => {
+  const order = ["sync", "bug", "security", "perf", "ux", "test", "infra", "cleanup"];
+  const labels = { sync: "sincronización", bug: "bug", security: "seguridad", perf: "rendimiento", ux: "UX", test: "tests", infra: "infra", cleanup: "limpieza" };
+  const active = issues.filter((i) => ["open", "in-progress", "blocked"].includes(i.status));
+  return order
+    .map((type) => {
+      const row = { type: labels[type], critical: 0, high: 0, medium: 0, low: 0, total: 0 };
+      active.filter((i) => i.type === type).forEach((i) => { row[i.severity] = (row[i.severity] || 0) + 1; row.total++; });
+      return row;
+    })
+    .filter((r) => r.total > 0);
 });
 
 (() => {
@@ -607,12 +629,12 @@ dash.calc("by_type", {
   const hhmm = (iso) => { const d = new Date(iso); return isNaN(d) ? iso : d.toLocaleString("es-ES", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }); };
 
   function drawKpis() {
-    const k = dash.data("kpis");
-    const els = document.querySelectorAll('[data-source="kpis"]');
+    const k = kpis();
+    const els = document.querySelectorAll("[data-qa-kpi-field]");
     if (k.status !== "ok") { if (k.status === "error") els.forEach((e) => { e.classList.remove("dash-skeleton"); e.textContent = "—"; }); return; }
     const row = k.data[0] || {};
     els.forEach((e) => {
-      const v = row[e.dataset.field];
+      const v = row[e.dataset.qaKpiField];
       e.textContent = v === null || v === undefined ? "—" : typeof v === "number" ? d3.format(",")(v) : v;
       e.classList.remove("dash-skeleton");
     });
@@ -626,7 +648,7 @@ dash.calc("by_type", {
 
   function drawNow() {
     const box = document.getElementById("now-box");
-    const r = dash.data("activity");
+    const r = dataset("activity");
     if (r.status === "error") { failLine(box); return; }
     if (r.status !== "ok") return;
     box.innerHTML = "";
@@ -711,7 +733,7 @@ dash.calc("by_type", {
 
   function drawPending() {
     const box = document.getElementById("pending-list");
-    const r = dash.data("pending");
+    const r = dataset("pending");
     if (r.status === "error") { failLine(box); return; }
     if (r.status !== "ok") return;
     const archive = document.getElementById("archive-list");
@@ -737,7 +759,7 @@ dash.calc("by_type", {
           .forEach((t) => det.appendChild(t.startsWith("## ") ? el("p", "h", t.slice(3)) : el("p", null, t)));
         card.appendChild(det);
       }
-      // Nested arrays arrive as JSON text from the file source: use the newline-joined export field
+      // Options come as the newline-joined export field options_text
       const opts = String(p.options_text || "").split("\n").map((o) => o.trim()).filter(Boolean);
       // Open decisions list their options inside the answer form instead
       if (opts.length && (p.answer || !answersDb || p.kind === "acción")) {
@@ -761,7 +783,7 @@ dash.calc("by_type", {
   function drawFeatures() {
     const sum = document.getElementById("features-summary");
     const box = document.getElementById("features-list");
-    const r = dash.data("features");
+    const r = dataset("features");
     if (r.status === "error") { failLine(box); sum.innerHTML = ""; return; }
     if (r.status !== "ok") return;
     const order = ["verificado", "hecho", "en curso", "bloqueado", "planeado"];
@@ -813,7 +835,7 @@ dash.calc("by_type", {
   function drawTypes() {
     const box = document.getElementById("chart-types");
     const lg = document.getElementById("legend-types");
-    const r = dash.data("by_type");
+    const r = byType();
     if (r.status === "error") { failLine(box); lg.innerHTML = ""; return; }
     if (r.status !== "ok") { box.innerHTML = ""; return; }
     const rows = r.data;
@@ -858,7 +880,7 @@ dash.calc("by_type", {
     const box = document.getElementById("chart-pace");
     const lg = document.getElementById("legend-pace");
     const kp = document.getElementById("pace-kpis");
-    const r = dash.data("activity");
+    const r = dataset("activity");
     if (r.status === "error") { failLine(box); lg.innerHTML = ""; kp.innerHTML = ""; return; }
     if (r.status !== "ok") { box.innerHTML = ""; return; }
     const KINDS = [
@@ -942,7 +964,7 @@ dash.calc("by_type", {
   function drawIssues() {
     const table = document.getElementById("issues-table");
     const body = table.querySelector("tbody");
-    const r = dash.data("issues");
+    const r = dataset("issues");
     body.innerHTML = "";
     if (r.status === "error") { const tr = body.insertRow(); const c = tr.insertCell(); c.colSpan = 6; failLine(c); return; }
     if (r.status !== "ok") return;
@@ -1006,7 +1028,7 @@ dash.calc("by_type", {
 
   function drawRows(id, tableId, cols, newestFirst, cellFor, keep) {
     const body = document.querySelector(`#${tableId} tbody`);
-    const r = dash.data(id);
+    const r = dataset(id);
     body.innerHTML = "";
     if (r.status === "error") { const tr = body.insertRow(); const c = tr.insertCell(); c.colSpan = cols; failLine(c); return; }
     if (r.status !== "ok") return;
@@ -1026,7 +1048,7 @@ dash.calc("by_type", {
     });
     // Historial: one card, "Todo" = agent activity, "Solo lo integrado" = commits on qa/loop
     const hf = document.getElementById("history-filter");
-    const act = dash.data("activity"), chg = dash.data("changes");
+    const act = dataset("activity"), chg = dataset("changes");
     hf.innerHTML = "";
     [[false, "Todo", act.status === "ok" ? act.data.length : "…"], [true, "Solo lo integrado", chg.status === "ok" ? chg.data.length : "…"]]
       .forEach(([merged, text, n]) => {
@@ -1045,7 +1067,7 @@ dash.calc("by_type", {
       td(tr, d.id, "mono"); td(tr, d.devices); pill(tr, d.result_es, `res-${d.result}`); td(tr, d.notes, "hide-narrow wrap");
     }, (d) => !runKind || d.kind === runKind);
     const rf = document.getElementById("runs-filter");
-    const runs = dash.data("runs");
+    const runs = dataset("runs");
     rf.innerHTML = "";
     if (runs.status === "ok") {
       const KIND_ES = { bots: "Bots", devices: "Móviles", unit: "Tests" };
@@ -1086,16 +1108,19 @@ dash.calc("by_type", {
   }));
 
   let linked = false;
-  dash.onData(() => {
+  function drawAll() {
     // One failing section must not blank the rest of the page
     [drawKpis, drawNow, drawPending, drawFeatures, drawTypes, drawPace, drawIssues, drawTables].forEach((f) => {
       try { f(); } catch (e) { console.error(`${f.name} failed`, e); }
     });
-    if (!linked && dash.data("pending").status === "ok") {
+    if (!linked && dataset("pending").status === "ok") {
       linked = true;
       const named = document.getElementById(location.hash.slice(1));
       if (named) { named.scrollIntoView(); dash.setLink(named.id); }
     }
-  });
+  }
+  // The data scripts already ran: draw now, and again whenever the page reports a change (e.g. its width)
+  drawAll();
+  dash.onData(drawAll);
 })();
 </script>

@@ -36,6 +36,11 @@
 # step fails on a hold (with --test-output-dir a failed or warned step also costs Maestro a screen dump).
 # maestro-sim.mjs plays the flow with bot holds (up to three a round, EXP-355), with screen reads that see the screen as
 # they start, as they end or anywhere along them (EXP-322) and with the phases painted late (EXP-349).
+# EXP-392: the guess's tapOn settles for about four screen reads and 0.75 s (Maestro 2.11 on Android: 3.3-3.9 s on 17
+# of it238's 20 guesses, on emulators whose reads took 0.6-0.7 s). There every guess lands and a missing card fails
+# its round; with reads of 1 s or more it is mostly left to lab.sh's warning (a scoreboard waited for without its card
+# seen), and from 2 s on a phone seldom sees a scoreboard's card at all (lab.sh: too slow to check). maestro-sim.mjs
+# states how often.
 appId: com.socketNull.ExposeMe
 ---
 - runFlow: wait-game-start.yaml
@@ -90,7 +95,9 @@ appId: com.socketNull.ExposeMe
       # conditionWaitMs after the tap (see above). So looks for the answering only start on a phone whose scoreboard
       # fits two of its reads (`slowestReadMs`: a slower one can't tell a missing card anyway, see maestro-sim.mjs)
       # and, until that wait is over, only if a look for the card after it would still start a read before the
-      # scoreboard closes.
+      # scoreboard closes. EXP-392: and only if a look for the answering that finds it over, and so waits out that
+      # wait, still leaves the first read after it covering where the scoreboard may have opened (Maestro's tap settles
+      # for about four reads, so that wait may well reach into the scoreboard: such a look read none of it).
       # EXP-325: while the photo owner holds the scoreboard the app shows only the photo and the `game-held` marker, and
       # the scoreboard stays up past `closesBy`. So the card wait also ends on the marker (a look that saw it read no
       # scoreboard without its card), and the look for the marker in the wait for the next options tells a held
@@ -113,7 +120,7 @@ appId: com.socketNull.ExposeMe
                 commands:
                   - runFlow:
                       when:
-                        true: ${output.round.answering && 2 * output.round.slowestReadMs < output.timing.scoresShownMs && Date.now() + output.round.slowestReadMs < output.round.actedAt + output.timing.conditionWaitMs && (output.round.lookFrom = Date.now())}
+                        true: ${output.round.answering && 2 * output.round.slowestReadMs < output.timing.scoresShownMs && Date.now() + output.round.slowestReadMs < output.round.actedAt + output.timing.conditionWaitMs && output.round.actedAt + output.timing.conditionWaitMs + output.round.slowestReadMs < output.round.opensAfter + output.timing.scoresShownMs && (output.round.lookFrom = Date.now())}
                         visible:
                           id: "player-option-.*"
                       commands:
@@ -255,8 +262,11 @@ appId: com.socketNull.ExposeMe
       # optionsLagMs late, after `opensAfter`, where the card wait's coverage of where it may have opened starts
       # (`coveredTo`). The card wait first looks for the answering still on screen (`answering`, `answeringSeen` by
       # this pass's look), moving `opensAfter` to where its last look that saw it started, and notes when its current
-      # look started (`lookFrom`) and the last one that saw neither the card nor the held marker (`missFrom`)
-      - evalScript: "${output.round = { closesAfter: output.options.hiddenFrom && output.options.hiddenFrom + output.timing.roundMs, closesBy: output.options.seenAt + output.timing.roundMs + output.timing.phaseLagMs, readMs: output.options.seenAt - output.options.lookFrom, answering: true, lookFrom: 0, missFrom: 0 }}"
+      # look started (`lookFrom`) and the last one that saw neither the card nor the held marker (`missFrom`). Whether
+      # one saw either (`cardWaited`) starts false, not undefined (EXP-392): after a wait that saw neither, the scripts
+      # that bound where the scoreboard closed must stay numbers (Math.max with undefined is NaN, which skipped the
+      # next round's scoreboard)
+      - evalScript: "${output.round = { closesAfter: output.options.hiddenFrom && output.options.hiddenFrom + output.timing.roundMs, closesBy: output.options.seenAt + output.timing.roundMs + output.timing.phaseLagMs, readMs: output.options.seenAt - output.options.lookFrom, answering: true, lookFrom: 0, missFrom: 0, cardWaited: false }}"
       # How long this phone's screen reads take now (`slowestReadMs`): the slowest single read of the wait for these
       # options, or the look that saw them when none was one (round 1's wait follows the flow's first scripts)
       - evalScript: ${output.round.slowestReadMs = output.options.slowestMs || output.round.readMs}

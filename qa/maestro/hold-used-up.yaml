@@ -21,8 +21,9 @@
 #
 # Timing: a hold needs more than 1.5 s of the 5 s scoreboard left (HOLD_MIN_REMAINING) and a quick one freezes it
 # for a few ms, so the taps must reach the server within 3.5 s of the scoreboard opening. They are one tapOn (on
-# Android one screen read to find the button, then 4 taps `delay` ms apart, then the tap's settle wait, a screen read
-# too; on iOS a tap by point, see below) right after the look that saw the button: the 4th press reaches the server
+# Android one screen read to find the button, Maestro's settle wait before the touches, 0.75 s and a read, then 4 taps
+# `delay` ms apart, then its settle wait after them, two reads, EXP-392; on iOS a tap by point, see below) right after
+# the look that saw the button: the 4th press reaches the server
 # after the 3 holds (the app's events come in order), and the app sends it unless it has greyed the button out by then; either way it must hold nothing (EXP-361:
 # a 4th tapOn of its own cost a read and the tap's latency more, which no phone with reads of 0.5 s had left). The look
 # loop notes when the last look that found none started (`hiddenFrom`): the scoreboard opened on the phone after it.
@@ -40,9 +41,10 @@
 # run like lab.sh play: the flow passed and the bots heard a round of the device's get its 3 holds. The flow never
 # checks the button on those apps. Judged by the bots, the run passes on the one that doesn't grey out (the bots tell
 # the holds counted, not how the button looks), and on the one whose 4th press holds only when that press reached the
-# server after the hold window (reads of 2 s or more: nothing to tell then). On the correct app the flow checks the
-# button only with reads of 0.4 s or less (none at 0.5 s), and the bots' check passes nearly every game with reads up to
-# 1 s, some at 2 s and none at 3-4 s (EXP-371: the simulator states how often each passes). The steps between
+# server after the hold window (slow reads: nothing to tell then). On the correct app the flow can't check the button on
+# screen with reads of 0.3 s or more (EXP-392: the tap's settle waits end past closingFrom), and the bots' check passes
+# every game with reads up to 0.5 s, most at it238's 0.65 s and none at 1-4 s but some seen as they end (EXP-371: the
+# simulator states how often each passes). The steps between
 # `timed:` markers are budgeted by qa/lab/tests/maestro-timing.test.sh, which also checks the copy of the server's
 # times below against Server/managers/GameEngine.ts and the closingFrom bound.
 # iOS (Maestro 2.11, EXP-354 smoke it188: qa/runs/it188-smoke-hold-ios/.../hold-used-up/logs/maestro.log and

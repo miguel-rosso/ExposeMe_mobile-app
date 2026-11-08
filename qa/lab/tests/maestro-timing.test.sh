@@ -456,7 +456,7 @@ else
   phase_lag="$(flow_ms phaseLagMs)"
   # shellcheck disable=SC2016 # Maestro expressions, not shell ones
   flow_has '- evalScript: ${output.timing.roundMs = output.timing.answeringMs + output.timing.revealMs + output.timing.scoresMs}' \
-    && flow_has '- evalScript: "${output.round = { closesAfter: output.options.hiddenFrom && output.options.hiddenFrom + output.timing.roundMs, closesBy: output.options.seenAt + output.timing.roundMs + output.timing.phaseLagMs, readMs: output.options.seenAt - output.options.lookFrom, answering: true, lookFrom: 0, missFrom: 0 }}"' \
+    && flow_has '- evalScript: "${output.round = { closesAfter: output.options.hiddenFrom && output.options.hiddenFrom + output.timing.roundMs, closesBy: output.options.seenAt + output.timing.roundMs + output.timing.phaseLagMs, readMs: output.options.seenAt - output.options.lookFrom, answering: true, lookFrom: 0, missFrom: 0, cardWaited: false }}"' \
     && flow_has '- evalScript: ${output.round.opensBy = output.round.closesBy - output.timing.scoresMs}' \
     && flow_has '- evalScript: ${output.round.coveredTo = output.round.opensAfter = output.round.closesAfter - output.timing.scoresMs - output.timing.optionsLagMs}' \
     && flow_has 'true: ${!output.round.cardWaited && output.round.coveredTo < output.round.opensBy && Date.now() < output.round.closesBy && !(output.round.answeringSeen = false)}' \

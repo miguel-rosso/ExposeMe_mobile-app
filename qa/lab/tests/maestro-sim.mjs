@@ -67,6 +67,17 @@ function readFlow(file) {
 const OPTIONAL_LOOKUP_MS = 7000;
 const LOOKUP_MS = 17000; // tapOn / assertVisible wait this long for the element
 const STEP_MS = 1000; // any other device step
+// What a tapOn on an element costs besides the read that found it (EXP-392), whatever waitToSettleTimeoutMs says
+// (Maestro 2.11, maestro-client.jar): Maestro.tap settles from the lookup's hierarchy before the touches (one read to
+// compare), and hierarchyBasedTap (Android) or screenshotBasedTap (iOS) settles from scratch after them (a read, and
+// one to compare). Android's driver first polls isWindowUpdating for up to 750 ms (AndroidDriver.waitForWindowToSettle),
+// idle before the touches, so that wait comes first there. it238's emulators match it (each of 20 taps on an answer:
+// lookup 0.6 s, 1.4 s more to the touches, 1.5 s after them; it166's took 2.9-4.9 s in all). On iOS this holds only
+// on a static screen, such as the onboarding the `toggle` scenario plays: each settle there first polls for a static
+// screen for up to 3 s (IOSDriver.waitUntilScreenIsStatic), which a game screen never gives (its progress bar), so
+// it238's iOS guesses took 7.1-7.5 s. No scenario plays a game on iOS, so those polls are not modelled.
+const TAP_SETTLE_READS = { beforeTouches: 1, afterTouches: 2 };
+const WINDOW_SETTLE_MS = { android: 750, ios: 0 };
 const POLL_MS = 500;
 const SELECTOR_KEYS = ["id", "text", "below", "enabled"];
 class FlowFailure extends Error {} // the device didn't do what the flow expects: what `retry` retries
@@ -88,8 +99,8 @@ const checkKeys = (node, allowed, what) => {
 };
 
 // skippableSubflows: `runFlow: <file>` steps another check covers; any other subflow file fails the run.
-// env: the flow's variables (`maestro test -e KEY=VALUE`)
-function runFlow(commands, device, { skippableSubflows = [], env = {} } = {}) {
+// env: the flow's variables (`maestro test -e KEY=VALUE`); afterStep(output): called after each step
+function runFlow(commands, device, { skippableSubflows = [], env = {}, afterStep = () => {} } = {}) {
   const output = {};
   const clock = { now: () => device.now };
   let lastInteraction = -Infinity; // device.now when a command last acted on the device
@@ -137,10 +148,8 @@ function runFlow(commands, device, { skippableSubflows = [], env = {} } = {}) {
   const failedStepArtifacts = () => { device.read({ id: "view-hierarchy-dump" }); step(); };
   // A command that acts on the device: a step, then conditions wait the full optional lookup again
   const interaction = (act = () => {}) => (arg) => { act(arg); step(); lastInteraction = device.now; };
-  // A tap's settle wait: Maestro 2.11 reads the screen at least once after the taps (Maestro.hierarchyBasedTap ->
-  // ScreenshotUtils.waitForAppToSettle), whatever waitToSettleTimeoutMs says. Devices that set `settlesWithRead` play
-  // that read; the others keep the step their scenarios' bounds were measured with
-  const settleTap = () => { if (device.settlesWithRead) device.read({ id: "settle-hierarchy" }); else step(); };
+  // A tap's settle wait (see TAP_SETTLE_READS)
+  const settleReads = (reads) => { for (let n = 0; n < reads; n++) device.read({ id: "settle-hierarchy" }); };
   const commandsByName = {
     waitForAnimationToEnd: step, takeScreenshot: step,
     launchApp: interaction(), swipe: interaction(),
@@ -163,13 +172,15 @@ function runFlow(commands, device, { skippableSubflows = [], env = {} } = {}) {
         if (optional) return failedStepArtifacts(); // a warning
         throw new FlowFailure(`tapOn ${describe(arg)}: not found`);
       }
-      // `repeat` taps `delay` ms apart (Maestro 2.11's TapRepeat), then the tap's settle wait
+      // The settle waits around the touches: `repeat` taps `delay` ms apart (Maestro 2.11's TapRepeat)
       const sel = selector(arg, TAP_KEYS);
       const { repeat, delay } = typeof arg === "string" ? {} : arg; // `tapOn: "<text>"` has neither
       const taps = repeat === undefined ? 1 : Number(value(repeat));
       const delayMs = delay === undefined ? 0 : Number(value(delay));
+      device.tick(WINDOW_SETTLE_MS[device.platform]);
+      settleReads(TAP_SETTLE_READS.beforeTouches);
       for (let n = 0; n < taps; n++) { if (n) device.tick(delayMs); device.tap(sel); }
-      settleTap();
+      settleReads(TAP_SETTLE_READS.afterTouches);
       lastInteraction = device.now;
     },
     assertVisible: (arg) => {
@@ -208,6 +219,7 @@ function runFlow(commands, device, { skippableSubflows = [], env = {} } = {}) {
     if (!commandsByName[name]) throw flowError(command, `unsupported command: ${name}`);
     try {
       commandsByName[name](arg, command);
+      afterStep(output);
     } catch (e) {
       if (e instanceof FlowFailure) failedStepArtifacts();
       throw e;
@@ -342,7 +354,8 @@ function onboarding(startLang, fate) {
 // device's (`proven`, EXP-350: the only ones the flow may count as checked).
 // ownerRound: the device's photo (its card says so); ownNameRounds: its card wrongly shows its own name (EXP-290);
 // cardlessRounds: its scoreboard has no card; stuckPhotoRound: its photo never loads (EXP-119); slowPhotoRound: its
-// photo loads SLOW_PHOTO_LOADING_MS late, which the look that ends the pass waits for.
+// photo loads SLOW_PHOTO_LOADING_MS late, which the look that ends the pass waits for; lateUploadRound: its owner
+// uploads the photo LATE_UPLOAD_MS after the round starts instead of PHOTO_WAIT_MS (the next options come that late).
 // holds: { <round>: [{ at, ms }, ...] }, the round's owner (a bot) presses hold `at` ms into its scoreboard (or after
 // its last release) and lets go `ms` later, as far as the server allows (see scoresParts): the server freezes the
 // scoreboard's timer meanwhile and the app shows only the photo and the held marker (EXP-325, EXP-355).
@@ -351,6 +364,7 @@ function onboarding(startLang, fate) {
 // starts it (EXP-349): the screen shows the latest phase it has painted. seesAt: where along each read it sees the
 // screen (see device); startAt: when the flow starts, from the game's start (when the device's wait in the lobby ends).
 const PHOTO_WAIT_MS = 500; // the owner's upload (a bot's: well under a second)
+const LATE_UPLOAD_MS = 4000; // a phone's own upload on a slow network
 const PHOTO_LOADING_MS = 1000; // the round photo's loading spinner
 const SLOW_PHOTO_LOADING_MS = 7000; // a slow one (a big photo on a slow network)
 const engineMs = (name) => {
@@ -382,7 +396,7 @@ function scoresParts(holds = [], { scoresMs, maxHolds, budgetMs, minRemaining })
 }
 function game({
   rounds, readMs, seesAt, startAt = 0, username, ownerRound = 0, ownNameRounds = [], cardlessRounds = [],
-  stuckPhotoRound = 0, slowPhotoRound = 0, holds = {}, renderLag = () => 0,
+  stuckPhotoRound = 0, slowPhotoRound = 0, lateUploadRound = 0, holds = {}, renderLag = () => 0,
 }) {
   const phases = [["photo", PHOTO_WAIT_MS], ["answering", engineMs("ANSWER_TIME")], ["reveal", engineMs("REVEAL_TIME")],
     ["scores", engineMs("SCORE_DISPLAY_TIME")]];
@@ -401,7 +415,8 @@ function game({
   };
   for (let round = 1; round <= rounds; round++) {
     for (const [phase, ms] of phases) {
-      for (const [name, length] of phase === "scores" ? scoresParts(holds[round], rules) : [[phase, ms]]) {
+      const phaseMs = phase === "photo" && round === lateUploadRound ? LATE_UPLOAD_MS : ms;
+      for (const [name, length] of phase === "scores" ? scoresParts(holds[round], rules) : [[phase, phaseMs]]) {
         addSegment(round, name, length);
       }
     }
@@ -564,7 +579,6 @@ function holdGame({ rounds, ownedRounds, readMs, seesAt, upLatency, paintLag = (
     (dev) => readMs(dev.now),
     seesAt,
   );
-  d.settlesWithRead = true;
   d.now = startAt;
   return { d, state, env: { USERNAME: "android-a" } };
 }
@@ -648,14 +662,45 @@ const randomReads = (seed, [fastest, slowest]) => {
   return () => Math.round(fastest + random() * (slowest - fastest));
 };
 
+// The first `tapOn` step anywhere in the flow (inside runFlow and repeat too) whose selector id is `id`
+const tapStep = (commands, id) => {
+  for (const command of commands) {
+    const [name, arg] = Object.entries(command)[0];
+    if (name === "tapOn" && arg?.id === id) return command;
+    const nested = arg?.commands && tapStep(arg.commands, id);
+    if (nested) return nested;
+  }
+  return null;
+};
+
+// EXP-392: the guess's tapOn takes as long as it238's did on the lab's Android emulators, whose reads took 0.57-0.69 s
+// (IT238_READ_MS): it touched the option 1.9-2.2 s after it started and ended 3.3-3.9 s after it (17 of its 20 taps
+// on an answer, maestro.log). A model that skipped Maestro's settle waits made every slow-phone bound optimistic
+const IT238_READ_MS = 650;
+const IT238_TAP = { touchMs: [1850, 2200], endMs: [3250, 3900] };
+function guessTapScenario(flow) {
+  const OPTION = "player-option-bot1";
+  const step = tapStep(flow, OPTION);
+  if (!step) throw new Error(`no tapOn on ${OPTION}`);
+  const touches = [];
+  const d = device("android", () => [{ id: OPTION }], (dev) => touches.push(dev.now), () => IT238_READ_MS);
+  runFlow([step], d);
+  const within = (ms, [low, high]) => ms >= low && ms <= high;
+  report(`the guess's tapOn with it238's ${IT238_READ_MS / 1000} s screen reads touches the option and ends as there `
+    + `(${touches.join(", ")} and ${d.now} ms after it starts)`,
+  touches.length === 1 && within(touches[0], IT238_TAP.touchMs) && within(d.now, IT238_TAP.endMs),
+  `it238: touch ${IT238_TAP.touchMs.join("-")} ms, end ${IT238_TAP.endMs.join("-")} ms`);
+}
+
 function roundsScenarios(flow) {
+  guessTapScenario(flow);
   const ROUNDS = 6;
   const USERNAME = "android-a";
   const OWNER_ROUND = 2; // the device's photo: the bots own (and may hold) the others
   const options = { skippableSubflows: ["wait-game-start.yaml"] };
-  const play = (readMs, gameOptions = {}) => {
+  const play = (readMs, gameOptions = {}, afterStep = undefined) => {
     const { d, state, env } = game({ rounds: ROUNDS, readMs, username: USERNAME, ownerRound: OWNER_ROUND, ...gameOptions });
-    const result = runFlow(flow, d, { ...options, env });
+    const result = runFlow(flow, d, { ...options, env, afterStep });
     return { state, now: d.now, ...result };
   };
   const ALL_ROUNDS = Array.from({ length: ROUNDS }, (_, i) => i + 1);
@@ -666,10 +711,10 @@ function roundsScenarios(flow) {
   const missedGuesses = (state) => ALL_ROUNDS
     .filter((round) => !state.taps.some((tap) => tap.round === round && tap.phase === "answering"));
   const failedPlay = ({ state, failure }) => failure || !state.final;
-  // Screen reads on the Android emulator (it136, 12-player room): 0.6-3.5 s, ~1.5 s most of the time, and now and then
-  // a burst of slow ones (EXP-312, round 6 there: 3.3-3.6 s after its guess) that pushed the scoreboard checks into
-  // the next answering phase
-  const STEADY_READ_MS = 1500;
+  // Screen reads on the lab's Android emulators (EXP-392: the lookups of it238's taps on an answer, 0.57-0.69 s on 18 of
+  // 20, and it166's, 0.6-1.4 s), and now and then a burst of slow ones (EXP-312, it136's 12-player room, round 6 there:
+  // 3.3-3.6 s after its guess) that pushed the scoreboard checks into the next answering phase
+  const STEADY_READ_MS = IT238_READ_MS;
   const SLOW_READ_MS = 4000;
   const slowAfterGuess = (round) => (t, { roundMs, phases }) => { // from the round's reveal to its scoreboard's end
     const revealStart = (round - 1) * roundMs + phases.photo + phases.answering;
@@ -704,38 +749,33 @@ function roundsScenarios(flow) {
   // fails a run only when it checked no scoreboard and found none held, after NONE_CHECKED_MIN_WAITS card waits at
   // least (`labFails`; with fewer it warns, `tooSlowWarned`). An unchecked scoreboard it waited
   // for is a warning in lab.sh (`warned`): correct games may get one (`falseWarnings`, the most share of them).
-  // Read profiles: it136's usual reads (0.6-2 s), every read it measured (0.6-3.5 s), and it166's slow Android at
-  // fixed lengths (1.8-2.2 s: reads seen as they start, as they end and anywhere along them, without render delays).
+  // Read profiles (EXP-392): the lab's Android emulators, from the lookups of it166's and it238's taps on an answer
+  // (0.5-1.4 s), it238's (fixed 0.65 s) and a slower one (fixed 1 s); reads seen as they start, as they end and
+  // anywhere along them, the random ones also with render delays. Slower phones are played below (Slow phones).
   // The share of the wrong scoreboards (one per game, on each round that can catch it) that must fail the run
-  // (`failed`), and fail it or warn (`flagged`), whatever the read points: on a slower phone more scoreboards go by
-  // while it is still busy with the round, a missing card only fails when a look surely read the scoreboard (two reads
-  // must fit in it, which slow reads seldom do), and the options painted late make that rarer (the `lagged` bounds).
-  // The device's own name is checked by a 1 s look after the card wait, so it is caught less often. Each minimum is 3
-  // standard deviations (of the 160 wrong scoreboards of SIM_GAMES=40) below the lowest share of the read-point (and
-  // render-delay) profiles over 400 games, and each most share of warned games as many above the highest
-  // (SIM_GAMES=400, rounds 2-5 of 1600, three read-point seeds; EXP-353, failed / failed or warned / warned games):
-  // 0.6-2 s 1398-1430 / 1600 / 0 of 400, with render delays 1241-1411 / 1600 / 1-34; 0.6-3.5 s 50-71 / 1572-1581 /
-  // 7-18, with render delays 46-58 / 1565-1589 / 27-62; fixed 1.8 s 1489-1600 / 1600 / 0-11, 2 s 1600 / 1600 / 0,
-  // 2.2 s 1481-1600 / 1600 / 0-36. qa/loop's flow failed 309, 353 and 202 of 400 round 3s at fixed 1.8, 2 and 2.2 s,
-  // and 1177-1223 of 1600 at 0.6-3.5 s, but those also 40 of 3600 plays by mistake. The own name: 1584-1598 and
-  // 1434-1580; 866-964 and 879-906; fixed 1488-1600, 1558-1600, 1431-1600.
+  // (`failed`), and fail it or warn (`flagged`), whatever the read points. A missing card only fails when a look surely
+  // read the scoreboard, which the guess's tap leaves time for only on a fast phone: with reads of about 1 s the looks
+  // after it wait for their element (conditionWaitMs) into the scoreboard, so a missing card is left to lab.sh's
+  // warning there. The device's own name is checked by a 1 s look after the card wait. Each minimum is 3 standard
+  // deviations (of the 160 wrong scoreboards of SIM_GAMES=40) below the lowest share of the read-point (and
+  // render-delay) profiles over 400 games, rounded down to a multiple of 5 %, and each most share of warned games as
+  // many above the highest (SIM_GAMES=400, rounds 2-5 of 1600, three read-point seeds; EXP-392, failed / failed or
+  // warned / warned games): 0.5-1.4 s 93-110 / 1600 / 0 of 400, with render delays 72-106 / 1599-1600 / 0; fixed
+  // 0.65 s 1600 / 1600 / 0; fixed 1 s 0 / 1600 / 0. The own name: 1597-1600, with render delays 1566-1598; 1600; 1600.
+  // EXP-353's flow, played with a tap that settled for a single step instead, failed 1398-1430 of 1600 missing cards
+  // with 0.6-2 s reads, and 1489-1600 with fixed 1.8-2.2 s ones.
   // A wrong scoreboard on every round, a regression rather than a slip, must be caught in nearly every game
   // (`everyRound`): a missing card fails the flow, or lab.sh for a run that checked none (after NONE_CHECKED_MIN_WAITS
-  // card waits: 0.6-3.5 s with render delays 397-399 of 400, the rest warned by lab.sh; 400 elsewhere).
+  // card waits: 400 of 400 in every profile).
   const RANDOM_PROFILES = [
-    { name: "random 0.6-2 s", range: [600, 2000], lagged: true,
-      bounds: { cardless: { failed: 0.75, flagged: 0.95 }, ownName: { failed: 0.9 }, falseWarnings: 0.05 },
-      laggedBounds: { cardless: { failed: 0.65, flagged: 0.95 }, ownName: { failed: 0.8 }, falseWarnings: 0.25 } },
-    // a missing card fails seldom here (two reads seldom fit in a scoreboard), so it is caught by the warning
-    { name: "random 0.6-3.5 s", range: [600, 3500], lagged: true,
-      bounds: { cardless: { failed: 0, flagged: 0.9 }, ownName: { failed: 0.4 }, falseWarnings: 0.15 },
-      laggedBounds: { cardless: { failed: 0, flagged: 0.9 }, ownName: { failed: 0.4 }, falseWarnings: 0.35 } },
-    { name: "fixed 1.8 s", range: [1800, 1800], lagged: false,
-      bounds: { cardless: { failed: 0.85, flagged: 0.95 }, ownName: { failed: 0.85 }, falseWarnings: 0.1 } },
-    { name: "fixed 2 s", range: [2000, 2000], lagged: false,
-      bounds: { cardless: { failed: 0.95, flagged: 0.95 }, ownName: { failed: 0.9 }, falseWarnings: 0.05 } },
-    { name: "fixed 2.2 s", range: [2200, 2200], lagged: false,
-      bounds: { cardless: { failed: 0.85, flagged: 0.95 }, ownName: { failed: 0.8 }, falseWarnings: 0.25 } },
+    { name: "random 0.5-1.4 s", range: [500, 1400], lagged: true,
+      bounds: { cardless: { failed: 0, flagged: 0.95 }, ownName: { failed: 0.95 }, falseWarnings: 0.05 },
+      laggedBounds: { cardless: { failed: 0, flagged: 0.95 }, ownName: { failed: 0.9 }, falseWarnings: 0.05 } },
+    { name: `fixed ${IT238_READ_MS / 1000} s (it238)`, range: [IT238_READ_MS, IT238_READ_MS], lagged: false,
+      bounds: { cardless: { failed: 0.95, flagged: 0.95 }, ownName: { failed: 0.95 }, falseWarnings: 0.05 } },
+    // a missing card is caught by lab.sh's warning (see above)
+    { name: "fixed 1 s", range: [1000, 1000], lagged: false,
+      bounds: { cardless: { failed: 0, flagged: 0.95 }, ownName: { failed: 0.95 }, falseWarnings: 0.05 } },
   ];
   // How the flow and lab.sh end a run: the flow failed, lab.sh fails it (no card wait saw a card nor the held marker,
   // EXP-353), or lab.sh warns about scoreboards it waited for without seeing their card (or the held marker)
@@ -808,7 +848,9 @@ function roundsScenarios(flow) {
     }
 
     // ── Slower phones: no false failure, few lost guesses ──
-    for (const readMs of [2000, 2500]) {
+    // EXP-392: with reads of 2 s or more the guess's tap often touches after the answering phase (it settles for a read
+    // and 0.75 s before the touches): those are played under Slow phones
+    for (const readMs of [1200, 1500]) {
       const runs = playPatterns(() => readMs);
       const wrong = runs.filter((run) => failedPlay(run) || missedGuesses(run.state).length > 1
         || (see.exact && run.state.blindChecks.length));
@@ -891,18 +933,28 @@ function roundsScenarios(flow) {
     }
   }
 
-  // ── Phones too slow to check (EXP-353) ──
-  // With reads this slow the card wait seldom or never starts (its first read would see the next round), or misses the
-  // card: the run must not fail, in the flow nor in lab.sh (whose NONE CHECKED needs NONE_CHECKED_MIN_WAITS card
-  // waits), but in a small share of the games with random reads (`maxFalseFails`: every card wait of a correct game
-  // missed its card: 0-3 of 400 per read-point and render-delay profile, SIM_GAMES=400 and three read-point seeds; with
-  // a single card wait enough it was 59 of its 2000 games at the default seed), and a card missing on every round must
-  // not pass silently either (the flow fails, or lab.sh fails or warns). Their guesses are another matter: a read that
-  // slow often misses the answering phase
+  // ── Slow phones (EXP-353, EXP-392) ──
+  // it136's 12-player room (0.6-2 s most of the time, 0.6-3.5 s in all) and slower. With 0.6-2 s and fixed 1.5 s
+  // reads the card wait still sees nearly every card (1950-2000 of 2000 over 400 games), though how often a single
+  // missing card fails is not bounded here (its looks after the guess's tap wait for their element, conditionWaitMs,
+  // into the scoreboard, as with 1 s reads above). With 2 s or more the card wait seldom or never starts (its first
+  // read would see the next round), or misses the card (0.6-3.5 s: 181-222 of 2400 seen; 2 s and slower: none, every
+  // game warned too slow to check). The run must not fail, in the flow nor in lab.sh (whose NONE CHECKED needs
+  // NONE_CHECKED_MIN_WAITS card waits), but in a small share of the games with random reads (`maxFalseFails`: the
+  // flow, or every card wait of a correct game missing its card: 0-1 of 400 per read-point and render-delay profile,
+  // SIM_GAMES=400 and three read-point seeds; with a single card wait enough it was 59 of its 2000 games at the default
+  // seed, EXP-353), and a card missing on every round must not pass silently either (the flow fails, or lab.sh fails
+  // or warns), but in a rarer share (`maxSilent`: 0-1 of 400 with 0.6-3.5 and 2.5-4 s reads and render delays). Their
+  // guesses are another matter: a read that slow often misses the answering phase
   const TOO_SLOW_PROFILES = [
+    { name: "random 0.6-2 s", range: [600, 2000], lagged: true, maxFalseFails: 0 },
+    { name: "random 0.6-3.5 s", range: [600, 3500], lagged: true, maxFalseFails: 0.025, maxSilent: 0.0025 },
+    { name: "fixed 1.5 s", range: [1500, 1500], lagged: false, maxFalseFails: 0 },
+    { name: "fixed 2 s", range: [2000, 2000], lagged: false, maxFalseFails: 0 },
+    { name: "fixed 2.5 s", range: [2500, 2500], lagged: false, maxFalseFails: 0 },
     { name: "fixed 3.5 s", range: [3500, 3500], lagged: false, maxFalseFails: 0 },
     { name: "fixed 4 s", range: [4000, 4000], lagged: false, maxFalseFails: 0 },
-    { name: "random 2.5-4 s", range: [2500, 4000], lagged: true, maxFalseFails: 0.025 },
+    { name: "random 2.5-4 s", range: [2500, 4000], lagged: true, maxFalseFails: 0.025, maxSilent: 0.0025 },
   ];
   for (const profile of TOO_SLOW_PROFILES) {
     for (const see of SEE_POINTS) {
@@ -923,8 +975,10 @@ function roundsScenarios(flow) {
         const silent = seeds.map((seed) => playSeed(seed, { cardlessRounds: ALL_ROUNDS }))
           .filter((run) => !/score-answer-card/.test(run.failure || "") && !labFails(run) && !warned(run)
             && !tooSlowWarned(run));
-        report(`${name}: a card missing on every round fails or warns in every game`, silent.length === 0,
-          `${silent.length} passed silently`);
+        const allowedSilent = Math.floor((profile.maxSilent ?? 0) * RANDOM_GAMES);
+        report(`${name}: a card missing on every round fails or warns in ${allowedSilent ? `all but ${allowedSilent} at `
+          + "most of the games" : "every game"} (${silent.length} passed silently)`, silent.length <= allowedSilent,
+        `${silent.length} passed silently`);
       }
     }
   }
@@ -957,7 +1011,7 @@ function roundsScenarios(flow) {
   // (the look that ends the pass waits for it) doesn't make the card wait skip its looks for the options from then on
   // (reads seen anywhere along them, over as many read-point patterns as random games: as often as without it)
   const SLOW_PHOTO_ROUND = 2;
-  const FIXED_READ_MS = 2000;
+  const FIXED_READ_MS = STEADY_READ_MS;
   const MIN_CAUGHT_AFTER_SLOW_PHOTO = 0.8;
   const anywhere = SEE_POINTS.find((see) => see.varies);
   const afterSlowPhoto = Array.from({ length: RANDOM_GAMES }, (_, i) => play(() => FIXED_READ_MS,
@@ -967,6 +1021,36 @@ function roundsScenarios(flow) {
     + `screen read, ${anywhere.name}): round ${CARDLESS_ROUND + 1} without the card still fails at least `
     + `${MIN_CAUGHT_AFTER_SLOW_PHOTO * 100}% of ${RANDOM_GAMES} read-point patterns (${afterSlowPhoto})`,
   afterSlowPhoto >= MIN_CAUGHT_AFTER_SLOW_PHOTO * RANDOM_GAMES, `caught ${afterSlowPhoto}/${RANDOM_GAMES}`);
+  // EXP-392: a card wait that ends without seeing the card (here, on a correct app, reads longer than the scoreboard
+  // from just before round 3's opens until it closes: no read sees it) still bounds where its scoreboard closed: the
+  // flow's timestamps stay numbers after every step, and when the next round's options are late (its owner's upload)
+  // the looks that find none tell where they showed, so that round's scoreboard is waited for and its card seen
+  const BURST_ROUND = 3;
+  const BURST_LEAD_MS = 1000;
+  const LONGER_THAN_SCOREBOARD_MS = 6500;
+  const blindThroughScoreboard = (t, { roundMs, phases }) => {
+    const opens = (BURST_ROUND - 1) * roundMs + phases.photo + phases.answering + phases.reveal;
+    return t >= opens - BURST_LEAD_MS && t < opens + phases.scores ? LONGER_THAN_SCOREBOARD_MS : STEADY_READ_MS;
+  };
+  const afterMissed = BURST_ROUND + 1;
+  const ROUND_TIMES = ["closesAfter", "closesBy", "opensAfter", "opensBy", "coveredTo", "closesFrom"];
+  const OPTIONS_TIMES = ["hiddenFrom", "seenAt", "lookFrom"];
+  const notNumbers = new Set();
+  const watchTimes = ({ round = {}, options = {} }) => {
+    for (const [what, fields, values] of [["round", ROUND_TIMES, round], ["options", OPTIONS_TIMES, options]]) {
+      for (const field of fields) {
+        if (field in values && !Number.isFinite(Number(values[field]))) notNumbers.add(`${what}.${field}`);
+      }
+    }
+  };
+  const missed = play(blindThroughScoreboard, { lateUploadRound: afterMissed }, watchTimes);
+  report(`${LONGER_THAN_SCOREBOARD_MS / 1000} s reads through round ${BURST_ROUND}'s scoreboard, its card wait over without the `
+    + `card, round ${afterMissed}'s photo uploaded ${LATE_UPLOAD_MS / 1000} s in: the flow's times stay numbers and round `
+    + `${afterMissed}'s card is seen`,
+  !missed.failure && counts(missed).waited > counts(missed).seen && notNumbers.size === 0
+    && cardsSeen(missed.state).has(afterMissed),
+  `${missed.failure || ""} waited ${counts(missed).waited}, seen ${counts(missed).seen}; not numbers: `
+    + `${[...notNumbers].join(", ") || "none"}; cards seen in rounds ${[...cardsSeen(missed.state)].join(", ")}`);
   // EXP-119: a round photo that never loads ends the round loop, which then fails on the game over it stopped short of
   const STUCK_PHOTO_ROUND = 3;
   const stuckPhoto = play(() => STEADY_READ_MS, { stuckPhotoRound: STUCK_PHOTO_ROUND });
@@ -1104,8 +1188,10 @@ function roundsScenarios(flow) {
 // holds the game, every check on the correct app saw the button greyed out by the 3 holds before hold-closed was
 // painted, and the correct app fails only for want of an own scoreboard tapped on (its last assert). Each run is also
 // judged like lab.sh play (EXP-371): the flow passed and the bots heard a round of the device's photo get its 3 holds
-// and no hold after them. Each line states both pass rates: a fast phone's on-screen checks must stay high
-// (MIN_FAST_PASSES), and so must the bots' check with reads up to BOTS_CHECK_READ_MS.
+// and no hold after them. Each line states both pass rates: the bots' check must pass nearly every game with reads up
+// to BOTS_CHECK_READ_MS. EXP-392: with Maestro 2.11's settle waits around the touches (TAP_SETTLE_READS) the flow no
+// longer checks the button on screen with any of these reads (only in the 0.1-0.3 s grid below), and the presses reach
+// the server in time only on a fast phone.
 function holdScenarios(flow) {
   const ROUNDS = 10;
   const OWN_SHARE = 1 / 3;
@@ -1114,13 +1200,13 @@ function holdScenarios(flow) {
   const UNTAPPED = /A scoreboard of the device's photo got the hold presses/;
   const options = { skippableSubflows: ["open-app.yaml", "join-room.yaml", "wait-game-start.yaml"] };
   const FAST_READS = { name: "fixed 0.3 s", range: [300, 300] };
-  const MIN_FAST_PASSES = 0.75;
-  // EXP-371: with reads up to 1 s the bots' check passes nearly every correct game (39-40 of 40 in every read-point and
-  // paint-delay profile), though the flow can check the button on screen only with reads of 0.4 s or less
-  const BOTS_CHECK_READ_MS = 1000;
+  // EXP-392: with reads up to 0.5 s the bots' check passes nearly every correct game (389 of 400 in every read-point
+  // and paint-delay profile, the rest with no own scoreboard tapped on); with it238's 0.65 s, 304-389 of 400, and with
+  // 1 s none but those seen as they end
+  const BOTS_CHECK_READ_MS = 500;
   const MIN_BOTS_CHECK_PASSES = 0.9;
   const fixedReads = (ms) => ({ name: `fixed ${ms / 1000} s`, range: [ms, ms] });
-  const READS = [FAST_READS, ...[400, 500, 1000, 2000, 3000, 4000].map(fixedReads),
+  const READS = [FAST_READS, ...[400, 500, 650, 1000, 2000, 3000, 4000].map(fixedReads),
     { name: "random 1-4 s", range: [1000, 4000] }];
   const eventSalt = (event) => [...event].reduce((hash, c) => (Math.imul(hash, 31) + c.charCodeAt(0)) >>> 0, 7);
   const lagDraw = (seed, round, event) => scatteredRandom(seed * 7907 + round * 31 + eventSalt(event))();
@@ -1172,15 +1258,14 @@ function holdScenarios(flow) {
             if (labPasses(broken)) brokenPasses[app]++;
           }
         }
-        const minChecked = reads === FAST_READS && !see.varies ? MIN_FAST_PASSES : 0;
         const minPassed = reads.range[1] <= BOTS_CHECK_READ_MS ? MIN_BOTS_CHECK_PASSES : 0;
         report(`${RANDOM_GAMES} games with ${reads.name} screen reads ${see.name}${lag.name}: checked on screen ${checked}`
-          + `${minChecked ? ` (at least ${minChecked * 100}%)` : ""}, each one proven, and passes ${passed} with the bots' `
+          + `, each one proven, and passes ${passed} with the bots' `
           + `check${minPassed ? ` (at least ${minPassed * 100}%)` : ""} (${late} own scoreboards reached too late on `
           + `screen); never checks on screen the apps whose holds don't grey the button out or whose 4th press holds `
           + `(the bots' check passes ${brokenPasses.holdsUncounted} and ${brokenPasses.fourthHolds} of them), never `
           + "fails but untapped",
-        problems.length === 0 && checked >= minChecked * RANDOM_GAMES && passed >= minPassed * RANDOM_GAMES,
+        problems.length === 0 && passed >= minPassed * RANDOM_GAMES,
         problems.slice(0, 3).join("; "));
       }
     }

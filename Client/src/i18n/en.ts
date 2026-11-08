@@ -210,6 +210,11 @@ export default {
   confirm: "Confirm",
   close: "Close",
 
+  // Shown in place of a screen that crashed while rendering (EXP-435): its buttons are tryAgain and errorScreenHome
+  errorScreenTitle: "Something went wrong",
+  errorScreenMessage: "An unexpected error occurred.",
+  errorScreenHome: "Back to home",
+
   // LanguageToggle
   changeLanguage: "Change language",
 

@@ -120,6 +120,10 @@ export const TEST_IDS = {
   playAgainButton: "play-again-button",
   // ── Language ──
   languageToggle: "language-toggle",
+  // ── Error screen (a screen that crashed while rendering, EXP-435) ──
+  errorScreen: "error-screen",
+  errorScreenRetry: "error-screen-retry",
+  errorScreenHome: "error-screen-home",
 } as const;
 
 export const playerOptionId = (username: string) => `player-option-${username}`;

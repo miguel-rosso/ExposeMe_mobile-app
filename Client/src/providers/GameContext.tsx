@@ -181,6 +181,24 @@ export const GameProvider: React.FC<GameProviderProps> = ({ children }) => {
     detachSocket()?.disconnect();
   }, [detachSocket]);
 
+  // The provider going away (the root error screen replaces the whole app, EXP-435) closes its socket: none of its
+  // listeners can update anything any more, and a new provider would open its own. A plain disconnect, not a leave: the
+  // server keeps the seat for a while and the stored rejoin token gets it back. StrictMode and Fast Refresh run this
+  // cleanup and the setup again at once on the same mounted provider, so the close waits a microtask and only happens
+  // if the setup did not run again.
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      Promise.resolve().then(() => {
+        if (mountedRef.current) return;
+        socketRef.current?.removeAllListeners();
+        socketRef.current?.disconnect();
+      });
+    };
+  }, []);
+
   // Exit (and Join on an invite link to another room): the server removes us and hands the host role over, and the rejoin
   // token for this room is forgotten. The app moves on at once; the old socket closes once the server confirms. Offline
   // (reconnecting), the old socket keeps the token to name this seat in its leave once it is back (leaveFromAnywhere,

@@ -211,6 +211,11 @@ export default {
   confirm: "Confirmar",
   close: "Cerrar",
 
+  // Shown in place of a screen that crashed while rendering (EXP-435): its buttons are tryAgain and errorScreenHome
+  errorScreenTitle: "Algo ha fallado",
+  errorScreenMessage: "Ha ocurrido un error inesperado.",
+  errorScreenHome: "Volver al inicio",
+
   // LanguageToggle
   changeLanguage: "Cambiar idioma",
 

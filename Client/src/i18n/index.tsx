@@ -25,6 +25,12 @@ export const resolveInitialLang = (saved: string | null | undefined, deviceLocal
   return deviceLocale?.toLowerCase().split(/[-_]/)[0] === "es" ? "es" : "en";
 };
 
+/**
+ * The device language's texts, for what renders outside I18nProvider (the root error screen, EXP-435): the saved
+ * choice is in AsyncStorage, which can't be read synchronously.
+ */
+export const deviceTranslations = (): Translations => translations[resolveInitialLang(null, getDeviceLocale())];
+
 export const I18nProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [lang, setLangState] = useState<Lang>("en");
   const [loaded, setLoaded] = useState(false);

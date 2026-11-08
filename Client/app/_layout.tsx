@@ -11,6 +11,11 @@ import { GameProvider } from "../src/providers/GameContext";
 import { BackgroundProvider } from "../src/providers/BackgroundContext";
 import { I18nProvider } from "../src/i18n";
 import { hideDevToolsButton } from "../src/utils/devToolsButton";
+import { ScreenErrorBoundary } from "../src/components/ErrorScreen";
+
+// A render error shows an error screen instead of closing the app (EXP-435): in place of the screen that failed (the
+// stack's unstable_screenErrorBoundary below), or of the whole app when this layout or a provider fails (this export)
+export { AppErrorBoundary as ErrorBoundary } from "../src/components/ErrorScreen";
 
 SplashScreen.preventAutoHideAsync();
 hideDevToolsButton();
@@ -54,7 +59,7 @@ export default function RootLayout() {
       <GameProvider>
         <BackgroundProvider>
           <StatusBar hidden={true} />
-          <Stack>
+          <Stack unstable_screenErrorBoundary={ScreenErrorBoundary}>
             <Stack.Screen name="index" options={{ headerShown: false, animation: "fade" }} />
             <Stack.Screen name="screens/OwnPhotos" options={{ headerShown: false, animation: "fade" }} />
             <Stack.Screen name="screens/WaitingRoom" options={{ headerShown: false, gestureEnabled: false }} />

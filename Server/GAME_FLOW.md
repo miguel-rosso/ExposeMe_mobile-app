@@ -457,8 +457,13 @@ After last round: game-over
   same `room-of-game` answer with the same token, no token needed, no broadcast. If the game has started it
   also sends that socket a fresh **`game-state` snapshot** (plus `your-turn` if its photo is awaited and the game
   is not paused), with no other effect: the app uses it to resync after rejoining from the lobby screen (see
-  "Pause and reconnect"). Reconnects arrive on a **new** socket and go through the normal rejoin path with the
-  `rejoinToken`.
+  "Pause and reconnect"), and when the game screen mounts again mid-game from its error screen's Retry (EXP-446:
+  the phase's events are not sent again and `im-ready` is ignored once the game runs). The game screen sends that
+  join once it has mounted (a Retry that fails to render again sends nothing), only while connected (offline, the
+  reconnect's rejoin brings the snapshot), and at most once every 10 s however often Retry is tapped, so it never
+  reaches the 5-joins limit below; a retry within those 10 s waits for the next phase. A first mount (from the lobby)
+  sends no extra join, and a retried screen keeps the game's used-photos memory. Reconnects arrive on a **new**
+  socket and go through the normal rejoin path with the `rejoinToken`.
 - Any other `join-create-game` from a bound socket (another room, a new room, or the same room under another
   username) is attempted first; **only if it succeeds** is the previous binding left exactly like
   `leave-room` (player removed, host handed over, `player-left`, socket leaves the socket.io room). A failed

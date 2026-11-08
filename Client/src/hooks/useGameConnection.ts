@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Socket } from "socket.io-client";
 import { RoomOfGameResponse } from "../models/interfaces";
 import { attachHandlers } from "../utils/socketHandlers";
@@ -29,7 +29,10 @@ interface GameConnectionOptions {
  * (and GameContext forces it when the app returns to the foreground), and every reconnect arrives on a new
  * server socket, so we rejoin with the rejoin token; the server answers with a `game-state` snapshot.
  * A planted photo the server lacks (its upload ended offline or before the rejoin bound the new socket) is planted again.
- * Returns whether the socket is connected, to show a "Reconnecting…" indicator meanwhile.
+ * Returns whether the socket is connected, to show a "Reconnecting…" indicator meanwhile, and `resync`, which asks the
+ * server for the game again on the connected socket (see Server/GAME_FLOW.md, "One socket = one player in one room":
+ * the same join on a bound socket is a no-op answered with room-of-game, the game-state snapshot and an awaited
+ * your-turn). Offline it sends nothing: the reconnect's rejoin brings the same snapshot.
  */
 export const useGameConnection = ({
   socket, gameCode, username, getRejoinToken, saveRejoinToken, onLeave, planted,
@@ -39,17 +42,28 @@ export const useGameConnection = ({
   const latest = useRef({ gameCode, username, getRejoinToken, saveRejoinToken, onLeave, planted });
   latest.current = { gameCode, username, getRejoinToken, saveRejoinToken, onLeave, planted };
 
+  /** join-create-game for this game's room and name, with its stored rejoin token */
+  const joinGame = useCallback(async (target: Socket): Promise<void> => {
+    const { gameCode: code, username: name, getRejoinToken: getToken } = latest.current;
+    if (!code || !name) return;
+    const rejoinToken = await getToken(code, name);
+    emitJoin(target, { gameCode: code, username: name, rejoinToken });
+  }, []);
+
+  const resync = useCallback(async () => {
+    if (!socket?.connected) return;
+    console.log("[GAME] Asking the server for the game again");
+    await joinGame(socket);
+  }, [socket, joinGame]);
+
   useEffect(() => {
     if (!socket) return;
     setConnected(socket.connected);
 
     const onConnect = async () => {
       setConnected(true);
-      const { gameCode: code, username: name, getRejoinToken: getToken } = latest.current;
-      if (!code || !name) return;
-      const rejoinToken = await getToken(code, name);
       console.log("[GAME] Reconnected — rejoining");
-      emitJoin(socket, { gameCode: code, username: name, rejoinToken });
+      await joinGame(socket);
     };
 
     const onDisconnect = (reason: string) => {
@@ -87,7 +101,7 @@ export const useGameConnection = ({
     });
   }, [socket]);
 
-  return { connected };
+  return { connected, resync };
 };
 
 export default useGameConnection;

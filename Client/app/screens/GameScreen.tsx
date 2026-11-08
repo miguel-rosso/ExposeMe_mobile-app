@@ -64,8 +64,9 @@ import { safeBottomRow } from "../../src/utils/safeAreaRows";
 import { ANSWERS_BOTTOM, HOLD_BUTTON_BOTTOM } from "../../src/utils/gameRows";
 import { PROGRESS_BAR_AREA, progressBarAreaBottom, progressBarRow } from "../../src/utils/progressBarRow";
 import {
-  GAME_SCREEN_PATH, GameScreenParams, openingGameNumber, opensOnGameInProgress,
+  GAME_SCREEN_PATH, GAME_SCREEN_ROUTE_NAME, GameScreenParams, openingGameNumber, opensOnGameInProgress,
 } from "../../src/utils/gameScreenRoute";
+import { useRetryResync } from "../../src/hooks/useRetryResync";
 import { useGoHome } from "../../src/hooks/useGoHome";
 import { isKickedByHost, KICKED_BY_HOST_MESSAGE } from "../../src/utils/serverMessage";
 
@@ -81,9 +82,6 @@ const GameScreen = () => {
   } = useGameContext();
   const safeUsername = username ?? "";
   const { pickGamePhoto, resetUsedPhotos } = usePhotoContext();
-  // One game screen per game (reconnects stay on it): a new screen is a new game, earlier photos may come up again.
-  // Optional call: screen tests mock the photo context with only what their flow needs.
-  useEffect(() => { resetUsedPhotos?.(); }, [resetUsedPhotos]);
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const progressRow = progressBarRow(insets);
@@ -103,9 +101,6 @@ const GameScreen = () => {
   // Room photo credentials for the round-photo prefetch (set with photoHeaders, below)
   const photoHeadersRef = useRef<Record<string, string> | undefined>(undefined);
   const [roundView, setRoundView] = useState<RoundView>(openingView);
-  // Opened on a game in progress (a rejoin from the lobby): its phase is unknown until the server's snapshot, so a
-  // neutral loader is shown instead of the ready phase's "waiting for everyone to be ready" (EXP-289)
-  const [awaitingSnapshot, setAwaitingSnapshot] = useState(() => opensOnGameInProgress(routeParams));
   // Device time the event that started the current phase (a new phaseKey) arrived: its progress bar ends `phaseDuration`
   // after it, not after the phase's paint, which can come much later on slow phones (EXP-300)
   const [phaseStartedAt, setPhaseStartedAt] = useState(0);
@@ -290,11 +285,21 @@ const GameScreen = () => {
   });
 
   // ── Connection: stay in the game, rejoin on reconnect ─
-  const { connected } = useGameConnection({
+  const { connected, resync } = useGameConnection({
     socket, gameCode, username, getRejoinToken, saveRejoinToken,
     onLeave: leaveGame,
     planted: { uri: plantedPhotoUri, sent: plantedPhotoSent, plant: plantPhoto },
   });
+  // The error screen's Retry mounts this screen again mid-game: the events of the phase in play are not sent again, so
+  // it asks the server for the game's snapshot once it has mounted (EXP-446)
+  const retried = useRetryResync(GAME_SCREEN_ROUTE_NAME, resync);
+  // One game screen per game (reconnects and retries stay in it): a new screen is a new game, earlier photos may come
+  // up again; a retried one goes on with the same game, whose photos stay used (EXP-446).
+  // Optional call: screen tests mock the photo context with only what their flow needs.
+  useEffect(() => { if (!retried) resetUsedPhotos?.(); }, [retried, resetUsedPhotos]);
+  // Opened on a game in progress (a rejoin from the lobby) or retried: its phase is unknown until the server's snapshot,
+  // so a neutral loader is shown instead of the ready phase's "waiting for everyone to be ready" (EXP-289)
+  const [awaitingSnapshot, setAwaitingSnapshot] = useState(() => opensOnGameInProgress(routeParams) || retried);
 
   // Removers of this screen's own socket listeners (never socket.off(event): the socket is shared, see socketHandlers).
   // The game ones go at game over, the final screens' ones (attached then) on unmount.
@@ -518,6 +523,9 @@ const GameScreen = () => {
       detachGameHandlers.current?.();
       detachRoomHandlers();
       detachFinalScreenHandlers.current?.();
+      // Nothing of this screen drives the game any more: a your-turn flow still running (pick, upload retries) neither
+      // sends nor reports. A retried screen gets the request again from its resync and runs it itself (EXP-446)
+      turnRequest.endTurn();
       // The socket is not ended here: "Play again" reuses it (the lobby rejoins on the same socket); leaving for
       // home ends it there (Exit, or the home screen on focus)
     };

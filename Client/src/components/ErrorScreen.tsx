@@ -1,6 +1,6 @@
 import React, { useEffect } from "react";
 import { Text, TouchableOpacity, View } from "react-native";
-import type { ErrorBoundaryProps } from "expo-router";
+import { useRoute, type ErrorBoundaryProps } from "expo-router";
 import tw from "twrnc";
 import { deviceTranslations, useI18n } from "@/src/i18n";
 import type { Translations } from "@/src/i18n/context";
@@ -9,6 +9,7 @@ import { useFocusedBackHandler } from "@/src/hooks/useFocusedBackHandler";
 import { useGoHome } from "@/src/hooks/useGoHome";
 import { useRouteBelow } from "@/src/hooks/useRouteBelow";
 import { TEST_IDS } from "@/src/utils/testIds";
+import { forgetScreenRetry, markScreenRetry } from "@/src/utils/screenRetry";
 
 // A render error that reaches no error boundary closes the app in a store build (EXP-435). expo-router catches it
 // with these: ScreenErrorBoundary in place of the screen that failed (the root stack's unstable_screenErrorBoundary,
@@ -59,12 +60,21 @@ const ErrorScreen = ({ error, t, onRetry, onGoHome }: ErrorScreenProps) => {
  * others are not left waiting for a lost connection. Home is the bottom screen: if it is the one that failed, going
  * home is rendering it again. Android back is Back to home too: the failed screen's own back handler is gone with it,
  * and a plain pop would reach home without a leave (home then just closes the socket: a lost connection for the others).
+ * Retry is marked for the screen it renders again (utils/screenRetry), so that mount knows it is a retry.
  */
 export const ScreenErrorBoundary = ({ error, retry }: ErrorBoundaryProps) => {
   const { t } = useI18n();
   const { socket, leaveRoom } = useGameContext();
   const goHome = useGoHome();
   const routeBelow = useRouteBelow();
+  const { name: routeName } = useRoute();
+
+  // Shown again: a retry still pending failed too, it is no retry of whatever mounts next
+  useEffect(() => { forgetScreenRetry(); }, []);
+  const retryScreen = () => {
+    markScreenRetry(routeName);
+    void retry();
+  };
 
   const isHome = () => routeBelow() === null;
   const leaveToHome = () => {
@@ -81,7 +91,7 @@ export const ScreenErrorBoundary = ({ error, retry }: ErrorBoundaryProps) => {
     return true;
   });
 
-  return <ErrorScreen error={error} t={t} onRetry={() => void retry()} onGoHome={leaveToHome} />;
+  return <ErrorScreen error={error} t={t} onRetry={retryScreen} onGoHome={leaveToHome} />;
 };
 
 /** In place of the whole app (root layout or a provider failed): outside I18nProvider, so in the device language. */

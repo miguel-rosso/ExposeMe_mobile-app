@@ -112,7 +112,8 @@ const withoutAllowedFormatChars = (text: string) => text
  * (splitsHangulBlock), no vowel sign or virama on an Indic independent vowel
  * (marksIndependentVowelOddly) and no Indic vowel sign but one on a letter of its script, which carries only marks of
  * that script, no length mark left alone, no rare mark hiding a vowel sign and no virama but one ending the marks of a
- * letter, after nothing but a nukta, nor an archaic Malayalam one (marksIndicLetterOddly). Emoji, symbols, punctuation
+ * letter, after nothing but a nukta, nor an archaic Malayalam one (marksIndicLetterOddly), and no spacing mark but on
+ * a character of its script (marksWithForeignSpacingMark). Emoji, symbols, punctuation
  * and digits are free: a name may be made only of them.
  */
 export function isValidUsername(value: unknown): value is string {
@@ -128,7 +129,8 @@ export function isValidUsername(value: unknown): value is string {
     && !mixesLookalikeScripts(value)
     && !splitsHangulBlock(value)
     && !marksIndependentVowelOddly(value)
-    && !marksIndicLetterOddly(value);
+    && !marksIndicLetterOddly(value)
+    && !marksWithForeignSpacingMark(value);
 }
 
 // ── Scripts ─────────────────────────────────────────
@@ -303,6 +305,48 @@ function marksIndicLetterOddly(name: string): boolean {
       || markList.some((mark) => LENGTH_MARK.test(mark))
       || !markList.every((mark) => isOwnMark(base, mark));
   });
+}
+
+// ── Spacing marks ───────────────────────────────────
+
+// Every script some spacing mark (Mc) belongs to in Unicode 15.1, by Script_Extensions (U+11303 is Grantha and Tamil,
+// U+1CE1 Bengali and Devanagari): the abugidas of India and Southeast Asia, Tibetan, the Hangul tone marks and the Han
+// Vietnamese reading marks. Unicode 15.1 or older, as JOINER_SCRIPTS (tests/playerNameScripts.test.ts checks that
+// every spacing mark of Unicode 15.1 has one of them, or is a musical one)
+export const SPACING_MARK_SCRIPTS = [
+  "Devanagari", "Bengali", "Gurmukhi", "Gujarati", "Oriya", "Tamil", "Telugu", "Kannada", "Malayalam", "Sinhala",
+  "Tibetan", "Myanmar", "Tagalog", "Hanunoo", "Khmer", "Limbu", "Buginese", "Tai_Tham", "Balinese", "Sundanese",
+  "Batak", "Lepcha", "Hangul", "Syloti_Nagri", "Saurashtra", "Rejang", "Javanese", "Cham", "Meetei_Mayek", "Brahmi",
+  "Kaithi", "Chakma", "Sharada", "Khojki", "Khudawadi", "Grantha", "Newa", "Tirhuta", "Siddham", "Modi", "Takri",
+  "Ahom", "Dogra", "Dives_Akuru", "Nandinagari", "Zanabazar_Square", "Soyombo", "Bhaiksuki", "Marchen",
+  "Gunjala_Gondi", "Makasar", "Kawi", "Miao", "Han",
+];
+const SPACING_MARK_SCRIPT_PATTERNS = SPACING_MARK_SCRIPTS.map((name) =>
+  new RegExp(`^\\p{Script_Extensions=${name}}$`, "u"));
+const SPACING_MARK = /^\p{Mc}$/u;
+// The spacing marks of no script (Common): the musical stems and flags (U+1D165, U+1D166, U+1D16D-U+1D172), drawn on
+// a notehead of the Musical Symbols block, the only base they have
+export const MUSICAL_SPACING_MARK = /^\p{Script_Extensions=Common}$/u;
+const MUSICAL_SYMBOL = /^[\u{1D100}-\u{1D1FF}]$/u;
+
+/**
+ * Whether the spacing `mark` may sit on `base`: a musical one on a musical symbol, any other on a character of one of
+ * its scripts (Script_Extensions, among SPACING_MARK_SCRIPTS).
+ */
+const fitsBase = (base: string, mark: string) => (MUSICAL_SPACING_MARK.test(mark)
+  ? MUSICAL_SYMBOL.test(base)
+  : SPACING_MARK_SCRIPT_PATTERNS.some((pattern) => pattern.test(mark) && pattern.test(base)));
+
+/**
+ * Whether `name`, once composed, puts a spacing mark (Mc) on a character of another script (EXP-456): a Devanagari
+ * visarga or a Burmese medial ya on a Latin letter, a space or a digit, a musical stem on anything but a musical symbol
+ * (a letter, a digit, punctuation, an emoji). A spacing mark takes room beside its letter like one more letter, which
+ * the keys drop, so these read like a name the keys don't see. Real spellings put it on a letter of its script
+ * (Burmese "လျှော့", Tamil, Sinhala, Tibetan), and a musical stem on a notehead (NFC splits the quarter note so).
+ */
+function marksWithForeignSpacingMark(name: string): boolean {
+  return Array.from(name.normalize("NFC").matchAll(LETTER_WITH_MARKS)).some(([, base, marks]) =>
+    Array.from(marks).some((mark) => SPACING_MARK.test(mark) && !fitsBase(base, mark)));
 }
 
 // ── Lookalike keys ──────────────────────────────────

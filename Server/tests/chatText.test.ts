@@ -58,18 +58,29 @@ describe("normalizeChatText", () => {
   });
 
   // EXP-447: a flood of messages full of joiners must not cost much more than plain text (it once grew with the square
-  // of the message's length)
+  // of the message's length). EXP-456: both texts are timed in alternating batches and compared by their medians, so a
+  // GC pause slows one batch only and a busy machine slows both texts alike, instead of failing the test
   it("normalises a message full of joiners about as fast as plain text", () => {
-    const CALLS = 2_000;
+    const BATCHES = 9;
+    const CALLS_PER_BATCH = 250;
+    const MAX_SLOWDOWN = 4;
+    const PLAIN = "ab".repeat(50);
+    const JOINERS = "a\u200D".repeat(50);
     const timePerCall = (text: string) => {
-      for (let i = 0; i < CALLS; i++) normalizeChatText(text); // warm-up
       const start = performance.now();
-      for (let i = 0; i < CALLS; i++) normalizeChatText(text);
-      return (performance.now() - start) / CALLS;
+      for (let i = 0; i < CALLS_PER_BATCH; i++) normalizeChatText(text);
+      return (performance.now() - start) / CALLS_PER_BATCH;
     };
-    const plain = timePerCall("ab".repeat(50));
-    const joiners = timePerCall("a\u200D".repeat(50));
-    expect(joiners).toBeLessThan(plain * 4);
+    const median = (times: readonly number[]) => [...times].sort((a, b) => a - b)[Math.floor(times.length / 2)];
+    timePerCall(PLAIN); // warm-up
+    timePerCall(JOINERS);
+    const plain: number[] = [];
+    const joiners: number[] = [];
+    for (let batch = 0; batch < BATCHES; batch++) {
+      plain.push(timePerCall(PLAIN));
+      joiners.push(timePerCall(JOINERS));
+    }
+    expect(median(joiners)).toBeLessThan(median(plain) * MAX_SLOWDOWN);
   });
 
   it("drops control characters but line breaks, which become \\n, and tabs, which become spaces", () => {

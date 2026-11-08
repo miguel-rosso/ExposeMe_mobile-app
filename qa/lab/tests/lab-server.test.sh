@@ -185,7 +185,7 @@ server_env() { # [VAR=value...]: the VAR=value environment cmd_server starts the
   ( set -euo pipefail; [ $# = 0 ] || export "$@"
     bg_running() { return 1; }; ensure_port_free() { :; }; curl() { return 0; }
     bg_start() { shift 3; printf '%s\n' "$@"; }   # name, log, cwd, then: env VAR=value... npx ts-node server.ts
-    cmd_server --port 4999 ) 2>/dev/null | grep -E '^[A-Z_]+='
+    cmd_server --port 4999 ) 2>/dev/null | grep -E '^[A-Z][A-Z0-9_]*='   # names may hold digits (..._IPV6_...)
 }
 env_value() { sed -n "s/^$1=//p" <<<"$2"; } # VAR, environment
 envint_args() { # VAR: "default|min|max" of the server's envInt() for it (digit separators dropped), empty if none
@@ -194,8 +194,18 @@ envint_args() { # VAR: "default|min|max" of the server's envInt() for it (digit 
 }
 is_int() { [[ $1 =~ ^[0-9]+$ ]]; }
 env="$(server_env)"
-for knob in SOCKET_HANDSHAKE_RATE_MAX UPLOAD_STORED_MAX UPLOAD_LOBBY_PER_IP_MAX SOCKET_MAX_CONNECTIONS_PER_IP; do
+for knob in SOCKET_HANDSHAKE_RATE_MAX UPLOAD_STORED_MAX UPLOAD_LOBBY_PER_IP_MAX SOCKET_MAX_CONNECTIONS_PER_IP \
+  ROOMS_PER_IP_MAX ROOMS_PER_IPV6_PREFIX_MAX; do
   [ -n "$(env_value "$knob" "$env")" ] && ok "server: sets $knob for load tests" || ko "server sets $knob" "$env"
+done
+# The rooms-per-IP limits are bound by the server's room cap (envInt range 1..MAX_ROOMS, a constant the loop below
+# can't read), so the lab's values may not exceed it
+max_rooms="$(sed -nE 's/^export const MAX_ROOMS = ([0-9_]+);.*/\1/p' "$SERVER_SRC/managers/RoomManager.ts" | tr -d _)"
+for knob in ROOMS_PER_IP_MAX ROOMS_PER_IPV6_PREFIX_MAX; do
+  value="$(env_value "$knob" "$env")"
+  is_int "$max_rooms" && is_int "$value" && [ "$value" -ge 1 ] && [ "$value" -le "$max_rooms" ] \
+    && ok "server: $knob=$value within the server's room cap (1..$max_rooms)" \
+    || ko "server: $knob within 1..MAX_ROOMS" "value '$value', MAX_ROOMS '$max_rooms'"
 done
 while IFS='=' read -r knob value; do
   IFS='|' read -r default min max <<<"$(envint_args "$knob")"

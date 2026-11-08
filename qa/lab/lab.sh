@@ -37,7 +37,10 @@
 #                               more (maestro/<device>-retry); a flow whose header says "# lab: one device (<why>)"
 #                               is refused on more than one device before any bots start (pick one: --devices <label>),
 #                               and one whose header says "# lab: holds used up (<why>)" passes only when the bots heard
-#                               each device use up its holds on a round of its photo (hold-used-up.yaml, EXP-371)
+#                               each device use up its holds on a round of its photo (hold-used-up.yaml, EXP-371);
+#                               one whose header says "# lab: cut link <s> (<why>)" runs on Android devices only, each
+#                               with its server link through its own qa/lab/link-proxy.mjs: the flow POSTs LINK_CUT_URL
+#                               to cut it for <s> s, and the run fails for a device whose link was never cut (EXP-437)
 #        [--second-room "<bots.mjs args>"]  also start a 2nd bots room; its code reaches the flows as NEW_CODE
 #        [--maestro-env KEY=VALUE]          extra Maestro variable for every device (repeatable)
 #        [--server http://localhost:P | --port P]  bots and render telemetry use that lab server (e.g. a worktree's
@@ -333,11 +336,12 @@ cmd_server() {
   [ $restart = 0 ] || bg_stop "$name" "$port" || true
   bg_running "$name" || ensure_port_free "$port" "Run your own: server --port N"
   # Bots/load tests: lift the per-player and per-room /upload rate limits, the /upload in-flight caps (including the
-  # per-IP cap of a busy server), the stored-photo caps (server-wide and lobby photos per IP) and the per-IP socket
-  # limits: open connections and new sessions per minute (every bot shares one IP) (override with
-  # UPLOAD_PLAYER_RATE_MAX=... / UPLOAD_ROOM_RATE_MAX=... / UPLOAD_INFLIGHT_*=... / UPLOAD_STORED_MAX=... /
+  # per-IP cap of a busy server), the stored-photo caps (server-wide and lobby photos per IP), the per-IP socket
+  # limits: open connections and new sessions per minute, and the rooms per IP / IPv6 prefix (every bot shares one IP)
+  # (override with UPLOAD_PLAYER_RATE_MAX=... / UPLOAD_ROOM_RATE_MAX=... / UPLOAD_INFLIGHT_*=... / UPLOAD_STORED_MAX=... /
   # UPLOAD_LOBBY_PER_IP_MAX=... / SOCKET_MAX_CONNECTIONS_PER_IP=... / SOCKET_HANDSHAKE_RATE_MAX=... /
-  # JOIN_MISS_MAX=... / JOIN_MISS_PREFIX_MAX=... / JOIN_MISS_GLOBAL_MAX=... / JOIN_MISS_PRESSURE_MAX=...).
+  # JOIN_MISS_MAX=... / JOIN_MISS_PREFIX_MAX=... / JOIN_MISS_GLOBAL_MAX=... / JOIN_MISS_PRESSURE_MAX=... /
+  # ROOMS_PER_IP_MAX=... / ROOMS_PER_IPV6_PREFIX_MAX=...).
   # Each value stays within the range the server accepts (envInt clamps it), checked by qa/lab/tests/lab-server.test.sh.
   # ALLOW_QA_ROUNDS=1: accept QA-only 3-round games (play --rounds 3); production never sets it
   # QA_TELEMETRY=1: record the qa-ack of QA builds (when each device rendered a phase) in $telemetry (play reads it);
@@ -356,6 +360,7 @@ cmd_server() {
     SOCKET_HANDSHAKE_RATE_MAX="${SOCKET_HANDSHAKE_RATE_MAX:-100000}" \
     JOIN_MISS_MAX="${JOIN_MISS_MAX:-100000}" JOIN_MISS_PREFIX_MAX="${JOIN_MISS_PREFIX_MAX:-1000000}" \
     JOIN_MISS_GLOBAL_MAX="${JOIN_MISS_GLOBAL_MAX:-10000000}" JOIN_MISS_PRESSURE_MAX="${JOIN_MISS_PRESSURE_MAX:-100000}" \
+    ROOMS_PER_IP_MAX="${ROOMS_PER_IP_MAX:-5000}" ROOMS_PER_IPV6_PREFIX_MAX="${ROOMS_PER_IPV6_PREFIX_MAX:-5000}" \
     npx ts-node server.ts
   for _ in $(seq 1 30); do curl -fs "http://localhost:$port/health" >/dev/null && { log "$name healthy on :$port"; return 0; }; sleep 1; done
   die "$name did not become healthy — see $logf"
@@ -952,6 +957,65 @@ check_holds_used_up() { # bots.json, device labels...: logs the rounds each devi
   [ $missing = 0 ]
 }
 
+# ── Cutting one device's server link mid-game (EXP-437) ──
+# A flow that drops its device's link to the server says so in its header: "# lab: cut link <s> (<why>)". Airplane
+# mode cuts neither adb reverse nor an iOS simulator's network, and stopping the server deletes the room, so play
+# points each selected Android device's adb reverse :SERVER_PORT at its own qa/lab/link-proxy.mjs and passes its flow
+# LINK_CUT_URL: a POST there (Maestro's http, run on this machine) drops that device's connections and refuses new
+# ones for <s> seconds, then the link is back. Android only: an iOS simulator shares the host's network, so it has no
+# link of its own to cut. Flows without the marker keep the plain adb reverse
+CUT_LINK_MARKER='# lab: cut link'
+CUT_LINK_MAX_S=600               # keep in sync: MAX_CUT_S in link-proxy.mjs (checked by lab-link-cut.test.sh)
+LINK_PROXY_START_POLLS=50        # x 0.1 s for a proxy to report its ports
+LINK_PROXY_SERIALS=()            # Android devices whose adb reverse play pointed at a proxy: pointed back on exit
+
+flow_cut_link_seconds() { # flow file: prints the seconds its header cuts the link for (exit 0), or nothing (exit 1)
+  [ -f "$1" ] && awk -v marker="$CUT_LINK_MARKER " '/^appId:/ { exit }
+    index($0, marker) == 1 { split(substr($0, length(marker) + 1), words, " "); print words[1]; found = 1; exit }
+    END { exit !found }' "$1"
+}
+
+valid_cut_seconds() { [[ $1 =~ ^[1-9][0-9]*$ ]] && [ "$1" -le "$CUT_LINK_MAX_S" ]; } # seconds
+
+start_link_proxy() { # dir, device json, seconds: routes that Android device's server link through its own proxy (stopped
+  # with the bots); sets LINK_CUT_URL, the URL its flow POSTs to cut the link. play starts them all before any flow
+  local dir=$1 seconds=$3 label serial ports i
+  label="$(jq -r .label <<<"$2")"; serial="$(jq -r .id <<<"$2")"; ports="$dir/link-$label.ports.json"
+  rm -f "$ports" "$dir/link-$label.jsonl"
+  node "$QA/lab/link-proxy.mjs" --target "$SERVER_PORT" --ports-file "$ports" --log "$dir/link-$label.jsonl" &
+  PLAY_BG_PIDS+=("$!")
+  for ((i = 0; i < LINK_PROXY_START_POLLS; i++)); do [ -s "$ports" ] && break; sleep 0.1; done
+  [ -s "$ports" ] || die "$label: its link proxy did not start"
+  adbs "$serial" reverse "tcp:$SERVER_PORT" "tcp:$(jq -r .port "$ports")" >/dev/null
+  LINK_PROXY_SERIALS+=("$serial")
+  stop_app android "$serial"   # no connection of an earlier launch keeps bypassing the proxy
+  LINK_CUT_URL="http://127.0.0.1:$(jq -r .controlPort "$ports")/cut?seconds=$seconds"
+  log "$label: server link through its own proxy (:$(jq -r .port "$ports")), its flow cuts it for $seconds s"
+}
+
+restore_link_reverses() { # points every proxied device's adb reverse straight at the server again
+  local serial
+  for serial in "${LINK_PROXY_SERIALS[@]:-}"; do
+    [ -z "$serial" ] || adbs "$serial" reverse "tcp:$SERVER_PORT" "tcp:$SERVER_PORT" >/dev/null 2>&1 || true
+  done
+  LINK_PROXY_SERIALS=()
+}
+
+check_link_cuts() { # dir, device labels...: logs each device's link cuts (their proxy's log); fails (exit 1) when a
+  # device's flow never cut its link
+  local dir=$1 label cuts missing=0; shift
+  for label in "$@"; do
+    cuts="$(jq -sr '[.[] | select(.event == "cut")] | select(length > 0)
+      | "\(length) time(s) for \(map(.seconds) | unique | join("/")) s, \(map(.dropped) | add) connection(s) dropped"' \
+      "$dir/link-$label.jsonl" 2>/dev/null)"
+    if [ -n "$cuts" ]; then log "$label: server link cut $cuts"
+    else warn "$label: LINK NEVER CUT: its flow did not POST LINK_CUT_URL (see $dir/maestro/$label)"; missing=1; fi
+  done
+  [ $missing = 0 ]
+}
+
+end_play_session() { restore_link_reverses; stop_play_bots; } # on play's exit: direct links back, background stopped
+
 # ── Device-hosted rooms (play --device-host, EXP-390) ──
 # The device creates the room, so its code is only on its screen: the flow reads it and POSTs it with Maestro's http
 # (run by the Maestro CLI on this machine) to a listener on loopback, which writes the first one it gets where a bots
@@ -1050,6 +1114,14 @@ cmd_play() {
   if [ "$n_dev" -gt 1 ] && one_device_reason="$(flow_one_device_reason "$QA/maestro/$flow.yaml")"; then
     die "$flow.yaml runs on one device only $one_device_reason: pick it with --devices <label> (got $n_dev devices)"
   fi
+  local cut_link_s="" ios_labels
+  if cut_link_s="$(flow_cut_link_seconds "$QA/maestro/$flow.yaml")"; then
+    valid_cut_seconds "$cut_link_s" \
+      || die "$flow.yaml: '$CUT_LINK_MARKER <s>' needs whole seconds, 1..$CUT_LINK_MAX_S (got '$cut_link_s')"
+    ios_labels="$(devices | jq -r "$sel | select(.platform == \"ios\") | .label" | tr '\n' ' ')"
+    [ -z "$ios_labels" ] || die "$flow.yaml cuts its device's server link, which only Android devices have (an iOS" \
+      "simulator shares the host's network): drop ${ios_labels% } from --devices"
+  fi
   if [ "$device_host" = 1 ]; then
     [ "$n_dev" = 1 ] || die "--device-host needs exactly one device, the room's host (got $n_dev)"
     [ "$server_port" = "$SERVER_PORT" ] \
@@ -1066,7 +1138,15 @@ cmd_play() {
     warn "devices and Metro always use the shared server :$SERVER_PORT, so they can't join a room on :$server_port" \
       "(their flows will fail); use --devices none to play bots only against your own server"
   fi
-  trap stop_play_bots EXIT
+  trap end_play_session EXIT
+  # Every device's link proxy first: one that fails to start stops play before any bots or flow run
+  local link_cut_urls=()
+  if [ -n "$cut_link_s" ]; then
+    while read -r d; do
+      [ -n "$d" ] || continue
+      start_link_proxy "$dir" "$d" "$cut_link_s"; link_cut_urls+=("$LINK_CUT_URL")
+    done < <(devices | jq -c "$sel")
+  fi
   # Optional 2nd room (e.g. the invite target of invite-link-after-game): its code reaches the flows as NEW_CODE.
   # It is auxiliary: it is stopped once the main run ends and its exit status does not count.
   if [ -n "$second_room" ]; then
@@ -1081,9 +1161,11 @@ cmd_play() {
     local host_device host_label; host_device="$(devices | jq -c "$sel")"; host_label="$(jq -r .label <<<"$host_device")"
     start_code_sink "$dir/code"
     maestro_version_check || true
+    local host_link_env=()
+    [ -z "$cut_link_s" ] || host_link_env=(-e "LINK_CUT_URL=${link_cut_urls[0]}")
     run_device_flow "$host_device" "$QA/maestro/$flow.yaml" "$dir/maestro" \
       -e USERNAME="$host_label" -e CODE_SINK_URL="$CODE_SINK_URL" -e METRO_URL="$metro_url" \
-      ${maestro_env[@]+"${maestro_env[@]}"} &
+      ${host_link_env[@]+"${host_link_env[@]}"} ${maestro_env[@]+"${maestro_env[@]}"} &
     pids+=($!)
     # A flow still running without having posted (timeout) is stopped with its Maestro, not left behind
     code="$(wait_device_room_code "$dir" "${pids[0]}")" || { stop_process_tree "${pids[0]}"; exit 1; }
@@ -1098,12 +1180,15 @@ cmd_play() {
     code="$(wait_room_code "$dir" "bots")" || exit 1
     log "room $code"
     [ "$n_dev" = 0 ] || maestro_version_check || true
+    local i_dev=0   # the device's place in link_cut_urls (same selection, same order)
     while read -r d; do
       [ -n "$d" ] || continue
-      local dl; dl="$(jq -r .label <<<"$d")"
+      local dl link_env=(); dl="$(jq -r .label <<<"$d")"
+      [ -z "$cut_link_s" ] || link_env=(-e "LINK_CUT_URL=${link_cut_urls[$i_dev]}")
+      i_dev=$((i_dev + 1))
       run_device_flow "$d" "$QA/maestro/$flow.yaml" "$dir/maestro" \
         -e GAME_CODE="$code" -e USERNAME="$dl" -e METRO_URL="$metro_url" -e LOBBY_WAIT_MS="$LOBBY_WAIT_MS" \
-        ${maestro_env[@]+"${maestro_env[@]}"} &
+        ${link_env[@]+"${link_env[@]}"} ${maestro_env[@]+"${maestro_env[@]}"} &
       pids+=($!)
     done < <(devices | jq -c "$sel")
   fi
@@ -1116,13 +1201,15 @@ cmd_play() {
   fi
   wait $bots_pid || fail=1
   forget_bots_pid "$bots_pid"
-  stop_play_bots
+  end_play_session
   node -e 'const r=require(process.argv[1]);console.log(JSON.stringify(r.summary,null,2))' "$dir/bots.json" 2>/dev/null || true
+  local labels; labels="$(devices | jq -r "$sel | .label")"
   if [ "$n_dev" -gt 0 ] && flow_checks_holds_used_up "$QA/maestro/$flow.yaml"; then
-    local labels; labels="$(devices | jq -r "$sel | .label")"
     # shellcheck disable=SC2086 # one device label per word
     check_holds_used_up "$dir/bots.json" $labels || fail=1
   fi
+  # shellcheck disable=SC2086 # one device label per word
+  [ -z "$cut_link_s" ] || check_link_cuts "$dir" $labels || fail=1
   print_render_skew "$dir" "$code" "$server_port"
   print_scoreboards_checked "$dir/maestro" || fail=1
   save_game_telemetry "$dir" "$code" "$server_port"

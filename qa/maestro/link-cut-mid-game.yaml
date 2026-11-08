@@ -1,0 +1,69 @@
+# EXP-437 (EXP-006 / EXP-429 on a device): the device alone loses its link to the server mid-game, the room and the
+# other players go on. Once the options are up the flow POSTs LINK_CUT_URL, and `lab.sh play` cuts this device's link
+# for the seconds of the marker below: the game screen stays with "Reconnecting…", which after
+# SERVER_UNREACHABLE_AFTER_MS (12 s, Client/src/hooks/useServerUnreachable.ts) becomes "No connection to the server."
+# with Try again; Try again gives the reconnection the full wait again (the pill is back), and once the link is back
+# socket.io reconnects on its own (reconnectionDelayMax 5 s), the banner goes and the device is in the game again.
+# The cut (60 s) must outlast the checks while offline on a slow emulator (1-4 s per screen read): the message shows
+# 12 s after the drop, and the steps from the cut to the Try again tap and its checks (about 8 reads, 2 screenshots)
+# take up to ~35 s more, so the link stays down until well after them. It is shorter than the rest of a 10-round game.
+# Run with TWO bots, so the game never pauses for the device (two players stay connected):
+#   qa/lab/lab.sh play --flow link-cut-mid-game --bots 2 --rounds 10 --devices <android label>
+# Android only: play routes the device's adb reverse :3000 through its own qa/lab/link-proxy.mjs, and refuses iOS
+# devices (a simulator shares the host's network). The run fails when the link was never cut.
+# lab: cut link 60 (play cuts this device's server link for 60 s when the flow POSTs LINK_CUT_URL)
+# env: GAME_CODE, USERNAME, METRO_URL (url-encoded), LINK_CUT_URL
+# Selectors are testIDs (Client/src/utils/testIds.ts), so the flow works in any UI language.
+appId: com.socketNull.ExposeMe
+---
+- runFlow: open-app.yaml
+- runFlow: join-room.yaml
+- runFlow: wait-game-start.yaml
+- extendedWaitUntil:
+    visible:
+      id: "player-option-.*"
+    timeout: 180000
+# Maestro's http runs on the lab machine, where this device's link proxy listens
+- evalScript: "${output.linkCut = http.post(LINK_CUT_URL, { body: 'cut' }).status}"
+- assertTrue:
+    condition: ${output.linkCut == 200}
+    label: "The device's link proxy cut its server link (LINK_CUT_URL)"
+# ── Offline: the game screen stays, with Reconnecting… ──
+- extendedWaitUntil:
+    visible:
+      id: "reconnecting-banner"
+    timeout: 10000
+    label: "Reconnecting… over the game once the link dropped"
+# Still the game screen (its Exit), not home
+- assertVisible:
+    id: "leave-game-button"
+- takeScreenshot: link-cut-reconnecting-${USERNAME}
+# ── Still offline after 12 s: the message with Try again (EXP-429) ──
+- extendedWaitUntil:
+    visible:
+      id: "game-server-unreachable"
+    timeout: 25000
+- assertVisible:
+    id: "game-server-unreachable-retry"
+- takeScreenshot: link-cut-unreachable-${USERNAME}
+# Try again starts the wait over: back to the pill, still offline
+- tapOn:
+    id: "game-server-unreachable-retry"
+    waitToSettleTimeoutMs: 500
+- extendedWaitUntil:
+    notVisible:
+      id: "game-server-unreachable"
+    timeout: 5000
+- assertVisible:
+    id: "reconnecting-banner"
+# ── The link is back: the device reconnects on its own and plays on ──
+- extendedWaitUntil:
+    notVisible:
+      id: "reconnecting-banner"
+    timeout: 75000
+    label: "The banner goes once the link is back and socket.io reconnected"
+- extendedWaitUntil:
+    visible:
+      id: "player-option-.*|score-modal|game-waiting-photo|final-score-modal"
+    timeout: 60000
+- takeScreenshot: link-cut-back-${USERNAME}

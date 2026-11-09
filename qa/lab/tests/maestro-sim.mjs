@@ -78,6 +78,13 @@ const STEP_MS = 1000; // any other device step
 // it238's iOS guesses took 7.1-7.5 s. No scenario plays a game on iOS, so those polls are not modelled.
 const TAP_SETTLE_READS = { beforeTouches: 1, afterTouches: 2 };
 const WINDOW_SETTLE_MS = { android: 750, ios: 0 };
+// A tap by point (`tapOn: point`, EXP-453) has no lookup and no settle wait before the touches, the window's included
+// (Maestro 2.11: Orchestra.tapOnPointV2Command -> Maestro.tapOnRelative, which asks the driver for the screen size, not
+// for a screen read -> hierarchyBasedTap, which with no lookup's hierarchy reads one to compare after the touches), then
+// settles after them like a tap on an element. On Android that is a read and WINDOW_SETTLE_MS less than an element tap
+// (its lookup's read; its settle read before the touches becomes hierarchyBasedTap's). On iOS (screenshotBasedTap) it
+// takes a screenshot instead, and its settle polls for a static screen: not modelled, as for element taps
+const POINT_TAP_READS_BEFORE_TOUCHES = 1;
 const POLL_MS = 500;
 const SELECTOR_KEYS = ["id", "text", "below", "enabled"];
 class FlowFailure extends Error {} // the device didn't do what the flow expects: what `retry` retries
@@ -117,6 +124,7 @@ function runFlow(commands, device, { skippableSubflows = [], env = {}, afterStep
     return { id: value(s.id), text: value(s.text), below: s.below && selector(s.below), enabled: value(s.enabled) };
   };
   const TAP_KEYS = ["optional", "waitToSettleTimeoutMs", "repeat", "delay", "retryTapIfNoChange"];
+  const POINT_TAP_KEYS = ["point", "waitToSettleTimeoutMs", "repeat", "delay", "retryTapIfNoChange"];
   const describe = (s) => JSON.stringify(selector(s, TAP_KEYS));
   // `below`: some element matching it is higher on screen (smaller y); `enabled`: elements are enabled unless they say
   // otherwise
@@ -150,6 +158,21 @@ function runFlow(commands, device, { skippableSubflows = [], env = {}, afterStep
   const interaction = (act = () => {}) => (arg) => { act(arg); step(); lastInteraction = device.now; };
   // A tap's settle wait (see TAP_SETTLE_READS)
   const settleReads = (reads) => { for (let n = 0; n < reads; n++) device.read({ id: "settle-hierarchy" }); };
+  // A tap's touches on `target`: `repeat` taps `delay` ms apart (Maestro 2.11's TapRepeat)
+  const touches = (arg, target) => {
+    const { repeat, delay } = typeof arg === "string" ? {} : arg; // `tapOn: "<text>"` has neither
+    const taps = repeat === undefined ? 1 : Number(value(repeat));
+    const delayMs = delay === undefined ? 0 : Number(value(delay));
+    for (let n = 0; n < taps; n++) { if (n) device.tick(delayMs); device.tap(target); }
+  };
+  // A tap by point (see POINT_TAP_READS_BEFORE_TOUCHES): the device's tap gets { point: "<x>,<y>" }
+  const tapPoint = (arg) => {
+    checkKeys(arg, POINT_TAP_KEYS, "tapOn point");
+    settleReads(POINT_TAP_READS_BEFORE_TOUCHES);
+    touches(arg, { point: value(arg.point) });
+    settleReads(TAP_SETTLE_READS.afterTouches);
+    lastInteraction = device.now;
+  };
   const commandsByName = {
     waitForAnimationToEnd: step, takeScreenshot: step,
     launchApp: interaction(), swipe: interaction(),
@@ -167,19 +190,16 @@ function runFlow(commands, device, { skippableSubflows = [], env = {}, afterStep
       if (!arg.when || condition(arg.when)) run(arg.commands);
     },
     tapOn: (arg) => {
+      if (typeof arg === "object" && "point" in arg) return tapPoint(arg);
       const optional = arg.optional === "true";
       if (!waitFor(() => isVisible(arg, TAP_KEYS), optional ? OPTIONAL_LOOKUP_MS : LOOKUP_MS)) {
         if (optional) return failedStepArtifacts(); // a warning
         throw new FlowFailure(`tapOn ${describe(arg)}: not found`);
       }
-      // The settle waits around the touches: `repeat` taps `delay` ms apart (Maestro 2.11's TapRepeat)
-      const sel = selector(arg, TAP_KEYS);
-      const { repeat, delay } = typeof arg === "string" ? {} : arg; // `tapOn: "<text>"` has neither
-      const taps = repeat === undefined ? 1 : Number(value(repeat));
-      const delayMs = delay === undefined ? 0 : Number(value(delay));
+      // The settle waits around the touches
       device.tick(WINDOW_SETTLE_MS[device.platform]);
       settleReads(TAP_SETTLE_READS.beforeTouches);
-      for (let n = 0; n < taps; n++) { if (n) device.tick(delayMs); device.tap(sel); }
+      touches(arg, selector(arg, TAP_KEYS));
       settleReads(TAP_SETTLE_READS.afterTouches);
       lastInteraction = device.now;
     },
@@ -490,9 +510,9 @@ function game({
 }
 
 // hold-used-up.yaml's game (EXP-361): `rounds` rounds as the server plays them, the device owning `ownedRounds` (its
-// photo: its scoreboard shows the hold button). A tap on the hold button while it is enabled is a quick hold, pressed
-// and released QUICK_HOLD_MS apart, that reaches the server upLatency() ms later (in order: after the release of the
-// previous one). The server accepts it while the round has holds left and more than HOLD_MIN_REMAINING of its
+// photo: its scoreboard shows the hold button). A tap on the hold button (by its id, or by point at HOLD_TAP_POINT, its
+// middle) while it is enabled is a quick hold, pressed and released QUICK_HOLD_MS apart, that reaches the server
+// upLatency() ms later (in order: after the release of the previous one). The server accepts it while the round has holds left and more than HOLD_MIN_REMAINING of its
 // scoreboard (GameEngine.ts), freezing the scoreboard meanwhile, and sends hold-closed once only that much is left.
 // The phone paints the server events of its own scoreboards late, in the order they came: the scoreboard
 // paintLag(round, "scores") ms late, its holds and their ends (the held marker; the 3rd end, holdsLeft 0, greys the
@@ -571,7 +591,8 @@ function holdGame({ rounds, ownedRounds, readMs, seesAt, upLatency, paintLag = (
       return shown;
     },
     (dev, sel) => {
-      const button = matches(sel.id || "", "hold-button") && holdButton(dev.now);
+      const onButton = sel.point ? sel.point === HOLD_TAP_POINT : matches(sel.id || "", "hold-button");
+      const button = onButton && holdButton(dev.now);
       if (!button || (!button.enabled && app !== "fourthHolds")) return;
       lastArrival = Math.max(dev.now + upLatency(), lastArrival + QUICK_HOLD_MS);
       press(lastArrival);
@@ -580,7 +601,7 @@ function holdGame({ rounds, ownedRounds, readMs, seesAt, upLatency, paintLag = (
     seesAt,
   );
   d.now = startAt;
-  return { d, state, env: { USERNAME: "android-a" } };
+  return { d, state, env: { USERNAME: "android-a", HOLD_TAP_POINT } };
 }
 
 // ── Scenarios ──
@@ -1181,17 +1202,19 @@ function roundsScenarios(flow) {
 }
 
 // ── hold-used-up.yaml (EXP-361, EXP-371) ──
-// The device owns about a third of the rounds of a 10-round game (2 bots, as its header runs it), on Android (the
-// flow's iOS branch, a tap by point, is not simulated). Played with reads seen as they start, as they end and anywhere
-// along them (those also with the device's scoreboard events painted up to it166's 0.5 s late, or on time or that
-// late), on fixed and random screen reads from a fast phone's to the slow emulator's 4 s: the flow never checks on screen an app whose button greys out only at hold-closed or whose 4th press
-// holds the game, every check on the correct app saw the button greyed out by the 3 holds before hold-closed was
-// painted, and the correct app fails only for want of an own scoreboard tapped on (its last assert). Each run is also
+// The device owns about a third of the rounds of a 10-round game (2 bots, as its header runs it), on Android (iOS's
+// settle waits are not simulated). Played with reads seen as they start, as they end and anywhere along them (those
+// also with the device's scoreboard events painted up to it166's 0.5 s late, or on time or that late), on fixed and
+// random screen reads from a fast phone's to the slow emulator's 4 s: the flow never checks on screen an app whose
+// button greys out only at hold-closed or whose 4th press holds the game, every check on the correct app saw the
+// button greyed out by the 3 holds before hold-closed was painted, and the correct app fails only for want of an own scoreboard tapped on (its last assert). Each run is also
 // judged like lab.sh play (EXP-371): the flow passed and the bots heard a round of the device's photo get its 3 holds
-// and no hold after them. Each line states both pass rates: the bots' check must pass nearly every game with reads up
-// to BOTS_CHECK_READ_MS. EXP-392: with Maestro 2.11's settle waits around the touches (TAP_SETTLE_READS) the flow no
-// longer checks the button on screen with any of these reads (only in the 0.1-0.3 s grid below), and the presses reach
-// the server in time only on a fast phone.
+// and no hold after them. Each line states both pass rates, and the bots' check must pass (BOTS_CHECK_SHARES) the
+// games whose device owns a round before the last (`countable`: a game it owns no round of, or only the last one,
+// fails the flow's own assert, see its header). EXP-392: an element tap's settle waits (TAP_SETTLE_READS) made the
+// presses reach the server in time only on a fast phone; EXP-453: the flow taps by point, a read and Android's window
+// settle sooner (POINT_TAP_READS_BEFORE_TOUCHES), so they reach it in time with reads up to 1 s, and the flow checks
+// the button on screen with reads of 0.3 s (not 0.4 s: its look then ends past closingFrom).
 function holdScenarios(flow) {
   const ROUNDS = 10;
   const OWN_SHARE = 1 / 3;
@@ -1200,11 +1223,18 @@ function holdScenarios(flow) {
   const UNTAPPED = /A scoreboard of the device's photo got the hold presses/;
   const options = { skippableSubflows: ["open-app.yaml", "join-room.yaml", "wait-game-start.yaml"] };
   const FAST_READS = { name: "fixed 0.3 s", range: [300, 300] };
-  // EXP-392: with reads up to 0.5 s the bots' check passes nearly every correct game (389 of 400 in every read-point
-  // and paint-delay profile, the rest with no own scoreboard tapped on); with it238's 0.65 s, 304-389 of 400, and with
-  // 1 s none but those seen as they end
-  const BOTS_CHECK_READ_MS = 500;
-  const MIN_BOTS_CHECK_PASSES = 0.9;
+  // The share of countable games the bots' check must pass, by the slowest read: every one with reads up to it238's
+  // 0.65 s (the lab's emulators), 95% with 1 s. EXP-453, SIM_GAMES=400 and two read-point seeds: 389 of 389 countable
+  // games up to 1 s in every profile but 1 s with the events painted late (378-385); 0.3 s, 393 of 400 (its checks on
+  // screen count a last round too); 2 s, 0-286 by profile; 3-4 s, none. The element tap of EXP-392 passed 304-389 at
+  // 0.65 s and none at 1 s but those seen as they end
+  const BOTS_CHECK_SHARES = [{ upToMs: 650, share: 1 }, { upToMs: 1000, share: 0.95 }];
+  const botsCheckShare = (reads) => BOTS_CHECK_SHARES.find(({ upToMs }) => reads.range[1] <= upToMs)?.share ?? 0;
+  const ownedRoundsOf = (seed) => {
+    const own = seededRandom(seed * 104723);
+    return Array.from({ length: ROUNDS }, (_, i) => i + 1).filter(() => own() < OWN_SHARE);
+  };
+  const countable = (seed) => ownedRoundsOf(seed).some((round) => round < ROUNDS);
   const fixedReads = (ms) => ({ name: `fixed ${ms / 1000} s`, range: [ms, ms] });
   const READS = [FAST_READS, ...[400, 500, 650, 1000, 2000, 3000, 4000].map(fixedReads),
     { name: "random 1-4 s", range: [1000, 4000] }];
@@ -1219,8 +1249,7 @@ function holdScenarios(flow) {
   ];
   const between = (random, [low, high]) => Math.round(low + random() * (high - low));
   const play = (seed, reads, see, lag, app) => {
-    const own = seededRandom(seed * 104723);
-    const ownedRounds = Array.from({ length: ROUNDS }, (_, i) => i + 1).filter(() => own() < OWN_SHARE);
+    const ownedRounds = ownedRoundsOf(seed);
     const latency = seededRandom(seed * 15485863);
     const { d, state, env } = holdGame({ rounds: ROUNDS, ownedRounds, readMs: randomReads(seed, reads.range),
       seesAt: see.seesAt(seed), upLatency: () => between(latency, UP_LATENCY_MS), paintLag: lag.paintLag(seed), app });
@@ -1239,12 +1268,13 @@ function holdScenarios(flow) {
   for (const reads of READS) {
     for (const see of SEE_POINTS) {
       for (const lag of see.varies ? LAGS : LAGS.slice(0, 1)) {
-        let checked = 0, passed = 0, late = 0;
+        let checked = 0, passed = 0, late = 0, countableGames = 0;
         const brokenPasses = { holdsUncounted: 0, fourthHolds: 0 };
         const problems = [];
         for (let seed = 1; seed <= RANDOM_GAMES; seed++) {
           const run = play(seed, reads, see, lag, "correct");
           late += run.output.hold?.late ?? 0;
+          if (countable(seed)) countableGames++;
           if (checkedOnScreen(run)) checked++;
           if (labPasses(run)) passed++;
           if (checkedOnScreen(run) && !proven(run)) {
@@ -1258,14 +1288,14 @@ function holdScenarios(flow) {
             if (labPasses(broken)) brokenPasses[app]++;
           }
         }
-        const minPassed = reads.range[1] <= BOTS_CHECK_READ_MS ? MIN_BOTS_CHECK_PASSES : 0;
+        const share = botsCheckShare(reads);
         report(`${RANDOM_GAMES} games with ${reads.name} screen reads ${see.name}${lag.name}: checked on screen ${checked}`
-          + `, each one proven, and passes ${passed} with the bots' `
-          + `check${minPassed ? ` (at least ${minPassed * 100}%)` : ""} (${late} own scoreboards reached too late on `
+          + `, each one proven, and passes ${passed} with the bots' check${share ? ` (at least ${share * 100}% of the `
+          + `${countableGames} with an own round before the last)` : ""} (${late} own scoreboards reached too late on `
           + `screen); never checks on screen the apps whose holds don't grey the button out or whose 4th press holds `
           + `(the bots' check passes ${brokenPasses.holdsUncounted} and ${brokenPasses.fourthHolds} of them), never `
           + "fails but untapped",
-        problems.length === 0 && passed >= minPassed * RANDOM_GAMES,
+        problems.length === 0 && passed >= share * countableGames,
         problems.slice(0, 3).join("; "));
       }
     }
@@ -1306,12 +1336,17 @@ function holdScenarios(flow) {
   `flow checked: ${flowChecks.slice(0, 3).join(", ") || "none"}; without phaseLagMs: ${mutantChecks.slice(0, 3).join(", ")}`);
 }
 
+// A lab.sh variable's value (`NAME=value` or `NAME="value"` on a line of its own)
+const labShValue = (name) => {
+  const m = fs.readFileSync(new URL("../lab.sh", import.meta.url), "utf8").match(new RegExp(`^${name}="?([^"\\n]*)"?$`, "m"));
+  if (!m) throw new Error(`lab.sh: no ${name}`);
+  return m[1];
+};
 // lab.sh's NONE_CHECKED_MIN_WAITS: the fewest card waits, all without a card, that fail a run checking none
-const NONE_CHECKED_MIN_WAITS = (() => {
-  const m = fs.readFileSync(new URL("../lab.sh", import.meta.url), "utf8").match(/^NONE_CHECKED_MIN_WAITS=([0-9]+)$/m);
-  if (!m) throw new Error("lab.sh: no NONE_CHECKED_MIN_WAITS");
-  return Number(m[1]);
-})();
+const NONE_CHECKED_MIN_WAITS = Number(labShValue("NONE_CHECKED_MIN_WAITS"));
+// Where lab.sh play has the lab's phones tap the hold button (hold_tap_point's default, EXP-453; maestro-timing.test.sh
+// checks it lies inside the button on their screens): the simulated device's button is there
+const HOLD_TAP_POINT = labShValue("HOLD_TAP_POINT_DEFAULT");
 
 // bots.mjs's own constants (`const NAME = <expression>;`, evaluated in order, HOLD_BUDGET_PER_ROUND first), so the
 // simulated holds follow the bots'

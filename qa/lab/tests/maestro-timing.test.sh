@@ -538,11 +538,11 @@ sed 's/output.round.greySeenAt < output.round.closingFrom/true/' \
   && ok "checker rejects a used-up look whose read may end after closingFrom" \
   || ko "checker rejects the unbounded used-up look"
 
-# ── hold-used-up.yaml's tap by point lands on the hold button of every lab iOS model (EXP-413) ──
-# On iOS the flow taps HOLD_TAP_POINT, which lab.sh play passes per device model (hold_tap_point), else lab.sh's
-# HOLD_TAP_POINT_DEFAULT. The button's middle sits insets.bottom + HOLD_BUTTON_BOTTOM + HOLD_BUTTON_HEIGHT / 2 above the
-# bottom edge (Client/src/utils/gameRows.ts), so how far down it spans depends on the screen: every IOS_MODELS model's
-# point must lie inside it, TAP_MARGIN_PCT from its edges, on that model's screen in portrait
+# ── hold-used-up.yaml's tap by point lands on the hold button of every lab iOS model and phone AVD (EXP-413, EXP-453) ──
+# The flow taps HOLD_TAP_POINT on both platforms, which lab.sh play passes per device model (hold_tap_point), else
+# lab.sh's HOLD_TAP_POINT_DEFAULT. The button's middle sits insets.bottom + HOLD_BUTTON_BOTTOM + HOLD_BUTTON_HEIGHT / 2
+# above the bottom edge (Client/src/utils/gameRows.ts), so how far down it spans depends on the screen: every IOS_MODELS
+# model's and phone AVD's point must lie inside it, TAP_MARGIN_PCT from its edges, on that model's screen in portrait
 GAME_ROWS="$HERE/../../../Client/src/utils/gameRows.ts"
 TAP_MARGIN_PCT=1
 ios_screen() { # IOS_MODELS model -> "<height> <bottom inset>" in pt, portrait (Apple's specs), or nothing
@@ -551,6 +551,18 @@ ios_screen() { # IOS_MODELS model -> "<height> <bottom inset>" in pt, portrait (
     "iPad mini (A17 Pro)") echo "1133 20";;
   esac
 }
+# AVD hardware profile (lab.sh's AVD_DEVICES) -> "<height> <bottom inset>" in dp, portrait, or nothing: hw.lcd.height /
+# (hw.lcd.density / 160), and the 24 dp gesture bar of the API 35 images. Measured in the lab's own Maestro hierarchy
+# dumps of the hold button: [54,1917][1026,2085] on exposeme_a's 2400 px (it169) and [54,1774][1026,1950] on
+# exposeme_b's 2280 px (it166), 120 dp above the bottom on both: 24 + HOLD_BUTTON_BOTTOM
+android_screen() {
+  case $1 in
+    pixel_7) echo "914.3 24";; pixel_4) echo "829.1 24";;
+  esac
+}
+# exposeme_c's Pixel Tablet is left out: the app follows the device's orientation (app.json) and its bottom inset was
+# never measured, so hold_tap_point gives it the default unverified (lab.sh)
+UNMEASURED_AVD_DEVICES="pixel_tablet"
 hold_button_span() { # screen height, bottom inset (pt) -> "<top>-<bottom>": the hold button's edges, in % down the screen
   node -e '
     const fs = require("fs");
@@ -572,30 +584,47 @@ point_on_button() { # point (x%,y%), screen height, bottom inset -> exit 0 when 
   [ "$x" = 50 ] && awk -v y="$y" -v top="$top" -v bottom="$bottom" -v m="$TAP_MARGIN_PCT" \
     'BEGIN { exit !(y >= top + m && y <= bottom - m) }'
 }
-# lab.sh's models and their points (a subshell sources its functions only), then its default
-ios_points="$(bash -c 'source "$1"; for m in "${IOS_MODELS[@]}"; do printf "%s\t%s\n" "$m" "$(hold_tap_point "$m")"; done
-  printf "default\t%s\n" "$HOLD_TAP_POINT_DEFAULT"' _ "$HERE/../lab.sh")"
-tap_default="$(sed -nE 's/^default\t//p' <<<"$ios_points")"
-while IFS=$'\t' read -r model point; do
-  [ "$model" = default ] && continue
-  screen="$(ios_screen "$model")"
-  if [ -z "$screen" ]; then ko "hold-used-up.yaml: no screen size for lab.sh's iOS model '$model' (add it to ios_screen)"; continue; fi
+# lab.sh's models and their points (a subshell sources its functions only): "<platform>\t<model>\t<point>[\t<AVD device>]"
+# per iOS model and AVD, then its default
+lab_points="$(bash -c 'source "$1"
+  for m in "${IOS_MODELS[@]}"; do printf "ios\t%s\t%s\n" "$m" "$(hold_tap_point "$m")"; done
+  for i in "${!AVD_NAMES[@]}"; do
+    printf "android\t%s\t%s\t%s\n" "${AVD_NAMES[$i]}" "$(hold_tap_point "${AVD_NAMES[$i]}")" "${AVD_DEVICES[$i]}"
+  done
+  printf "default\t\t%s\n" "$HOLD_TAP_POINT_DEFAULT"' _ "$HERE/../lab.sh")"
+tap_default="$(sed -nE 's/^default\t\t//p' <<<"$lab_points")"
+while IFS=$'\t' read -r platform model point avd_device; do
+  case $platform in
+    ios) screen="$(ios_screen "$model")";;
+    android) [[ " $UNMEASURED_AVD_DEVICES " == *" $avd_device "* ]] && continue; screen="$(android_screen "$avd_device")";;
+    *) continue;;
+  esac
+  if [ -z "$screen" ]; then
+    ko "hold-used-up.yaml: no screen size for lab.sh's $platform model '$model' (add it to ${platform}_screen)"; continue
+  fi
   # shellcheck disable=SC2086 # height and inset
   span="$(hold_button_span $screen)"
   # shellcheck disable=SC2086
   point_on_button "$point" $screen && ok "hold-used-up.yaml taps $model's hold button at $point (it spans $span% down)" \
     || ko "hold-used-up.yaml's tap at $point misses $model's hold button" "it spans $span% down"
-done <<<"$ios_points"
+done <<<"$lab_points"
 # EXP-413's bug: the iPhones' point on every model, the iPad mini's too
 # shellcheck disable=SC2086 # height and inset
 ! point_on_button "$tap_default" $(ios_screen "iPad mini (A17 Pro)") \
   && ok "checker rejects the iPhones' point ($tap_default) on the iPad mini" \
   || ko "checker rejects the iPhones' point on the iPad mini"
-# The flow taps lab.sh's point on iOS, lab.sh's default when it gets none
+# The measured gesture bar matters: under a 48 dp 3-button bar the Pixel 4's button would end above the default point
+read -r pixel_4_height _ < <(android_screen pixel_4)
+! point_on_button "$tap_default" "$pixel_4_height" 48 \
+  && ok "checker rejects the default point ($tap_default) on a Pixel 4 with a 3-button navigation bar" \
+  || ko "checker rejects the default point on a Pixel 4 with a 3-button navigation bar"
+# The flow taps lab.sh's point on both platforms (one tapOn, by point: EXP-453), lab.sh's default when it gets none
 # shellcheck disable=SC2016 # a Maestro expression, not a shell one
-[ -n "$tap_default" ] && grep -qxF "                      point: \${HOLD_TAP_POINT || \"$tap_default\"}" "$HOLD_FLOW" \
-  && ok "hold-used-up.yaml taps HOLD_TAP_POINT on iOS, lab.sh's default ($tap_default) without it" \
-  || ko "hold-used-up.yaml taps \${HOLD_TAP_POINT || \"<lab.sh's default>\"}" "default: ${tap_default:-none}"
+[ -n "$tap_default" ] && grep -qE "^ +point: \\$\\{HOLD_TAP_POINT \\|\\| \"$tap_default\"\\}$" "$HOLD_FLOW" \
+  && [ "$(grep -cE '^[[:space:]]*- tapOn:' "$HOLD_FLOW")" = 1 ] && ! grep -qE '^[[:space:]]*platform:' "$HOLD_FLOW" \
+  && ok "hold-used-up.yaml taps HOLD_TAP_POINT on both platforms, lab.sh's default ($tap_default) without it" \
+  || ko "hold-used-up.yaml taps \${HOLD_TAP_POINT || \"<lab.sh's default>\"} in its only tapOn, on both platforms" \
+    "default: ${tap_default:-none}"
 
 # ── hold-closed.yaml's times fit the server's (EXP-354) ──
 # Without tapping: the button is enabled while the hold window is surely open (until hiddenFrom + SCORE_DISPLAY_TIME -

@@ -220,24 +220,36 @@ rc=$?
   && ok "a flow without the marker doesn't check the holds" || ko "unmarked flow ignores the holds" "rc=$rc $(cat "$TMP/play.out")"
 rm -rf "$QA/maestro"
 
-# ── Where hold-used-up.yaml taps the hold button on iOS, per device model (EXP-413) ──
-# Each iOS device gets its model's point (the iPad mini's button sits lower than the iPhones'); Android taps the element
-# and gets none. A device without a model gets the iPhone default
+# ── Where hold-used-up.yaml taps the hold button, per device model (EXP-413, EXP-453) ──
+# Each device of a flow that reads HOLD_TAP_POINT gets its model's point (the iPad mini's button sits lower than the
+# iPhones' and the phone AVDs'); a device without a model gets the default. A flow that doesn't read it gets none
 LAB_DEVICES_JSON="$DEVICES_JSON"; DEVICES_JSON="$TMP/models.json"
 cat >"$DEVICES_JSON" <<'EOF'
 [{"id":"FAKE-1","label":"ios-a","platform":"ios","model":"iPhone 17"},
  {"id":"FAKE-4","label":"ios-d","platform":"ios","model":"iPad mini (A17 Pro)"},
  {"id":"FAKE-9","label":"ios-z","platform":"ios"},
- {"id":"emulator-5554","label":"android-a","platform":"android","model":"exposeme_a"}]
+ {"id":"emulator-5554","label":"android-a","platform":"android","model":"exposeme_a"},
+ {"id":"emulator-5556","label":"android-b","platform":"android","model":"exposeme_b"}]
 EOF
-play r-hold-points --bots 2 --rounds 10 --devices all
-rc=$?
+mkdir -p "$QA/maestro"
+cp "$MAESTRO_DIR/hold-used-up.yaml" "$MAESTRO_DIR/play-game.yaml" "$QA/maestro/"
+all_used_up='{"summary":{"pass":true,"rooms_detail":[{"holds_used_up":[{"owner":"ios-a","round":1},{"owner":"ios-d","round":2},{"owner":"ios-z","round":3},{"owner":"android-a","round":4},{"owner":"android-b","round":5}]}]}}'
 tap_point_of() { grep -- "--test-output-dir [^ ]*/$1 " "$TMP/maestro.args" | grep -oE -- "-e HOLD_TAP_POINT=[^ ]*" ; } # label
+STUB_BOTS_OUT="$all_used_up" play r-hold-points --bots 2 --rounds 10 --devices all --flow hold-used-up
+rc=$?
 [ $rc = 0 ] && [ "$(tap_point_of ios-a)" = "-e HOLD_TAP_POINT=50%,82%" ] \
   && [ "$(tap_point_of ios-d)" = "-e HOLD_TAP_POINT=50%,87%" ] && [ "$(tap_point_of ios-z)" = "-e HOLD_TAP_POINT=50%,82%" ] \
-  && [ -z "$(tap_point_of android-a)" ] \
-  && ok "play passes each iOS device its model's hold tap point (iPhone 50%,82%, iPad mini 50%,87%), Android none" \
+  && [ "$(tap_point_of android-a)" = "-e HOLD_TAP_POINT=50%,82%" ] \
+  && [ "$(tap_point_of android-b)" = "-e HOLD_TAP_POINT=50%,82%" ] \
+  && ok "play passes each device its model's hold tap point (iPhones and phone AVDs 50%,82%, iPad mini 50%,87%)" \
   || ko "HOLD_TAP_POINT per device model" "rc=$rc $(cat "$TMP/maestro.args")"
+: >"$TMP/maestro.args"
+play r-no-hold-points --bots 2 --rounds 3 --devices all --flow play-game
+rc=$?
+[ $rc = 0 ] && ! grep -q -- "HOLD_TAP_POINT" "$TMP/maestro.args" \
+  && ok "a flow that doesn't read HOLD_TAP_POINT gets no hold tap point" \
+  || ko "no HOLD_TAP_POINT for a flow without it" "rc=$rc $(cat "$TMP/maestro.args")"
+rm -rf "$QA/maestro"
 DEVICES_JSON="$LAB_DEVICES_JSON"
 
 # Second room never publishes a code: fail loudly, nothing left running, no device run

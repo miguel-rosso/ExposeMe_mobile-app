@@ -91,6 +91,57 @@ function slowUpload(
   });
 }
 
+/**
+ * An upload that sends its whole declared body as fast as the server takes it, still sending when it is answered.
+ * Resolves with the response, or a null status if the connection was closed before one could be read (EXP-455).
+ */
+function fastUpload(
+  auth: Auth,
+  ip: string,
+  bytes: number,
+): Promise<{ status: number | null; retryAfter?: string; connection?: string; body: string }> {
+  const chunk = Buffer.alloc(64 * 1024);
+  return new Promise((resolve) => {
+    const result: { status: number | null; retryAfter?: string; connection?: string; body: string } = { status: null, body: "" };
+    let settled = false;
+    const settle = () => { if (!settled) { settled = true; resolve(result); } };
+    const req = http.request({
+      host: "127.0.0.1",
+      port: harness.port,
+      method: "POST",
+      path: "/upload",
+      agent: false,
+      headers: {
+        ...auth,
+        "X-Forwarded-For": ip,
+        "Content-Type": `multipart/form-data; boundary=${BOUNDARY}`,
+        "Content-Length": String(bytes),
+      },
+    });
+    req.on("response", (res) => {
+      result.status = res.statusCode ?? 0;
+      result.retryAfter = res.headers["retry-after"] as string | undefined;
+      result.connection = res.headers.connection;
+      res.setEncoding("utf8");
+      res.on("data", (c) => (result.body += c));
+      res.on("end", settle);
+      res.on("error", settle);
+    });
+    req.on("error", () => setTimeout(settle, 200)); // let a response that is already arriving be read
+    req.on("close", () => setTimeout(settle, 200));
+    let left = bytes;
+    const writeMore = () => {
+      while (left > 0 && !req.destroyed) {
+        const piece = chunk.subarray(0, Math.min(left, chunk.length));
+        left -= piece.length;
+        if (!req.write(piece)) return void req.once("drain", writeMore);
+      }
+      if (left === 0) req.end();
+    };
+    writeMore();
+  });
+}
+
 const held = async (...reqs: Array<Promise<{ status: number | null }>>) => {
   const res = await Promise.all(reqs);
   expect(res.map((r) => r.status)).toEqual(reqs.map(() => null));
@@ -166,6 +217,16 @@ describe("in-flight upload caps", () => {
     expect(inFlight()).toBe(3);
   });
 
+  it("a refused client still sending its photo reads the 429 and its Retry-After, not a reset (EXP-455)", async () => {
+    await held(slowUpload(m.alice, "10.0.7.1"));
+    const extra = await fastUpload(m.alice, "10.0.7.2", 4 * 1024 * 1024);
+    expect(extra.status).toBe(429);
+    expect(extra.retryAfter).toBe("2");
+    expect(extra.connection).toBe("close");
+    expect(JSON.parse(extra.body)).toEqual({ error: "Too many uploads in progress", scope: "member" });
+    expect(inFlight()).toBe(1);
+  });
+
   it("frees the slot when the client aborts mid-upload, and after a completed upload", async () => {
     const first = await slowUpload(m.alice, "10.0.4.1");
     expect(first.status).toBeNull();
@@ -218,6 +279,14 @@ describe("in-flight upload caps", () => {
 describe("upload size", () => {
   it("is 5 MB, enough for the app's ≤1600 px JPEGs", () => {
     expect(MAX_FILE_SIZE).toBe(5 * 1024 * 1024);
+  });
+
+  it("a client still sending a declared body over the limit reads the 413, not a reset (EXP-455)", async () => {
+    const res = await fastUpload(m.alice, "10.0.6.9", MAX_FILE_SIZE * 2);
+    expect(res.status).toBe(413);
+    expect(res.connection).toBe("close");
+    expect(JSON.parse(res.body)).toEqual({ error: "File too large" });
+    expect(inFlight()).toBe(0);
   });
 
   it("refuses a declared body over the limit with 413 JSON before reading it, without taking a slot", async () => {

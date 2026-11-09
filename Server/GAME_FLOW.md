@@ -990,11 +990,19 @@ unknown room or a token that is not a current member of it → **403**.
   `UPLOAD_REQUEST_TIMEOUT_MS` (default 20 s) → **408** and the connection is closed (only reception is timed: a complete
   body that waits for processing is not cut). Its whole body, declared or chunked (no `Content-Length`), is also counted
   as it arrives, ignored bytes around the photo included (multipart preamble/epilogue), and so are the bytes read off
-  the connection (chunked framing and extensions, 64 KB more allowed): past 5MB + 64 KB of body → **413** with
-  `Connection: close` and the connection is closed at once, nothing stored (a client still sending may only see the
-  connection reset instead of the 413). The slot is freed with the response, or if the client aborts. `qa/lab/lab.sh server` raises the in-flight caps for bot load tests (all bots share one IP).
+  the connection (chunked framing and extensions, 64 KB more allowed): past 5MB + 64 KB of body → **413** and the
+  connection is closed, nothing stored. Every refusal that closes the connection (413, 429/503 of the in-flight caps,
+  408) does so without losing the answer: the server ends its side right after the response (`Connection: close`) and
+  closes it for good 1 s later (`UNREAD_BODY_GRACE_MS`) if the client is still sending; once it has read another
+  5MB + 128 KB (one whole upload) meanwhile it stops reading and closes it 250 ms later (`OVER_CAP_CLOSE_DELAY_MS`),
+  so the reset doesn't make the client drop the answer. The slot is held until the response is out *and* the body has
+  stopped arriving (fully received, or the connection closed): an upload answered early (403/429 after admission) keeps
+  its slot and its upload timeout while the rest of its body drains; a client abort frees it at once. `qa/lab/lab.sh server` raises the in-flight caps for bot load tests (all bots share one IP).
 - **HTTP timeouts** (all routes): the whole request must arrive within `HTTP_REQUEST_TIMEOUT_MS` (default 60 s) and its
-  headers within `HTTP_HEADERS_TIMEOUT_MS` (default 20 s); WebSocket connections are not affected.
+  headers within `HTTP_HEADERS_TIMEOUT_MS` (default 20 s); WebSocket connections are not affected. A body still
+  arriving once its request was answered (401/403/404, socket.io's 400…) gets 1 s (`UNREAD_BODY_GRACE_MS`) and 1 MB
+  (`UNREAD_BODY_MAX_BYTES`) more, then its connection is closed (past the bytes: no longer read, closed 250 ms later;
+  `middlewares/unreadBody.ts`).
 - Errors are JSON `{ error }`:
 
 | Status | When |

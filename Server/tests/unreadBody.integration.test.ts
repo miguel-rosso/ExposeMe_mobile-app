@@ -2,7 +2,7 @@ import fs from "fs";
 import net from "net";
 import sharp from "sharp";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { pendingUnreadBodyGraces, UNREAD_BODY_GRACE_MS } from "../middlewares/unreadBody";
+import { pendingUnreadBodyGraces, UNREAD_BODY_GRACE_MS, UNREAD_BODY_MAX_BYTES } from "../middlewares/unreadBody";
 import { useTestServer } from "./socketHarness";
 
 // EXP-448: once a response is out, a request body still arriving is not read (and discarded) until the request
@@ -10,6 +10,7 @@ import { useTestServer } from "./socketHarness";
 // middleware or socket.io's long-polling endpoint) and whether or not the request had credentials. The client still
 // receives the response, and a body that finishes in time keeps its keep-alive connection. An admitted upload answered
 // early is left to its own byte cap (EXP-442), so a member on a slow network still reads the answer.
+// EXP-449: within the grace period a fast client can't make the server read more than UNREAD_BODY_MAX_BYTES.
 
 const UPLOAD_DIR = vi.hoisted(() => {
   const tmp = (process.env.TMPDIR || "/tmp").replace(/\/$/, "");
@@ -53,7 +54,12 @@ interface Outcome {
   closed: boolean;
   /** Time from the first byte of the response to the connection closing. */
   closedAfterMs: number;
+  /** Bytes the client sent after the first byte of the response. */
+  sentAfterAnswer: number;
 }
+
+/** Bytes the client's send buffer and the server's receive buffer may hold on top of what the server reads. */
+const SOCKET_BUFFERS_SLACK = 16 * 1024 * 1024;
 
 /**
  * Sends `head` (a chunked request) followed by an endless chunked body, written as fast as the server reads it, and
@@ -64,16 +70,25 @@ function sendEndlessBody(head: string, waitMs = CLOSE_WITHIN_MS + 1_000): Promis
     let response = "";
     let closed = false;
     let answeredAt = 0;
+    let sentAtAnswer = 0;
     const socket = net.connect(harness.port, "127.0.0.1");
     const finish = () => {
       clearTimeout(timer);
       socket.destroy();
-      resolve({ response, closed, closedAfterMs: closed && answeredAt ? Date.now() - answeredAt : Infinity });
+      resolve({
+        response,
+        closed,
+        closedAfterMs: closed && answeredAt ? Date.now() - answeredAt : Infinity,
+        sentAfterAnswer: socket.bytesWritten - sentAtAnswer,
+      });
     };
     const timer = setTimeout(finish, waitMs);
     socket.setEncoding("latin1");
     socket.on("data", (d: string) => {
-      if (!answeredAt) answeredAt = Date.now();
+      if (!answeredAt) {
+        answeredAt = Date.now();
+        sentAtAnswer = socket.bytesWritten;
+      }
       response += d;
     });
     socket.on("error", () => {}); // reset while still writing
@@ -150,10 +165,12 @@ describe("a response sent before the request body has arrived closes the connect
     ["a JSON body (404)", () => requestHead("POST", "/no-such-route", { ...chunked, "Content-Type": "application/json" }), 404],
     ["a socket.io long-polling POST without a session (400)", () => requestHead("POST", "/socket.io/?EIO=4&transport=polling", chunked), 400],
   ])("%s", async (_what, head, status) => {
-    const { response, closed, closedAfterMs } = await sendEndlessBody(head());
+    const { response, closed, closedAfterMs, sentAfterAnswer } = await sendEndlessBody(head());
     expect(response).toMatch(new RegExp(`^HTTP/1\\.1 ${status} `));
     expect(closed).toBe(true);
     expect(closedAfterMs).toBeLessThan(CLOSE_WITHIN_MS);
+    // Not a whole grace period of reading at full speed (gigabytes on loopback)
+    expect(sentAfterAnswer).toBeLessThan(UNREAD_BODY_MAX_BYTES + SOCKET_BUFFERS_SLACK);
   });
 
   it("an admitted upload answered before its body is read (member rate limit, 429) is cut by the upload byte cap", async () => {

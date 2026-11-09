@@ -3,6 +3,7 @@ import http from "http";
 import net from "net";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import sharp from "sharp";
+import { UNREAD_BODY_GRACE_MS } from "../middlewares/unreadBody";
 import { MAX_UPLOAD_BODY_BYTES, MAX_UPLOAD_WIRE_BYTES, uploadInFlightLimit } from "../middlewares/uploadInFlight";
 import { useTestServer } from "./socketHarness";
 
@@ -10,6 +11,8 @@ import { useTestServer } from "./socketHarness";
 // multer ignores (a preamble before the first boundary, an epilogue after the last one), nor take more than
 // MAX_UPLOAD_WIRE_BYTES off the wire (chunk extensions the parser drops): past either cap the upload is answered 413,
 // its connection is closed, its in-flight slot is freed and nothing is stored.
+// EXP-449 / EXP-452: the connection is closed without losing the 413 to a reset: the server ends its side right after
+// the response and only resets a client still sending UNREAD_BODY_GRACE_MS later, so the client always reads it.
 
 const UPLOAD_DIR = vi.hoisted(() => {
   const tmp = (process.env.TMPDIR || "/tmp").replace(/\/$/, "");
@@ -46,7 +49,7 @@ const photoPart = () =>
   ]);
 
 interface ChunkedResult {
-  /** null when the connection was reset before the response could be read. */
+  /** null when the connection was closed before a response could be read. */
   status: number | null;
   body: string;
   connection?: string;
@@ -54,7 +57,7 @@ interface ChunkedResult {
 
 /**
  * Sends `pieces` as a chunked body (no Content-Length), honouring backpressure, and ends it unless `end` is false.
- * Resolves with the response, or with a null status if the server closes the connection before it is read.
+ * Resolves with the response, or with a null status if the connection is closed before one is read.
  */
 function chunkedUpload(pieces: Buffer[], { end = true } = {}): Promise<ChunkedResult> {
   return new Promise((resolve) => {
@@ -126,6 +129,66 @@ function rawChunkedUpload(chunks: number, waitMs = 3_000): Promise<{ response: s
   });
 }
 
+/** One chunked-encoding frame of padding. */
+const PADDING_FRAME = Buffer.concat([Buffer.from(`${PADDING_CHUNK.length.toString(16)}\r\n`), PADDING_CHUNK, Buffer.from("\r\n")]);
+/** A slow network: one 1 KB frame every SLOW_FRAME_INTERVAL_MS. */
+const SLOW_FRAME = Buffer.concat([Buffer.from(`${(1024).toString(16)}\r\n`), Buffer.alloc(1024, "y"), Buffer.from("\r\n")]);
+const SLOW_FRAME_INTERVAL_MS = 50;
+/** Bytes the client's send buffer and the server's receive buffer may hold on top of what the server reads. */
+const SOCKET_BUFFERS_SLACK = 16 * 1024 * 1024;
+
+interface EndlessUpload {
+  response: string;
+  /** ms from the response's first byte to the server's FIN. */
+  endedAfterMs: number;
+  /** ms from the response's first byte to the connection being closed. */
+  closedAfterMs: number;
+  /** Bytes the client sent after the response's first byte. */
+  sentAfterAnswer: number;
+}
+
+/**
+ * A chunked body sent as fast as the server reads it, by a client that ignores the server's FIN and keeps sending, so
+ * only the server can close the connection. With `slow`, only just past the cap is sent at full speed (so the socket
+ * buffers don't hold another upload's worth when the server answers), then it keeps sending at a slow pace.
+ */
+function endlessUpload({ slow = false } = {}): Promise<EndlessUpload> {
+  return new Promise((resolve) => {
+    let response = "";
+    let answeredAt = 0;
+    let sentAtAnswer = 0;
+    let endedAfterMs = Infinity;
+    let slowTimer: NodeJS.Timeout | undefined;
+    const socket = net.connect({ port: harness.port, host: "127.0.0.1", allowHalfOpen: true });
+    socket.setEncoding("latin1");
+    socket.on("data", (d: string) => {
+      if (!answeredAt) {
+        answeredAt = Date.now();
+        sentAtAnswer = socket.bytesWritten;
+      }
+      response += d;
+    });
+    socket.on("end", () => (endedAfterMs = Date.now() - answeredAt));
+    socket.on("error", () => {}); // reset while still writing
+    socket.on("close", () => {
+      clearInterval(slowTimer);
+      resolve({ response, endedAfterMs, closedAfterMs: Date.now() - answeredAt, sentAfterAnswer: socket.bytesWritten - sentAtAnswer });
+    });
+    const head = Object.entries({ ...auth, "Content-Type": `multipart/form-data; boundary=${BOUNDARY}` })
+      .map(([k, v]) => `${k}: ${v}\r\n`)
+      .join("");
+    socket.write(`POST /upload HTTP/1.1\r\nHost: 127.0.0.1\r\nTransfer-Encoding: chunked\r\n${head}\r\n`);
+    const writeSlowly = () => (slowTimer = setInterval(() => socket.write(SLOW_FRAME), SLOW_FRAME_INTERVAL_MS));
+    const writeFast = () => {
+      while (!socket.destroyed) {
+        if (slow && socket.bytesWritten > MAX_UPLOAD_WIRE_BYTES + PADDING_FRAME.length) return void writeSlowly();
+        if (!socket.write(PADDING_FRAME)) return void socket.once("drain", writeFast);
+      }
+    };
+    writeFast();
+  });
+}
+
 async function waitFor(cond: () => boolean, timeoutMs = 3_000) {
   const t0 = Date.now();
   while (!cond()) {
@@ -171,14 +234,35 @@ describe("chunked upload body cap", () => {
     await expectSlotFreed();
   });
 
+  it("ends its side right after the 413 and only resets a slow client still sending after the grace period", async () => {
+    const { response, endedAfterMs, closedAfterMs } = await endlessUpload({ slow: true });
+    expect(response).toMatch(/^HTTP\/1\.1 413 /);
+    expect(response).toMatch(/\r\nConnection: close\r\n/i);
+    expect(response).toContain(JSON.stringify({ error: "File too large" }));
+    expect(endedAfterMs).toBeLessThan(UNREAD_BODY_GRACE_MS / 2);
+    expect(closedAfterMs).toBeGreaterThanOrEqual(UNREAD_BODY_GRACE_MS - 100);
+    expect(closedAfterMs).toBeLessThan(UNREAD_BODY_GRACE_MS + 1_000);
+    await expectSlotFreed();
+  });
+
+  it("closes the connection of a fast client still sending after the 413 once it sent another upload's worth", async () => {
+    const { response, endedAfterMs, closedAfterMs, sentAfterAnswer } = await endlessUpload();
+    expect(response).toMatch(/^HTTP\/1\.1 413 /);
+    expect(response).toContain(JSON.stringify({ error: "File too large" }));
+    expect(endedAfterMs).toBeLessThan(UNREAD_BODY_GRACE_MS / 2);
+    // Not a whole grace period of reading at full speed (gigabytes on loopback)
+    expect(sentAfterAnswer).toBeLessThan(MAX_UPLOAD_WIRE_BYTES + SOCKET_BUFFERS_SLACK);
+    expect(closedAfterMs).toBeLessThan(UNREAD_BODY_GRACE_MS);
+    await expectSlotFreed();
+  });
+
   it.each([
     ["a preamble before the first boundary", () => [...padding(PADDING_BYTES), photoPart()]],
     ["an epilogue after the closing boundary", () => [photoPart(), ...padding(PADDING_BYTES)]],
   ])("refuses a whole chunked body over the cap with %s: slot freed, nothing stored", async (_what, body) => {
     const before = new Set(storedFiles());
     const res = await chunkedUpload(body());
-    // The connection is closed while the client is still sending, so the 413 may be lost to the reset
-    expect([413, null]).toContain(res.status);
+    expect(res.status).toBe(413);
     await expectSlotFreed();
     expect(storedFiles().filter((f) => !before.has(f))).toEqual([]);
   });

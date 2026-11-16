@@ -33,6 +33,16 @@ export const HOLD_BUTTON_CLEARANCE = HOLD_BUTTON_BOTTOM + HOLD_BUTTON_HEIGHT + H
 const COMPACT_FROM = 7;
 // The rows sit on a near-opaque dark panel: the photo (a big caption, busy detail) doesn't show between them (EXP-271)
 export const SCORE_LIST_BACKING = "rgba(0,0,0,0.85)";
+// The row's right-hand columns are the same on every row, so the points line up (EXP-459): the points, right-aligned,
+// then one slot per row action the scoreboard offers, left empty on the rows without it (your own, for instance)
+const POINTS_COLUMN_MIN_WIDTH = 36;
+/** Fits an icon-only row button (its ml-3 margin and an 18 dp icon) */
+const ACTION_SLOT_WIDTH = 32;
+
+/** A fixed-width column at the row's end for one action; empty on the rows that don't have it */
+const ActionSlot: React.FC<{ children?: React.ReactNode }> = ({ children }) => (
+  <View style={[tw`items-end`, { width: ACTION_SLOT_WIDTH }]}>{children}</View>
+);
 
 /**
  * The round title's top: TITLE_TOP, or just below a taller cutout; when that puts it over the round's progress bar
@@ -93,6 +103,8 @@ const ScoreModal: React.FC<ScoreModalProps> = ({
   const contentTop = Math.max(titleTop + TITLE_SPACE, progressBarAreaBottom(insets));
   const ranked = rankScores(scoreRound);
   const compact = ranked.length >= COMPACT_FROM;
+  // Only while someone can still be removed: else the empty column would just push every row's points left
+  const hasRemoveColumn = !!onRemovePlayer && (removable?.size ?? 0) > 0;
 
   return (
     <View
@@ -141,9 +153,9 @@ const ScoreModal: React.FC<ScoreModalProps> = ({
                 <View style={tw`flex items-center w-[12%] min-w-[40px] justify-center rounded-l-full bg-[#e63a35]`}>
                   <Text testID={scoreRankId(player.username)} style={tw`text-lg text-white font-bold`}>{player.rank}</Text>
                 </View>
-                <View style={tw`flex-row px-2 pr-4 items-center flex-1 justify-between`}>
-                  {/* Shrinks before the points do: long names (up to 15 characters) stay on one line in the fixed-height row */}
-                  <View style={tw`flex-shrink mr-2`}>
+                <View style={tw`flex-row px-2 pr-4 items-center flex-1`}>
+                  {/* Takes the space the columns leave: long names (up to 15 characters) stay on one line in the fixed-height row */}
+                  <View style={tw`flex-1 mr-2`}>
                     <Text style={tw`text-lg font-bold`} numberOfLines={1} ellipsizeMode="tail">{player.username}</Text>
                     <View style={tw`flex-row items-center`}>
                       <Icon style={tw`px-2`} name={icon} size={12} color={color} />
@@ -157,22 +169,32 @@ const ScoreModal: React.FC<ScoreModalProps> = ({
                       </Text>
                     </View>
                   </View>
-                  <Text style={tw`text-lg`}>{player.points}</Text>
-                  {onToggleMute && player.username !== myUsername && (
-                    <MutePlayerButton
-                      username={player.username}
-                      muted={muted.has(player.username)}
-                      testID={scoreMuteId(player.username)}
-                      onToggle={onToggleMute}
-                      onLight
-                    />
+                  <Text style={[tw`text-lg text-right`, { minWidth: POINTS_COLUMN_MIN_WIDTH, fontVariant: ["tabular-nums"] }]}>
+                    {player.points}
+                  </Text>
+                  {onToggleMute && (
+                    <ActionSlot>
+                      {player.username !== myUsername && (
+                        <MutePlayerButton
+                          username={player.username}
+                          muted={muted.has(player.username)}
+                          testID={scoreMuteId(player.username)}
+                          onToggle={onToggleMute}
+                          onLight
+                        />
+                      )}
+                    </ActionSlot>
                   )}
-                  {onRemovePlayer && removable?.has(player.username) && (
-                    <RemovePlayerButton
-                      username={player.username}
-                      testID={scoreRemoveId(player.username)}
-                      onPress={onRemovePlayer}
-                    />
+                  {hasRemoveColumn && (
+                    <ActionSlot>
+                      {onRemovePlayer && removable?.has(player.username) && (
+                        <RemovePlayerButton
+                          username={player.username}
+                          testID={scoreRemoveId(player.username)}
+                          onPress={onRemovePlayer}
+                        />
+                      )}
+                    </ActionSlot>
                   )}
                 </View>
               </View>

@@ -6,9 +6,15 @@ import * as Animatable from "react-native-animatable";
 import { ScoreRound } from "@/src/models/interfaces";
 import { useI18n } from "../../i18n";
 import { TEST_IDS, winnerNameId } from "@/src/utils/testIds";
+import { useReduceMotion } from "@/src/hooks/useReduceMotion";
 
 // Get screen dimensions
 const { width, height } = Dimensions.get("window");
+
+// The overlay waits for a tap with no time limit, so every animation on it must end by itself: else it keeps the CPU
+// busy (and drains the battery) for as long as nobody touches the screen (EXP-458). The confetti plays its one burst
+// (~10 s) and is then removed; the winners' names pulse a few times and then stay still.
+export const WINNER_NAME_PULSES = 3;
 
 interface WinnerModalProps {
   visible: boolean;
@@ -23,6 +29,8 @@ const WinnerModal: React.FC<WinnerModalProps> = ({ visible, winners, onAnimation
   const confettiAnimation = useRef<LottieView>(null);
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const [animationComplete, setAnimationComplete] = useState(false);
+  const [confettiDone, setConfettiDone] = useState(false);
+  const reduceMotion = useReduceMotion();
 
   useEffect(() => {
     if (visible) {
@@ -51,6 +59,7 @@ const WinnerModal: React.FC<WinnerModalProps> = ({ visible, winners, onAnimation
       // Reset animations for next time
       fadeAnim.setValue(0);
       setAnimationComplete(false);
+      setConfettiDone(false);
     }
   }, [visible]);
 
@@ -63,22 +72,25 @@ const WinnerModal: React.FC<WinnerModalProps> = ({ visible, winners, onAnimation
       <TouchableOpacity accessible={false} activeOpacity={1} style={tw`flex-1`} onPress={animationComplete ? onAnimationEnd : undefined}>
         {/* Main container with black semi-transparent background */}
         <View style={tw`flex-1 bg-black bg-opacity-95`}>
-          {/* Confetti covering the entire screen */}
-          <LottieView
-            ref={confettiAnimation}
-            source={require("@/assets/animations/confetiAnimation.json")}
-            style={{
-              position: "absolute",
-              width: width * 1.2, // Make it slightly larger than screen
-              height: height * 1.2,
-              left: -width * 0.1, // Center the enlarged animation
-              top: -height * 0.1,
-              zIndex: 1, // Ensure confetti is behind other content but above background
-            }}
-            autoPlay={false}
-            loop={true}
-            resizeMode="cover"
-          />
+          {/* Confetti covering the entire screen: one burst, then gone; none when the system asks to reduce motion */}
+          {!reduceMotion && !confettiDone && (
+            <LottieView
+              ref={confettiAnimation}
+              source={require("@/assets/animations/confetiAnimation.json")}
+              style={{
+                position: "absolute",
+                width: width * 1.2, // Make it slightly larger than screen
+                height: height * 1.2,
+                left: -width * 0.1, // Center the enlarged animation
+                top: -height * 0.1,
+                zIndex: 1, // Ensure confetti is behind other content but above background
+              }}
+              autoPlay={false}
+              loop={false}
+              onAnimationFinish={() => setConfettiDone(true)}
+              resizeMode="cover"
+            />
+          )}
 
           {/* Main content with z-index to be above confetti */}
           <View style={[tw`flex-1 justify-center items-center pb-16`, { zIndex: 2 }]}>
@@ -107,8 +119,8 @@ const WinnerModal: React.FC<WinnerModalProps> = ({ visible, winners, onAnimation
                   <Animatable.Text
                     key={w.username}
                     testID={winnerNameId(w.username)}
-                    animation={animationComplete ? "pulse" : undefined}
-                    iterationCount="infinite"
+                    animation={animationComplete && !reduceMotion ? "pulse" : undefined}
+                    iterationCount={WINNER_NAME_PULSES}
                     numberOfLines={1}
                     adjustsFontSizeToFit
                     style={tw`text-white ${isTie ? "text-3xl" : "text-4xl"} font-extrabold text-center`}

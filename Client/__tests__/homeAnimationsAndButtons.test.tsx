@@ -47,7 +47,7 @@ jest.mock("react-native-animatable", () => {
   };
 });
 jest.mock("expo-splash-screen", () => ({ preventAutoHideAsync: jest.fn(), hideAsync: jest.fn() }));
-jest.mock("@expo/vector-icons", () => ({ Ionicons: () => null }));
+jest.mock("@react-native-vector-icons/ionicons/static", () => ({ Ionicons: () => null }));
 jest.mock("@react-native-community/hooks", () => ({ useBackHandler: () => {} }));
 jest.mock("@/app/screens/InitialScreen", () => () => null);
 jest.mock("../src/components/LanguageToggle", () => () => null);

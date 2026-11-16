@@ -15,7 +15,7 @@ import GameScreen from "../app/screens/GameScreen";
 // connection (the others paused for up to 5 min).
 
 // Icon fonts are not loadable under jest (the pause modal's mute chips, EXP-422)
-jest.mock("react-native-vector-icons/FontAwesome", () => "Icon");
+jest.mock("@react-native-vector-icons/fontawesome/static", () => "Icon");
 jest.mock("@react-native-async-storage/async-storage", () =>
   require("@react-native-async-storage/async-storage/jest/async-storage-mock")
 );

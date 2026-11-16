@@ -11,8 +11,8 @@ import FinalScoreModal from "../src/components/modals/FinalScoreModal";
 
 jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: require("../src/i18n/en").default }) }));
 jest.mock("lottie-react-native", () => "LottieView");
-jest.mock("react-native-vector-icons/FontAwesome", () => "Icon");
-jest.mock("@expo/vector-icons", () => ({ Ionicons: "Ionicons" }));
+jest.mock("@react-native-vector-icons/fontawesome/static", () => "Icon");
+jest.mock("@react-native-vector-icons/ionicons/static", () => ({ Ionicons: "Ionicons" }));
 jest.mock("expo-linear-gradient", () => ({ LinearGradient: "LinearGradient" }));
 jest.mock("expo-router", () => ({ useRouter: () => ({ replace: jest.fn() }) }));
 jest.mock("../src/providers/GameContext", () => ({

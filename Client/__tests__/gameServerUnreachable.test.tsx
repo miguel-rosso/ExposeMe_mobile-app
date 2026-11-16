@@ -13,8 +13,8 @@ import es from "../src/i18n/es";
 // "Reconnecting…" pill (and the loading spinner) for ever. After SERVER_UNREACHABLE_AFTER_MS without a connection the
 // pill says the server can't be reached, with Try again; the socket keeps retrying and a connection carries on.
 
-jest.mock("react-native-vector-icons/FontAwesome", () => "Icon");
-jest.mock("@expo/vector-icons", () => ({ Ionicons: "Ionicons" }));
+jest.mock("@react-native-vector-icons/fontawesome/static", () => "Icon");
+jest.mock("@react-native-vector-icons/ionicons/static", () => ({ Ionicons: "Ionicons" }));
 jest.mock("@react-native-async-storage/async-storage", () =>
   require("@react-native-async-storage/async-storage/jest/async-storage-mock")
 );

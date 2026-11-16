@@ -11,7 +11,7 @@ import CloseButton from "../src/components/CloseButton";
 import { listAppSources } from "../testUtils/appSources";
 
 // Icon fonts are not loadable under jest
-jest.mock("react-native-vector-icons/FontAwesome", () => "Icon");
+jest.mock("@react-native-vector-icons/fontawesome/static", () => "Icon");
 // The close button names itself for screen readers in the UI language
 jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: require("../src/i18n/en").default }) }));
 

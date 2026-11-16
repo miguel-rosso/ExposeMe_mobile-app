@@ -15,7 +15,7 @@ const mockReplace = jest.fn();
 jest.mock("expo-router", () => ({ useRouter: () => ({ replace: mockReplace, push: jest.fn() }) }));
 const mockHandleContinue = jest.fn();
 jest.mock("@/src/providers/PhotoContext", () => ({ usePhotoContext: () => ({ handleContinue: mockHandleContinue }) }));
-jest.mock("@expo/vector-icons", () => ({ Ionicons: "Ionicons" }));
+jest.mock("@react-native-vector-icons/ionicons/static", () => ({ Ionicons: "Ionicons" }));
 jest.mock("../src/components/LanguageToggle", () => () => null);
 // EXP-192: a tall gesture-bar inset, so the test can tell whether the scroll content clears it
 const MOCK_BOTTOM_INSET = 48;

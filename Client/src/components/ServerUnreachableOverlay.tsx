@@ -1,6 +1,6 @@
 import React from "react";
 import { Text, TouchableOpacity, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons } from "@react-native-vector-icons/ionicons/static";
 import tw from "twrnc";
 import { useI18n } from "../i18n";
 import { TEST_IDS } from "@/src/utils/testIds";

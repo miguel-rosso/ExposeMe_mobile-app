@@ -18,7 +18,7 @@ import GameScreen from "../app/screens/GameScreen";
 // join, a Retry that fails again sends none, and retries are spaced so the server's join limit (5 per socket in any
 // 10 s, "Too many attempts" would send the player home) is never reached.
 
-jest.mock("react-native-vector-icons/FontAwesome", () => "Icon");
+jest.mock("@react-native-vector-icons/fontawesome/static", () => "Icon");
 jest.mock("@react-native-async-storage/async-storage", () =>
   require("@react-native-async-storage/async-storage/jest/async-storage-mock")
 );

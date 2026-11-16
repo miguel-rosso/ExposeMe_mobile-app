@@ -70,8 +70,8 @@ jest.mock("@/assets/images/IOSPermInstruction2.jpg", () => "IOSPermInstruction2"
 jest.mock("@/assets/images/IOSPermInstruction1.jpg", () => "IOSPermInstruction1", { virtual: true });
 jest.mock("@/src/components/CustomCarousel/CustomCarousel", () => () => null);
 jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: require("../src/i18n/en").default }) }));
-jest.mock("react-native-vector-icons/FontAwesome", () => "Icon");
-jest.mock("@expo/vector-icons", () => ({ Ionicons: "Ionicons" }));
+jest.mock("@react-native-vector-icons/fontawesome/static", () => "Icon");
+jest.mock("@react-native-vector-icons/ionicons/static", () => ({ Ionicons: "Ionicons" }));
 jest.mock("react-native-animatable", () => ({ View: "AnimatableView", initializeRegistryWithDefinitions: jest.fn() }));
 jest.mock("expo-clipboard", () => ({ setStringAsync: jest.fn() }));
 jest.mock("expo-image-picker", () => ({ launchImageLibraryAsync: jest.fn() }));

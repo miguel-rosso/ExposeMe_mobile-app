@@ -22,7 +22,7 @@ import { useContentReport } from "@/src/hooks/useContentReport";
 import ReportContentModal from "@/src/components/modals/ReportContentModal";
 import MutePlayerButton from "@/src/components/IngameComunication/MutePlayerButton";
 import { useStartGame } from "@/src/hooks/useStartGame";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons } from "@react-native-vector-icons/ionicons/static";
 import { LobbyChatFooter, LobbyChatMessages } from "@/src/components/LobbyChat";
 import BusyOverlay from "@/src/components/BusyOverlay";
 import ServerUnreachableOverlay from "@/src/components/ServerUnreachableOverlay";

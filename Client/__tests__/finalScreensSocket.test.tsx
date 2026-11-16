@@ -19,7 +19,7 @@ const mockMarkRoomExit = jest.fn();
 const mockSocket = { emit: jest.fn(), disconnect: jest.fn() };
 jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: require("../src/i18n/en").default }) }));
 jest.mock("lottie-react-native", () => "LottieView");
-jest.mock("@expo/vector-icons", () => ({ Ionicons: "Ionicons" }));
+jest.mock("@react-native-vector-icons/ionicons/static", () => ({ Ionicons: "Ionicons" }));
 jest.mock("expo-linear-gradient", () => ({ LinearGradient: "LinearGradient" }));
 jest.mock("expo-router", () => ({ useRouter: () => ({ replace: mockReplace, dismissTo: mockDismissTo }) }));
 jest.mock("../src/providers/GameContext", () => ({

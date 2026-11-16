@@ -14,7 +14,7 @@ import GameScreen from "../app/screens/GameScreen";
 // photo-unavailable report (no access / no photos / upload failed) and never leaving the game for a permission.
 
 // Icon fonts are not loadable under jest (the pause modal's mute chips, EXP-422)
-jest.mock("react-native-vector-icons/FontAwesome", () => "Icon");
+jest.mock("@react-native-vector-icons/fontawesome/static", () => "Icon");
 jest.mock("@react-native-async-storage/async-storage", () =>
   require("@react-native-async-storage/async-storage/jest/async-storage-mock")
 );

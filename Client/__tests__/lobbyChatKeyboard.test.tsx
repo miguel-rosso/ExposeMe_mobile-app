@@ -9,7 +9,7 @@ import { TEST_IDS } from "../src/utils/testIds";
 // nothing typed it closes the keyboard. The send button closes it once the message is out. Those are the lobby's ways
 // back to the room on iOS. A refused send leaves the keyboard up.
 
-jest.mock("@expo/vector-icons", () => ({ Ionicons: () => null }));
+jest.mock("@react-native-vector-icons/ionicons/static", () => ({ Ionicons: () => null }));
 jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: require("../src/i18n/en").default }) }));
 jest.mock("expo-router", () => require("../testUtils/screenNavigation").screenNavigationMock());
 

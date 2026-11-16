@@ -33,7 +33,7 @@ jest.mock("expo-router", () => ({
 const mockFocusEffects = new Set<() => void>();
 const mockRefocus = () => mockFocusEffects.forEach((effect) => effect());
 jest.mock("expo-splash-screen", () => ({ preventAutoHideAsync: jest.fn(), hideAsync: jest.fn() }));
-jest.mock("@expo/vector-icons", () => ({ Ionicons: () => null }));
+jest.mock("@react-native-vector-icons/ionicons/static", () => ({ Ionicons: () => null }));
 jest.mock("@react-native-community/hooks", () => ({ useBackHandler: () => {} }));
 jest.mock("@/app/screens/InitialScreen", () => {
   const { Text } = require("react-native");

@@ -11,7 +11,7 @@ jest.mock("@react-native-async-storage/async-storage", () =>
 jest.mock("expo-router", () => ({ useRouter: () => ({ replace: jest.fn(), push: jest.fn() }) }));
 jest.mock("@/src/providers/PhotoContext", () => ({ usePhotoContext: () => ({ handleContinue: jest.fn() }) }));
 jest.mock("@/src/components/CustomCarousel/CustomCarousel", () => () => null);
-jest.mock("@expo/vector-icons", () => ({ Ionicons: "Ionicons" }));
+jest.mock("@react-native-vector-icons/ionicons/static", () => ({ Ionicons: "Ionicons" }));
 jest.mock("react-native-safe-area-context", () => {
   const { View } = require("react-native");
   return { SafeAreaView: View, useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) };

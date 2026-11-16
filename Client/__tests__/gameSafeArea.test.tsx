@@ -42,7 +42,7 @@ jest.mock("@/src/hooks/useGalleryAccessGuard", () => ({
   useGalleryAccessGuard: () => ({ blocked: null, check: jest.fn(), selectMore: jest.fn() }),
 }));
 jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: require("../src/i18n/en").default }) }));
-jest.mock("react-native-vector-icons/FontAwesome", () => "Icon");
+jest.mock("@react-native-vector-icons/fontawesome/static", () => "Icon");
 jest.mock("@/src/components/PhotoComponent", () => () => null);
 jest.mock("@/src/components/modals/FinalScoreModal", () => () => null);
 jest.mock("@/src/components/modals/WinnerModal", () => () => null);

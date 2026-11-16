@@ -14,7 +14,7 @@ jest.mock("@react-native-async-storage/async-storage", () => {
 });
 jest.mock("expo-router", () => require("../testUtils/stackRouter").expoRouterMock);
 jest.mock("expo-splash-screen", () => ({ preventAutoHideAsync: jest.fn(), hideAsync: jest.fn() }));
-jest.mock("@expo/vector-icons", () => ({ Ionicons: () => null }));
+jest.mock("@react-native-vector-icons/ionicons/static", () => ({ Ionicons: () => null }));
 jest.mock("@/app/screens/InitialScreen", () => () => null);
 jest.mock("@/src/components/modals/GalleryAccessModal", () => () => null);
 jest.mock("@/src/hooks/useGalleryAccessGuard", () => ({ useGalleryAccessGuard: () => ({ check: jest.fn() }) }));

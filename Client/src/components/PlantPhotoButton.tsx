@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Text, TouchableOpacity, View } from "react-native";
-import Icon from "react-native-vector-icons/FontAwesome";
+import Icon from "@react-native-vector-icons/fontawesome/static";
 import tw from "twrnc";
 import { useI18n } from "../i18n";
 import { TEST_IDS } from "../utils/testIds";

@@ -31,8 +31,15 @@ const IMPORT_SPECIFIER = /(?:\bfrom\s+|\bimport\s+|\brequire\(\s*|\bimport\(\s*)
 const packageOf = (specifier: string) =>
   specifier.split("/").slice(0, specifier.startsWith("@") ? 2 : 1).join("/");
 
-const importsOf = (file: string) =>
-  [...fs.readFileSync(file, "utf8").matchAll(IMPORT_SPECIFIER)].map((match) => packageOf(match[1]));
+const importSpecifiersOf = (file: string) =>
+  [...fs.readFileSync(file, "utf8").matchAll(IMPORT_SPECIFIER)].map((match) => match[1]);
+
+const importsOf = (file: string) => importSpecifiersOf(file).map(packageOf);
+
+/** Icon packages replaced by the per-set @react-native-vector-icons packages (EXP-053) */
+const DEPRECATED_ICON_PACKAGES = ["@expo/vector-icons", "react-native-vector-icons", "@types/react-native-vector-icons"];
+
+const ICON_SET_SCOPE = "@react-native-vector-icons/";
 
 const sources = [...listAppSources(), CONFIG_FILE];
 const importedPackages = new Set(sources.flatMap(importsOf));
@@ -63,6 +70,31 @@ describe("client dependencies (EXP-052)", () => {
       .filter((name) => name.startsWith("@types/"))
       .filter((name) => !installedPackages.has(name.slice("@types/".length)));
     expect(orphanTypes).toEqual([]);
+  });
+
+  it("draws icons with the @react-native-vector-icons packages only (EXP-053)", () => {
+    // @expo/vector-icons is on its way to deprecation and react-native-vector-icons is deprecated; mixing either with
+    // the @react-native-vector-icons packages can render the same font's glyphs as "?" or empty squares.
+    const installed = DEPRECATED_ICON_PACKAGES.filter((name) => installedPackages.has(name));
+    const offenders = sources.filter((file) => importsOf(file).some((name) => DEPRECATED_ICON_PACKAGES.includes(name)));
+    expect(installed).toEqual([]);
+    expect(offenders.map(clientRelative)).toEqual([]);
+  });
+
+  it("imports icon sets from their /static entry, with the set's config plugin registering its font", () => {
+    // The /static entry leaves the font to the native build (autolinking copies it into the app); on iOS the set's
+    // config plugin must also list it in UIAppFonts, or its glyphs render as "?".
+    const iconImports = sources.flatMap((file) =>
+      importSpecifiersOf(file)
+        .filter((specifier) => specifier.startsWith(ICON_SET_SCOPE))
+        .map((specifier) => ({ file: clientRelative(file), specifier }))
+    );
+    expect(iconImports.length).toBeGreaterThan(0);
+    expect(iconImports.filter(({ specifier }) => !specifier.endsWith("/static"))).toEqual([]);
+    const unregistered = [...new Set(iconImports.map(({ specifier }) => packageOf(specifier)))].filter(
+      (name) => !configPlugins.has(name)
+    );
+    expect(unregistered).toEqual([]);
   });
 
   it("never imports @react-navigation directly: expo-router bundles its own copy", () => {

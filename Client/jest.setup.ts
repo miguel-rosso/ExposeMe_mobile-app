@@ -25,10 +25,9 @@ globalThis.clearImmediate = ((handle?: NodeJS.Immediate) => {
 jest.mock("react-native-safe-area-context", () => require("react-native-safe-area-context/jest/mock").default);
 
 // ── Icon fonts ──
-// FontAwesome icons load their font through expo-font, which has no asset registry under jest: any screen drawing one
-// (the game screen's report flag, EXP-423) would fail to render. They render as a host "Icon" element instead, its
-// props (name, size, color) kept for assertions; a test file may still mock the module its own way.
-jest.mock("react-native-vector-icons/FontAwesome", () => "Icon");
+// FontAwesome icons (the game screen's report flag, EXP-423) render as a host "Icon" element, its props (name, size,
+// color) kept for assertions instead of a font glyph; a test file may still mock the module its own way.
+jest.mock("@react-native-vector-icons/fontawesome/static", () => "Icon");
 
 // ── Async storage ──
 // The native module is missing under jest: the library's in-memory mock stands in (its documented jest setup), so a

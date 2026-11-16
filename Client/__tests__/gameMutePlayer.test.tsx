@@ -53,7 +53,7 @@ jest.mock("react-native-animatable", () => {
   const { View } = require("react-native");
   return { View };
 });
-jest.mock("react-native-vector-icons/FontAwesome", () => "Icon");
+jest.mock("@react-native-vector-icons/fontawesome/static", () => "Icon");
 jest.mock("@/src/components/PhotoComponent", () => () => { mockScreenRenders.count++; return null; });
 jest.mock("@/src/components/modals/FinalScoreModal", () => () => null);
 jest.mock("@/src/components/modals/WinnerModal", () => () => null);

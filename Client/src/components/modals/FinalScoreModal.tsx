@@ -4,7 +4,7 @@ import tw from "twrnc";
 import { ScoreRound } from "@/src/models/interfaces";
 import { useRouter } from "expo-router";
 import { useGameContext } from "@/src/providers/GameContext";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons } from "@react-native-vector-icons/ionicons/static";
 import * as Animatable from "react-native-animatable";
 import LottieView from "lottie-react-native";
 import { LinearGradient } from "expo-linear-gradient";

@@ -1,7 +1,7 @@
 import React from "react";
 import { View, Text } from "react-native";
 import * as Animatable from "react-native-animatable";
-import Icon from "react-native-vector-icons/FontAwesome";
+import Icon from "@react-native-vector-icons/fontawesome/static";
 import tw from "twrnc";
 
 interface SuccessAlertProps {

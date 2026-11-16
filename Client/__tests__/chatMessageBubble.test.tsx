@@ -7,7 +7,7 @@ import ChatMessage, { MESSAGE_MAX_LINES } from "../src/components/IngameComunica
 // 3 line breaks, but 100 characters still wrap) never covers the lobby's chat area for the 5 s it stays.
 
 jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: require("../src/i18n/en").default }) }));
-jest.mock("react-native-vector-icons/FontAwesome", () => "Icon");
+jest.mock("@react-native-vector-icons/fontawesome/static", () => "Icon");
 
 const LONG_MESSAGE = "1\n2\n3\n" + "palabra ".repeat(12);
 

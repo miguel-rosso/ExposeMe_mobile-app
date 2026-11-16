@@ -3,7 +3,7 @@ import { View, Text, ScrollView } from "react-native";
 import { EdgeInsets, useSafeAreaInsets } from "react-native-safe-area-context";
 import tw from "twrnc";
 import { ScoreRound } from "../../models/interfaces";
-import Icon from "react-native-vector-icons/FontAwesome";
+import Icon from "@react-native-vector-icons/fontawesome/static";
 import { useI18n } from "../../i18n";
 import { TEST_IDS, scoreGuessId, scoreMuteId, scoreRankId, scoreRemoveId } from "@/src/utils/testIds";
 import { rankScores } from "@/src/utils/ranking";

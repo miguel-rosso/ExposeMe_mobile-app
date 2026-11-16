@@ -1,6 +1,6 @@
 import React from "react";
 import { Text, TouchableOpacity } from "react-native";
-import Icon from "react-native-vector-icons/FontAwesome";
+import Icon from "@react-native-vector-icons/fontawesome/static";
 import tw from "twrnc";
 import { useI18n } from "@/src/i18n";
 import { fillTemplate } from "@/src/i18n/format";

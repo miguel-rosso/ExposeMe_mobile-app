@@ -46,7 +46,7 @@ jest.mock("@/src/hooks/useGalleryAccessGuard", () => ({
 }));
 jest.mock("../src/i18n", () => ({ useI18n: () => ({ t: require("../src/i18n/en").default }) }));
 // A plain glyph: the icon font isn't loaded in tests
-jest.mock("react-native-vector-icons/FontAwesome", () => "Icon");
+jest.mock("@react-native-vector-icons/fontawesome/static", () => "Icon");
 jest.mock("@/src/components/modals/FinalScoreModal", () => () => null);
 jest.mock("@/src/components/modals/WinnerModal", () => () => null);
 // Every render of an answer option, the emoji buttons, the photo and the scoreboard: each one asks for its testID once

@@ -107,7 +107,9 @@
           "microphonePermission": false
         }
       ],
-      "expo-status-bar"
+      "expo-status-bar",
+      "@react-native-vector-icons/ionicons",
+      "@react-native-vector-icons/fontawesome"
     ],
     "experiments": {
       "typedRoutes": true

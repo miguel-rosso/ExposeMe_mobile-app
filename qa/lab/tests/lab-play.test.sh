@@ -7,7 +7,8 @@
 # downloading the JS bundle (EXP-256) or whose dev-client-boot.yaml loaded check failed: its bundle wait ran out
 # (EXP-297) or it gave up at once on "There was a problem loading the project" (EXP-304); the scoreboards each device
 # checked in play-rounds.yaml and the Maestro version warning (EXP-312), and the holds each device of a hold-used-up.yaml
-# run used up, from the bots' summary (EXP-371), and the hold button point each iOS device gets for its model (EXP-413).
+# run used up, from the bots' summary (EXP-371), the hold button point each iOS device gets for its model (EXP-413),
+# and a reused RUN_ID never handing the devices an older attempt's room code or summary (EXP-460).
 # Run: qa/lab/tests/lab-play.test.sh
 set -uo pipefail
 
@@ -27,7 +28,8 @@ RUNS="$TMP/runs"; DEVICES_JSON="$TMP/devices.json"; QA="$TMP/qa"
 mkdir -p "$TMP/bin" "$QA/lab"
 echo '[{"id":"FAKE-1","label":"ios-a","platform":"ios"},{"id":"emulator-5554","label":"android-a","platform":"android"}]' >"$DEVICES_JSON"
 # node stub: `node bots.mjs ...` logs its argv, writes a room code (ROOM<--bots>) to --code-file and an empty
-# summary to --out (STUB_BOTS_OUT instead, when set); a room started with --wait-players 99 (the "second room") then
+# summary to --out (STUB_BOTS_OUT instead, when set); the room of STUB_NO_CODE (its --bots) writes no code and, with
+# STUB_NO_OUT=1, no room writes a summary; a room started with --wait-players 99 (the "second room") then
 # lingers like a lobby-only room.
 cat >"$TMP/bin/node" <<'EOF'
 #!/usr/bin/env bash
@@ -40,7 +42,7 @@ while [ $# -gt 0 ]; do case $1 in
   --wait-players) [ "$2" = 99 ] && linger=1; shift;; esac; shift; done
 [ "${STUB_NO_CODE:-}" = "$bots" ] || echo "ROOM$bots" >"$code_file"
 passed='{"summary":{"pass":true}}'
-echo "${STUB_BOTS_OUT:-$passed}" >"$out"
+[ -n "${STUB_NO_OUT:-}" ] || echo "${STUB_BOTS_OUT:-$passed}" >"$out"
 if [ $linger = 1 ]; then echo $$ >"$STUB_LOG/linger.pid"; exec sleep 30; fi
 echo $$ >"$STUB_LOG/main.pid"
 EOF
@@ -265,6 +267,35 @@ STUB_NO_CODE=2 LAB_ROOM_CODE_TIMEOUT=1 play r4 --bots 2 --devices ios-a --second
 rc=$?
 pid="$(cat "$TMP/linger.pid" 2>/dev/null)"
 [ $rc != 0 ] && [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null && ok "main room failure also stops the second room" || ko "main room failure also stops the second room" "rc=$rc pid=$pid"
+
+# ── A reused RUN_ID (EXP-460): an older run's room code and summary are never this run's ──
+stale_run() { # RUN_ID: leaves an older attempt's room codes (main and second room) and summary in that run's dir
+  mkdir -p "$RUNS/$1/second-room"
+  echo OLDMAIN >"$RUNS/$1/code"; echo OLDSECOND >"$RUNS/$1/second-room/code"
+  echo '{"summary":{"stale":true}}' >"$RUNS/$1/bots.json"
+}
+stale_run r-reuse
+STUB_NO_CODE=2 LAB_ROOM_CODE_TIMEOUT=1 play r-reuse --bots 2 --devices ios-a
+rc=$?
+[ $rc != 0 ] && grep -q "bots did not create a room" "$TMP/play.out" && [ ! -s "$TMP/maestro.args" ] \
+  && ok "reused RUN_ID: bots that don't create a room fail, not reuse the older code" \
+  || ko "reused RUN_ID: older main room code used" "rc=$rc $(cat "$TMP/maestro.args" 2>/dev/null)"
+stale_run r-reuse
+STUB_NO_CODE=3 LAB_ROOM_CODE_TIMEOUT=1 play r-reuse --bots 2 --devices ios-a --second-room "--bots 3 --host --wait-players 99"
+rc=$?
+[ $rc != 0 ] && grep -q "second room did not create a room" "$TMP/play.out" && [ ! -s "$TMP/maestro.args" ] \
+  && ok "reused RUN_ID: a second room without a code fails, not reuse the older code" \
+  || ko "reused RUN_ID: older second room code used" "rc=$rc $(cat "$TMP/maestro.args" 2>/dev/null)"
+stale_run r-reuse
+play r-reuse --bots 2 --devices ios-a --second-room "--bots 3 --host --wait-players 99"
+rc=$?
+[ $rc = 0 ] && grep -q -- "-e GAME_CODE=ROOM2" "$TMP/maestro.args" && grep -q -- "-e NEW_CODE=ROOM3" "$TMP/maestro.args" \
+  && ! grep -q "OLD" "$TMP/maestro.args" && ok "reused RUN_ID: the devices get this run's room codes" \
+  || ko "reused RUN_ID: devices get this run's codes" "rc=$rc $(cat "$TMP/maestro.args" 2>/dev/null)"
+stale_run r-reuse
+STUB_NO_OUT=1 play r-reuse --bots 2 --devices ios-a
+! grep -q '"stale"' "$TMP/play.out" && ok "reused RUN_ID: bots that write no summary don't show the older one" \
+  || ko "reused RUN_ID: older summary shown" "$(cat "$TMP/play.out")"
 
 # ── --maestro-env ──
 play r5 --bots 2 --devices ios-a --maestro-env FOO=bar --maestro-env "MSG=a b=c"

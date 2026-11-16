@@ -726,11 +726,19 @@ forget_bots_pid() { # pid: drop a reaped bots process so a reused PID is never s
   PLAY_BG_PIDS=(${kept[@]+"${kept[@]}"})
 }
 
-start_bots_room() { # dir, server url, bots.mjs args...: runs bots.mjs in the background → dir/{code,bots.json,bots.log}; sets BOTS_PID
+start_bots_room() { # dir, server url, bots.mjs args...: runs bots.mjs in the background → dir/{bots.json,bots.log}; sets BOTS_PID
   local dir=$1 server=$2; shift 2; mkdir -p "$dir"
-  node "$QA/lab/bots.mjs" --server "$server" --photos "$RUNS/photos/bots" --out "$dir/bots.json" --code-file "$dir/code" "$@" \
+  rm -f "$dir/bots.json"   # a reused RUN_ID must not keep an older room's summary
+  node "$QA/lab/bots.mjs" --server "$server" --photos "$RUNS/photos/bots" --out "$dir/bots.json" "$@" \
     >"$dir/bots.log" 2>&1 &
   BOTS_PID=$!; PLAY_BG_PIDS+=("$BOTS_PID")
+}
+
+start_bots_hosted_room() { # dir, server url, bots.mjs args...: start_bots_room for a room the bots create; they write
+  # its code to dir/code (read it with wait_room_code); sets BOTS_PID
+  local dir=$1 server=$2; shift 2
+  rm -f "$dir/code"   # a reused RUN_ID must not hand the devices an older room's code (EXP-460)
+  start_bots_room "$dir" "$server" --code-file "$dir/code" "$@"
 }
 
 # play only drives local lab servers (lab.sh server [--port P]): their telemetry file is known, and QA traffic
@@ -923,7 +931,7 @@ print_scoreboards_checked() { # maestro output dir: one line per device run that
   [ $none = 0 ]
 }
 
-wait_room_code() { # dir, label: prints the room code the bots wrote to dir/code, or dies
+wait_room_code() { # dir, label: prints the code the bots of start_bots_hosted_room wrote to dir/code, or dies
   local dir=$1 label=$2 i
   for ((i = 0; i < ${LAB_ROOM_CODE_TIMEOUT:-$ROOM_CODE_TIMEOUT_S}; i++)); do [ -s "$dir/code" ] && break; sleep 1; done
   [ -s "$dir/code" ] || die "$label did not create a room — see $dir/bots.log"
@@ -1160,7 +1168,7 @@ cmd_play() {
   # It is auxiliary: it is stopped once the main run ends and its exit status does not count.
   if [ -n "$second_room" ]; then
     # shellcheck disable=SC2086 # second_room is a list of bots.mjs flags
-    start_bots_room "$dir/second-room" "$server_url" $second_room
+    start_bots_hosted_room "$dir/second-room" "$server_url" $second_room
     local new_code; new_code="$(wait_room_code "$dir/second-room" "second room")" || exit 1
     log "second room $new_code"; maestro_env+=(-e "NEW_CODE=$new_code")
   fi
@@ -1184,7 +1192,7 @@ cmd_play() {
     bots_pid=$BOTS_PID
   else
     # shellcheck disable=SC2086 # bot_args is a list of bots.mjs flags
-    start_bots_room "$dir" "$server_url" --bots "$bots" --host --rounds "$rounds" --wait-players "$total" $bot_args
+    start_bots_hosted_room "$dir" "$server_url" --bots "$bots" --host --rounds "$rounds" --wait-players "$total" $bot_args
     bots_pid=$BOTS_PID
     code="$(wait_room_code "$dir" "bots")" || exit 1
     log "room $code"

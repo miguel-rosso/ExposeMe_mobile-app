@@ -103,8 +103,9 @@ rc=$?
   && ok "the listener keeps the first code: another one is a conflict (409), the same one again is fine" \
   || ko "the listener keeps the first code" "status=$(tr '\n' ' ' <"$TMP/post.status") code=$(cat "$RUNS/dh1/code")"
 [ "$(wc -l <"$TMP/node.args" | tr -d ' ')" = 1 ] && grep -q -- "--bots 3 --code K7MQ4X --chaos 0.1" "$TMP/node.args" \
-  && ! grep -qE -- "--host|--wait-players" "$TMP/node.args" \
-  && ok "the bots join the posted code (no --host), with --bot-args" || ko "the bots join the posted code" "$(cat "$TMP/node.args")"
+  && ! grep -qE -- "--host|--wait-players|--code-file" "$TMP/node.args" \
+  && ok "the bots join the posted code (no --host, no --code-file over the device's), with --bot-args" \
+  || ko "the bots join the posted code" "$(cat "$TMP/node.args")"
 grep -q "room K7MQ4X (created by ios-a)" "$TMP/play.out" && ok "play names the room the device created" || ko "play logs the device's room"
 port="$(cat "$RUNS/dh1/code.sink-port")"
 for _ in $(seq 10); do curl -s -o /dev/null "http://127.0.0.1:$port/" || break; sleep 0.1; done

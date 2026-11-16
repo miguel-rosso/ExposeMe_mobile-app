@@ -71,9 +71,11 @@ appId: com.socketNull.ExposeMe
               id: "score-mute-bot2"
               text: "Mute bot2|Silenciar a bot2"
           commands:
+            # the emoji pills keep the screen moving: an unbounded settle wait outlasts the 5 s scoreboard
             - tapOn:
                 id: "score-mute-bot2"
                 retryTapIfNoChange: false
+                waitToSettleTimeoutMs: 500
       - runFlow:
           when:
             visible:

@@ -126,7 +126,7 @@ Summary fields: `pass`, `skew_ms` (spread between players receiving the same pha
 
 ## Raw device control (when Maestro is not enough)
 - iOS: `xcrun simctl io <udid> screenshot f.png`, `xcrun simctl openurl <udid> <url>`, `xcrun simctl addmedia <udid> *.jpg`, `xcrun simctl privacy <udid> grant photos com.socketNull.ExposeMe`, logs `xcrun simctl spawn <udid> log stream --predicate 'process == "ExposeMe"'`.
-- Android: `adb -s <serial> exec-out screencap -p > f.png`, `adb -s <serial> shell input tap X Y`, `adb -s <serial> logcat -s ReactNativeJS`.
+- Android: `adb -s <serial> exec-out screencap -p > f.png` (never `screencap -p /sdcard/…`: Android adds that file to the gallery and the app then plays the screenshot as the device's photo, which looks like a rendering bug — EXP-461), `adb -s <serial> shell input tap X Y`, `adb -s <serial> logcat -s ReactNativeJS`.
 - Maestro on one device: `~/.maestro/bin/maestro --device <id> test qa/maestro/<flow>.yaml -e USERNAME=x -e GAME_CODE=K7MQ4X -e METRO_URL=http%3A%2F%2Flocalhost%3A8081`. Interactive selector help: `maestro studio`.
 - Device ids/labels: `qa/runs/.lab/devices.json`.
 

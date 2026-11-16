@@ -1,4 +1,4 @@
-import { Animated, ViewStyle } from "react-native";
+import { Animated, type ViewStyle } from "react-native";
 
 const parentContainer = (
   height: number,
@@ -25,7 +25,7 @@ const buttonStyle = (
   indicatorHeight: Animated.AnimatedInterpolation<string | number>,
   backgroundColor: Animated.AnimatedInterpolation<string | number>,
   borderRadius: number
-): Animated.Animated => {
+): Animated.WithAnimatedValue<ViewStyle> => {
   return {
     width: indicatorWidth,
     height: indicatorHeight,

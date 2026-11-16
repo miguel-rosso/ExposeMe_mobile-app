@@ -78,7 +78,7 @@ beforeEach(() => {
   (Clipboard.setStringAsync as jest.Mock).mockClear();
   alertSpy = jest.spyOn(Alert, "alert").mockImplementation(() => {});
   dismissSpy = jest.spyOn(Keyboard, "dismiss").mockImplementation(() => {});
-  shareSpy = jest.spyOn(Share, "share").mockResolvedValue({ action: "sharedAction" });
+  shareSpy = jest.spyOn(Share, "share").mockResolvedValue({ action: Share.sharedAction, activityType: undefined });
 });
 
 async function mount() {

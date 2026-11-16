@@ -1,5 +1,5 @@
 import React, { memo, useRef } from "react";
-import { ScrollView, View } from "react-native";
+import { ScrollView, type ScrollViewInstance, View } from "react-native";
 import tw from "twrnc";
 import { Player } from "@/src/models/interfaces";
 import { AnswerOptionsLayout } from "@/src/utils/answerOptionsLayout";
@@ -29,7 +29,7 @@ interface AnswerOptionsGridProps {
  * events and batched re-renders to every round's mount, and on Android the clipping of off-screen subviews.
  */
 const AnswerOptionsGrid = ({ players, layout, renderOption }: AnswerOptionsGridProps) => {
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<ScrollViewInstance>(null);
   // iOS only draws the scroll indicator while scrolling: flash it when some options are out of view
   const hintMoreOptions = (_width: number, contentHeight: number) => {
     if (contentHeight > layout.maxHeight) scrollRef.current?.flashScrollIndicators();

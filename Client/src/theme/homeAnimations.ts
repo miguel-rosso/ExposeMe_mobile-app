@@ -1,5 +1,4 @@
 import * as Animatable from "react-native-animatable";
-import type { CustomAnimation } from "react-native-animatable";
 
 // ── Custom react-native-animatable animations of the home screen (app/index.tsx) ──
 
@@ -8,8 +7,20 @@ export const HOME_ANIMATION_MS = 600;
 /** Duration of the shake that rejects a blank name or an incomplete room code */
 export const SHAKE_MS = 500;
 
+/**
+ * One keyframe of these animations. react-native-animatable reads `translateY` as a shorthand for the transform, but
+ * its CustomAnimation type only allowed it through a deprecated style key of React Native's legacy types.
+ */
+interface SlideKeyframe {
+  opacity: number;
+  translateY: number;
+}
+
+/** Keyframes by animation progress, from 0 to 1 */
+type SlideAnimation = Record<number, SlideKeyframe>;
+
 /** The join panel's code input (and its name input, for an invite): fades in from above with a bounce */
-const SLIDE_IN_DOWN_BOUNCE: CustomAnimation = {
+const SLIDE_IN_DOWN_BOUNCE: SlideAnimation = {
   0: { opacity: 0, translateY: -15 },
   0.6: { opacity: 1, translateY: 10 },
   0.75: { opacity: 1, translateY: -5 },
@@ -18,7 +29,7 @@ const SLIDE_IN_DOWN_BOUNCE: CustomAnimation = {
 };
 
 /** The join panel's Search button: fades in from below with a bounce */
-const SLIDE_IN_UP_BOUNCE: CustomAnimation = {
+const SLIDE_IN_UP_BOUNCE: SlideAnimation = {
   0: { opacity: 0, translateY: 15 },
   0.6: { opacity: 1, translateY: -10 },
   0.75: { opacity: 1, translateY: 5 },
@@ -27,7 +38,7 @@ const SLIDE_IN_UP_BOUNCE: CustomAnimation = {
 };
 
 /** The name input reappearing after the join panel closes: fades in bouncing upwards */
-export const REAPPEAR_BOUNCE_UP: CustomAnimation = {
+export const REAPPEAR_BOUNCE_UP: SlideAnimation = {
   0: { opacity: 0, translateY: 0 },
   0.25: { opacity: 1, translateY: -10 },
   0.5: { opacity: 1, translateY: -5 },
@@ -36,7 +47,7 @@ export const REAPPEAR_BOUNCE_UP: CustomAnimation = {
 };
 
 /** The Join game button reappearing after the join panel closes: fades in bouncing downwards */
-export const REAPPEAR_BOUNCE_DOWN: CustomAnimation = {
+export const REAPPEAR_BOUNCE_DOWN: SlideAnimation = {
   0: { opacity: 0, translateY: 0 },
   0.25: { opacity: 1, translateY: 10 },
   0.5: { opacity: 1, translateY: 5 },
@@ -45,15 +56,15 @@ export const REAPPEAR_BOUNCE_DOWN: CustomAnimation = {
 };
 
 // Leaving for the photo explorer and coming back (useExitAnimationNavigation steps)
-const SLIDE_OUT_DOWN_FAR: CustomAnimation = {
+const SLIDE_OUT_DOWN_FAR: SlideAnimation = {
   0: { opacity: 1, translateY: 0 },
   1: { opacity: 0, translateY: 100 },
 };
-const SLIDE_OUT_UP_FAR: CustomAnimation = {
+const SLIDE_OUT_UP_FAR: SlideAnimation = {
   0: { opacity: 1, translateY: 0 },
   1: { opacity: 0, translateY: -200 },
 };
-const SLIDE_IN_DOWN_FAR: CustomAnimation = {
+const SLIDE_IN_DOWN_FAR: SlideAnimation = {
   0: { opacity: 0, translateY: -200 },
   1: { opacity: 1, translateY: 0 },
 };

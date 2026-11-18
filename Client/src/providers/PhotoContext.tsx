@@ -120,10 +120,11 @@ export const PhotoProvider: React.FC<PhotoProviderProps> = ({ children }) => {
         console.log("Could not resolve photo URI:", e);
       }
 
+      // Used as is: getUri() already returns an encoded URI (Uri.fromFile on Android, URL.absoluteString on iOS), so
+      // encoding it again breaks every path with a space or an accent ("WhatsApp Images" draws black)
       if (uri) {
-        const encodedUri = encodeURI(uri);
         console.log("Random photo selected.");
-        return { uri: encodedUri };
+        return { uri };
       }
     }
 

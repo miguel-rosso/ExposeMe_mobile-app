@@ -39,8 +39,10 @@ jest.mock("expo-media-library", () => {
     constructor(assetId: string) {
       this.id = assetId;
     }
+    // Like the native module: Android builds it with Uri.fromFile and iOS with URL.absoluteString, so a path with a
+    // space or an accent arrives already percent-encoded
     async getUri() {
-      return `file:///photos/${this.id} copy.jpg`;
+      return `file:///storage/emulated/0/Pictures/WhatsApp%20Images/${this.id}%20a%C3%B1o.jpg`;
     }
   }
   return {
@@ -77,8 +79,41 @@ describe("PhotoContext with expo-media-library SDK 58 (EXP-038)", () => {
       uri = await ctx.getRandomPhoto();
     });
 
-    expect(uri).toMatch(/^file:\/\/\/photos\/p[12]%20copy\.jpg$/);
+    expect(uri).toMatch(/^file:\/\/\/storage\/emulated\/0\/Pictures\/WhatsApp%20Images\/p[12]%20a%C3%B1o\.jpg$/);
     expect(ctx.photoUri).toBe(uri);
+  });
+
+  it("keeps the photo URI exactly as the gallery returns it: encoding it again points at a file that doesn't exist", async () => {
+    let ctx!: ReturnType<typeof usePhotoContext>;
+    const Probe = () => {
+      ctx = usePhotoContext();
+      return null;
+    };
+    let r!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      r = TestRenderer.create(
+        <PhotoProvider>
+          <Probe />
+        </PhotoProvider>
+      );
+    });
+
+    const uris: (string | null)[] = [];
+    await act(async () => {
+      uris.push(await ctx.getRandomPhoto());
+    });
+    let game: Awaited<ReturnType<typeof ctx.pickGamePhoto>> | null = null;
+    await act(async () => {
+      game = await ctx.pickGamePhoto();
+    });
+    uris.push(game && "uri" in game ? (game as { uri: string }).uri : null);
+
+    for (const uri of uris) {
+      expect(uri).not.toBeNull();
+      expect(uri).not.toContain("%25");
+      expect(decodeURI(uri!)).toMatch(/\/WhatsApp Images\/p[12] año\.jpg$/);
+    }
+    act(() => r.unmount());
     act(() => r.unmount());
   });
 

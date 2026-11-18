@@ -272,6 +272,20 @@ describe("Home logo vs the limited-access banner (EXP-281)", () => {
     act(() => r.unmount());
   });
 
+  it("the logo box sizes itself: no flex inside its unsized slide-in wrapper, which left it 0 high and the logo unseen (EXP-463)", async () => {
+    mockPerm = FULL;
+    const r = await mount();
+    const box = emoji(r.root).parent!;
+    expect(box.findAll((n) => n === title(r.root)).length).toBe(1); // the title is drawn in this same box
+    const boxStyle = StyleSheet.flatten(box.props.style);
+    expect(boxStyle.height).toBe(LOGO_BOX_HEIGHT);
+    // flex: 1 makes the flex basis 0: in a column wrapper with no height of its own that is the box's whole height
+    expect(boxStyle).not.toHaveProperty("flex");
+    expect(boxStyle).not.toHaveProperty("flexGrow");
+    expect(boxStyle).not.toHaveProperty("flexBasis");
+    act(() => r.unmount());
+  });
+
   it("access becomes full: the banner wrapper collapses and the emoji goes back to its usual size", async () => {
     const r = await mountLaidOut(640, { y: 5, height: 30 });
     expect(emojiTransform(r.root).transform).toBeDefined();

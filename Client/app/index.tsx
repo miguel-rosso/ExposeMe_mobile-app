@@ -370,7 +370,7 @@ const Index = () => {
           onLayout={handleLogoLayout}
         >
           <Animatable.View ref={topLogoRef} animation="slideInDown" duration={HOME_ANIMATION_MS}>
-            <View style={[tw` flex-1 items-center  max-w-[300px] w-[100%]`, { height: LOGO_BOX_HEIGHT }]}>
+            <View style={[tw`items-center max-w-[300px] w-[100%]`, { height: LOGO_BOX_HEIGHT }]}>
               <Text
                 style={[
                   tw`text-white ${getTitleFontSize()}  z-10 text-center pt-15`,
